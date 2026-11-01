@@ -11,6 +11,7 @@ import type { DraftAttachment } from "./mail-types";
 import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
+import { isDraft, parseSuggestion, type StoredSuggestion, type Suggestion } from "./relay-predraft-core";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -45,6 +46,9 @@ export type RelayItem = {
   updated_at: string;
   /** The kind of email (buyer_price, chase, ...), from the scan; picks the voice card and examples. */
   situation: string | null;
+  /** Relay's own draft, written before Alex adds a note; shown while written for last_seen_message_id. */
+  suggestion: StoredSuggestion | null;
+  last_seen_message_id: string | null;
 };
 
 export type RelayDraftView = {
@@ -74,7 +78,7 @@ export type RelayReviewItem = RelayItem & { drafts: RelayDraftView[]; todos: Rel
 
 
 const ITEM_COLUMNS = `i.id,i.tab,i.status,i.priority,i.counterpart_name,i.counterpart_email,i.company,i.contact_type,i.headline,i.context,i.last_message,
-  i.earlier,i.bulk_listing_id,i.deal_label,i.waiting_since,i.note,i.mail_thread_id,i.gmail_thread_id,i.updated_at,i.situation`;
+  i.earlier,i.bulk_listing_id,i.deal_label,i.waiting_since,i.note,i.mail_thread_id,i.gmail_thread_id,i.updated_at,i.situation,i.suggestion,i.last_seen_message_id`;
 
 const PRIORITY_ORDER = `case i.priority when 'urgent' then 0 when 'overdue' then 1 when 'high' then 2 when 'medium' then 3 else 4 end`;
 
@@ -221,13 +225,15 @@ export async function deleteSenderRule(ownerId: string, id: string): Promise<voi
 
 type ThreadMessage = { id: string; direction: string; from_email: string | null; to_emails: string[]; cc_emails: string[]; subject: string | null; body_text: string | null; at: string; identity_key: string | null; state: string };
 
-async function threadMessages(mailThreadId: string | null): Promise<ThreadMessage[]> {
+/** The thread's last eight messages, newest first; with beforeId, only those sent before that message (to replay a past reply). */
+async function threadMessages(mailThreadId: string | null, beforeId?: string): Promise<ThreadMessage[]> {
   if (!mailThreadId) return [];
   return queryPg<ThreadMessage>(
     `select id, direction, from_email, coalesce(to_emails,'{}') as to_emails, coalesce(cc_emails,'{}') as cc_emails, subject, body_text,
        coalesce(sent_at, accepted_at, created_at)::text as at, identity_key, state
      from mail_message where thread_id = $1 and state in ('received','accepted','sent','delivered','opened','clicked','replied')
-     order by coalesce(sent_at, accepted_at, created_at) desc limit 8`, [mailThreadId]);
+       and ($2::text is null or coalesce(sent_at, accepted_at, created_at) < (select coalesce(sent_at, accepted_at, created_at) from mail_message where id = $2))
+     order by coalesce(sent_at, accepted_at, created_at) desc limit 8`, [mailThreadId, beforeId ?? null]);
 }
 
 async function dealSummary(listingId: string | null): Promise<string> {
@@ -287,17 +293,32 @@ Return ONLY JSON:
  "todos": [ {"title": "short task", "detail": "due or context, one line", "kind": "suggested" | "promise"} ] (0-3; include as kind "promise" anything this reply commits Alex to),
  "log": ["2-4 short past-tense lines of what you did, e.g. Read the thread and the deal"]}`;
 
+/** Drafting with no note: the reply Alex would most likely send, or one question for him when only he can decide. */
+const PREDRAFT_SYSTEM = (rules: string[], guide?: string | null) => `You are Relay, drafting emails for Alex Polglase, founder of ReBattery (a UK marketplace and broker for used EV and storage batteries).
+Alex has not written a note. Write the reply he would most likely send now, in his voice, from what the thread and the deal say.${voiceGuideBlock(guide)} Follow these writing rules strictly:
+${rules.map((r) => `- ${r}`).join("\n")}
+- Never decide for Alex. If the reply needs a decision only he can make (a price or an offer, accepting or proposing terms, committing to a date, quantity or delivery, anything legal, tax or money, or what to say is unclear from the thread), do not write the email: return needs_input with one short question to him and 2 or 3 options, each written as the short note he would type, e.g. "ask for their price", "decline politely".
+- A FOLLOW-UP (Alex wrote last and got no reply) is a short, friendly chase that adds one useful thing; it rarely needs input.
+- Never invent facts: prices, quantities, dates, tests, partners, logistics or availability must come from the thread or the deal.
+- Nothing is attached. Never write that something is attached, enclosed or included as a file.
+${greetingRule(!!guide)}
+- No em dashes. British English.
+Return ONLY JSON:
+{"subject": "Re: …" (keep the thread's subject), "body": "the reply, or empty when you return needs_input",
+ "needs_input": null | {"question": "…", "options": ["…", "…"]},
+ "todos": [ {"title": "short task", "detail": "one line", "kind": "promise"} ] (only what the reply commits Alex to)}`;
+
 export type DraftResult = { item: RelayItem };
 
 // ---------- voice ----------
 
-type Voice = { guide: string; card: string | null; examples: VoiceExample[] };
+type Voice = { version: number; guide: string; card: string | null; examples: VoiceExample[] };
 
 /** The owner's active voice (relay_voice_study.py): the guide, this kind of email's card and his three closest real replies.
  * Null until a voice is published; drafting then works as before. */
 async function voiceFor(ownerId: string, item: Pick<RelayItem, "situation" | "contact_type">, theirText: string): Promise<Voice | null> {
   try {
-    const [voice] = await queryPg<{ id: string; guide: string }>("select id, guide from relay_voice where owner_id = $1::uuid and active", [ownerId]);
+    const [voice] = await queryPg<{ id: string; version: number; guide: string }>("select id, version, guide from relay_voice where owner_id = $1::uuid and active", [ownerId]);
     if (!voice) return null;
     const [card] = item.situation ? await queryPg<{ card: string }>("select card from relay_voice_situation where voice_id = $1 and situation = $2", [voice.id, item.situation]) : [];
     // Same situation; for an email the scan hasn't tagged yet, the same kind of contact.
@@ -305,7 +326,7 @@ async function voiceFor(ownerId: string, item: Pick<RelayItem, "situation" | "co
       `select inbound, reply, contact_type, sent_at::text as sent_at from relay_voice_example
        where voice_id = $1 and (situation = $2 or ($2::text is null and contact_type = $3)) order by sent_at desc limit 80`,
       [voice.id, item.situation, item.contact_type]);
-    return { guide: voice.guide, card: card?.card ?? null, examples: pickExamples(pool, item.contact_type, theirText) };
+    return { version: voice.version, guide: voice.guide, card: card?.card ?? null, examples: pickExamples(pool, item.contact_type, theirText) };
   } catch {
     return null;  // before the voice tables exist
   }
@@ -319,17 +340,18 @@ async function activeGuide(ownerId: string): Promise<string | null> {
 }
 
 /** Everything a draft is written from: the thread, the deal, the writing rules, the owner's voice and who the reply goes to. */
-async function draftContext(item: RelayItem, ownerId: string, note: string) {
-  const messages = await threadMessages(item.mail_thread_id);
+async function draftContext(item: RelayItem, ownerId: string, note: string | null, beforeId?: string) {
+  const messages = await threadMessages(item.mail_thread_id, beforeId);
   const rules = await activeRules(ownerId);
   const deal = await dealSummary(item.bulk_listing_id);
   const lastInbound = messages.find((m) => m.direction === "inbound");
   const voice = await voiceFor(ownerId, item, stripQuoted(lastInbound?.body_text ?? item.last_message?.text ?? ""));
   const transcript = [...messages].reverse().map((m) => `--- ${m.direction === "inbound" ? `From ${m.from_email}` : `From Alex (${m.from_email})`} · ${m.at}\nTo: ${m.to_emails.join(", ")}${m.cc_emails.length ? `\nCc: ${m.cc_emails.join(", ")}` : ""}\nSubject: ${m.subject ?? ""}\n${stripQuoted(m.body_text ?? "").slice(0, 3000)}`).join("\n\n");
-  const prompt = `${voice ? voiceExamplesBlock(voice.card, voice.examples) : ""}Alex's note (what he wants to say):\n${note}\n\n${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
+  const ask = note == null ? "There is no note from Alex: write the reply he would most likely send now, or ask him what to do.\n\n" : `Alex's note (what he wants to say):\n${note}\n\n`;
+  const prompt = `${voice ? voiceExamplesBlock(voice.card, voice.examples) : ""}${ask}${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
   const to = (lastInbound?.from_email ?? item.counterpart_email ?? "").trim();
   if (!to) throw new RelayError(400, "Relay couldn't find who to reply to on this thread.");
-  return { messages, rules, prompt, to, identity: replyIdentity(messages), guide: voice?.guide ?? null };
+  return { messages, rules, prompt, to, identity: replyIdentity(messages), guide: voice?.guide ?? null, voiceVersion: voice?.version ?? null, deal };
 }
 
 /** Turns the owner's note into draft v1 (plus follow-ons and to-dos) and moves the item to Review. Notes that need work start an agent job instead. */
@@ -357,7 +379,7 @@ async function mainCopies(mailIds: string[]): Promise<Map<string, string>> {
 }
 
 /** Writes the drafts, attaches files and saves to-dos for one item, then puts it in Review. Shared by quick drafts and agent jobs. */
-async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, ctx: Awaited<ReturnType<typeof draftContext>>, parsed: Record<string, unknown>, files: string[], origin: "note" | "job" = "note"): Promise<void> {
+async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, ctx: Awaited<ReturnType<typeof draftContext>>, parsed: Record<string, unknown>, files: string[], origin: "note" | "job" | "predraft" = "note"): Promise<void> {
   const itemId = item.id;
   const rawSubject = String(parsed.subject || ctx.messages[0]?.subject || item.headline || "").trim();
   const subject = (rawSubject.replace(/^((re|aw|fw|fwd)\s*:\s*)+/i, (m) => (/^(re|aw)/i.test(m) ? "Re: " : m)).slice(0, 300)) || "Re:";
@@ -400,6 +422,89 @@ async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, 
     }
     await tx.query("update relay_item set status = 'review', updated_at = now() where id = $1", [itemId]);
   });
+}
+
+// ---------- Relay's own drafts (before a note) ----------
+
+/** Relay's draft for one item, written as of now (or as of a past message, beforeId, to replay one Alex already answered). */
+async function suggestFor(item: RelayItem, ownerId: string, beforeId?: string): Promise<{ suggestion: Suggestion; amounts: string[] }> {
+  const ctx = await draftContext(item, ownerId, null, beforeId);
+  const parsed = parseSuggestion(await askAgent(PREDRAFT_SYSTEM(ctx.rules, ctx.guide), ctx.prompt, 90_000));
+  const corpus = [ctx.deal, item.context, ...ctx.messages.map((m) => m.body_text ?? "")].join("\n");
+  return { suggestion: { ...parsed, for_message_id: item.last_seen_message_id, voice_version: ctx.voiceVersion, at: new Date().toISOString() }, amounts: amountsIn(corpus) };
+}
+
+export type PredraftRun = { drafted: number; asked: number; failed: number; left: number };
+
+/**
+ * Writes Relay's draft for the open Action and Follow up emails that need one, most important first, within a time budget.
+ * Skips emails with a note, a running job or a failure on the same message. A draft is saved only if the email has not moved
+ * on (status and newest message unchanged) while it was being written.
+ */
+export async function predraftPending(ownerId: string, limit = 10, budgetMs = 360_000): Promise<PredraftRun> {
+  const started = Date.now();
+  const items = await queryPg<RelayItem>(
+    `select ${ITEM_COLUMNS} from relay_item i
+     where i.owner_id = $1::uuid and i.status = 'open' and i.tab in ('action', 'follow') and i.note = ''
+       and (i.snooze_until is null or i.snooze_until <= now())
+       and not exists (select 1 from relay_job j where j.item_id = i.id and j.status in ('queued', 'running', 'ready', 'finalising'))
+       and (i.suggestion is null
+         or (i.suggestion ? 'failed_for' and i.suggestion->>'failed_for' is distinct from i.last_seen_message_id)
+         or (i.suggestion ? 'body' and (i.suggestion->>'for_message_id' is distinct from i.last_seen_message_id
+             or (i.tab = 'follow' and (i.suggestion->>'at')::timestamptz < now() - interval '3 days'))))
+     order by ${PRIORITY_ORDER}, coalesce(i.waiting_since, i.updated_at) asc limit $2`, [ownerId, limit]);
+  const run: PredraftRun = { drafted: 0, asked: 0, failed: 0, left: 0 };
+  for (const item of items) {
+    if (Date.now() - started > budgetMs - 90_000) { run.left += 1; continue; }
+    let stored: StoredSuggestion;
+    try {
+      stored = (await suggestFor(item, ownerId)).suggestion;
+    } catch (error) {
+      stored = { failed_for: item.last_seen_message_id, error: (error instanceof Error ? error.message : "failed").slice(0, 200), at: new Date().toISOString() };
+    }
+    const saved = await queryPg(`update relay_item set suggestion = $2::jsonb where id = $1 and status = 'open' and last_seen_message_id is not distinct from $3 returning id`,
+      [item.id, JSON.stringify(stored), item.last_seen_message_id]);
+    if (!saved.length) continue;
+    if (!isDraft(stored)) run.failed += 1;
+    else if (stored.needs_input) run.asked += 1;
+    else run.drafted += 1;
+  }
+  return run;
+}
+
+/** Replays past emails for the eval: what Relay would have drafted just before each message Alex actually sent. Stores nothing. */
+export async function predraftReplay(ownerId: string, cases: { id: string; mail_thread_id: string; before_message_id: string; tab: "action" | "follow";
+  counterpart_email: string | null; counterpart_name: string | null; situation: string | null; contact_type: string | null }[]) {
+  const out: { id: string; suggestion?: Suggestion; amounts?: string[]; error?: string }[] = [];
+  for (const c of cases) {
+    try {
+      const [thread] = await queryPg<{ gmail_thread_id: string }>("select gmail_thread_id from mail_thread where id = $1 and mailbox_owner_id = $2::uuid", [c.mail_thread_id, ownerId]);
+      if (!thread) throw new Error("not the owner's thread");
+      const item = { id: c.id, tab: c.tab, status: "open", priority: "medium", counterpart_name: c.counterpart_name, counterpart_email: c.counterpart_email, company: null,
+        contact_type: c.contact_type, headline: "", context: "", last_message: null, earlier: [], bulk_listing_id: null, deal_label: null, waiting_since: null, note: "",
+        mail_thread_id: c.mail_thread_id, gmail_thread_id: thread.gmail_thread_id, updated_at: new Date().toISOString(), situation: c.situation, suggestion: null,
+        last_seen_message_id: null } satisfies RelayItem;
+      out.push({ id: c.id, ...(await suggestFor(item, ownerId, c.before_message_id)) });
+    } catch (error) {
+      out.push({ id: c.id, error: error instanceof Error ? error.message.slice(0, 200) : "failed" });
+    }
+  }
+  return out;
+}
+
+/** "Use draft": turns Relay's stored draft into the mail draft in Review, with no model call. Refuses a draft the email has moved past. */
+export async function applySuggestion(itemId: string, ownerId: string, forMessageId: string | null): Promise<RelayItem> {
+  const item = await readRelayItem(itemId, ownerId);
+  if (!item) throw new RelayError(404, "Not found");
+  const s = item.suggestion;
+  if (item.status !== "open" || !isDraft(s) || s.for_message_id !== item.last_seen_message_id || s.for_message_id !== forMessageId) {
+    throw new RelayError(409, "A newer message came in. Relay is redrafting; try again in a few minutes.");
+  }
+  if (s.needs_input || !s.body) throw new RelayError(400, "Pick one of the options first.");
+  const ctx = await draftContext(item, ownerId, null);
+  await saveDraftOutputs(item, ownerId, "Relay's draft", ctx, { subject: s.subject ?? "", body: s.body, todos: s.todos, log: ["Drafted by Relay before your note"] }, [], "predraft");
+  await queryPg("update relay_item set suggestion = null where id = $1", [itemId]);
+  return (await readRelayItem(itemId, ownerId))!;
 }
 
 // ---------- agent jobs ----------

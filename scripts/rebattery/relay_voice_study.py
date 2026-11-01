@@ -646,6 +646,105 @@ def _similarity():
         return lambda a, b: difflib.SequenceMatcher(None, body_of(a).lower(), body_of(b).lower()).ratio()
 
 
+# ---------- eval: Relay's drafts before a note ----------
+
+PREDRAFT_JUDGE = """Relay drafts Alex Polglase's email replies before he says anything. For each item you get what the other side last
+wrote, what Alex actually sent, and what Relay produced: either a draft, or a question to Alex with options.
+Judge each item. Reply with ONLY a JSON array:
+[{"id": "...",
+  "decision_needed": true|false (Alex's real email made a call only he could make: a price or offer, accepting or setting terms,
+     committing to a date, quantity or delivery, a yes or no on a deal; false for acknowledgements, scheduling with given slots,
+     passing on information already in the thread, routine chases),
+  "rating": "sendable" | "light" | "wrong" | "asked",
+     sendable: Alex could send Relay's draft as is; light: small edits; wrong: says something Alex did not mean or misses the point;
+     asked: Relay asked a question instead of drafting,
+  "asked_right": true|false|null (only when Relay asked: was asking the right call, and do the options cover what Alex did?),
+  "invented": true|false (the draft commits Alex to something or states a fact that is not in what the other side wrote),
+  "why": "<10 words>"}]"""
+
+
+def predraft_cases(out: Path, n_replies: int, n_chases: int) -> list[dict]:
+    rows, holdout = joined(out)
+    banked = {e["mail_message_id"] for e in read_jsonl(out / "examples.jsonl")}
+    chases = [r for r in rows if r["kind"] == "chase" and r["words"] >= 6 and r["id"] not in banked][-n_chases:]
+    picked = holdout[-n_replies:] + chases
+    return [{"id": r["id"], "mail_thread_id": r["thread_id"], "before_message_id": r["id"], "tab": "follow" if r["kind"] == "chase" else "action",
+             "counterpart_email": r["to"], "counterpart_name": r.get("to_name"), "situation": r.get("situation"), "contact_type": r.get("contact_type"),
+             "_row": r} for r in picked]
+
+
+def post_internal(url: str, payload: dict, timeout: int = 900) -> dict:
+    import urllib.request
+    secret = Path("/root/.hermes/workspace/secrets/relay-internal.secret").read_text().strip()
+    req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",
+                                 headers={"content-type": "application/json", "authorization": f"Bearer {secret}"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+def eval_predraft(args) -> None:
+    out = owner_dir(args.work, args.owner)
+    cases = predraft_cases(out, args.n, args.chases)
+    results: dict[str, dict] = {}
+    url = args.url.rstrip("/") + "/api/relay/internal/predraft"
+    batches = [cases[i:i + 5] for i in range(0, len(cases), 5)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
+        payloads = [{"cases": [{k: v for k, v in c.items() if k != "_row"} for c in b]} for b in batches]
+        for reply in pool.map(lambda p: post_internal(url, p), payloads):
+            for r in reply.get("results", []):
+                results[r["id"]] = r
+    items = []
+    for c in cases:
+        r, res = c["_row"], results.get(c["id"], {})
+        s = res.get("suggestion") or {}
+        items.append({"id": c["id"], "kind": r["kind"], "situation": r.get("situation"), "they_wrote": ((r.get("inbound") or {}).get("text") or "")[:1200],
+                      "alex_actual": r["text"][:1500], "relay_draft": s.get("body") or "", "relay_question": s.get("needs_input"),
+                      "error": res.get("error"), "thread_amounts": res.get("amounts") or []})
+    verdicts = {}
+    for i in range(0, len(items), 8):
+        chunk = [{k: v for k, v in it.items() if k in ("id", "they_wrote", "alex_actual", "relay_draft", "relay_question")} for it in items[i:i + 8] if not it["error"]]
+        if chunk:
+            raw = rs.run_hermes(PREDRAFT_JUDGE + "\n\n" + json.dumps(chunk, ensure_ascii=False))
+            for obj in json.loads(raw[raw.find("["):raw.rfind("]") + 1]):
+                verdicts[obj["id"]] = obj
+    for it in items:
+        v = verdicts.get(it["id"], {})
+        seen = {a.lower() for a in it["thread_amounts"]}
+        it["amounts_not_in_thread"] = [a for a in set(m.group(0).strip() for m in MONEY.finditer(it["relay_draft"])) if normalise_amount(a) not in seen]
+        it.update({k: v.get(k) for k in ("decision_needed", "rating", "asked_right", "invented", "why")})
+    ok = [it for it in items if not it["error"]]
+    drafts = [it for it in ok if it["relay_draft"]]
+    asked = [it for it in ok if it["relay_question"]]
+    useful = [it for it in ok if it.get("rating") in ("sendable", "light") or (it["relay_question"] and it.get("asked_right"))]
+    decisions = [it for it in ok if it.get("decision_needed")]
+    invented = [it for it in drafts if it.get("invented") or it["amounts_not_in_thread"]]
+    summary = {
+        "cases": len(items), "errors": len(items) - len(ok), "drafts": len(drafts), "asked": len(asked),
+        "sendable": sum(it.get("rating") == "sendable" for it in ok), "light_edit": sum(it.get("rating") == "light" for it in ok),
+        "wrong": sum(it.get("rating") == "wrong" for it in ok), "useful": len(useful), "useful_pct": round(100 * len(useful) / max(1, len(ok))),
+        "invented": len(invented), "decision_cases": len(decisions), "asked_when_decision": sum(bool(it["relay_question"]) for it in decisions),
+        "asked_without_decision": sum(bool(it["relay_question"]) and not it.get("decision_needed") for it in ok),
+        "by_kind": {k: {"n": sum(it["kind"] == k for it in ok), "useful": sum(it["kind"] == k for it in useful)} for k in ("reply", "chase")},
+    }
+    summary["asked_when_decision_pct"] = round(100 * summary["asked_when_decision"] / max(1, len(decisions)))
+    summary["gate"] = summary["useful_pct"] >= 50 and summary["invented"] <= 1 and summary["asked_when_decision_pct"] >= 70
+    write_jsonl(out / "predraft-eval.jsonl", items)
+    write_private(out / "predraft-eval-summary.json", json.dumps(summary, indent=2))
+    print(json.dumps(summary))
+
+
+def normalise_amount(raw: str) -> str:
+    """Mirrors relay-checks normaliseAmount: "£1,500.00" and "£1500" compare equal; "€30k" is €30000."""
+    text = raw.strip().rstrip(",.")
+    thousands = text.lower().endswith("k")
+    digits = re.sub(r"[^\d.]", "", text)
+    try:
+        value = float(digits) * (1000 if thousands else 1)
+    except ValueError:
+        return text.lower()
+    return f"{text[0]}{round(value, 2):g}".lower() if text and text[0] in "£€$" else text.lower()
+
+
 # ---------- publish ----------
 
 def publish(args) -> None:
@@ -677,7 +776,7 @@ def publish(args) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("command", choices=["extract", "tag", "synthesize", "eval", "publish", "render"])
+    parser.add_argument("command", choices=["extract", "tag", "synthesize", "eval", "eval-predraft", "publish", "render"])
     parser.add_argument("--owner", default="alex@rebattery.io")
     parser.add_argument("--dsn", default=DEFAULT_DSN)
     parser.add_argument("--work", type=Path)
@@ -685,11 +784,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch", type=int, default=30, help="emails per tagging call")
     parser.add_argument("--max-batches", type=int, default=0, help="tag at most N batches this run (0: all)")
     parser.add_argument("--n", type=int, default=30, help="held-out replies to evaluate")
+    parser.add_argument("--chases", type=int, default=10, help="eval-predraft: recent chases to replay")
+    parser.add_argument("--url", default="http://127.0.0.1:3100", help="eval-predraft: the CRM web app to replay through")
     parser.add_argument("--activate", action="store_true", help="publish: make this version the one Relay uses")
     parser.add_argument("--baseline", choices=["active", "none"], default="active", help="eval: compare with the voice in use, or with no voice")
     parser.add_argument("--render-to", type=Path, default=VOICE_FILE, help="render: the file every other drafter reads")
     args = parser.parse_args(argv)
-    {"extract": extract, "tag": tag, "synthesize": synthesize, "eval": eval_, "publish": publish, "render": render}[args.command](args)
+    {"extract": extract, "tag": tag, "synthesize": synthesize, "eval": eval_, "eval-predraft": eval_predraft, "publish": publish, "render": render}[args.command](args)
     return 0
 
 

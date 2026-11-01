@@ -6,6 +6,7 @@ import type { HermesConversation } from "@/lib/hermes-conversations";
 import { describeWhen, parseWhen } from "@/lib/relay-when";
 import type { RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayRule, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
 import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
+import { isFresh } from "@/lib/relay-predraft-core";
 import s from "./relay.module.css";
 
 const ChatPanel = dynamic(() => import("@/app/components/chat-panel").then((m) => m.ChatPanel), { ssr: false });
@@ -198,8 +199,8 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
     if (note === undefined || note === i.note) return;
     void api(`/api/relay/items/${i.id}`, { method: "PATCH", body: { note } }).catch(() => undefined);
   };
-  const draft = async (i: RelayItem) => {
-    const note = noteOf(i).trim();
+  const draft = async (i: RelayItem, chosen?: string) => {
+    const note = (chosen ?? noteOf(i)).trim();
     if (!note) { say("Add a note first: how do you want to reply?"); setOpen(i.id); return; }
     setBusy((b) => ({ ...b, [i.id]: true }));
     const agent = NEEDS_AGENT.test(note);
@@ -214,6 +215,33 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
     } finally {
       setBusy((b) => ({ ...b, [i.id]: false }));
     }
+  };
+  /** Relay's own draft for an email, while it was written for the newest message (chases also go stale after three days). */
+  const fresh = (i: RelayItem) => isFresh(i.suggestion, i.last_seen_message_id, i.tab);
+  const useDraft = async (i: RelayItem, quiet = false) => {
+    if (!fresh(i)) return false;
+    setBusy((b) => ({ ...b, [i.id]: true }));
+    try {
+      await api(`/api/relay/items/${i.id}/suggestion`, { method: "POST", body: { for_message_id: i.suggestion && "for_message_id" in i.suggestion ? i.suggestion.for_message_id : null } });
+      setGone((g) => ({ ...g, [i.id]: true }));
+      if (!quiet) { await reload(); say(`${firstName(i.counterpart_name)} is in Review with Relay's draft`, onDrafted); }
+      return true;
+    } catch (err) {
+      say(err instanceof Error ? err.message : "Couldn't use the draft.");
+      return false;
+    } finally {
+      setBusy((b) => ({ ...b, [i.id]: false }));
+    }
+  };
+  const chasesReady = tab === "follow" ? items.filter((i) => !gone[i.id] && fresh(i) && !(i.suggestion && "needs_input" in i.suggestion && i.suggestion.needs_input)) : [];
+  const [allBusy, setAllBusy] = useState(false);
+  const reviewAllChases = async () => {
+    setAllBusy(true);
+    let n = 0;
+    for (const i of chasesReady) if (await useDraft(i, true)) n += 1;
+    setAllBusy(false);
+    await reload();
+    say(`${n} chase${n === 1 ? "" : "s"} in Review`, onDrafted);
   };
   /** "Always do this for this sender" offered on the toast after a move or a Done. */
   const ruleAction = (i: RelayItem, tab: "action" | "other"): ToastAction | undefined => {
@@ -271,6 +299,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people or deals" aria-label="Search" />
           </label>
+          {chasesReady.length > 0 && <button type="button" className={cx(s.btn, s.pri)} disabled={allBusy} onClick={() => void reviewAllChases()}>{allBusy ? "Moving to Review…" : `Review all chases (${chasesReady.length})`}</button>}
           <select className={s.filter} value={type} onChange={(e) => setType(e.target.value)} aria-label="Filter by type">
             <option value="">All types</option>
             {types.map((t) => <option key={t} value={t}>{t.replace(/^./, (c) => c.toUpperCase())}</option>)}
@@ -315,6 +344,21 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
                     {i.earlier.length > 0 && <div className={s.earlier}>{i.earlier.map((e, k) => <span key={k}><b>{e.who}</b> · {e.when}: {e.summary}</span>)}</div>}
                   </div>
                 )}
+                {tab !== "other" && fresh(i) && i.suggestion && "body" in i.suggestion && (i.suggestion.needs_input
+                  ? (
+                    <div className={s.sugg}>
+                      <div className={s.sugh}><span className={s.spark} aria-hidden>✦</span><b>Relay needs you:</b> {i.suggestion.needs_input.question}</div>
+                      <div className={s.chips}>
+                        {i.suggestion.needs_input.options.map((o) => <button key={o} type="button" disabled={busy[i.id]} onClick={() => { setNotes((n) => ({ ...n, [i.id]: o })); void draft(i, o); }}>{o}</button>)}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className={s.sugg}>
+                      <div className={s.sugh}><span className={s.spark} aria-hidden>✦</span><b>Relay&apos;s draft</b><span className={s.muted}> · use it as is, or write a note below to change it</span></div>
+                      <div className={cx(s.sugb, isOpen && s.full)}>{i.suggestion.body}</div>
+                      <div className={s.sugact}><button type="button" className={cx(s.btn, s.pri)} disabled={busy[i.id]} onClick={() => void useDraft(i)}>{busy[i.id] ? "Moving to Review…" : "Use draft"}</button></div>
+                    </div>
+                  ))}
                 {tab !== "other" && (
                   <>
                     <div className={s.note}>
