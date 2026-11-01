@@ -149,6 +149,9 @@ def sync_postmark_suppressions(db, stream, apply=False, client=None):
 
 def recheck_thread(thread_id, account, driver=None):
     with connection() as db:
+        # Wait briefly for a short sync (Relay's pre-scan one) to finish rather than collide with it on a new message.
+        # Behind a long full sync the send goes ahead unlocked, as it always has, instead of hanging.
+        lock_gmail_sync(db,account,timeout_seconds=30)
         # References and Postmark-origin replies may cross Gmail threads, and
         # accepted sends may not have any provider thread linkage yet. The refresh must stay
         # bounded: an unbounded `in:anywhere` sync of a whole mailbox can run for many minutes
@@ -161,9 +164,6 @@ def recheck_thread(thread_id, account, driver=None):
             since = first.strftime('%Y/%m/%d') if first else None
         if since is None:
             since = (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%Y/%m/%d')
-        # Wait briefly for a short sync (Relay's pre-scan one) to finish rather than collide with it on a new message.
-        # Behind a long full sync the send goes ahead unlocked, as it always has, instead of hanging.
-        lock_gmail_sync(db,account,timeout_seconds=30)
         result = sync_gmail(db,account,since=since,apply=True,driver=driver,skip_known=True)
         if thread_id is None:
             return bool(result['counts']['replies'])
