@@ -41,3 +41,14 @@ class GmailDriver:
 
     def fetch(self, account, message_id):
         return self.call(account,'gmail','get',message_id,timeout=60)
+
+    def thread_messages(self, account, thread_id):
+        """Every message in one Gmail thread (ids, threadId, labelIds): one call instead of a mailbox search."""
+        result = self.call(account,'gmail','thread','get',thread_id,timeout=60)
+        thread = result.get('thread',result) if isinstance(result,dict) else {}
+        return [m for m in thread.get('messages',[]) if isinstance(m,dict) and m.get('id')]
+
+    def label_names(self, account):
+        result = self.call(account,'gmail','labels','list',timeout=60)
+        labels = result.get('labels',result) if isinstance(result,dict) else result
+        return {l['id']:l.get('name') for l in labels or [] if isinstance(l,dict) and l.get('id')}

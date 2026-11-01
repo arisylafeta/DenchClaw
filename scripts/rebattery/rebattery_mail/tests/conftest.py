@@ -83,3 +83,25 @@ def db_after_cutover(db_pre_cutover):
         if ROLE_MIGRATION.exists():
             cur.execute(ROLE_MIGRATION.read_text())
     return db_pre_cutover
+
+
+@pytest.fixture(autouse=True)
+def no_real_mail(monkeypatch):
+    """No test can reach Gmail or Postmark, whatever the send gates say: live sends need only a named approval, so a
+    test that builds a real driver would otherwise send real email (it did, 1 Nov 2026). A gog or HTTP call fails the test."""
+    import subprocess
+    import urllib.request
+    real_run = subprocess.run
+
+    def guarded_run(args, *rest, **kwargs):
+        argv = list(args) if isinstance(args, (list, tuple)) else [str(args)]
+        command = os.path.basename(str(argv[0])) if argv else ''
+        if command == 'gog' or 'hermes-agent' in str(argv[0]):
+            raise AssertionError(f'test tried to run {command}: tests must use a fake runner or driver')
+        return real_run(args, *rest, **kwargs)
+
+    def refused_urlopen(*args, **kwargs):
+        raise AssertionError('test tried an HTTP call: tests must use a fake client')
+
+    monkeypatch.setattr(subprocess, 'run', guarded_run)
+    monkeypatch.setattr(urllib.request, 'urlopen', refused_urlopen)

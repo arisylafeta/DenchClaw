@@ -7,7 +7,7 @@ FIELDS = ('id','identity_key','transport','purpose','from_email','to_emails','cc
 
 
 def digest(rows):
-    values = [{key:row.get(key) for key in FIELDS} | {
+    values = [{key:row.get(key) for key in FIELDS} | ({'attachments':[{'filename':a['filename'],'sha256':a['sha256']} for a in row['personalization']['attachments']]} if row.get('personalization',{}).get('attachments') and row.get('direction')=='outbound' else {}) | {
         'identity_snapshot':row.get('personalization',{}).get('identity_snapshot'),
         'campaign_cap':row.get('personalization',{}).get('campaign_cap'),
         'links':sorted(row.get('links',[]),key=lambda link:(link['cta_key'],link['destination_url'],link.get('listing_id') or ''))} for row in rows]

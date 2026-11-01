@@ -159,6 +159,16 @@ def recheck_thread(thread_id, account, driver=None):
         since = None
         if thread_id:
             with db.cursor() as cur:
+                cur.execute("select gmail_thread_id from mail_thread where id=%s",(thread_id,))
+                row = cur.fetchone()
+                gmail_thread = row[0] if row else None
+            if gmail_thread and (driver is None or hasattr(driver,'thread_messages')):
+                # A Gmail thread is read directly: about a second, however old the thread is.
+                sync_gmail(db,account,apply=True,driver=driver,thread_id=gmail_thread,skip_known=True)
+                with db.cursor() as cur:
+                    cur.execute("select exists(select 1 from mail_message where thread_id=%s and direction='inbound')",(thread_id,))
+                    return cur.fetchone()[0]
+            with db.cursor() as cur:
                 cur.execute("select min(coalesce(sent_at,created_at)) - interval '1 day' from mail_message where thread_id=%s",(thread_id,))
                 first = cur.fetchone()[0]
             since = first.strftime('%Y/%m/%d') if first else None

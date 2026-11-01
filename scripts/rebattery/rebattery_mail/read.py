@@ -5,6 +5,14 @@ from .core import connection, dict_cursor, Refused, UsageError, PURPOSES, TRANSP
 COUNTS = ('sent', 'delivered', 'bounced', 'opened', 'clicked', 'unsubscribed', 'replied')
 
 
+def filename_pattern(text):
+    """ILIKE pattern: plain text is a substring match, * and ? make it a glob."""
+    escaped = text.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+    if '*' in text or '?' in text:
+        return escaped.replace('*', '%').replace('?', '_')
+    return '%' + escaped + '%'
+
+
 def query(db, sql, params=()):
     with dict_cursor(db) as cur:
         cur.execute(sql, params)
@@ -27,6 +35,11 @@ def search(db, **filters):
         if filters.get(key):
             clauses.append(f'm.sent_at {operator} %s::timestamptz')
             params.append(filters[key])
+    if filters.get('has_attachment'):
+        clauses.append('m.has_attachments')
+    if filters.get('filename'):
+        clauses.append("exists(select 1 from jsonb_array_elements(case when jsonb_typeof(m.personalization->'attachments')='array' then m.personalization->'attachments' else '[]'::jsonb end) a where a->>'filename' ilike %s)")
+        params.append(filename_pattern(filters['filename']))
     if filters.get('crm_only'):
         clauses.append('m.crm_visible')
     if filters.get('event'):
@@ -46,6 +59,8 @@ def message(db, id):
     rows = query(db, 'select * from mail_message where id=%s', (id,))
     if not rows:
         raise Refused('message_not_found', message_id=id)
+    from .attachment import live_attachments
+    rows[0]['attachments'] = live_attachments(db, rows[0])
     return {'message': rows[0], 'events': query(db, 'select * from mail_event where message_id=%s order by occurred_at,id', (id,)), 'links': query(db, 'select * from mail_message_link where message_id=%s order by cta_key,id', (id,))}
 
 
@@ -53,7 +68,11 @@ def thread(db, id):
     rows = query(db, 'select * from mail_thread where id=%s', (id,))
     if not rows:
         raise Refused('thread_not_found', thread_id=id)
-    return {'thread': rows[0], 'messages': query(db, 'select * from mail_message where thread_id=%s order by sent_at desc nulls last,id', (id,)), 'events': query(db, 'select e.* from mail_event e join mail_message m on m.id=e.message_id where m.thread_id=%s order by e.occurred_at,e.id', (id,))}
+    from .attachment import live_attachments
+    messages = query(db, 'select * from mail_message where thread_id=%s order by sent_at desc nulls last,id', (id,))
+    for row in messages:
+        row['attachments'] = live_attachments(db, row)
+    return {'thread': rows[0], 'messages': messages, 'events': query(db, 'select e.* from mail_event e join mail_message m on m.id=e.message_id where m.thread_id=%s order by e.occurred_at,e.id', (id,))}
 
 
 def person(db, id):
@@ -111,6 +130,8 @@ def register(subparsers):
     parser.add_argument('--purpose', choices=PURPOSES)
     parser.add_argument('--event', choices=('opened','clicked','replied','bounced'))
     parser.add_argument('--crm-only', action='store_true')
+    parser.add_argument('--has-attachment', action='store_true')
+    parser.add_argument('--filename', help='Attachment filename filter (substring, or glob with * and ?); needs stored metadata, see attachment backfill')
     parser.add_argument('--limit', type=int, default=100)
     parser.set_defaults(handler=handle)
     for name in ('thread','message','person','status'):

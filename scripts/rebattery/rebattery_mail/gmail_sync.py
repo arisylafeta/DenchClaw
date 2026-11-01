@@ -7,6 +7,7 @@ from email.utils import parsedate_to_datetime
 from .core import Refused, dict_cursor
 from .gmail_driver import GmailDriver
 from .gmail_body import extract_bodies
+from .attachment import describe
 from .crm_visibility import normalize_email, parse_email_addresses, ensure_person, visibility, is_common_email_provider, reply_matches
 
 
@@ -32,12 +33,22 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
         companies = {r[0]:r[2] for r in rows}
         cur.execute("select lower(domain),min(id) from crm_companies where coalesce(domain,'')<>'' group by lower(domain) having count(*)=1")
         domains = {r[0]:r[1] for r in cur.fetchall() if not is_common_email_provider(r[0])}
-    query = 'in:anywhere -label:DRAFT'
-    if since:
-        query += ' after:' + str(since)
-    hits = {r['id']:r for r in driver.search(account, query) if r.get('id')}
-    labelled_ids = {r['id'] for r in driver.search(account, '(label:CRM) -label:DRAFT' + (' after:'+str(since) if since else '')) if r.get('id')}
-    triaged_ids = {r['id'] for r in driver.search(account, '(label:Deal OR label:Inbound) -label:DRAFT' + (' after:'+str(since) if since else '')) if r.get('id')}
+    if thread_id and hasattr(driver,'thread_messages'):
+        # One thread (pre-send reply check): read just that thread. A mailbox-wide search from the thread's
+        # first message could cover months of mail and fetch every unlogged message one by one.
+        thread_hits = driver.thread_messages(account, thread_id)
+        names = driver.label_names(account) if hasattr(driver,'label_names') else {}
+        label_sets = {m['id']:{names.get(l,l) for l in m.get('labelIds') or []} for m in thread_hits}
+        hits = {m['id']:m for m in thread_hits}
+        labelled_ids = {i for i,ls in label_sets.items() if 'CRM' in ls}
+        triaged_ids = {i for i,ls in label_sets.items() if ls & {'Deal','Inbound'}}
+    else:
+        query = 'in:anywhere -label:DRAFT'
+        if since:
+            query += ' after:' + str(since)
+        hits = {r['id']:r for r in driver.search(account, query) if r.get('id')}
+        labelled_ids = {r['id'] for r in driver.search(account, '(label:CRM) -label:DRAFT' + (' after:'+str(since) if since else '')) if r.get('id')}
+        triaged_ids = {r['id'] for r in driver.search(account, '(label:Deal OR label:Inbound) -label:DRAFT' + (' after:'+str(since) if since else '')) if r.get('id')}
     stats['found'] = len(hits)
     prepared = []
     known = set()
@@ -130,7 +141,7 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
             preview = re.sub(r'\s+',' ',re.sub(r'<[^>]+>',' ',body)).strip()[:500]
             fields = {'thread_id':thread_pk,'mailbox_owner_id':owner_id,'gmail_message_id':gmail_id,'rfc_message_id':rfc_id,'in_reply_to':headers.get('in-reply-to'),'rfc_references':headers.get('references'),'subject':headers.get('subject'),'body_text':body,'body_preview':preview,'body_html':body_html,'from_email':sender,'from_person_id':from_person,'to_emails':recipients['to'],'cc_emails':recipients['cc'],'bcc_emails':recipients['bcc'],'labels':labels,'has_attachments':has_attachments,'sent_at':date,'crm_visible':visible,'crm_visible_reason':reason}
             if not outbound:
-                fields['personalization'] = json.dumps({'provider_headers':headers})
+                fields['personalization'] = json.dumps({'provider_headers':headers,**({'attachments':describe(full)} if has_attachments else {})})
             if existing:
                 # An outbound row is an immutable copy/routing snapshot. Gmail
                 # receipt normalisation must never rewrite approved content.
@@ -165,9 +176,18 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
                     interaction = 'int_'+hashlib.md5(f'{message_id}_{person}'.encode()).hexdigest()[:16]
                     cur.execute('''insert into crm_interactions(id,type,occurred_at,person_id,company_id,email_message_id,direction,score_contribution) values(%s,'Email',%s,%s,%s,%s,%s,%s) on conflict(id) do update set occurred_at=excluded.occurred_at,direction=excluded.direction,score_contribution=excluded.score_contribution''',(interaction,date,person,companies.get(person),message_id,interaction_direction,score))
                     cur.execute("update crm_people set last_interaction_at=greatest(coalesce(last_interaction_at,'1970-01-01'::timestamptz),%s) where id=%s and (last_interaction_at is null or last_interaction_at<%s)",(date,person,date))
+    scoped_threads = None
+    if thread_id and hasattr(driver,'thread_messages'):
+        # A one-thread check links replies inside that thread only; the hourly sync covers the whole mailbox.
+        with db.cursor() as cur:
+            cur.execute("select id from mail_thread where gmail_thread_id=%s and mailbox_owner_id=%s",(thread_id,owner_id))
+            scoped_threads = [r[0] for r in cur.fetchall()]
     if apply:
         with dict_cursor(db) as cur:
-            cur.execute("select * from mail_message where mailbox_owner_id=%s or (direction='outbound' and mailbox_owner_id is null)",(owner_id,))
+            if scoped_threads is not None:
+                cur.execute("select * from mail_message where thread_id=any(%s::text[]) and (mailbox_owner_id=%s or (direction='outbound' and mailbox_owner_id is null))",(scoped_threads,owner_id))
+            else:
+                cur.execute("select * from mail_message where mailbox_owner_id=%s or (direction='outbound' and mailbox_owner_id is null)",(owner_id,))
             planned = {r['id']:dict(r) for r in cur.fetchall()}
     with db.cursor() as cur:
         cur.execute("select provider_event_id from mail_event where source='gmail' and type='replied'")
@@ -190,13 +210,24 @@ def sync_gmail(db, account, since=None, apply=False, driver=None, thread_id=None
                 if not reply_matches(incoming,original,owner_id,account):
                     continue
                 event_id = 'reply:'+original['id']+':'+incoming['id']
+                if event_id in observed_replies:
+                    # Already linked in an earlier run (same transaction as its replied_at and follow-up pause).
+                    # Re-running every known pair cost ~34,000 statements (26 s) per sync and twice per send.
+                    continue
                 if not apply:
-                    stats['replies'] += int(event_id not in observed_replies)
+                    stats['replies'] += 1
                     continue
                 cur.execute('update mail_message set replied_at=least(replied_at,%s) where id=%s',(incoming['sent_at'],original['id']))
                 cur.execute("insert into mail_event(message_id,type,source,provider_event_id,occurred_at,detail) values(%s,'replied','gmail',%s,%s,jsonb_build_object('reply_message_id',%s)) on conflict do nothing",(original['id'],event_id,incoming['sent_at'],incoming['id']))
                 stats['replies'] += cur.rowcount
                 cur.execute("update mail_followup set state='paused',paused_reason='reply',updated_at=now() where state in ('pending','drafted') and (thread_id=any(%s::text[]) or message_id=%s)",([original.get('thread_id'),incoming.get('thread_id')],original['id']))
         if apply:
-            cur.execute('''update mail_thread t set message_count=s.n,last_message_at=s.latest,crm_visible=s.visible from (select thread_id,count(*)::integer n,max(sent_at) latest,bool_or(crm_visible) visible from mail_message where mailbox_owner_id=%s group by thread_id) s where t.id=s.thread_id''',(owner_id,))
+            # Follow-ups created after a reply was already linked are paused here in one statement, so skipping
+            # known reply pairs above never leaves a chaser running on a thread that has an answer.
+            cur.execute("""update mail_followup f set state='paused',paused_reason='reply',updated_at=now()
+                where f.state in ('pending','drafted') and exists (
+                    select 1 from mail_event e join mail_message o on o.id=e.message_id
+                    left join mail_message i on i.id=e.detail->>'reply_message_id'
+                    where e.type='replied' and e.source='gmail' and (f.message_id=o.id or f.thread_id=o.thread_id or f.thread_id=i.thread_id))""")
+            cur.execute('''update mail_thread t set message_count=s.n,last_message_at=s.latest,crm_visible=s.visible from (select thread_id,count(*)::integer n,max(sent_at) latest,bool_or(crm_visible) visible from mail_message where mailbox_owner_id=%s and (%s::text[] is null or thread_id=any(%s::text[])) group by thread_id) s where t.id=s.thread_id''',(owner_id,scoped_threads,scoped_threads))
     return {'account':account,'dry_run':not apply,'counts':stats}

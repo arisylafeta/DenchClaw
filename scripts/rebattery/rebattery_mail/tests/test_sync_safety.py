@@ -160,8 +160,10 @@ def test_gmail_driver_never_wraps_ingested_content(monkeypatch):
 
 
 class _FakeCursor:
-    def __init__(self, first):
+    def __init__(self, first, gmail_thread=None):
         self.first = first
+        self.gmail_thread = gmail_thread
+        self.sql = ''
 
     def __enter__(self):
         return self
@@ -169,16 +171,19 @@ class _FakeCursor:
     def __exit__(self, *args):
         return False
 
-    def execute(self, *args):
-        pass
+    def execute(self, sql, *args):
+        self.sql = sql
 
     def fetchone(self):
+        if 'gmail_thread_id from mail_thread' in self.sql:
+            return (self.gmail_thread,)
         return (self.first,)
 
 
 class _FakeDb:
-    def __init__(self, first):
+    def __init__(self, first, gmail_thread=None):
         self.first = first
+        self.gmail_thread = gmail_thread
 
     def __enter__(self):
         return self
@@ -187,7 +192,7 @@ class _FakeDb:
         return False
 
     def cursor(self):
-        return _FakeCursor(self.first)
+        return _FakeCursor(self.first, self.gmail_thread)
 
 
 def test_pre_send_mailbox_refresh_is_always_bounded(monkeypatch):
@@ -196,7 +201,7 @@ def test_pre_send_mailbox_refresh_is_always_bounded(monkeypatch):
     from rebattery_mail import sync
 
     seen = []
-    monkeypatch.setattr(sync, 'sync_gmail', lambda db, account, since=None, apply=False, driver=None, skip_known=False: seen.append((since, skip_known)) or {'counts': {'replies': 0}})
+    monkeypatch.setattr(sync, 'sync_gmail', lambda db, account, since=None, apply=False, driver=None, skip_known=False, thread_id=None: seen.append((since, skip_known)) or {'counts': {'replies': 0}})
     # The query itself subtracts one day from the thread's first message (2026-10-01), so it returns 09-30.
     monkeypatch.setattr(sync, 'connection', lambda *a, **k: _FakeDb(datetime(2026, 9, 30, 9, 0, tzinfo=timezone.utc)))
     sync.recheck_thread('thread-1', 'alex@rebattery.io')
@@ -204,6 +209,17 @@ def test_pre_send_mailbox_refresh_is_always_bounded(monkeypatch):
     monkeypatch.setattr(sync, 'connection', lambda *a, **k: _FakeDb(None))
     sync.recheck_thread(None, 'alex@rebattery.io')
     assert seen[-1][0] is not None and len(seen[-1][0]) == 10  # never None: fallback window, not the whole mailbox
+
+
+def test_pre_send_refresh_reads_only_the_gmail_thread_when_known(monkeypatch):
+    """Relay replies sit in old threads: reading the one thread replaces a months-long mailbox window."""
+    from rebattery_mail import sync
+
+    seen = []
+    monkeypatch.setattr(sync, 'sync_gmail', lambda db, account, since=None, apply=False, driver=None, skip_known=False, thread_id=None: seen.append((since, thread_id, skip_known)) or {'counts': {'replies': 0}})
+    monkeypatch.setattr(sync, 'connection', lambda *a, **k: _FakeDb(True, gmail_thread='19e82db74675fa10'))
+    sync.recheck_thread('gmail_thread_x', 'alex@rebattery.io')
+    assert seen == [(None, '19e82db74675fa10', True)]
 
 
 def test_first_message_skips_reply_refresh(monkeypatch):
