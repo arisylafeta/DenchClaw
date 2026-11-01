@@ -297,8 +297,10 @@ Return ONLY JSON:
 const PREDRAFT_SYSTEM = (rules: string[], guide?: string | null) => `You are Relay, drafting emails for Alex Polglase, founder of ReBattery (a UK marketplace and broker for used EV and storage batteries).
 Alex has not written a note. Write the reply he would most likely send now, in his voice, from what the thread and the deal say.${voiceGuideBlock(guide)} Follow these writing rules strictly:
 ${rules.map((r) => `- ${r}`).join("\n")}
-- Never decide for Alex. If the reply needs a decision only he can make (a price or an offer, accepting or proposing terms, committing to a date, quantity or delivery, anything legal, tax or money, or what to say is unclear from the thread), do not write the email: return needs_input with one short question to him and 2 or 3 options, each written as the short note he would type, e.g. "ask for their price", "decline politely".
-- A FOLLOW-UP (Alex wrote last and got no reply) is a short, friendly chase that adds one useful thing; it rarely needs input.
+- Say only what the thread supports: answer what they asked or confirm what they said, as briefly as Alex would. Add no offers, pitches, next steps or reassurance nobody asked for. Never say something happened (sent, resent, booked, invited, passed on, checked) unless the thread shows it, and never promise an action Alex has not already said he will take (I'll book, I'll pass it on, I'll chase, I'll send).
+- Whether to pitch listing on ReBattery is Alex's call. For a seller offering stock, ask him (needs_input) with options such as "pitch listing on ReBattery", "say we'll share it with buyers and come back with offers"; never pitch it yourself.
+- Never decide for Alex. If the reply needs a decision only he can make (a price or an offer, accepting or proposing terms, committing to a date, quantity or delivery, anything legal, tax or money), or something only he knows or has (a document, an address, what he did since, a status the thread does not show), do not write the email: return needs_input with one short question to him and 2 or 3 options, most likely first, each written as the short note he would type, e.g. "ask for their price", "decline politely".
+- A FOLLOW-UP (Alex wrote last and got no reply) repeats the specific open question from his last email in one short line, not a generic nudge, and adds nothing he has not already said.
 - Never invent facts: prices, quantities, dates, tests, partners, logistics or availability must come from the thread or the deal.
 - Nothing is attached. Never write that something is attached, enclosed or included as a file.
 ${greetingRule(!!guide)}
@@ -351,7 +353,7 @@ async function draftContext(item: RelayItem, ownerId: string, note: string | nul
   const prompt = `${voice ? voiceExamplesBlock(voice.card, voice.examples) : ""}${ask}${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
   const to = (lastInbound?.from_email ?? item.counterpart_email ?? "").trim();
   if (!to) throw new RelayError(400, "Relay couldn't find who to reply to on this thread.");
-  return { messages, rules, prompt, to, identity: replyIdentity(messages), guide: voice?.guide ?? null, voiceVersion: voice?.version ?? null, deal };
+  return { messages, rules, prompt, to, identity: replyIdentity(messages), guide: voice?.guide ?? null, voiceVersion: voice?.version ?? null, deal, transcript };
 }
 
 /** Turns the owner's note into draft v1 (plus follow-ons and to-dos) and moves the item to Review. Notes that need work start an agent job instead. */
@@ -427,11 +429,17 @@ async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, 
 // ---------- Relay's own drafts (before a note) ----------
 
 /** Relay's draft for one item, written as of now (or as of a past message, beforeId, to replay one Alex already answered). */
-async function suggestFor(item: RelayItem, ownerId: string, beforeId?: string): Promise<{ suggestion: Suggestion; amounts: string[] }> {
+async function suggestFor(item: RelayItem, ownerId: string, beforeId?: string): Promise<{ suggestion: Suggestion; amounts: string[]; thread: string }> {
   const ctx = await draftContext(item, ownerId, null, beforeId);
-  const parsed = parseSuggestion(await askAgent(PREDRAFT_SYSTEM(ctx.rules, ctx.guide), ctx.prompt, 90_000));
+  // The date Alex is replying on: now, or when he actually replied in a replay. Without it, dates in the thread read as past.
+  const [asOf] = beforeId ? await queryPg<{ at: string }>("select coalesce(sent_at, accepted_at, created_at)::text as at from mail_message where id = $1", [beforeId]) : [];
+  const today = new Date(asOf?.at ? Date.parse(asOf.at.replace(" ", "T").replace(/([+-]\d\d)$/, "$1:00")) : Date.now());
+  const dated = `Today is ${today.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Europe/London" })}.\n\n${ctx.prompt}`;
+  // The guide's approved commercial lines are for drafting from Alex's note; without a note, pitching is his call (see the prompt).
+  const guide = ctx.guide ? ctx.guide.replace(/## Commercial lines[\s\S]*?(?=\n## |$)/, "") : ctx.guide;
+  const parsed = parseSuggestion(await askAgent(PREDRAFT_SYSTEM(ctx.rules, guide), dated, 90_000));
   const corpus = [ctx.deal, item.context, ...ctx.messages.map((m) => m.body_text ?? "")].join("\n");
-  return { suggestion: { ...parsed, for_message_id: item.last_seen_message_id, voice_version: ctx.voiceVersion, at: new Date().toISOString() }, amounts: amountsIn(corpus) };
+  return { suggestion: { ...parsed, for_message_id: item.last_seen_message_id, voice_version: ctx.voiceVersion, at: new Date().toISOString() }, amounts: amountsIn(corpus), thread: ctx.transcript };
 }
 
 export type PredraftRun = { drafted: number; asked: number; failed: number; left: number };
@@ -475,7 +483,7 @@ export async function predraftPending(ownerId: string, limit = 10, budgetMs = 36
 /** Replays past emails for the eval: what Relay would have drafted just before each message Alex actually sent. Stores nothing. */
 export async function predraftReplay(ownerId: string, cases: { id: string; mail_thread_id: string; before_message_id: string; tab: "action" | "follow";
   counterpart_email: string | null; counterpart_name: string | null; situation: string | null; contact_type: string | null }[]) {
-  const out: { id: string; suggestion?: Suggestion; amounts?: string[]; error?: string }[] = [];
+  const out: { id: string; suggestion?: Suggestion; amounts?: string[]; thread?: string; error?: string }[] = [];
   for (const c of cases) {
     try {
       const [thread] = await queryPg<{ gmail_thread_id: string }>("select gmail_thread_id from mail_thread where id = $1 and mailbox_owner_id = $2::uuid", [c.mail_thread_id, ownerId]);

@@ -648,8 +648,9 @@ def _similarity():
 
 # ---------- eval: Relay's drafts before a note ----------
 
-PREDRAFT_JUDGE = """Relay drafts Alex Polglase's email replies before he says anything. For each item you get what the other side last
-wrote, what Alex actually sent, and what Relay produced: either a draft, or a question to Alex with options.
+PREDRAFT_JUDGE = """Relay drafts Alex Polglase's email replies before he says anything. For each item you get the thread as Relay saw it
+(oldest first, including Alex's own earlier emails), what Alex actually sent next, and what Relay produced: either a draft, or a question
+to Alex with options.
 Judge each item. Reply with ONLY a JSON array:
 [{"id": "...",
   "decision_needed": true|false (Alex's real email made a call only he could make: a price or offer, accepting or setting terms,
@@ -659,7 +660,7 @@ Judge each item. Reply with ONLY a JSON array:
      sendable: Alex could send Relay's draft as is; light: small edits; wrong: says something Alex did not mean or misses the point;
      asked: Relay asked a question instead of drafting,
   "asked_right": true|false|null (only when Relay asked: was asking the right call, and do the options cover what Alex did?),
-  "invented": true|false (the draft commits Alex to something or states a fact that is not in what the other side wrote),
+  "invented": true|false (the draft states a fact or event found nowhere in the thread, or promises an action Alex never said he would take),
   "why": "<10 words>"}]"""
 
 
@@ -697,12 +698,13 @@ def eval_predraft(args) -> None:
     for c in cases:
         r, res = c["_row"], results.get(c["id"], {})
         s = res.get("suggestion") or {}
-        items.append({"id": c["id"], "kind": r["kind"], "situation": r.get("situation"), "they_wrote": ((r.get("inbound") or {}).get("text") or "")[:1200],
+        items.append({"id": c["id"], "kind": r["kind"], "situation": r.get("situation"), "thread": (res.get("thread") or "")[-5000:],
+                      "they_wrote": ((r.get("inbound") or {}).get("text") or "")[:1200],
                       "alex_actual": r["text"][:1500], "relay_draft": s.get("body") or "", "relay_question": s.get("needs_input"),
                       "error": res.get("error"), "thread_amounts": res.get("amounts") or []})
     verdicts = {}
-    for i in range(0, len(items), 8):
-        chunk = [{k: v for k, v in it.items() if k in ("id", "they_wrote", "alex_actual", "relay_draft", "relay_question")} for it in items[i:i + 8] if not it["error"]]
+    for i in range(0, len(items), 5):
+        chunk = [{k: v for k, v in it.items() if k in ("id", "thread", "alex_actual", "relay_draft", "relay_question")} for it in items[i:i + 5] if not it["error"]]
         if chunk:
             raw = rs.run_hermes(PREDRAFT_JUDGE + "\n\n" + json.dumps(chunk, ensure_ascii=False))
             for obj in json.loads(raw[raw.find("["):raw.rfind("]") + 1]):
