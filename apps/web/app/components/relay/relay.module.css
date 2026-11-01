@@ -237,6 +237,14 @@
 .toast.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
 .toast button { border: 0; background: none; color: #9dbbff; font-weight: 600; }
 .error { color: var(--red); font-size: 13.5px; }
+.sugg { margin: 0 18px 10px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--blue) 30%, transparent); border-radius: 12px; background: var(--blue-soft); display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; }
+.sugh { color: var(--ink); }
+.sugh .spark { margin-right: 6px; color: var(--blue); }
+.sugb { white-space: pre-wrap; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sugb.full { display: block; -webkit-line-clamp: unset; }
+.sugact { display: flex; gap: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { border: 1px solid color-mix(in srgb, var(--blue) 45%, transparent); background: var(--card); color: var(--blue-ink); border-radius: 999px; padding: 4px 11px; font-size: 13px; }
 .rulespage { display: flex; flex-direction: column; gap: 14px; }
 .rcard { padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
 .proposal { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); font-size: 14px; }
