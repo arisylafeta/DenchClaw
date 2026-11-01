@@ -290,6 +290,15 @@ def test_alex_own_send_does_not_reopen_but_a_due_chase_does():
     assert due[0]["kind"] == "reopen" and due[0]["values"]["tab"] == "follow"
 
 
+def test_closed_as_replied_but_still_waiting_reopens_in_action():
+    # An answer that no longer counts (a reply in another conversation) leaves the thread waiting on Alex: back to Action.
+    ops = rs.plan_writes([row(tab="action", newest="m1", new_message=False, seen_known=True)],
+                         {"t1": item(status="done", done_reason="replied", last_seen="m1")}, NOW, {"t1"})
+    assert ops[0]["kind"] == "reopen" and ops[0]["values"]["tab"] == "action"
+    assert rs.plan_writes([row(tab="action", newest="m1", new_message=False, seen_known=True)],
+                          {"t1": item(status="done", done_reason="user_done", last_seen="m1")}, NOW, {"t1"}) == []
+
+
 def test_dont_chase_stays_dismissed_until_they_write():
     # "Don't chase" closes a Follow up item with done_reason no_chase: a due chase never reopens it, their reply does.
     due = rs.plan_writes([row(tab="follow", newest="m4", new_message=False, seen_known=True)],
@@ -460,6 +469,17 @@ def test_db_write_path(scratch, monkeypatch, tmp_path, capsys):
     assert subprocess.run(["psql", "-X", "-At", "-d", TEST_DB, "-c", f"select situation from {SCHEMA}.relay_item where gmail_thread_id = 'a'"],
                           text=True, capture_output=True, check=True).stdout.strip() == "supplier_price"
     assert rows[1].split("|")[:6] == ["f", "follow", "high", "open", "Waiting on Kokam answer", "Kokam cells · 13,104 units"]
+
+    # Alex answers Tom inside a different, older conversation (Tom wrote there first): Tom's price question stays open.
+    psql(TEST_DB, f"""set search_path = {SCHEMA}, public;
+      insert into mail_thread (id, gmail_thread_id, mailbox_owner_id, subject, last_message_at) values ('gmail_thread_o', 'o', '{owner}', 'Collection', now());
+      insert into mail_message (id, direction, transport, purpose, mailbox_owner_id, thread_id, subject, body_text, from_email, to_emails, state, sent_at, gmail_message_id) values
+        ('mo1', 'inbound', 'gmail', null, '{owner}', 'gmail_thread_o', 'Collection', 'When can you collect?', 'tom@dealer.no', '{{alex@rebattery.io}}', 'received', '{t(5)}', 'go1'),
+        ('mo2', 'outbound', 'gmail', 'personal', '{owner}', 'gmail_thread_o', 'Re: Collection', 'Thursday works.', 'alex@rebattery.io', '{{tom@dealer.no}}', 'accepted', now(), 'go2');""")
+    assert rs.main(args) == 0
+    capsys.readouterr()
+    assert subprocess.run(["psql", "-X", "-At", "-d", TEST_DB, "-c", f"select status, tab from {SCHEMA}.relay_item where gmail_thread_id = 'a'"],
+                          text=True, capture_output=True, check=True).stdout.strip() == "open|action"
 
     # User sets a note; Alex replies to Tom. Next run marks it done and keeps the note.
     psql(TEST_DB, f"""set search_path = {SCHEMA}, public;

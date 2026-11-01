@@ -477,26 +477,35 @@ def load_threads(cur, owner_id: str, since: dt.datetime, extra_thread_ids: list[
     return threads
 
 
-def load_contact_maps(cur, owner_id: str, since: dt.datetime) -> tuple[dict, dict]:
-    """last_to: when the owner last wrote to each address; last_from: when each address last wrote in."""
+def load_contact_maps(cur, owner_id: str, since: dt.datetime) -> tuple[dict, dict, dict]:
+    """last_to: when the owner last wrote to each address; last_from: when each address last wrote in;
+    last_new_to: when the owner last wrote to each address outside an existing conversation (a new email, or more of his
+    own unanswered ones). Only those can be his answer to another thread: a reply inside a different conversation with the
+    same person belongs to that conversation (Alex, 1 Nov: a reply about a proposal had closed an unrelated question)."""
     cur.execute(
-        """select direction, from_email, to_emails, cc_emails, coalesce(sent_at, accepted_at, created_at) as at
-             from mail_message where mailbox_owner_id = %s and coalesce(sent_at, accepted_at, created_at) >= %s
-              and state in ('accepted', 'received') and campaign_id is null""",
+        """select m.direction, m.from_email, m.to_emails, m.cc_emails, coalesce(m.sent_at, m.accepted_at, m.created_at) as at,
+                  exists (select 1 from mail_message p where p.thread_id = m.thread_id and p.direction = 'inbound'
+                            and p.state in ('accepted', 'received')
+                            and coalesce(p.sent_at, p.accepted_at, p.created_at) < coalesce(m.sent_at, m.accepted_at, m.created_at)) as in_conversation
+             from mail_message m where m.mailbox_owner_id = %s and coalesce(m.sent_at, m.accepted_at, m.created_at) >= %s
+              and m.state in ('accepted', 'received') and m.campaign_id is null""",
         (owner_id, since))
     last_to: dict[str, dt.datetime] = {}
     last_from: dict[str, dt.datetime] = {}
+    last_new_to: dict[str, dt.datetime] = {}
     for r in cur.fetchall():
         if r["direction"] == "outbound":
             for e in (r["to_emails"] or []) + (r["cc_emails"] or []):
                 e = email_of(e)
                 if e and (e not in last_to or r["at"] > last_to[e]):
                     last_to[e] = r["at"]
+                if e and not r["in_conversation"] and (e not in last_new_to or r["at"] > last_new_to[e]):
+                    last_new_to[e] = r["at"]
         else:
             e = email_of(r["from_email"])
             if e and (e not in last_from or r["at"] > last_from[e]):
                 last_from[e] = r["at"]
-    return last_to, last_from
+    return last_to, last_from, last_new_to
 
 
 def load_people(cur, emails: list[str]) -> dict[str, dict]:
@@ -762,7 +771,9 @@ def plan_writes(rows: list[dict], existing: dict[str, dict], now: dt.datetime, s
         if item["status"] in ("review", "done"):
             # A reply Alex sent (by hand or from Relay) that asked something comes back as Follow once the chase is due.
             reopen_follow = item["status"] == "done" and item.get("done_reason") in ("replied", "sent") and row.get("tab") == "follow"
-            if (new_message and row.get("tab")) or reopen_follow:
+            # Closed as answered, but the thread still waits on Alex (an answer that turned out not to count): back to Action.
+            reopen_unanswered = item["status"] == "done" and item.get("done_reason") == "replied" and row.get("tab") == "action"
+            if (new_message and row.get("tab")) or reopen_follow or reopen_unanswered:
                 ops.append({"op": "update", "gmail_thread_id": gid, "id": item["id"], "kind": "reopen",
                             "values": {**fields, **content, **CLEAR_USER_TAB, "status": "open", "done_reason": None}})
             elif not row.get("seen_known") and row.get("newest_message_id"):
@@ -862,8 +873,9 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
             or STREAM_TYPE.get(tri.get("automated_stream") or "") or (item or {}).get("contact_type")
         deal = choose_deal(counterpart, contact_type, ctx_global["deals"].get(tid, set()), thread_text, ctx_global.get("owned", {}))
         deal_linked = bool(deal) or counterpart in ctx_global.get("open_deal_emails", set())
+        # "Owner wrote to them since" counts only a new email from him, not a reply in another conversation.
         ctx = {"triage": tri, "contact_type": contact_type, "deal_linked": deal_linked,
-               "last_to": ctx_global["last_to"], "last_from": ctx_global["last_from"],
+               "last_to": ctx_global.get("last_new_to", ctx_global["last_to"]), "last_from": ctx_global["last_from"],
                "known": bool(person) or bool(company_row) or counterpart in ctx_global["last_to"],
                "existing_open": bool(item and item["status"] == "open")}
         result = classify_thread(msgs, ctx, now, args.days, args.follow_days)
@@ -1045,7 +1057,7 @@ def main(argv: list[str] | None = None) -> int:
         open_thread_ids = [i["mail_thread_id"] for i in existing.values() if i["status"] == "open" and i.get("mail_thread_id")]
         since = now - dt.timedelta(days=max(args.days, args.follow_days))
         threads = load_threads(cur, owner_id, since, open_thread_ids)
-        last_to, last_from = load_contact_maps(cur, owner_id, now - dt.timedelta(days=max(args.days, args.follow_days) + 30))
+        last_to, last_from, last_new_to = load_contact_maps(cur, owner_id, now - dt.timedelta(days=max(args.days, args.follow_days) + 30))
         counterparts = set()
         for th in threads.values():
             for m in th["messages"]:
@@ -1061,7 +1073,7 @@ def main(argv: list[str] | None = None) -> int:
             "open_deal_emails": load_open_deal_emails(cur),
             "owned": load_owned_listings(cur),
             "sender_rules": load_sender_rules(cur, owner_id),
-            "last_to": last_to, "last_from": last_from,
+            "last_to": last_to, "last_from": last_from, "last_new_to": last_new_to,
         }
         rows, jobs, seen = build_rows(threads, existing, ctx_global, now, args)
 
