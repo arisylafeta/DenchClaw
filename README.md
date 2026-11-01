@@ -305,7 +305,7 @@ Any `sending` or `unknown` row blocks the whole audience; ambiguous sends exit 4
 retried automatically. `recover <campaign-id> --apply` reconciles exact provider
 receipts, leaving missing receipts unresolved.
 
-Sends are live: a named human approval is the only send gate (`DENCH_MAIL_LIVE_SEND` is no longer read). Tests can never send: an autouse fixture fails any test that runs gog or opens an HTTP connection.
+Sends are live: a named human approval is the only send gate (`DENCH_MAIL_LIVE_SEND` is no longer read). Emergency stop for every Postmark send (mail tool and the CRM web app): `rebattery-mail postmark-stop on --by <name> --reason "..."`, then `off` to resume and `status` to check; it refuses before anything is claimed. Gmail sends stop with `GOG_GMAIL_NO_SEND=1`. Tests can never send: an autouse fixture fails any test that runs gog or opens an HTTP connection.
 Gmail's no-send restriction remains effective. Marketing requires an unsubscribe
 path on both transports; Postmark marketing requires an explicit Broadcast
 stream, with `{{{ pm:unsubscribe }}}` in both bodies. `followup draft` prepares a

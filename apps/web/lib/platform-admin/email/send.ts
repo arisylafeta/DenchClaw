@@ -1,5 +1,6 @@
 import "server-only";
 
+import { readFileSync } from "node:fs";
 import * as postmark from "postmark";
 import { getPostmarkClient } from "./client";
 import { getPostmarkEnv } from "@/lib/platform-admin/env";
@@ -8,9 +9,19 @@ export type EmailResult =
   | { success: true; messageId: string }
   | {
       success: false;
-      error: "inactive_recipient" | "rate_limit" | "auth" | "unknown";
+      error: "inactive_recipient" | "rate_limit" | "auth" | "stopped" | "unknown";
       detail?: string;
     };
+
+/** The Postmark emergency stop shared with the mail tool (`rebattery-mail postmark-stop on|off|status`). */
+const STOP_FILE = "/root/.hermes/workspace/mail-postmark-stop.json";
+
+/** Who stopped Postmark sending and why, while the stop is on; null otherwise. An unreadable stop file still stops. */
+export function postmarkStop(): { by?: string; reason?: string } | null {
+  let text: string;
+  try { text = readFileSync(process.env.REBATTERY_MAIL_POSTMARK_STOP_FILE || STOP_FILE, "utf8"); } catch { return null; }
+  try { return JSON.parse(text) as { by?: string; reason?: string }; } catch { return { reason: "stop file present" }; }
+}
 
 /**
  * Send a raw HTML email via Postmark.
@@ -29,6 +40,11 @@ export async function sendRawEmail(params: {
   const env = getPostmarkEnv();
   const from = params.from ?? env.postmarkFromEmail;
   const text = params.text ?? stripHtml(html);
+
+  const stopped = postmarkStop();
+  if (stopped) {
+    return { success: false, error: "stopped", detail: `Postmark sending is stopped${stopped.by ? ` by ${stopped.by}` : ""}${stopped.reason ? `: ${stopped.reason}` : ""}` };
+  }
 
   try {
     const client = getPostmarkClient();

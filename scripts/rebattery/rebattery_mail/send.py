@@ -8,6 +8,7 @@ from .core import connection, dict_cursor, Refused, ProviderError, UnknownOutcom
 from .digest import digest, load
 from . import policy
 from .drivers import resolve_driver, live_gate
+from .stop import check_postmark
 
 CLAIMABLE = ('draft','frozen','approved')
 
@@ -273,6 +274,8 @@ def execute(args, driver=None, campaign_mode=False):
             if not args.apply:
                 return {'subject_id':target,'sha256':sha,'message_ids':[row['id'] for row in chosen],'dry_run':True}
             live_gate()  # Refuse before changing any delivery state or claiming a key.
+            if any(str(row.get('transport') or '').startswith('postmark') for row in chosen):
+                check_postmark()  # the emergency stop leaves a stopped campaign untouched, not half failed
             count = approval_count(rows)
             def authorise():
                 submission_approval(target,approval['id'],sha,count,rows[0]['identity_key'])

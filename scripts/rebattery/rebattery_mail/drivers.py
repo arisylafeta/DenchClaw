@@ -1,4 +1,4 @@
-"""Provider boundaries. No provider submission without the explicit live-send gate."""
+"""Provider boundaries. Sends are live once a named person approved them; Postmark also honours the emergency stop (stop.py)."""
 import json
 import os
 import subprocess
@@ -10,6 +10,7 @@ from contextlib import nullcontext
 from datetime import datetime
 from email.utils import getaddresses
 from .core import Refused, ProviderError, UnknownOutcome, connection, dict_cursor, gog_env
+from .stop import check_postmark
 
 
 def live_gate():
@@ -221,6 +222,7 @@ class PostmarkSendDriver:
         self.client = client or postmark
 
     def preflight(self, identity, message):
+        check_postmark()  # refused before any claim while the emergency stop is on
         if message.get('personalization',{}).get('attachments'):
             raise Refused('attachments_require_gmail_transport')
         stream = identity.get('postmark_stream')
@@ -231,6 +233,7 @@ class PostmarkSendDriver:
 
     def send(self, identity, message):
         live_gate()
+        check_postmark()  # and again at the last moment, for a stop turned on mid-campaign
         payload = {'From':f"{identity['display_name']} <{identity['address']}>", 'ReplyTo':identity.get('reply_to') or identity['address'],
                    'To':','.join(message['to_emails']), 'Subject':message['subject'],'HtmlBody':message['body_html'],
                    'TextBody':message['body_text'],'MessageStream':identity['postmark_stream'],
