@@ -26,6 +26,9 @@ describe("sameRule", () => {
     expect(sameRule("Cut detailed recaps of the recipient’s message.", "cut detailed recaps of the recipient's message")).toBe(true);
     expect(sameRule("Keep acknowledgements brief.", "End proposals with a direct question.")).toBe(false);
   });
+  it("lets a short rule not block a longer one that merely shares a word", () => {
+    expect(sameRule("Be warm.", "Keep a warm tone but cut the opening pleasantries.")).toBe(false);
+  });
 });
 
 describe("parseProposals", () => {
@@ -41,6 +44,10 @@ describe("parseProposals", () => {
     expect(got[0].evidence[0]).toEqual({ draft_id: "d1", before: pairs[0].before, after: pairs[0].after });
     expect(got[1].evidence).toEqual([{ draft_id: "d3", request: "shorter" }, { draft_id: "d3", request: "warmer" }]);
     expect(got[2].target_id).toBe("r1");
+  });
+  it("never proposes a removal that is already waiting or was turned down", () => {
+    const got = parseProposals(JSON.stringify({ remove: [{ rule_id: "r1", why: "x", evidence: ["d1"] }] }), { ...ctx, blockedTargets: ["r1"] });
+    expect(got).toEqual([]);
   });
   it("drops rules without evidence, repeats of known or rejected rules, and unknown removals", () => {
     const got = parseProposals(JSON.stringify({

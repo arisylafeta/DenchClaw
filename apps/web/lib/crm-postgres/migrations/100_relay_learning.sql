@@ -28,6 +28,8 @@ alter table relay_rule add constraint relay_rule_state_check check (state in ('a
 alter table relay_rule drop constraint if exists relay_rule_action_check;
 alter table relay_rule add constraint relay_rule_action_check check (action in ('add', 'remove') and (action = 'add' or target_id is not null));
 create index if not exists relay_rule_owner_state_idx on relay_rule (owner_id, state);
+-- One waiting proposal per rule text (and per removal target): overlapping learning runs cannot add the same card twice.
+create unique index if not exists relay_rule_proposed_uidx on relay_rule (owner_id, action, coalesce(target_id, ''), lower(text)) where state = 'proposed';
 
 create table if not exists relay_learn_run (
   id text primary key default gen_random_uuid()::text,

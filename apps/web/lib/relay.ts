@@ -10,7 +10,7 @@ import { editDraft, editableCopy, identitySignatures, sameVersion, textToHtml, s
 import type { DraftAttachment } from "./mail-types";
 import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
-import type { Evidence } from "./relay-learn-core";
+import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -101,7 +101,7 @@ export async function relayCounts(ownerId: string): Promise<RelayCounts> {
        (select count(*) from work_tasks w join relay_task_meta m on m.work_task_id = w.id
           where lower(w.assignee_email) = (select lower(email) from crm_users where id = $1::uuid) and w.status in ('Planned','In Progress')
           and m.snooze_until > now())::int as scheduled,
-       (select count(*) from relay_draft d join relay_item x on x.id = d.item_id where x.owner_id = $1::uuid and d.state = 'sent' and d.updated_at >= date_trunc('day', now()))::int as sent_today,
+       (select count(*) from relay_draft d join relay_item x on x.id = d.item_id where x.owner_id = $1::uuid and d.state = 'sent' and coalesce(d.sent_at, d.updated_at) >= date_trunc('day', now()))::int as sent_today,
        count(*) filter (where status = 'done' and updated_at >= date_trunc('day', now()))::int as done_today
      from relay_item where owner_id = $1::uuid`, [ownerId]);
   return row ?? { action: 0, follow: 0, other: 0, review: 0, todos: 0, sent_today: 0, done_today: 0, scheduled: 0 };
@@ -175,6 +175,7 @@ export async function addRule(ownerId: string, text: string): Promise<void> {
 export async function deleteRule(ownerId: string, id: string): Promise<void> {
   await queryPg("delete from relay_rule where id = $1 and owner_id = $2::uuid and source = 'alex'", [id, ownerId]);
   await queryPg("update relay_rule set state = 'rejected', decided_at = now() where id = $1 and owner_id = $2::uuid and source = 'learned'", [id, ownerId]);
+  await queryPg("delete from relay_rule where target_id = $1 and owner_id = $2::uuid and state = 'proposed'", [id, ownerId]);
 }
 
 /** Approve or reject a proposal. Approving a removal retires the learned rule it names. */
@@ -186,6 +187,8 @@ export async function decideRule(ownerId: string, id: string, decision: "approve
     if (decision === "reject") {
       await tx.query("update relay_rule set state = 'rejected', decided_at = now() where id = $1", [id]);
     } else if (rule.action === "add") {
+      const { rows: [{ n }] } = await tx.query<{ n: number }>("select count(*)::int as n from relay_rule where owner_id = $1::uuid and source = 'learned' and state = 'active'", [ownerId]);
+      if (n >= MAX_LEARNED) throw new RelayError(409, `You have ${MAX_LEARNED} learned rules. Remove one before adding another.`);
       await tx.query("update relay_rule set state = 'active', decided_at = now() where id = $1", [id]);
     } else {
       await tx.query("update relay_rule set state = 'rejected', decided_at = now() where id = $1 and source = 'learned'", [rule.target_id]);
@@ -574,7 +577,8 @@ async function recordSent(where: string, values: unknown[]): Promise<number> {
      where m.state = 'accepted' and ${where}`, values);
   const copies = await mainCopies(rows.map((r) => r.mail_message_id));
   for (const r of rows) {
-    await queryPg(`update relay_draft set state = 'sent', sent_body = $2, sent_at = coalesce($3::timestamptz, sent_at, now()), updated_at = now() where id = $1`,
+    await queryPg(`update relay_draft set sent_body = $2, sent_at = coalesce($3::timestamptz, sent_at, now()),
+      updated_at = case when state = 'sent' then updated_at else now() end, state = 'sent' where id = $1`,
       [r.id, copies.get(r.mail_message_id) ?? null, r.accepted_at]);
   }
   return rows.length;

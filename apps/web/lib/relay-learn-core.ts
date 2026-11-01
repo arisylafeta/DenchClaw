@@ -34,7 +34,7 @@ export function sameRule(a: string, b: string): boolean {
   if (!x.size || !y.size) return false;
   let shared = 0;
   for (const w of x) if (y.has(w)) shared += 1;
-  return shared / Math.min(x.size, y.size) >= 0.8;
+  return shared / Math.max(x.size, y.size) >= 0.8;
 }
 
 export function learnPrompt(input: { own: string[]; learned: LearnRule[]; rejected: string[]; pairs: LearnPair[]; requests: { draft_id: string; text: string }[]; unchanged: number }): string {
@@ -73,7 +73,7 @@ ${JSON.stringify(input.requests)}`;
 }
 
 /** Checks the model's proposals against the evidence and the rules there are, and drops anything unsupported or repeated. */
-export function parseProposals(content: string, ctx: { pairs: LearnPair[]; requests: { draft_id: string; text: string }[]; learned: LearnRule[]; known: string[] }): Proposal[] {
+export function parseProposals(content: string, ctx: { pairs: LearnPair[]; requests: { draft_id: string; text: string }[]; learned: LearnRule[]; known: string[]; blockedTargets?: string[] }): Proposal[] {
   const match = content.match(/\{[\s\S]*\}/);
   if (!match) return [];
   let parsed: { add?: unknown; remove?: unknown };
@@ -98,7 +98,8 @@ export function parseProposals(content: string, ctx: { pairs: LearnPair[]; reque
   const learned = new Map(ctx.learned.map((r) => [r.id, r]));
   for (const raw of (Array.isArray(parsed.remove) ? parsed.remove : []).slice(0, MAX_REMOVES) as Record<string, unknown>[]) {
     const target = learned.get(String(raw?.rule_id ?? ""));
-    if (!target || out.some((p) => p.target_id === target.id)) continue;
+    // A removal already waiting for Alex, or one he turned down, is not proposed again.
+    if (!target || out.some((p) => p.target_id === target.id) || ctx.blockedTargets?.includes(target.id)) continue;
     out.push({ action: "remove", text: target.text, target_id: target.id, why: String(raw?.why ?? "").slice(0, 240), evidence: evidenceOf(raw?.evidence) });
   }
   return out;
