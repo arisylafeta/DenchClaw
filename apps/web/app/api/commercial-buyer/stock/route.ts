@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import {
-  aggregateStock, bandOffsetFor, interpretFilters, lotKeyFor, MAX_SEARCH_GROUPS, searchRows, suggestModels,
+  aggregateStock, bandOffsetFor, chemistryFamilies, interpretFilters, lotKeyFor, MAX_SEARCH_GROUPS, searchRows, suggestModels,
   TOTAL_GROUPS_CAP, TOTAL_UNITS_CAP, withPackIdentity, type StockRow,
 } from "@/lib/commercial-stock";
 import { allowStockRequest, commercialStockAuthorised, scopeSignatureValid, secret, unauthorised } from "@/lib/commercial-stock-access";
@@ -53,7 +53,9 @@ export async function POST(request: Request): Promise<Response> {
   const input = parsed.data;
   // A real filter is required, so the whole book cannot be read with an empty or country-only query. Chemistry counts:
   // buyers lead with it (LFP for storage and export), and results stay capped at MAX_SEARCH_GROUPS and rate limited.
-  const filtered = Boolean(input.make || input.model || input.chemistry || input.groupKeys?.length || input.kwhMin !== undefined || input.kwhMax !== undefined);
+  // Only a recognised family counts ("LFP", "NMC"): punctuation or a letter would otherwise match every row.
+  const chemistryFilter = Boolean(input.chemistry && chemistryFamilies(input.chemistry).length);
+  const filtered = Boolean(input.make || input.model || chemistryFilter || input.groupKeys?.length || input.kwhMin !== undefined || input.kwhMax !== undefined);
   if (!filtered) return fail("filter_required", 400);
   // Real asks only for the platform's signed re-check by group keys.
   if (input.exact && !(input.groupKeys?.length && input.scope && input.scopeSig)) return fail("Invalid filters", 400);
