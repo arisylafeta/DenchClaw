@@ -85,23 +85,41 @@ def db_after_cutover(db_pre_cutover):
     return db_pre_cutover
 
 
+
 @pytest.fixture(autouse=True)
 def no_real_mail(monkeypatch):
     """No test can reach Gmail or Postmark, whatever the send gates say: live sends need only a named approval, so a
-    test that builds a real driver would otherwise send real email (it did, 1 Nov 2026). A gog or HTTP call fails the test."""
+    test that builds a real driver would otherwise send real email (it did, 1 Nov 2026). Any gog command, HTTP connection
+    or shell command fails the test with pytest.fail, which send-path error handling cannot swallow. Tests run without the gog
+    keyring password."""
+    import http.client
     import subprocess
     import urllib.request
-    real_run = subprocess.run
+
+    def blocked(what):
+        pytest.fail(f'test tried {what}: tests must use a fake runner, driver or client', pytrace=False)
+
+    def check(args, kwargs):
+        argv = [str(a) for a in args] if isinstance(args, (list, tuple)) else [str(args)]
+        if kwargs.get('shell') or any(os.path.basename(a) == 'gog' or a.endswith('/gog') or ' gog ' in f' {a} ' for a in argv):
+            blocked('to run ' + ' '.join(argv)[:80])
+        if any('hermes-agent' in a for a in argv):
+            blocked('to read a provider secret')
+
+    real_run, real_popen = subprocess.run, subprocess.Popen
 
     def guarded_run(args, *rest, **kwargs):
-        argv = list(args) if isinstance(args, (list, tuple)) else [str(args)]
-        command = os.path.basename(str(argv[0])) if argv else ''
-        if command == 'gog' or 'hermes-agent' in str(argv[0]):
-            raise AssertionError(f'test tried to run {command}: tests must use a fake runner or driver')
+        check(args, kwargs)
         return real_run(args, *rest, **kwargs)
 
-    def refused_urlopen(*args, **kwargs):
-        raise AssertionError('test tried an HTTP call: tests must use a fake client')
+    class GuardedPopen(real_popen):
+        def __init__(self, args, *rest, **kwargs):
+            check(args, kwargs)
+            super().__init__(args, *rest, **kwargs)
 
     monkeypatch.setattr(subprocess, 'run', guarded_run)
-    monkeypatch.setattr(urllib.request, 'urlopen', refused_urlopen)
+    monkeypatch.setattr(subprocess, 'Popen', GuardedPopen)
+    monkeypatch.setattr(os, 'system', lambda *a, **k: blocked('os.system'))
+    monkeypatch.setattr(urllib.request, 'urlopen', lambda *a, **k: blocked('an HTTP call'))
+    monkeypatch.setattr(http.client.HTTPConnection, 'connect', lambda self: blocked(f'an HTTP connection to {self.host}'))
+    monkeypatch.delenv('GOG_KEYRING_PASSWORD', raising=False)

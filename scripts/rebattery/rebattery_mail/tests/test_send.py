@@ -277,13 +277,6 @@ def test_dry_run_has_no_claim_or_approval(env):
     assert state(row['id'])=='draft'
 
 
-def test_live_gate_is_open_and_named_approval_is_the_gate(monkeypatch):
-    # Sends are live; the only gate is a named human approval (test_send_without_approver_is_a_dry_run_and_with_one_sends).
-    from rebattery_mail.drivers import live_gate
-    monkeypatch.delenv('DENCH_MAIL_LIVE_SEND',raising=False)
-    assert live_gate() is None
-
-
 def test_tracked_links_and_optional_auction():
     row={'body_html':'<a href="https://www.rebattery.io/stock">Stock</a>','body_text':'https://www.rebattery.io/stock'}
     campaign.validate_links(row,[{'key':'stock','url':'https://www.rebattery.io/stock'}])
@@ -531,9 +524,13 @@ def test_review_12_html_unsubscribe_required():
 
 
 def test_review_13_gate_precedes_claim(env):
-    # Without an approval nothing is claimed or sent (a fake driver: tests never reach Gmail).
-    row=one(env);fake=Fake()
-    with pytest.raises(Refused,match='approval_missing'):
+    # An approved send whose provider preflight refuses is stopped before any claim (a fake driver: tests never reach Gmail).
+    row=one(env);approved(row['id'])
+    class Refusing(Fake):
+        def preflight(self,identity,message):
+            raise Refused('provider_preflight_refused')
+    fake=Refusing()
+    with pytest.raises(Refused,match='provider_preflight_refused'):
         send.execute(NS(target=row['id'],apply=True),fake)
     assert not fake.calls
     with connection(read_only=True) as db:
@@ -913,7 +910,9 @@ def test_attachment_draft_digest_and_send_flags(env,tmp_path,monkeypatch):
     with connection(read_only=True) as db:
         row=load(db,plain['id'])[1][0]
     assert row['has_attachments'] and row['personalization']['attachments'][0]['filename']=='Prices Oct 2026.xlsx'
-    assert digest([plain])!=digest([row])  # approval covers the attachment bytes
+    import copy
+    bare=copy.deepcopy(row);bare['personalization'].pop('attachments',None)
+    assert digest([row])!=digest([bare])  # approval covers the attachment bytes
     calls=[]
     def runner(args,**kwargs):
         calls.append((args,kwargs))
