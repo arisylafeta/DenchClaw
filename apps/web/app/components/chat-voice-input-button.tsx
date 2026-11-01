@@ -5,7 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 type VoiceInputState = "idle" | "recording" | "listening" | "processing" | "error";
 
 type BrowserSpeechRecognitionEvent = Event & {
-  results: ArrayLike<ArrayLike<{ transcript: string }>>;
+  resultIndex: number;
+  results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }>;
 };
 
 type BrowserSpeechRecognition = {
@@ -14,7 +15,7 @@ type BrowserSpeechRecognition = {
   maxAlternatives: number;
   lang?: string;
   onend: (() => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((event: Event & { error?: string }) => void) | null;
   onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null;
   start: () => void;
   stop: () => void;
@@ -70,6 +71,7 @@ export function ChatVoiceInputButton({
   onTranscript: (text: string) => void;
 }) {
   const [state, setState] = useState<VoiceInputState>("idle");
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [browserSpeechSupported, setBrowserSpeechSupported] = useState(false);
   const [recordingSupported, setRecordingSupported] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -132,27 +134,52 @@ export function ChatVoiceInputButton({
 
     const recognition = new RecognitionCtor();
     recognitionRef.current = recognition;
-    recognition.continuous = false;
+    // Keep listening through pauses; each finished phrase is appended as it arrives.
+    recognition.continuous = true;
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
     recognition.onresult = (event) => {
-      const transcript = Array.from(event.results)
-        .map((result) => result[0]?.transcript ?? "")
-        .join(" ")
-        .trim();
+      const finished: string[] = [];
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal && result[0]?.transcript) {
+          finished.push(result[0].transcript.trim());
+        }
+      }
+      const transcript = finished.join(" ").trim();
       if (transcript) {
         onTranscript(transcript);
       }
     };
-    recognition.onerror = () => {
-      setState("idle");
+    recognition.onerror = (event) => {
       recognitionRef.current = null;
+      if (event.error === "no-speech" || event.error === "aborted") {
+        setState("idle");
+        return;
+      }
+      setErrorDetail(
+        event.error === "not-allowed" || event.error === "service-not-allowed"
+          ? "Microphone access is blocked. Allow it in the browser site settings."
+          : event.error === "network"
+            ? "Speech service unreachable. Check your connection and try again."
+            : "Voice input failed. Try again.",
+      );
+      setState("error");
+      window.setTimeout(() => setState("idle"), 4000);
     };
     recognition.onend = () => {
-      setState("idle");
+      setState((current) => (current === "error" ? current : "idle"));
       recognitionRef.current = null;
     };
-    recognition.start();
+    try {
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+      setErrorDetail("Voice input failed to start. Try again.");
+      setState("error");
+      window.setTimeout(() => setState("idle"), 4000);
+      return;
+    }
     setState("listening");
   };
 
@@ -199,8 +226,9 @@ export function ChatVoiceInputButton({
           }
           setState("idle");
         } catch {
+          setErrorDetail("Transcription failed. Try again.");
           setState("error");
-          window.setTimeout(() => setState("idle"), 1500);
+          window.setTimeout(() => setState("idle"), 4000);
         } finally {
           recorderRef.current = null;
           streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -247,6 +275,8 @@ export function ChatVoiceInputButton({
 
   const title = inputMode === "unsupported"
     ? "Voice input is not supported in this browser"
+    : state === "error" && errorDetail
+      ? errorDetail
     : state === "processing"
       ? "Transcribing..."
       : state === "recording" || state === "listening"

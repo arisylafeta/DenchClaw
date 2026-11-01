@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useConversationNotifications } from "@/lib/hermes-chat/use-conversation-notifications";
 import { closeHermesEventsClient } from "@/lib/hermes-chat/events-client";
 import { applyChatView, automation, canViewConversation, conversationChannel, DEFAULT_VIEW, filterConversations, messagingConversation, parseChatView, type ChatView, type GroupBy, type HermesConversation } from "@/lib/hermes-conversations";
 import { ChevronRight, MessageCircle, Users, Pin, PinOff, Clock3, Hash, Pencil, Copy, MoreVertical, Share2 } from "lucide-react";
@@ -132,6 +133,7 @@ export function useHermesConversations() {
       return next;
     });
   }, [listing, selected?.key]);
+  useConversationNotifications(listing?.sessions, selected?.key);
   const select = (row: HermesConversation) => { if (!canViewConversation(row, account.current)) return; setSelected(row); setDialog(null); setError(null); };
   /** Opens a conversation that is not in the listing (deep link, old chat). Resolves false when it cannot be loaded. */
   const selectKey = useCallback(async (key: string): Promise<boolean> => {

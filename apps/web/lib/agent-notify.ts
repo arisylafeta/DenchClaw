@@ -3,11 +3,11 @@
 const FALLBACK_ICON = "/rebattery-app-192.png";
 const PREFS_KEY = "denchclaw:notification-prefs";
 
-export type NotificationKind = "start" | "done";
-export interface NotificationPrefs { start: boolean; done: boolean }
+export type NotificationKind = "start" | "done" | "input";
+export interface NotificationPrefs { start: boolean; done: boolean; input: boolean }
 
 export function readNotificationPrefs(): NotificationPrefs {
-  const defaults = { start: true, done: true };
+  const defaults = { start: true, done: true, input: true };
   if (typeof localStorage === "undefined") return defaults;
   try { return { ...defaults, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") }; } catch { return defaults; }
 }

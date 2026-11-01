@@ -10,8 +10,8 @@ class FakeSpeechRecognition {
   maxAlternatives = 1;
   lang?: string;
   onend: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null = null;
+  onerror: ((event: { error?: string }) => void) | null = null;
+  onresult: ((event: { resultIndex: number; results: unknown[] }) => void) | null = null;
   start = vi.fn();
   stop = vi.fn(() => {
     this.onend?.();
@@ -60,12 +60,22 @@ describe("ChatVoiceInputButton", () => {
     expect(lastRecognition?.start).toHaveBeenCalledTimes(1);
 
     lastRecognition?.onresult?.({
-      results: [[{ transcript: "voice from browser" }]],
+      resultIndex: 0,
+      results: [Object.assign([{ transcript: "voice from browser" }], { isFinal: true })],
     });
     lastRecognition?.onend?.();
 
     await waitFor(() => {
       expect(onTranscript).toHaveBeenCalledWith("voice from browser");
+    });
+  });
+
+  it("shows why voice input failed when the microphone is blocked", async () => {
+    render(<ChatVoiceInputButton preferServerTranscription={false} onTranscript={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start voice input" }));
+    lastRecognition?.onerror?.({ error: "not-allowed" });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Microphone access is blocked/ })).toBeTruthy();
     });
   });
 });

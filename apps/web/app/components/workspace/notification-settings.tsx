@@ -41,7 +41,7 @@ function Row({ label, hint, checked, onChange, disabled }: {
 
 export function NotificationSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [permission, setPermission] = useState<Permission>("default");
-  const [prefs, setPrefs] = useState<NotificationPrefs>({ start: true, done: true });
+  const [prefs, setPrefs] = useState<NotificationPrefs>({ start: true, done: true, input: true });
   const [needsInstall, setNeedsInstall] = useState(false);
 
   const refresh = useCallback(() => {
@@ -68,7 +68,7 @@ export function NotificationSettingsDialog({ open, onOpenChange }: { open: boole
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>Notifications</DialogTitle>
-          <DialogDescription>Get alerted when an agent starts replying or finishes, while the app is in the background.</DialogDescription>
+          <DialogDescription>Get alerted when any chat finishes or needs your input, while the app is in the background.</DialogDescription>
         </DialogHeader>
 
         {permission === "unsupported" || needsInstall ? (
@@ -94,6 +94,7 @@ export function NotificationSettingsDialog({ open, onOpenChange }: { open: boole
 
         <div className="divide-y">
           <Row label="Response started" hint="When an agent begins replying" checked={prefs.start} disabled={!enabled} onChange={(start) => update({ start })} />
+          <Row label="Waiting for input" hint="When a chat needs an approval or an answer" checked={prefs.input} disabled={!enabled} onChange={(input) => update({ input })} />
           <Row label="Agent finished" hint="When a reply is complete" checked={prefs.done} disabled={!enabled} onChange={(done) => update({ done })} />
         </div>
 
