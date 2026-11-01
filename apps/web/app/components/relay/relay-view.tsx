@@ -250,6 +250,19 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
       await reload();
     } catch (err) { setGone((g) => ({ ...g, [i.id]: false })); say(err instanceof Error ? err.message : "Couldn't update Gmail."); }
   };
+  /** Follow up: stop suggesting a chase on this thread. It comes back only if they write again. */
+  const dontChase = async (i: RelayItem) => {
+    setGone((g) => ({ ...g, [i.id]: true }));
+    try {
+      await api(`/api/relay/items/${i.id}/done`, { method: "POST", body: { reason: "no_chase" } });
+      say(`No chase for ${firstName(i.counterpart_name)}. It comes back only if they write again.`, async () => {
+        await api(`/api/relay/items/${i.id}`, { method: "PATCH", body: { status: "open", done_reason: "" } }).catch(() => undefined);
+        setGone((g) => ({ ...g, [i.id]: false }));
+        await reload();
+      });
+      await reload();
+    } catch (err) { setGone((g) => ({ ...g, [i.id]: false })); say(err instanceof Error ? err.message : "Couldn't update Gmail."); }
+  };
   const dropRule = async (r: SenderRule) => {
     try { await api(`/api/relay/sender-rules`, { method: "POST", body: { delete: r.id } }); say(`Removed the rule for ${r.match}`); await reload(); }
     catch (err) { say(err instanceof Error ? err.message : "Couldn't remove it."); }
@@ -329,6 +342,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
                       />
                       <button type="button" className={cx(s.arrow, note.trim() && s.ready)} disabled={busy[i.id]} onClick={() => void draft(i)} aria-label="Draft this reply"><Arrow /></button>
                       {tab === "action" && <button type="button" className={s.doneb} title="No reply needed: marks it read and labels it Sorted in Gmail" onClick={() => void done(i)}>Done</button>}
+                      {tab === "follow" && <button type="button" className={s.doneb} title="Stop suggesting a chase. It comes back only if they write again." onClick={() => void dontChase(i)}>Don&apos;t chase</button>}
                     </div>
                     {!isOpen && <div className={s.hint}>{busy[i.id] ? "Drafting…" : note.trim() ? (NEEDS_AGENT.test(note) ? "Relay will do the work first (research, lists, files), then draft. Takes a few minutes." : "Ready: press the arrow (or ⌘↵) to draft") : "Click to read the full email"}</div>}
                   </>

@@ -290,6 +290,16 @@ def test_alex_own_send_does_not_reopen_but_a_due_chase_does():
     assert due[0]["kind"] == "reopen" and due[0]["values"]["tab"] == "follow"
 
 
+def test_dont_chase_stays_dismissed_until_they_write():
+    # "Don't chase" closes a Follow up item with done_reason no_chase: a due chase never reopens it, their reply does.
+    due = rs.plan_writes([row(tab="follow", newest="m4", new_message=False, seen_known=True)],
+                         {"t1": item(status="done", done_reason="no_chase", last_seen="m3")}, NOW, {"t1"})
+    assert due == []
+    replied = rs.plan_writes([row(tab="action", newest="m5", new_message=True, seen_known=True)],
+                             {"t1": item(status="done", done_reason="no_chase", last_seen="m3")}, NOW, {"t1"})
+    assert replied[0]["kind"] == "reopen" and replied[0]["values"]["tab"] == "action"
+
+
 def test_sender_rule_covers_subdomains():
     assert rs.sender_rule({"@acme.com": "other"}, "Bob <bob@uk.acme.com>") == "other"
     assert rs.sender_rule({"@acme.com": "other", "bob@uk.acme.com": "action"}, "bob@uk.acme.com") == "action"

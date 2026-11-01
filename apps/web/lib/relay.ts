@@ -768,7 +768,9 @@ export async function saveToGmailDrafts(draftId: string, ownerId: string): Promi
 }
 
 /** Done = no reply needed: marks the thread read and labels it "4 Sorted" in Gmail. It stays in the Gmail inbox. */
-export async function markDone(itemId: string, ownerId: string, ownerEmail: string): Promise<RelayItem | null> {
+/** Done (no reply needed) or, on Follow up, "Don't chase": both label it Sorted in Gmail. A dismissed chase comes back only
+ * when they write again (then as Action); the scan never turns it back into a chase. */
+export async function markDone(itemId: string, ownerId: string, ownerEmail: string, reason: "user_done" | "no_chase" = "user_done"): Promise<RelayItem | null> {
   const item = await readRelayItem(itemId, ownerId);
   if (!item) throw new RelayError(404, "Not found");
   const args = ["--account", ownerEmail, "--gmail-no-send", "--enable-commands-exact", "gmail.thread.modify", "--no-input", "--json",
@@ -779,7 +781,7 @@ export async function markDone(itemId: string, ownerId: string, ownerEmail: stri
     throw new RelayError(502, "Gmail didn't accept the change. Try again.");
   }
   await queryPg("update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail')", [itemId]);
-  return updateRelayItem(itemId, ownerId, { status: "done", done_reason: "user_done" });
+  return updateRelayItem(itemId, ownerId, { status: "done", done_reason: reason });
 }
 
 // ---------- access ----------
