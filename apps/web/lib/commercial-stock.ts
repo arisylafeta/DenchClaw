@@ -61,6 +61,8 @@ export type StockFilters = {
   kwhMin?: number;
   kwhMax?: number;
   maxPriceEurExVat?: number;
+  /** EUR per kWh ex VAT, applied per row as a per-unit cap in the same EUR 100 steps as maxPriceEurExVat. */
+  maxPriceEurPerKwh?: number;
   seenWithinDays?: number;
   limit?: number;
   /** Exact groups only (a tapped stock card or a follow-up on groups already shown). */
@@ -580,6 +582,11 @@ export function matchesFilters(row: StockRow, filters: StockFilters, today = new
   // a seller's exact ask inside its shown band or the exact day it was listed.
   if (filters.maxPriceEurExVat !== undefined && (row.price_eur_ex_vat === null ||
     Math.floor(row.price_eur_ex_vat / LOT_BAND_EUR) > Math.floor(filters.maxPriceEurExVat / LOT_BAND_EUR))) return false;
+  if (filters.maxPriceEurPerKwh !== undefined) {
+    const kwh = rowKwh(row);
+    if (row.price_eur_ex_vat === null || kwh === null ||
+      Math.floor(row.price_eur_ex_vat / LOT_BAND_EUR) > Math.floor((filters.maxPriceEurPerKwh * kwh) / LOT_BAND_EUR)) return false;
+  }
   if (filters.seenWithinDays !== undefined && Math.ceil(daysOld(row.seen_on, today) / 30) > Math.ceil(filters.seenWithinDays / 30)) return false;
   return true;
 }

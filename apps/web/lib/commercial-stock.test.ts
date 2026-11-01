@@ -339,4 +339,20 @@ describe("ask bands", () => {
     expect(matchesFilters(row({ price_eur_ex_vat: 4180 }), { maxPriceEurExVat: 4099 }, today)).toBe(false);
     expect(matchesFilters(row({ seen_on: "2026-10-20" }), { seenWithinDays: 1 }, today)).toBe(true);
   });
+
+  it("caps price per kWh in the same EUR 100 steps as the per-unit cap", () => {
+    const today = new Date("2026-10-27T12:00:00Z");
+    // 50 kWh at EUR 4,000 is EUR 80/kWh; the cap becomes EUR 50 x kWh per unit, compared in EUR 100 steps.
+    expect(matchesFilters(row({}), { maxPriceEurPerKwh: 80 }, today)).toBe(true);
+    expect(matchesFilters(row({}), { maxPriceEurPerKwh: 81.9 }, today)).toBe(true);
+    expect(matchesFilters(row({}), { maxPriceEurPerKwh: 78 }, today)).toBe(false);
+    expect(matchesFilters(row({ capacity_kwh: null }), { maxPriceEurPerKwh: 500 }, today)).toBe(false);
+    expect(matchesFilters(row({ price_eur_ex_vat: null }), { maxPriceEurPerKwh: 500 }, today)).toBe(false);
+  });
+
+  it("matches a chemistry family without a make, model or kWh", () => {
+    const today = new Date("2026-10-27T12:00:00Z");
+    expect(matchesFilters(row({ chemistry: "LFP" }), { chemistry: "LFP" }, today)).toBe(true);
+    expect(matchesFilters(row({ chemistry: "NMC622" }), { chemistry: "LFP" }, today)).toBe(false);
+  });
 });

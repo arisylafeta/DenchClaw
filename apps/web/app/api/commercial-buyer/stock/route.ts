@@ -19,6 +19,7 @@ const filters = z.strictObject({
   kwhMin: z.number().min(0).max(2000).optional(),
   kwhMax: z.number().min(0).max(2000).optional(),
   maxPriceEurExVat: z.number().positive().max(1_000_000).optional(),
+  maxPriceEurPerKwh: z.number().positive().max(10_000).optional(),
   seenWithinDays: z.number().int().min(1).max(365).optional(),
   limit: z.number().int().min(1).max(50).optional(),
   groupKeys: z.array(z.string().regex(/^grp_[0-9a-f]{16}$/)).min(1).max(20).optional(),
@@ -50,8 +51,9 @@ export async function POST(request: Request): Promise<Response> {
   const parsed = filters.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return fail("Invalid filters", 400);
   const input = parsed.data;
-  // A real filter is required, so the whole book cannot be read with an empty or country-only query.
-  const filtered = Boolean(input.make || input.model || input.groupKeys?.length || input.kwhMin !== undefined || input.kwhMax !== undefined);
+  // A real filter is required, so the whole book cannot be read with an empty or country-only query. Chemistry counts:
+  // buyers lead with it (LFP for storage and export), and results stay capped at MAX_SEARCH_GROUPS and rate limited.
+  const filtered = Boolean(input.make || input.model || input.chemistry || input.groupKeys?.length || input.kwhMin !== undefined || input.kwhMax !== undefined);
   if (!filtered) return fail("filter_required", 400);
   // Real asks only for the platform's signed re-check by group keys.
   if (input.exact && !(input.groupKeys?.length && input.scope && input.scopeSig)) return fail("Invalid filters", 400);
