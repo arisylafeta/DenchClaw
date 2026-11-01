@@ -6,6 +6,7 @@
   relay_voice_study.py synthesize           # writing guide, one card per situation, the example bank (model)
   relay_voice_study.py eval [--n 30]        # held-out replies drafted with today's prompt and with the voice; scored
   relay_voice_study.py publish [--activate] # write the voice as a new version into relay_voice* (CRM database)
+  relay_voice_study.py render               # write alex-voice.md (read by every other drafter) from the active voice and rules
 
 Work files live in --work (default /srv/rebattery-data/relay-voice/<owner>), never in the repository: they hold mail.
 Read-only on mail. publish is the only step that writes to the database, and only to the relay_voice tables.
@@ -34,6 +35,8 @@ import relay_scan as rs  # noqa: E402  (cleaning, contact types, the Hermes mode
 DEFAULT_DSN = rs.DEFAULT_DSN
 WORK_ROOT = Path("/srv/rebattery-data/relay-voice")
 TRIAGE_DIR = Path("/root/.hermes/workspace/gmail-unified-triage")
+# Every other drafter (writing-emails skill, Gmail triage, email sprint) reads this file; `render` writes it from the active voice
+# and the approved rules, so Relay's database is the one source of how Alex writes.
 VOICE_FILE = Path("/root/.hermes/workspace/cron/gmail-voice-audit/alex-voice.md")
 IDENTITIES = {"alex", "supply", "hello"}  # mailboxes Alex writes from himself; support@/ari@/sean@ are other voices
 HOLDOUT = 40  # newest replies kept out of the example bank, for the eval
@@ -131,6 +134,7 @@ def extract(args) -> None:
     conn.set_session(readonly=True)
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     owner_id = rs.load_owner(cur, args.owner)
+    relay_written = relay_draft_ids(cur)
     cur.execute(
         """select m.id, m.thread_id, m.direction, m.identity_key, m.from_email, coalesce(m.to_emails,'{}') as to_emails,
                   coalesce(m.cc_emails,'{}') as cc_emails, m.subject, m.body_text, m.body_html, m.labels, m.state, m.campaign_id, m.purpose,
@@ -156,8 +160,8 @@ def extract(args) -> None:
     rows, seen_text = [], collections.Counter()
     for tid, msgs in threads.items():
         for i, m in enumerate(msgs):
-            if m["direction"] != "outbound" or (m["identity_key"] or "alex") not in IDENTITIES:
-                continue
+            if m["direction"] != "outbound" or (m["identity_key"] or "alex") not in IDENTITIES or m["id"] in relay_written:
+                continue  # Relay's own drafts would teach the voice its own habits
             external = [rs.email_of(e) for e in (m["to_emails"] or []) + (m["cc_emails"] or []) if not own(e)]
             subject = m["subject"] or ""
             if not external or rs.CALENDAR_SUBJECT.match(subject) or re.match(r"^\s*(fwd?|fw)\s*:", subject, re.I):
@@ -399,11 +403,11 @@ def synthesize(args) -> None:
                 print(json.dumps({"card_error": str(exc)[:200]}), file=sys.stderr)
 
     sources = {
-        "earlier voice notes": VOICE_FILE.read_text(encoding="utf-8") if VOICE_FILE.exists() else "",
+        "the writing guide in use now": (active_voice(args) or {}).get("guide", ""),
         "approved facts and commercial lines": (TRIAGE_DIR / "alex-context.md").read_text(encoding="utf-8") if (TRIAGE_DIR / "alex-context.md").exists() else "",
         "playbooks": playbooks,
         "his own Relay writing rules (he wrote these; they win over everything else)": "\n".join(f"- {r}" for r in owner_rules(args)),
-        "rules learned from his edits": (TRIAGE_DIR / "alex-draft-rules.md").read_text(encoding="utf-8") if (TRIAGE_DIR / "alex-draft-rules.md").exists() else "",
+        "rules learned from his edits (he approved these)": "\n".join(f"- {r}" for r in owner_rules(args, source="learned")),
     }
     spread = [r for s in SITUATIONS for r in sample_for([x for x in by_sit[s] if x.get("exemplar", 0) >= 2], 3)]
     prompt = (GUIDE_INSTRUCTIONS + "\n\n## Measured numbers\n" + json.dumps({k: stats[k] for k in ("all", "by_kind", "by_identity", "by_contact_type")})
@@ -485,7 +489,8 @@ def eval_(args) -> None:
     guide = (out / "guide.md").read_text(encoding="utf-8")
     cards = json.loads((out / "cards.json").read_text())
     bank = read_jsonl(out / "examples.jsonl")
-    rules = owner_rules(args) or DEFAULT_RULES
+    rules = owner_rules(args, source=None) or DEFAULT_RULES
+    current = active_voice(args) if args.baseline == "active" else None
     notes = {}
     for i in range(0, len(holdout), 10):
         chunk = holdout[i:i + 10]
@@ -498,7 +503,10 @@ def eval_(args) -> None:
                 f"Subject: {r['inbound']['subject'] or ''}\n{r['inbound']['text'][:3000]}\n\nReply to: {r['inbound']['from']}")
 
     def draft(r: dict, arm: str) -> str:
-        if arm == "before":
+        if arm == "before" and current:
+            ex = pick_examples(current["bank"], r["situation"], r.get("contact_type"), r["inbound"]["text"])
+            system, user = draft_system(rules, current["guide"]), voice_examples_block(current["cards"].get(r["situation"]), ex) + prompt_for(r)
+        elif arm == "before":
             system, user = draft_system(rules, None), prompt_for(r)
         else:
             ex = pick_examples(bank, r["situation"], r.get("contact_type"), r["inbound"]["text"])
@@ -546,21 +554,85 @@ def eval_(args) -> None:
                "words_actual_median": med("actual_words"), "words_before_median": med("before_words"), "words_after_median": med("after_words"),
                "length_error_before": statistics.median(abs(x["before_words"] - x["actual_words"]) for x in rows) if rows else None,
                "length_error_after": statistics.median(abs(x["after_words"] - x["actual_words"]) for x in rows) if rows else None}
+    summary["baseline"] = f"voice v{current['version']}" if current else "no voice"
     write_jsonl(out / "eval.jsonl", rows)
     write_private(out / "eval-summary.json", json.dumps(summary, indent=2))
     print(json.dumps(summary))
 
 
-def owner_rules(args) -> list[str]:
-    """The writing rules Relay uses for the owner today (relay_rule), so both eval arms draft exactly as Relay does."""
+def owner_rules(args, source: str | None = "alex") -> list[str]:
+    """Rules in force for the owner: his own (source 'alex'), the learned ones he approved ('learned'), or both (None)."""
     conn = psycopg2.connect(args.dsn)
     conn.set_session(readonly=True)
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute("select r.text from relay_rule r join crm_users u on u.id = r.owner_id where lower(u.email) = lower(%s) order by r.position, r.created_at", (args.owner,))
+        cur.execute("""select r.text from relay_rule r join crm_users u on u.id = r.owner_id
+                       where lower(u.email) = lower(%s) and r.state = 'active' and (%s::text is null or r.source = %s)
+                       order by r.source, r.position, r.created_at""", (args.owner, source, source))
         return [r["text"] for r in cur.fetchall()]
     finally:
         conn.close()
+
+
+def active_voice(args) -> dict | None:
+    """The voice Relay uses now: guide, cards by situation and the example bank."""
+    conn = psycopg2.connect(args.dsn)
+    conn.set_session(readonly=True)
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""select v.id, v.version, v.guide from relay_voice v join crm_users u on u.id = v.owner_id
+                       where lower(u.email) = lower(%s) and v.active""", (args.owner,))
+        voice = cur.fetchone()
+        if not voice:
+            return None
+        cur.execute("select situation, card from relay_voice_situation where voice_id = %s", (voice["id"],))
+        cards = {r["situation"]: r["card"] for r in cur.fetchall()}
+        cur.execute("select situation, contact_type, inbound, reply, sent_at::text as sent_at from relay_voice_example where voice_id = %s", (voice["id"],))
+        return {"version": voice["version"], "guide": voice["guide"], "cards": cards, "bank": [dict(r) for r in cur.fetchall()]}
+    finally:
+        conn.close()
+
+
+def relay_draft_ids(cur) -> set[str]:
+    if not rs.table_exists(cur, "relay_draft"):
+        return set()
+    cur.execute("select mail_message_id from relay_draft where mail_message_id is not null")
+    return {r["mail_message_id"] for r in cur.fetchall()}
+
+
+RENDER_HEADER = """# How Alex writes
+
+Generated from Relay: the active writing style (version {version}) and the rules Alex has approved. Do not edit this file;
+change rules on Relay's Rules page (crm.rebattery.io ~crm/relay). Rebuilt within ten minutes of any change.
+"""
+
+
+def render_text(voice: dict, own: list[str], learned: list[str]) -> str:
+    parts = [RENDER_HEADER.format(version=voice["version"]).strip(), voice["guide"].strip()]
+    if own:
+        parts.append("## Alex's own rules (always follow)\n" + "\n".join(f"- {r}" for r in own))
+    if learned:
+        parts.append("## Learned from his edits (approved)\n" + "\n".join(f"- {r}" for r in learned))
+    return "\n\n".join(parts) + "\n"
+
+
+def render(args) -> None:
+    """Write alex-voice.md when the active voice or the approved rules changed. Nothing is written without an active voice."""
+    voice = active_voice(args)
+    if not voice:
+        print(json.dumps({"rendered": False, "reason": "no active voice"}))
+        return
+    text = render_text(voice, owner_rules(args, "alex"), owner_rules(args, "learned"))
+    path = args.render_to
+    if path.exists() and path.read_text(encoding="utf-8") == text:
+        print(json.dumps({"rendered": False, "reason": "unchanged"}))
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.chmod(0o600)
+    tmp.replace(path)
+    print(json.dumps({"rendered": True, "path": str(path), "version": voice["version"], "words": words(text)}))
 
 
 def _similarity():
@@ -605,7 +677,7 @@ def publish(args) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("command", choices=["extract", "tag", "synthesize", "eval", "publish"])
+    parser.add_argument("command", choices=["extract", "tag", "synthesize", "eval", "publish", "render"])
     parser.add_argument("--owner", default="alex@rebattery.io")
     parser.add_argument("--dsn", default=DEFAULT_DSN)
     parser.add_argument("--work", type=Path)
@@ -614,8 +686,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-batches", type=int, default=0, help="tag at most N batches this run (0: all)")
     parser.add_argument("--n", type=int, default=30, help="held-out replies to evaluate")
     parser.add_argument("--activate", action="store_true", help="publish: make this version the one Relay uses")
+    parser.add_argument("--baseline", choices=["active", "none"], default="active", help="eval: compare with the voice in use, or with no voice")
+    parser.add_argument("--render-to", type=Path, default=VOICE_FILE, help="render: the file every other drafter reads")
     args = parser.parse_args(argv)
-    {"extract": extract, "tag": tag, "synthesize": synthesize, "eval": eval_, "publish": publish}[args.command](args)
+    {"extract": extract, "tag": tag, "synthesize": synthesize, "eval": eval_, "publish": publish, "render": render}[args.command](args)
     return 0
 
 

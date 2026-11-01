@@ -10,6 +10,7 @@ import { editDraft, editableCopy, identitySignatures, sameVersion, textToHtml, s
 import type { DraftAttachment } from "./mail-types";
 import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
+import type { Evidence } from "./relay-learn-core";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -142,23 +143,55 @@ export const DEFAULT_RULES = [
   "Every number must come from the thread or the deal.",
 ];
 
-export async function listRules(ownerId: string): Promise<{ id: string; text: string }[]> {
-  const rows = await queryPg<{ id: string; text: string }>("select id, text from relay_rule where owner_id = $1::uuid order by position, created_at", [ownerId]);
-  if (rows.length) return rows;
+export type RelayRule = {
+  id: string; text: string; source: "alex" | "learned"; state: "active" | "proposed"; action: "add" | "remove";
+  target_id: string | null; why: string; evidence: Evidence[]; created_at: string;
+};
+
+/** The owner's rules in force and the proposals waiting for him (rejected ones stay hidden). Seeds the defaults once. */
+export async function listRules(ownerId: string): Promise<RelayRule[]> {
+  const read = () => queryPg<RelayRule>(`select id, text, source, state, action, target_id, why, evidence, created_at::text as created_at from relay_rule
+    where owner_id = $1::uuid and state <> 'rejected' order by source, position, created_at`, [ownerId]);
+  const [{ n }] = await queryPg<{ n: number }>("select count(*)::int as n from relay_rule where owner_id = $1::uuid", [ownerId]);
+  if (n) return read();
   await withPgTransaction(async (tx) => {
     for (const [position, text] of DEFAULT_RULES.entries()) {
       await tx.query("insert into relay_rule (owner_id, text, position) values ($1::uuid, $2, $3)", [ownerId, text, position]);
     }
   });
-  return queryPg<{ id: string; text: string }>("select id, text from relay_rule where owner_id = $1::uuid order by position, created_at", [ownerId]);
+  return read();
+}
+
+/** What drafts follow: his own rules and the learned rules he approved. Proposals never reach a prompt. */
+export async function activeRules(ownerId: string): Promise<string[]> {
+  return (await listRules(ownerId)).filter((r) => r.state === "active").map((r) => r.text);
 }
 
 export async function addRule(ownerId: string, text: string): Promise<void> {
   await queryPg("insert into relay_rule (owner_id, text, position) values ($1::uuid, $2, (select coalesce(max(position), 0) + 1 from relay_rule where owner_id = $1::uuid))", [ownerId, text.slice(0, 300)]);
 }
 
+/** His own rules are deleted; a learned rule is marked rejected so the weekly learning never proposes it again. */
 export async function deleteRule(ownerId: string, id: string): Promise<void> {
-  await queryPg("delete from relay_rule where id = $1 and owner_id = $2::uuid", [id, ownerId]);
+  await queryPg("delete from relay_rule where id = $1 and owner_id = $2::uuid and source = 'alex'", [id, ownerId]);
+  await queryPg("update relay_rule set state = 'rejected', decided_at = now() where id = $1 and owner_id = $2::uuid and source = 'learned'", [id, ownerId]);
+}
+
+/** Approve or reject a proposal. Approving a removal retires the learned rule it names. */
+export async function decideRule(ownerId: string, id: string, decision: "approve" | "reject"): Promise<void> {
+  await withPgTransaction(async (tx) => {
+    const { rows: [rule] } = await tx.query<{ action: "add" | "remove"; target_id: string | null }>(
+      "select action, target_id from relay_rule where id = $1 and owner_id = $2::uuid and state = 'proposed' for update", [id, ownerId]);
+    if (!rule) throw new RelayError(409, "Already decided.");
+    if (decision === "reject") {
+      await tx.query("update relay_rule set state = 'rejected', decided_at = now() where id = $1", [id]);
+    } else if (rule.action === "add") {
+      await tx.query("update relay_rule set state = 'active', decided_at = now() where id = $1", [id]);
+    } else {
+      await tx.query("update relay_rule set state = 'rejected', decided_at = now() where id = $1 and source = 'learned'", [rule.target_id]);
+      await tx.query("delete from relay_rule where id = $1", [id]);
+    }
+  });
 }
 
 // ---------- sender rules ----------
@@ -214,7 +247,7 @@ function replyIdentity(messages: ThreadMessage[]): "alex" | "supply" {
 
 // ---------- the agent ----------
 
-async function askAgent(system: string, user: string, timeoutMs = 240_000): Promise<string> {
+export async function askAgent(system: string, user: string, timeoutMs = 240_000): Promise<string> {
   const base = process.env.HERMES_API_BASE_URL ?? "http://127.0.0.1:8642";
   const key = process.env.HERMES_API_KEY;
   if (!key) throw new RelayError(503, "The assistant is not configured here.");
@@ -285,7 +318,7 @@ async function activeGuide(ownerId: string): Promise<string | null> {
 /** Everything a draft is written from: the thread, the deal, the writing rules, the owner's voice and who the reply goes to. */
 async function draftContext(item: RelayItem, ownerId: string, note: string) {
   const messages = await threadMessages(item.mail_thread_id);
-  const rules = (await listRules(ownerId)).map((r) => r.text);
+  const rules = await activeRules(ownerId);
   const deal = await dealSummary(item.bulk_listing_id);
   const lastInbound = messages.find((m) => m.direction === "inbound");
   const voice = await voiceFor(ownerId, item, stripQuoted(lastInbound?.body_text ?? item.last_message?.text ?? ""));
@@ -312,8 +345,16 @@ export async function draftFromNote(itemId: string, ownerId: string, note: strin
   return (await readRelayItem(itemId, ownerId))!;
 }
 
+/** The main copy of mail rows (body without the identity signature), as the editor shows it. */
+async function mainCopies(mailIds: string[]): Promise<Map<string, string>> {
+  if (!mailIds.length) return new Map();
+  const signatures = await identitySignatures();
+  const rows = await queryPg<{ id: string; body_text: string | null; identity_key: string | null }>("select id, body_text, identity_key from mail_message where id = any($1)", [mailIds]);
+  return new Map(rows.map((r) => [r.id, splitCopy(r.body_text, signatures.get(r.identity_key ?? "") ?? null).main]));
+}
+
 /** Writes the drafts, attaches files and saves to-dos for one item, then puts it in Review. Shared by quick drafts and agent jobs. */
-async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, ctx: Awaited<ReturnType<typeof draftContext>>, parsed: Record<string, unknown>, files: string[]): Promise<void> {
+async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, ctx: Awaited<ReturnType<typeof draftContext>>, parsed: Record<string, unknown>, files: string[], origin: "note" | "job" = "note"): Promise<void> {
   const itemId = item.id;
   const rawSubject = String(parsed.subject || ctx.messages[0]?.subject || item.headline || "").trim();
   const subject = (rawSubject.replace(/^((re|aw|fw|fwd)\s*:\s*)+/i, (m) => (/^(re|aw)/i.test(m) ? "Re: " : m)).slice(0, 300)) || "Re:";
@@ -337,13 +378,15 @@ async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, 
     const mailId = fTo ? await createMailDraft({ identity: "alex", to: [fTo], ccThread: false, thread: null, subject: String(f.subject ?? f.title ?? "").slice(0, 300) || "(no subject)", body: fBody }).catch(() => null) : null;
     followRows.push({ title: String(f.title ?? "Follow-on email").slice(0, 120), why: String(f.why ?? "").slice(0, 200), mailId });
   }
+  // What Relay wrote, split from the signature the same way as the sent copy, so learning compares like with like.
+  const originals = await mainCopies([primaryId, ...followRows.map((f) => f.mailId).filter((id): id is string => !!id)]);
   await withPgTransaction(async (tx) => {
     await tx.query("update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail')", [itemId]);
-    await tx.query(`insert into relay_draft (item_id, role, position, title, why, mail_message_id, source_note, agent_log) values ($1, 'primary', 0, $2, '', $3, $4, $5::jsonb)`,
-      [itemId, `Reply to ${item.counterpart_name ?? ctx.to}`, primaryId, note, JSON.stringify([...log, ...sources])]);
+    await tx.query(`insert into relay_draft (item_id, role, position, title, why, mail_message_id, source_note, agent_log, original_body, origin) values ($1, 'primary', 0, $2, '', $3, $4, $5::jsonb, $6, $7)`,
+      [itemId, `Reply to ${item.counterpart_name ?? ctx.to}`, primaryId, note, JSON.stringify([...log, ...sources]), originals.get(primaryId) ?? null, origin]);
     for (const [index, f] of followRows.entries()) {
-      await tx.query(`insert into relay_draft (item_id, role, position, title, why, mail_message_id, source_note) values ($1, 'follow', $2, $3, $4, $5, $6)`,
-        [itemId, index + 1, f.title, f.why, f.mailId, note]);
+      await tx.query(`insert into relay_draft (item_id, role, position, title, why, mail_message_id, source_note, original_body, origin) values ($1, 'follow', $2, $3, $4, $5, $6, $7, $8)`,
+        [itemId, index + 1, f.title, f.why, f.mailId, note, f.mailId ? originals.get(f.mailId) ?? null : null, origin]);
     }
     await tx.query("delete from relay_todo where item_id = $1 and state = 'suggested'", [itemId]);
     for (const t of todos) {
@@ -433,7 +476,7 @@ export async function finaliseJobs(ownerId: string): Promise<void> {
         } catch { return []; }
       });
       const ctx = await draftContext(item, ownerId, job.note);
-      await saveDraftOutputs(item, ownerId, job.note, ctx, job.result, files);
+      await saveDraftOutputs(item, ownerId, job.note, ctx, job.result, files, "job");
       await queryPg("update relay_job set status = 'done', finished_at = now(), steps = steps || $2::jsonb where id = $1", [job.id, JSON.stringify(["Draft ready"])]);
     } catch (error) {
       await queryPg("update relay_job set status = 'failed', error = $2, finished_at = now() where id = $1", [job.id, (error instanceof Error ? error.message : "Couldn't save the draft").slice(0, 300)]);
@@ -515,14 +558,31 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
 /** Drafts Gmail accepted are sent; an item whose primary reply is sent is done. Returns the items that just closed. */
 export async function settleItems(itemIds: string[]): Promise<Set<string>> {
   if (!itemIds.length) return new Set();
-  await queryPg(`update relay_draft d set state = 'sent', updated_at = now() from mail_message m
-    where d.item_id = any($1) and m.id = d.mail_message_id and d.state in ('draft','gmail') and m.state = 'accepted'`, [itemIds]);
+  await recordSent(`d.item_id = any($1) and d.state in ('draft','gmail')`, [itemIds]);
   const closed = await queryPg<{ id: string }>(`update relay_item i set status = 'done', done_reason = 'sent', updated_at = now()
     where i.id = any($1) and i.status = 'review'
       and exists (select 1 from relay_draft d where d.item_id = i.id and d.role = 'primary' and d.state = 'sent')
       and not exists (select 1 from relay_draft d where d.item_id = i.id and d.role = 'primary' and d.state in ('draft','gmail'))
     returning i.id`, [itemIds]);
   return new Set(closed.map((r) => r.id));
+}
+
+/** Marks drafts Gmail accepted as sent and keeps the main copy that went out, for learning. */
+async function recordSent(where: string, values: unknown[]): Promise<number> {
+  const rows = await queryPg<{ id: string; mail_message_id: string; accepted_at: string | null }>(
+    `select d.id, d.mail_message_id, m.accepted_at::text as accepted_at from relay_draft d join mail_message m on m.id = d.mail_message_id
+     where m.state = 'accepted' and ${where}`, values);
+  const copies = await mainCopies(rows.map((r) => r.mail_message_id));
+  for (const r of rows) {
+    await queryPg(`update relay_draft set state = 'sent', sent_body = $2, sent_at = coalesce($3::timestamptz, sent_at, now()), updated_at = now() where id = $1`,
+      [r.id, copies.get(r.mail_message_id) ?? null, r.accepted_at]);
+  }
+  return rows.length;
+}
+
+/** Every sent Relay draft of the owner's whose sent copy isn't recorded yet, including sends Alex never came back to Review for. */
+export async function settleSentDrafts(ownerId: string): Promise<number> {
+  return recordSent(`d.sent_body is null and d.state in ('draft','gmail','sent') and d.item_id in (select id from relay_item where owner_id = $1::uuid)`, [ownerId]);
 }
 
 // ---------- sending ----------
@@ -577,7 +637,7 @@ export async function rewriteDraft(draftId: string, ownerId: string, instruction
   if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
   const mail = await readMailDraft(relayDraft.mail_message_id, ownerId);
   if (!mail || mail.state !== "draft") throw new RelayError(409, "This email was already sent.");
-  const rules = (await listRules(ownerId)).map((r) => r.text);
+  const rules = await activeRules(ownerId);
   const guide = await activeGuide(ownerId);
   const current = (await editableCopy(mail)).main;
   const files = (mail.attachments ?? []).map((a) => a.filename);
@@ -591,6 +651,7 @@ export async function rewriteDraft(draftId: string, ownerId: string, instruction
   }
   const list = (v: unknown) => Array.isArray(v) ? v.filter((a): a is string => typeof a === "string") : undefined;
   await editDraft(mail, { body, cc: list(parsed.cc), bcc: list(parsed.bcc) });
+  await queryPg("update relay_draft set edit_requests = edit_requests || $2::jsonb where id = $1", [draftId, JSON.stringify([{ text: instruction.slice(0, 300), at: new Date().toISOString() }])]);
   return { body, note: String(parsed.note ?? "Updated the draft.").slice(0, 200) };
 }
 

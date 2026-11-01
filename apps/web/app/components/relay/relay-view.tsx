@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HermesConversation } from "@/lib/hermes-conversations";
 import { describeWhen, parseWhen } from "@/lib/relay-when";
-import type { RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
+import type { RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayRule, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
 import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
 import s from "./relay.module.css";
 
@@ -12,11 +12,13 @@ const ChatPanel = dynamic(() => import("@/app/components/chat-panel").then((m) =
 
 type Counts = { action: number; follow: number; other: number; review: number; todos: number; sent_today: number; done_today: number; scheduled: number };
 type SenderRule = { id: string; match: string; tab: "action" | "other" };
-type Summary = { tab: RelayTab; counts: Counts; items: RelayItem[]; review: RelayReviewItem[]; todos: RelayTask[]; scheduled: RelayTask[]; rules: { id: string; text: string }[]; senderRules: SenderRule[]; scannedAt: string | null; mailSyncedAt: string | null; avgReplyMinutes: number | null };
+type Summary = { tab: RelayTab; counts: Counts; items: RelayItem[]; review: RelayReviewItem[]; todos: RelayTask[]; scheduled: RelayTask[]; rules: RelayRule[]; senderRules: SenderRule[]; learnRun: LearnRun | null; voice: VoiceInfo | null; scannedAt: string | null; mailSyncedAt: string | null; avgReplyMinutes: number | null };
 /** A second button on the toast, next to Undo. */
 type ToastAction = { label: string; run: () => void | Promise<void> };
 type Say = (text: string, undo?: () => void, action?: ToastAction) => void;
-type Page = "inbox" | "review" | "todos";
+type Page = "inbox" | "review" | "todos" | "rules";
+type LearnRun = { ran_at: string; sent: number; unchanged: number; edited: number; proposed: number; note: string };
+type VoiceInfo = { version: number; created_at: string; source_emails: number | null; eval: { judge_after_wins?: number; judge_before_wins?: number; n?: number } | null; guide: string };
 
 const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(" ");
 const PALETTE = ["#2563EB", "#0EA5E9", "#7C3AED", "#DB2777", "#EA580C", "#16A34A", "#0D9488", "#4F46E5", "#B45309"];
@@ -136,7 +138,7 @@ export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?
         <div className={s.top}>
           <div className={s.brand}><Logo />Relay</div>
           <div className={s.tabs} role="tablist" aria-label="Relay">
-            {([["inbox", "Inbox", counts ? counts.action + counts.follow : 0], ["review", "Review", counts?.review ?? 0], ["todos", "To-dos", counts?.todos ?? 0]] as const).map(([key, label, n]) => (
+            {([["inbox", "Inbox", counts ? counts.action + counts.follow : 0], ["review", "Review", counts?.review ?? 0], ["todos", "To-dos", counts?.todos ?? 0], ["rules", "Rules", data?.rules.filter((r) => r.state === "proposed").length ?? 0]] as const).map(([key, label, n]) => (
               <button key={key} role="tab" type="button" aria-selected={page === key} onClick={() => setPage(key)}>{label} <span className={s.n}>{n}</span></button>
             ))}
           </div>
@@ -161,6 +163,7 @@ export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?
         {!data && !error && <p className={s.muted} role="status">Loading Relay…</p>}
         {data && page === "inbox" && <Inbox data={data} tab={tab} setTab={setTab} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onDrafted={() => setPage("review")} />}
         {data && page === "review" && <Review data={data} reload={() => load(tab)} say={say} onBack={() => setPage("inbox")} sending={sending} startSend={startSend} />}
+        {data && page === "rules" && <Rules data={data} reload={() => load(tab)} say={say} />}
         {data && page === "todos" && <Tasks tasks={data.todos} scheduled={data.scheduled ?? []} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenMailMessage={onOpenMailMessage} onDrafted={() => setPage("review")} />}
       </div>
       <div className={cx(s.toast, toast && s.on)} role="status" aria-live="polite">
@@ -615,11 +618,72 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
   );
 }
 
+// ---------------------------------------------------------------- Rules
+
+/** Writing rules: what Relay learned from Alex's edits (to approve), the rules in force, and the writing style behind every draft. */
+function Rules({ data, reload, say }: { data: Summary; reload: () => Promise<void>; say: Say }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [showGuide, setShowGuide] = useState(false);
+  const post = async (body: unknown, message: string, key: string) => {
+    setBusy(key);
+    try { await api(`/api/relay/rules`, { method: "POST", body }); say(message); await reload(); }
+    catch (err) { say(err instanceof Error ? err.message : "Couldn't save that."); } finally { setBusy(null); }
+  };
+  const proposals = data.rules.filter((r) => r.state === "proposed");
+  const own = data.rules.filter((r) => r.state === "active" && r.source === "alex");
+  const learned = data.rules.filter((r) => r.state === "active" && r.source === "learned");
+  const run = data.learnRun;
+  const v = data.voice;
+  return (
+    <section aria-label="Rules" className={s.rulespage}>
+      <div className={cx(s.card, s.rcard)}>
+        <div className={s.sec}><h3>To review</h3><span>{proposals.length ? "Relay noticed these in how you edit its drafts. Approve to apply them to every draft." : "Nothing to review. Relay checks your sent drafts every week."}</span></div>
+        {proposals.map((p) => (
+          <div key={p.id} className={s.proposal}>
+            <b>{p.action === "remove" ? `Stop: ${p.text}` : p.text}</b>
+            {p.why && <span className={s.muted}>{p.why}</span>}
+            {p.evidence.slice(0, 2).map((e, k) => e.request
+              ? <span key={k} className={s.ev}>You asked: &ldquo;{e.request}&rdquo;</span>
+              : <span key={k} className={s.ev}><i>Relay wrote:</i> {(e.before ?? "").slice(0, 160)}… <i>You sent:</i> {(e.after ?? "").slice(0, 160)}…</span>)}
+            <div className={s.eact} style={{ padding: "8px 0 0" }}>
+              <button type="button" className={cx(s.btn, s.pri)} disabled={busy === p.id} onClick={() => void post({ approve: p.id }, p.action === "remove" ? "Removed from your rules" : "Added · applies to every draft", p.id)}>Approve</button>
+              <button type="button" className={cx(s.btn, s.ghost)} disabled={busy === p.id} onClick={() => void post({ reject: p.id }, "Rejected · Relay won't suggest it again", p.id)}>Reject</button>
+            </div>
+          </div>
+        ))}
+        {run && <span className={s.muted} style={{ fontSize: 12.5 }}>Last checked {when(run.ran_at)}: {run.sent} sent, {run.unchanged} unchanged, {run.edited} edited{run.note ? ` · ${run.note}` : ""}.</span>}
+      </div>
+      <div className={cx(s.card, s.rcard)}>
+        <div className={s.sec}><h3>Your rules</h3><span>Always followed, ahead of everything else.</span></div>
+        <div className={s.rules}>
+          {own.map((r) => <div key={r.id} className={s.rule}><i>›</i><span>{r.text}</span><button type="button" aria-label="Remove rule" onClick={() => void post({ delete: r.id }, "Rule removed", r.id)}>×</button></div>)}
+          <form className={s.ask} style={{ padding: "6px 0 0", border: 0 }} onSubmit={(e) => { e.preventDefault(); if (text.trim()) { void post({ text: text.trim() }, "Rule added · applies to every draft", "new"); setText(""); } }}>
+            <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Add a rule, e.g. sign off 'Cheers'" aria-label="New rule" />
+            <button type="submit" aria-label="Add rule">+</button>
+          </form>
+        </div>
+      </div>
+      <div className={cx(s.card, s.rcard)}>
+        <div className={s.sec}><h3>Learned from your edits</h3><span>{learned.length ? "Approved by you. Remove one and Relay won't suggest it again." : "None yet."}</span></div>
+        <div className={s.rules}>
+          {learned.map((r) => <div key={r.id} className={s.rule}><i>›</i><span>{r.text}</span><button type="button" aria-label="Remove learned rule" onClick={() => void post({ delete: r.id }, "Removed · Relay won't suggest it again", r.id)}>×</button></div>)}
+        </div>
+      </div>
+      <div className={cx(s.card, s.rcard)}>
+        <div className={s.sec}><h3>Writing style</h3><span>{v ? `Version ${v.version}, learned from ${v.source_emails ?? "your"} sent emails${v.eval?.judge_after_wins != null ? `; in a blind test it read more like you ${v.eval.judge_after_wins} times out of ${v.eval.n}` : ""}.` : "No writing style yet."}</span></div>
+        {v && <button type="button" className={cx(s.btn, s.ghost)} onClick={() => setShowGuide((x) => !x)}>{showGuide ? "Hide the guide" : "Read the guide"}</button>}
+        {v && showGuide && <pre className={s.guide}>{v.guide}</pre>}
+      </div>
+    </section>
+  );
+}
+
 // ---------------------------------------------------------------- AI panel
 
 type Bubble = { who: "bot" | "me" | "work"; text: string };
 
-function AiPanel({ item, draft, rules, reload, say }: { item: RelayReviewItem; draft: RelayDraftView | undefined; rules: { id: string; text: string }[]; reload: () => Promise<void>; say: (t: string) => void }) {
+function AiPanel({ item, draft, rules, reload, say }: { item: RelayReviewItem; draft: RelayDraftView | undefined; rules: RelayRule[]; reload: () => Promise<void>; say: (t: string) => void }) {
   const [mode, setMode] = useState<"edit" | "ask" | "rules">("edit");
   const [stock, setStock] = useState(false);
   const [chat, setChat] = useState<Bubble[]>([{ who: "bot", text: draft?.source_note ? `Drafted v1 from your note: "${draft.source_note}". Edit it directly, or tell me what to change.` : "Tell me what to change in this email." }]);
@@ -691,7 +755,7 @@ function AiPanel({ item, draft, rules, reload, say }: { item: RelayReviewItem; d
       )}
       {mode === "rules" && (
         <div className={s.rules}>
-          {rules.map((r) => <div key={r.id} className={s.rule}><i>›</i><span>{r.text}</span><button type="button" aria-label="Remove rule" onClick={() => void saveRules({ delete: r.id }, "Rule removed")}>×</button></div>)}
+          {rules.filter((r) => r.state === "active").map((r) => <div key={r.id} className={s.rule}><i>›</i><span>{r.text}</span><button type="button" aria-label="Remove rule" onClick={() => void saveRules({ delete: r.id }, r.source === "learned" ? "Learned rule removed · Relay won't suggest it again" : "Rule removed")}>×</button></div>)}
           <form className={s.ask} style={{ padding: "6px 0 0", border: 0 }} onSubmit={(e) => { e.preventDefault(); if (rule.trim()) { void saveRules({ text: rule.trim() }, "Rule added · applies to every draft"); setRule(""); } }}>
             <input value={rule} onChange={(e) => setRule(e.target.value)} placeholder="Add a rule, e.g. sign off 'Cheers'" aria-label="New rule" />
             <button type="submit" aria-label="Add rule">+</button>

@@ -237,6 +237,12 @@
 .toast.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
 .toast button { border: 0; background: none; color: #9dbbff; font-weight: 600; }
 .error { color: var(--red); font-size: 13.5px; }
+.rulespage { display: flex; flex-direction: column; gap: 14px; }
+.rcard { padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+.proposal { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); font-size: 14px; }
+.ev { font-size: 12.5px; color: var(--muted); }
+.ev i { font-style: normal; font-weight: 600; color: var(--ink); }
+.guide { white-space: pre-wrap; font: inherit; font-size: 13.5px; line-height: 1.5; margin: 0; padding: 12px; border-radius: 12px; background: var(--soft); max-height: 60vh; overflow: auto; }
 .srules { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 10px; font-size: 12.5px; }
 .srule { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink); }
 .srule button { border: 0; background: none; color: var(--muted); font-size: 15px; line-height: 1; padding: 0 4px; }

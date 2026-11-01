@@ -24,7 +24,8 @@ const PUBLIC_ROUTES = new Set([
   "/api/commercial-buyer/stock",
 ]);
 // /t/ serves tracked links from trade emails; tokens are random and only forward.
-const PUBLIC_PREFIXES = ["/api/apps/webhooks/", "/t/"];
+// /api/relay/internal/ is server-to-server (Hermes jobs on this host); every route checks the internal secret itself.
+const PUBLIC_PREFIXES = ["/api/apps/webhooks/", "/t/", "/api/relay/internal/"];
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 function isPublicPath(pathname: string): boolean {
