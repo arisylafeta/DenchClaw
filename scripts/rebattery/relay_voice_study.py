@@ -297,6 +297,8 @@ uses** (2-4 short phrases quoted from the emails, facts removed), **Never** (2-3
 GUIDE_INSTRUCTIONS = """You write the writing guide that Relay, Alex Polglase's email assistant, follows for every email it drafts as him.
 Alex is the founder of ReBattery (UK marketplace and broker for used EV and storage batteries). Sources: measured numbers from his sent
 mail, his earlier voice notes, his approved commercial lines and playbooks, the rules learned from his edits, and real emails.
+Alex is brief, and drafts so far have padded: make it explicit that a draft says what his note says and stops, with no recap
+of their message, no added context, and no extra offers, questions or pleasantries the note does not ask for. When in doubt, shorter.
 His own Relay writing rules come first. After them, measured numbers and real emails win over the notes when they disagree.
 Keep every approved commercial line word for word.
 Write in second person to the drafting model ("Open with..."). Concrete defaults with numbers, not adjectives. British English, no em dashes.
@@ -319,6 +321,34 @@ def sample_for(rows: list[dict], n: int, seed: int = 7) -> list[dict]:
         if len(picked) >= n:
             break
     return picked
+
+
+def representative(pool: list[dict], n: int, prefer: list[str] = ()) -> list[dict]:
+    """Examples that look like his usual email here, not his longest: closest to the median length first (the model's picks
+    first when they are in range), newer and better-rated breaking ties, at most two per recipient."""
+    if not pool:
+        return []
+    w = sorted(r["words"] for r in pool)
+    lo, mid, hi = w[len(w) // 4], w[len(w) // 2], w[min(len(w) - 1, 3 * len(w) // 4)]
+    in_range = [r for r in pool if lo <= r["words"] <= hi]
+    order = {i: k for k, i in enumerate(prefer)}
+    ranked = sorted(in_range, key=lambda r: (r["id"] not in order, order.get(r["id"], 0), abs(r["words"] - mid) // 10,
+                                             -r.get("exemplar", 0), -dt.datetime.fromisoformat(r["at"]).timestamp()))
+    seen, picked = collections.Counter(), []
+    for r in ranked:
+        if seen[r["to"]] < 2:
+            seen[r["to"]] += 1
+            picked.append(r)
+        if len(picked) >= n:
+            break
+    return picked
+
+
+def length_line(rows: list[dict]) -> str:
+    w = sorted(r["words"] for r in rows)
+    if not w:
+        return ""
+    return f"\n\n**Target length**: about {w[len(w) // 2]} words, not counting greeting and sign-off. His emails here usually run {w[len(w) // 4]} to {w[3 * len(w) // 4]}."
 
 
 def example_view(r: dict, chars: int = 900) -> dict:
@@ -385,14 +415,14 @@ def synthesize(args) -> None:
     write_private(out / "guide.md", guide)
     bank = []
     for sit, c in cards.items():
-        by_id = {r["id"]: r for r in by_sit[sit]}
-        chosen = [by_id[i] for i in c["best"] if i in by_id]
-        chosen += [r for r in sample_for([r for r in by_sit[sit] if r.get("exemplar", 0) >= 2], 12) if r not in chosen][: max(0, 10 - len(chosen))]
-        for r in chosen[:12]:
+        c["card"] = c["card"].split("\n\n**Target length**")[0] + length_line(by_sit[sit])
+        chosen = representative([r for r in by_sit[sit] if r.get("exemplar", 0) >= 1], 12, prefer=c["best"])
+        for r in chosen:
             bank.append({"situation": sit, "contact_type": r.get("contact_type"), "identity": r["identity"], "kind": r["kind"],
                          "inbound": mask(((r.get("inbound") or {}).get("text") or "")[:700]), "reply": mask(r["text"][:1500]),
                          "words": r["words"], "sent_at": r["at"], "mail_message_id": r["id"], "thread_id": r["thread_id"], "why": r.get("why", "")})
     write_jsonl(out / "examples.jsonl", bank)
+    write_private(out / "cards.json", json.dumps(cards, indent=2, ensure_ascii=False))
     print(json.dumps({"cards": len(cards), "guide_words": words(guide), "examples": len(bank), "holdout": len(holdout)}))
 
 
