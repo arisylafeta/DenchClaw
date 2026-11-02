@@ -20,27 +20,41 @@ export function rawFileLinkPath(href: string, currentHost: string): string | nul
   }
 }
 
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
+
+/** Undo only what a markdown parser adds to a destination (spaces and non-ASCII bytes), so names with a literal % stay intact. */
+function undoParserEncoding(path: string): string {
+  return path
+    .replace(/%20/g, " ")
+    .replace(/(?:%[89A-Fa-f][0-9A-Fa-f])+/g, (run) => { try { return decodeURIComponent(run); } catch { return run; } });
+}
+
 /**
- * Where a markdown image in chat should load from. Web, data and blob sources and
- * the app's own /api routes load as written; a local path (absolute, relative or
- * file://) is served through the raw-file route so an image the agent saved in the
- * workspace shows inline instead of as a broken link. Returns the workspace path
- * too when the image is local, so a click can open it in a content tab.
+ * Where a markdown image in chat should load from. Web https/http, data:image and blob
+ * images and this app's own raw-file URLs load as written; a local path (absolute, relative
+ * or file://) to an image file is served through the raw-file route so an image the agent
+ * saved in the workspace shows inline. `path` is the workspace path, so a click can open it
+ * in a content tab. Anything else (other /api routes, protocol-relative URLs, other schemes,
+ * non-image files such as html) returns an empty src and the caller shows the alt text.
  */
-export function chatImageSource(src: string): { src: string; path: string | null } {
+export function chatImageSource(src: string, currentHost = ""): { src: string; path: string | null } {
+  const none = { src: "", path: null };
   const value = src.trim();
-  if (!value) {return { src: "", path: null };}
-  if (/^(https?:|data:image\/|blob:)/i.test(value) || value.startsWith("//") || value.startsWith(`${RAW_FILE_PATH}?`)) {
-    return { src: value, path: rawFileLinkPath(value, "") };
+  if (!value) {return none;}
+  if (value.startsWith("//")) {return none;}
+  if (/^(https?:|data:image\/|blob:)/i.test(value)) {
+    return { src: value, path: currentHost ? rawFileLinkPath(value, currentHost) : null };
   }
-  if (value.startsWith("/api/")) {return { src: value, path: null };}
+  if (value.startsWith(`${RAW_FILE_PATH}?`)) {return { src: value, path: rawFileLinkPath(value, currentHost) };}
+  if (value.startsWith("/api/")) {return none;}
   let path = value;
   if (/^file:\/\//i.test(path)) {
-    try { path = decodeURIComponent(new URL(path).pathname); } catch { return { src: "", path: null }; }
+    try { path = decodeURIComponent(new URL(path).pathname); } catch { return none; }
   } else if (/^[a-z][a-z0-9+.-]*:/i.test(path)) {
-    return { src: "", path: null };
+    return none;
+  } else {
+    path = undoParserEncoding(path);
   }
-  // Markdown parsers percent-encode spaces in a destination; undo that once so the path is not encoded twice.
-  try { path = decodeURIComponent(path); } catch { /* keep the literal text */ }
+  if (!IMAGE_FILE.test(path)) {return none;}
   return { src: `${RAW_FILE_PATH}?path=${encodeURIComponent(path)}`, path };
 }

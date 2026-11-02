@@ -31,18 +31,21 @@ describe("native transcript", () => {
     expect(onOpenArtifact).toHaveBeenCalledWith("/ws/a.webm");
     expect(screen.getByRole("link", { name: "Ext" })).toHaveAttribute("target", "_blank");
   });
-  it("shows a markdown image saved in the workspace inline and opens it on click", () => {
+  it("shows a markdown image saved in the workspace inline and opens it on click without following a wrapping link", () => {
     const onOpenArtifact = vi.fn();
-    const state = events([["message.start", {}], ["message.delta", { text: "![Yaris](</root/.hermes/workspace/a b.png>) and ![Web](https://img.test/w.png)" }], ["message.complete", {}]]);
+    const state = events([["message.start", {}], ["message.delta", { text: "![Yaris](</root/.hermes/workspace/a b.png>) ![Web](https://img.test/w.png) ![Bad](/api/auth/session) [![Linked](/root/x.png)](https://foreign.test/page)" }], ["message.complete", {}]]);
     render(<NativeTranscript state={state} callbacks={callbacks()} onOpenArtifact={onOpenArtifact} />);
     const local = screen.getByAltText("Yaris");
     expect(local).toHaveAttribute("src", "/api/workspace/raw-file?path=%2Froot%2F.hermes%2Fworkspace%2Fa%20b.png");
-    fireEvent.click(local);
+    fireEvent.click(screen.getByRole("button", { name: "Open Yaris" }));
     expect(onOpenArtifact).toHaveBeenCalledWith("/root/.hermes/workspace/a b.png");
-    const web = screen.getByAltText("Web");
-    expect(web).toHaveAttribute("src", "https://img.test/w.png");
-    fireEvent.click(web);
-    expect(onOpenArtifact).toHaveBeenCalledTimes(1);
+    expect(screen.getByAltText("Web")).toHaveAttribute("src", "https://img.test/w.png");
+    expect(screen.queryByRole("button", { name: "Open Web" })).toBeNull();
+    expect(screen.queryByAltText("Bad")).toBeNull();
+    expect(screen.getByText("Bad")).toBeInTheDocument();
+    const linked = screen.getByRole("button", { name: "Open Linked" });
+    expect(fireEvent.click(linked)).toBe(false);
+    expect(onOpenArtifact).toHaveBeenLastCalledWith("/root/x.png");
   });
   it("streams exposed reasoning as muted plain text, separate from tools and the final answer", async () => {
     const cb = callbacks();

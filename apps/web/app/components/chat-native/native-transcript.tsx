@@ -39,10 +39,12 @@ function AnswerText({ text, live, renderMarkdown, onOpenArtifact, onSendPrompt }
     const external = !own && typeof href === "string" && /^(https?:)?\/\//.test(href);
     return <a href={href} {...props} {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})} onClick={event => { if (own && onOpenArtifact) { event.preventDefault(); void onOpenArtifact(own); } }}>{children}</a>;
   }, img: ({ src, alt, node: _node, ...props }) => {
-    const image = chatImageSource(typeof src === "string" ? src : "");
-    if (!image.src) { return null; }
+    const image = chatImageSource(typeof src === "string" ? src : "", typeof window !== "undefined" ? window.location.host : "");
+    if (!image.src) { return alt ? <span>{alt}</span> : null; }
+    const open = image.path && onOpenArtifact ? image.path : null;
     // eslint-disable-next-line @next/next/no-img-element
-    return <img {...props} src={image.src} alt={alt ?? ""} className="my-2 block h-auto max-w-full rounded-md border border-[var(--color-border)]" style={{ maxHeight: 480, cursor: image.path && onOpenArtifact ? "zoom-in" : undefined }} onClick={() => { if (image.path && onOpenArtifact) { void onOpenArtifact(image.path); } }} />;
+    const picture = <img {...props} src={image.src} alt={alt ?? ""} className="my-2 block h-auto max-w-full rounded-md border border-[var(--color-border)]" style={{ maxHeight: 480 }} />;
+    return open ? <button type="button" aria-label={alt ? `Open ${alt}` : "Open image"} className="block cursor-zoom-in border-0 bg-transparent p-0 text-left" onClick={event => { event.preventDefault(); event.stopPropagation(); void onOpenArtifact?.(open); }}>{picture}</button> : picture;
   } }}>{value}</ReactMarkdown>;
   const withArtifacts = (value: string, keyPrefix: string) => !hasArtifactBlocks(value) ? markdown(value) : <>{splitArtifactBlocks(value).map((piece, index) => piece.type === "artifact"
     ? <ArtifactCard key={`${keyPrefix}-artifact-${index}-${piece.artifact.id}`} artifact={piece.artifact} autoOpen={live} onOpen={onOpenArtifact} />

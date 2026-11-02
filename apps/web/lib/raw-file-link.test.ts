@@ -25,15 +25,23 @@ describe("rawFileLinkPath", () => {
 
 import { chatImageSource } from "./raw-file-link";
 describe("chatImageSource", () => {
-  it("serves local paths through the raw-file route and leaves web sources alone", () => {
-    expect(chatImageSource("/root/.hermes/workspace/a b.png")).toEqual({ src: "/api/workspace/raw-file?path=%2Froot%2F.hermes%2Fworkspace%2Fa%20b.png", path: "/root/.hermes/workspace/a b.png" });
+  it("serves local image paths through the raw-file route and leaves web sources alone", () => {
+    expect(chatImageSource("/root/.hermes/workspace/a%20b.png")).toEqual({ src: "/api/workspace/raw-file?path=%2Froot%2F.hermes%2Fworkspace%2Fa%20b.png", path: "/root/.hermes/workspace/a b.png" });
     expect(chatImageSource("file:///tmp/x%20y.png")).toEqual({ src: "/api/workspace/raw-file?path=%2Ftmp%2Fx%20y.png", path: "/tmp/x y.png" });
-    expect(chatImageSource("/root/a%20b.png").path).toBe("/root/a b.png");
-    expect(chatImageSource("reports/chart.png").path).toBe("reports/chart.png");
+    expect(chatImageSource("reports/chart.PNG").path).toBe("reports/chart.PNG");
     expect(chatImageSource("https://example.test/a.png")).toEqual({ src: "https://example.test/a.png", path: null });
     expect(chatImageSource("data:image/png;base64,AAAA").path).toBeNull();
+  });
+  it("keeps a literal % in a file name and decodes non-ASCII parser escapes", () => {
+    expect(chatImageSource("/root/a%41.png").path).toBe("/root/a%41.png");
+    expect(chatImageSource("/root/a%2541.png").path).toBe("/root/a%2541.png");
+    expect(chatImageSource("/root/caf%C3%A9.png").path).toBe("/root/café.png");
+  });
+  it("opens own raw-file URLs by path and refuses everything else", () => {
     expect(chatImageSource("/api/workspace/raw-file?path=%2Fws%2Fa.png")).toEqual({ src: "/api/workspace/raw-file?path=%2Fws%2Fa.png", path: "/ws/a.png" });
-    expect(chatImageSource("javascript:alert(1)")).toEqual({ src: "", path: null });
-    expect(chatImageSource("")).toEqual({ src: "", path: null });
+    expect(chatImageSource("https://crm.test/api/workspace/raw-file?path=%2Fws%2Fa.png", "crm.test").path).toBe("/ws/a.png");
+    for (const bad of ["", "/api/auth/session", "//cdn.test/a.png", "javascript:alert(1)", "C:\\x\\a.png", "ftp://h/a.png", "/root/report.html", "/root/secret.txt", "data:text/html,x"]) {
+      expect(chatImageSource(bad)).toEqual({ src: "", path: null });
+    }
   });
 });
