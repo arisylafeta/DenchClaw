@@ -532,7 +532,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
       return next;
     } catch (err) { say(err instanceof Error ? err.message : "Couldn't save."); return null; } finally { setSaving(false); }
   };
-  const useTo = async (address: string) => { const next = { ...local, to: address }; setLocal(next); await save(next); };
+  const useTo = async (address: string) => { await save({ ...local, to: address }); };
   const sent = draft.state === "sent";
   const to = splitAddrs(local.to);
   const verdict = beforeYouSend({ to, body: local.body, attachments: mail.attachments.length }, item.facts);
@@ -543,7 +543,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
     try {
       const version = await save();
       if (!version) return;
-      if (await startSend(draft.id, version.updated_at, to.join(", "))) onNext();
+      if (await startSend(draft.id, version.updated_at, splitAddrs(version.to).join(", "))) onNext();
     } finally { setSending(false); }
   };
   const [checking, setChecking] = useState(false);

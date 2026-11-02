@@ -654,9 +654,14 @@ export async function rewriteDraft(draftId: string, ownerId: string, instruction
     throw new RelayError(422, "I can't attach files from here, so I didn't change the email. Use Attach stock list, or add the file in Gmail.");
   }
   const list = (v: unknown) => Array.isArray(v) ? v.filter((a): a is string => typeof a === "string") : undefined;
-  await editDraft(mail, { body, to: list(parsed.to)?.length ? list(parsed.to) : undefined, cc: list(parsed.cc), bcc: list(parsed.bcc) });
+  // The model may only point To at an address the draft already carries or the user wrote out; anything else is dropped, not guessed.
+  const known = new Set([...mail.to_emails, ...mail.cc_emails, ...mail.bcc_emails, ...(instruction.match(/[^\s,;<>()]+@[^\s,;<>()]+\.[^\s,;<>()]+/g) ?? [])].map((a) => a.toLowerCase()));
+  const wantTo = list(parsed.to)?.filter((a) => a.trim());
+  const toOk = !!wantTo?.length && wantTo.every((a) => known.has(a.trim().toLowerCase()));
+  await editDraft(mail, { body, to: toOk ? wantTo : undefined, cc: list(parsed.cc), bcc: list(parsed.bcc) });
   await queryPg("update relay_draft set edit_requests = edit_requests || $2::jsonb where id = $1", [draftId, JSON.stringify([{ text: instruction.slice(0, 300), at: new Date().toISOString() }])]);
-  return { body, note: String(parsed.note ?? "Updated the draft.").slice(0, 200) };
+  const note = String(parsed.note ?? "Updated the draft.").slice(0, 200);
+  return { body, note: wantTo?.length && !toOk ? `${note} I left To unchanged: I only change it to an address already on the draft or one you write out.` : note };
 }
 
 const claimsAttachment = (text: string) => /\b(attached|enclosed|attaching|i've attached|please find)\b/i.test(text);

@@ -25,3 +25,11 @@ describe("editDraft recipients", () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe("editDraft address checks", () => {
+  it("rejects a malformed To before calling the CLI", async () => {
+    calls.length = 0;
+    await expect(editDraft(draft, { to: ["not-an-address"] })).rejects.toMatchObject({ status: 400 });
+    expect(calls).toEqual([]);
+  });
+});

@@ -87,6 +87,8 @@ export async function editDraft(draft: MailDraft, changes: { subject?: string; b
     if (!next) { continue; }
     if (key === "to" && !next.some((a) => a.trim())) { throw new DraftActionError(400, "A draft needs at least one To address."); }
     const clean = [...new Set(next.map((a) => a.trim().toLowerCase()).filter(Boolean))].sort();
+    const bad = clean.find((a) => !/^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$/.test(a));
+    if (bad) { throw new DraftActionError(400, `"${bad}" isn't a valid email address.`); }
     if (clean.join(",") !== [...(draft[`${key}_emails`] ?? [])].sort().join(",")) { args.push(`--${key}=${clean.join(",")}`); }
   }
   if (args.length === 1) { return; }
