@@ -40,7 +40,11 @@ describe("chatImageSource", () => {
   it("opens own raw-file URLs by path and refuses everything else", () => {
     expect(chatImageSource("/api/workspace/raw-file?path=%2Fws%2Fa.png")).toEqual({ src: "/api/workspace/raw-file?path=%2Fws%2Fa.png", path: "/ws/a.png" });
     expect(chatImageSource("https://crm.test/api/workspace/raw-file?path=%2Fws%2Fa.png", "crm.test").path).toBe("/ws/a.png");
-    for (const bad of ["", "/api/auth/session", "//cdn.test/a.png", "javascript:alert(1)", "C:\\x\\a.png", "ftp://h/a.png", "/root/report.html", "/root/secret.txt", "data:text/html,x"]) {
+    expect(chatImageSource("https://crm.test/api/auth/logout", "crm.test")).toEqual({ src: "", path: null });
+    expect(chatImageSource("https://crm.test/api/workspace/raw-file?path=%2Froot%2Fsecret.txt", "crm.test")).toEqual({ src: "", path: null });
+    expect(chatImageSource("https://other.test/api/auth/logout", "crm.test")).toEqual({ src: "https://other.test/api/auth/logout", path: null });
+    expect(chatImageSource("file://localhost/tmp/a.png").path).toBe("/tmp/a.png");
+    for (const bad of ["", "/api/auth/session", "//cdn.test/a.png", "javascript:alert(1)", "C:\\x\\a.png", "ftp://h/a.png", "/root/report.html", "/root/secret.txt", "data:text/html,x", "/api/workspace/raw-file?path=%2Froot%2Fa.html", "file://evil.host/share/a.png", "/root/x.png?v=1"]) {
       expect(chatImageSource(bad)).toEqual({ src: "", path: null });
     }
   });

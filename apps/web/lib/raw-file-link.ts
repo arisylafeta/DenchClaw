@@ -42,14 +42,29 @@ export function chatImageSource(src: string, currentHost = ""): { src: string; p
   const value = src.trim();
   if (!value) {return none;}
   if (value.startsWith("//")) {return none;}
-  if (/^(https?:|data:image\/|blob:)/i.test(value)) {
-    return { src: value, path: currentHost ? rawFileLinkPath(value, currentHost) : null };
+  const own = (url: string): { src: string; path: string | null } => {
+    const path = rawFileLinkPath(url, currentHost);
+    return path && IMAGE_FILE.test(path) ? { src: url, path } : none;
+  };
+  if (/^https?:/i.test(value)) {
+    try {
+      const url = new URL(value);
+      if (currentHost && url.host.toLowerCase() === currentHost.toLowerCase()) {
+        return url.pathname === RAW_FILE_PATH ? own(value) : none;
+      }
+    } catch { return none; }
+    return { src: value, path: null };
   }
-  if (value.startsWith(`${RAW_FILE_PATH}?`)) {return { src: value, path: rawFileLinkPath(value, currentHost) };}
+  if (/^(data:image\/|blob:)/i.test(value)) {return { src: value, path: null };}
+  if (value.startsWith(`${RAW_FILE_PATH}?`)) {return own(value);}
   if (value.startsWith("/api/")) {return none;}
   let path = value;
   if (/^file:\/\//i.test(path)) {
-    try { path = decodeURIComponent(new URL(path).pathname); } catch { return none; }
+    try {
+      const url = new URL(path);
+      if (url.host && url.host.toLowerCase() !== "localhost") {return none;}
+      path = decodeURIComponent(url.pathname);
+    } catch { return none; }
   } else if (/^[a-z][a-z0-9+.-]*:/i.test(path)) {
     return none;
   } else {
