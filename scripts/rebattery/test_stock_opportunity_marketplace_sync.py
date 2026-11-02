@@ -18,6 +18,13 @@ class Plan(unittest.TestCase):
             ("d", "opportunity", "missing", "listed", "published"),
         ])
 
+    def test_rows_delivered_to_staging_are_left_alone(self):
+        rows = [{"id": "s", "status": "listed", "marketplace_status": "published", "marketplace_listing_id": "L-staging",
+                 "details": {"delivery": {"environment": "staging"}}},
+                {"id": "p", "status": "listed", "marketplace_status": "published", "marketplace_listing_id": "L-gone",
+                 "details": {"delivery": {"environment": "production"}}}]
+        self.assertEqual(plan(rows, {}), [("p", "opportunity", "missing", "listed", "published")])
+
     def test_stale_and_rejected_rows_keep_their_status_unless_live_again(self):
         rows = [
             {"id": "s", "status": "stale", "marketplace_status": "withdrawn", "marketplace_listing_id": "m1"},

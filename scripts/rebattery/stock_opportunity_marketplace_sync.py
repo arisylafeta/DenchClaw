@@ -4,7 +4,8 @@
 1. Status: each stock opportunity linked to a marketplace listing (marketplace_listing_id) gets that listing's
    current status. `published` means status `listed`; anything else (draft, completed, withdrawn) means
    `opportunity`, with the marketplace status kept in marketplace_status. A listing gone from the marketplace
-   is marked `missing`.
+   is marked `missing`. Rows delivered to staging (details.delivery.environment = 'staging') are skipped:
+   they point at staging listings, which this production check cannot see.
 2. New listings: every published individual listing that no stock opportunity points at becomes a `listed`
    row for its supplier, so the table counts all marketplace stock once. The supplier contact comes from
    crm_platform_accounts; a seller the CRM does not know yet is added as a person (and company), and the
@@ -86,6 +87,10 @@ def plan(rows, statuses):
     """Status changes as (id, new status, new marketplace_status, old status, old marketplace_status)."""
     changes = []
     for row in rows:
+        # This job reads the production marketplace. A row delivered to staging (a test or rehearsal) points
+        # at a staging listing, so production has no word on it: leave it alone.
+        if ((row.get("details") or {}).get("delivery") or {}).get("environment", "production") != "production":
+            continue
         market = statuses.get(row["marketplace_listing_id"], "missing")
         status = "listed" if market == "published" else "opportunity"
         # A row marked stale (gone at source) or rejected (dropped in the enrichment pipeline)
@@ -230,7 +235,7 @@ def main(argv=None):
     statuses = {listing["id"]: listing["listing_status"] for listing in listings}
     conn = psycopg2.connect(args.dsn)
     with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        cur.execute("""select id, status, marketplace_status, marketplace_listing_id from crm_stock_opportunities
+        cur.execute("""select id, status, marketplace_status, marketplace_listing_id, details from crm_stock_opportunities
                        where marketplace_listing_id is not null""")
         rows = cur.fetchall()
         changes = plan(rows, statuses)
