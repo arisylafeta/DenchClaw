@@ -14,7 +14,7 @@ import { hasArtifactBlocks, splitArtifactBlocks } from "@/lib/mail-artifacts";
 import { ArtifactCard } from "../mail-message-card";
 import { splitVisualBlocks } from "@/lib/visual-blocks";
 import { VisualBlock } from "./visual-block";
-import { rawFileLinkPath } from "@/lib/raw-file-link";
+import { chatImageSource, rawFileLinkPath } from "@/lib/raw-file-link";
 
 function UserContent({ html, text }: { html?: string; text: string }) {
   const [content, setContent] = useState<ReactNode>(text);
@@ -38,6 +38,11 @@ function AnswerText({ text, live, renderMarkdown, onOpenArtifact, onSendPrompt }
     const own = typeof href === "string" && typeof window !== "undefined" ? rawFileLinkPath(href, window.location.host) : null;
     const external = !own && typeof href === "string" && /^(https?:)?\/\//.test(href);
     return <a href={href} {...props} {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})} onClick={event => { if (own && onOpenArtifact) { event.preventDefault(); void onOpenArtifact(own); } }}>{children}</a>;
+  }, img: ({ src, alt, node: _node, ...props }) => {
+    const image = chatImageSource(typeof src === "string" ? src : "");
+    if (!image.src) { return null; }
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img {...props} src={image.src} alt={alt ?? ""} className="my-2 block h-auto max-w-full rounded-md border border-[var(--color-border)]" style={{ maxHeight: 480, cursor: image.path && onOpenArtifact ? "zoom-in" : undefined }} onClick={() => { if (image.path && onOpenArtifact) { void onOpenArtifact(image.path); } }} />;
   } }}>{value}</ReactMarkdown>;
   const withArtifacts = (value: string, keyPrefix: string) => !hasArtifactBlocks(value) ? markdown(value) : <>{splitArtifactBlocks(value).map((piece, index) => piece.type === "artifact"
     ? <ArtifactCard key={`${keyPrefix}-artifact-${index}-${piece.artifact.id}`} artifact={piece.artifact} autoOpen={live} onOpen={onOpenArtifact} />

@@ -31,6 +31,19 @@ describe("native transcript", () => {
     expect(onOpenArtifact).toHaveBeenCalledWith("/ws/a.webm");
     expect(screen.getByRole("link", { name: "Ext" })).toHaveAttribute("target", "_blank");
   });
+  it("shows a markdown image saved in the workspace inline and opens it on click", () => {
+    const onOpenArtifact = vi.fn();
+    const state = events([["message.start", {}], ["message.delta", { text: "![Yaris](</root/.hermes/workspace/a b.png>) and ![Web](https://img.test/w.png)" }], ["message.complete", {}]]);
+    render(<NativeTranscript state={state} callbacks={callbacks()} onOpenArtifact={onOpenArtifact} />);
+    const local = screen.getByAltText("Yaris");
+    expect(local).toHaveAttribute("src", "/api/workspace/raw-file?path=%2Froot%2F.hermes%2Fworkspace%2Fa%20b.png");
+    fireEvent.click(local);
+    expect(onOpenArtifact).toHaveBeenCalledWith("/root/.hermes/workspace/a b.png");
+    const web = screen.getByAltText("Web");
+    expect(web).toHaveAttribute("src", "https://img.test/w.png");
+    fireEvent.click(web);
+    expect(onOpenArtifact).toHaveBeenCalledTimes(1);
+  });
   it("streams exposed reasoning as muted plain text, separate from tools and the final answer", async () => {
     const cb = callbacks();
     let state = events([["message.start", {}], ["thinking.delta", { text: "Status only" }]]);
