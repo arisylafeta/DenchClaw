@@ -646,7 +646,7 @@ export async function rewriteDraft(draftId: string, ownerId: string, instruction
   const current = (await editableCopy(mail)).main;
   const files = (mail.attachments ?? []).map((a) => a.filename);
   const attachedLine = files.length ? `Files actually attached: ${files.join(", ")}. Only these may be called attached.` : "No files are attached. Never write that anything is attached, enclosed or included; if asked to attach something, say in the note that it needs the Attach stock list button or Gmail.";
-  const system = `You edit one email draft for Alex Polglase (ReBattery) exactly as instructed. You can change the text and the Cc and Bcc lists (Cc now: ${mail.cc_emails.join(", ") || "none"}; Bcc now: ${mail.bcc_emails.join(", ") || "none"}), never the To line: you cannot attach files, run searches or do anything outside this email. Keep facts unchanged unless told. ${attachedLine} Follow these rules:\n${rules.map((r) => `- ${r}`).join("\n")}\n${voiceGuideBlock(guide)}No signature block. Return ONLY JSON {"body": "the full new email text", "note": "one short line saying what you changed, and plainly what you could not do"}.`;
+  const system = `You edit one email draft for Alex Polglase (ReBattery) exactly as instructed. You can change the text and the To, Cc and Bcc lists (To now: ${mail.to_emails.join(", ") || "none"}; Cc now: ${mail.cc_emails.join(", ") || "none"}; Bcc now: ${mail.bcc_emails.join(", ") || "none"}). Change a list only when told to, and only to addresses already on the draft or written out in the instruction; if the instruction names someone whose address you don't have, leave the list alone and say so in the note. You cannot attach files, run searches or do anything outside this email. Keep facts unchanged unless told. ${attachedLine} Follow these rules:\n${rules.map((r) => `- ${r}`).join("\n")}\n${voiceGuideBlock(guide)}No signature block. Return ONLY JSON {"body": "the full new email text", "note": "one short line saying what you changed, and plainly what you could not do"}, plus "to", "cc" or "bcc" (the complete new list of addresses) only for a list you were told to change.`;
   const parsed = parseJson(await askAgent(system, `Instruction: ${instruction}\n\nCurrent draft:\n${current}`, 120_000));
   const body = String(parsed.body ?? "").trim();
   if (!body) throw new RelayError(502, "The assistant returned an empty draft. Try again.");
@@ -654,7 +654,7 @@ export async function rewriteDraft(draftId: string, ownerId: string, instruction
     throw new RelayError(422, "I can't attach files from here, so I didn't change the email. Use Attach stock list, or add the file in Gmail.");
   }
   const list = (v: unknown) => Array.isArray(v) ? v.filter((a): a is string => typeof a === "string") : undefined;
-  await editDraft(mail, { body, cc: list(parsed.cc), bcc: list(parsed.bcc) });
+  await editDraft(mail, { body, to: list(parsed.to)?.length ? list(parsed.to) : undefined, cc: list(parsed.cc), bcc: list(parsed.bcc) });
   await queryPg("update relay_draft set edit_requests = edit_requests || $2::jsonb where id = $1", [draftId, JSON.stringify([{ text: instruction.slice(0, 300), at: new Date().toISOString() }])]);
   return { body, note: String(parsed.note ?? "Updated the draft.").slice(0, 200) };
 }

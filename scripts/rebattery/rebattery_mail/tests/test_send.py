@@ -865,6 +865,22 @@ def test_edit_draft_purpose_drops_unsubscribe_and_refuses_marketing_or_sent(env)
         draft.edit(NS(target=row['id'],purpose=None,subject='Late',body=None,html=None))
 
 
+def test_edit_draft_replaces_to_and_keeps_thread_and_cc_clean(env):
+    first,second,third=env+'a@example.test',env+'b@example.test',env+'c@example.test'
+    with connection() as db:
+        row,_=draft.prepare(db,'alex',[first],subject='Hi',body='Hello',cc=[second],message_id=env+'to')
+        draft.insert(db,row)
+    edited=draft.edit(NS(target=row['id'],purpose=None,subject=None,body=None,html=None,to=second,cc=None,bcc=None))['message']
+    assert edited['to_emails']==[second] and edited['cc_emails']==[] and edited['recipient_email']==second
+    edited=draft.edit(NS(target=row['id'],purpose=None,subject=None,body=None,html=None,to=f'{third}; {first}',cc=None,bcc=None))['message']
+    assert edited['to_emails']==sorted([first,third]) and edited['subject']=='Hi'
+    with pytest.raises(Refused) as caught:
+        draft.edit(NS(target=row['id'],purpose=None,subject=None,body=None,html=None,to=' ',cc=None,bcc=None))
+    assert caught.value.rule=='recipient_unverified'
+    with pytest.raises(Refused,match='invalid_recipient_address'):
+        draft.edit(NS(target=row['id'],purpose=None,subject=None,body=None,html=None,to='not-an-address',cc=None,bcc=None))
+
+
 def test_gog_env_always_carries_keyring_and_home(monkeypatch,tmp_path):
     from rebattery_mail import core
     key=tmp_path/'key';key.write_text('secret\n')

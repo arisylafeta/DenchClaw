@@ -367,7 +367,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
 
 // ---------------------------------------------------------------- Review
 
-type Local = { subject: string; body: string; cc: string; bcc: string; updated_at: string };
+type Local = { subject: string; body: string; to: string; cc: string; bcc: string; updated_at: string };
 const splitAddrs = (v: string) => v.replace(/;/g, ",").split(",").map((a) => a.trim()).filter(Boolean);
 
 function Review({ data, reload, say, onBack, sending, startSend }: {
@@ -507,34 +507,34 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
   sendingTo?: string; startSend: (draftId: string, updatedAt: string, toLabel: string) => Promise<boolean>;
 }) {
   const mail = draft.mail;
-  const [local, setLocal] = useState<Local | null>(mail ? { subject: mail.subject ?? "", body: mail.main, cc: mail.cc_emails.join(", "), bcc: mail.bcc_emails.join(", "), updated_at: mail.updated_at } : null);
+  const [local, setLocal] = useState<Local | null>(mail ? { subject: mail.subject ?? "", body: mail.main, to: mail.to_emails.join(", "), cc: mail.cc_emails.join(", "), bcc: mail.bcc_emails.join(", "), updated_at: mail.updated_at } : null);
   const [saving, setSaving] = useState(false);
   const [arming, setArming] = useState(false);
   const [sending, setSending] = useState(false);
-  const [toOverride, setToOverride] = useState<string | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   // A rewrite from the AI panel saves server-side; pick up the new copy when the draft's version moves on.
-  useEffect(() => { if (mail && local && mail.updated_at !== local.updated_at && !saving) setLocal({ subject: mail.subject ?? "", body: mail.main, cc: mail.cc_emails.join(", "), bcc: mail.bcc_emails.join(", "), updated_at: mail.updated_at }); }, [mail?.updated_at]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (mail && local && mail.updated_at !== local.updated_at && !saving) setLocal({ subject: mail.subject ?? "", body: mail.main, to: mail.to_emails.join(", "), cc: mail.cc_emails.join(", "), bcc: mail.bcc_emails.join(", "), updated_at: mail.updated_at }); }, [mail?.updated_at]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const el = bodyRef.current; if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; } }, [local?.body]);
   useEffect(() => { if (!arming) return; const t = setTimeout(() => setArming(false), 5000); return () => clearTimeout(t); }, [arming]);
 
   if (!mail || !local) {
     return <div className={cx(s.card, s.editor)}><div className={s.ebar}><div><div className={s.lab}>Follow-on email</div><h2>{draft.title}</h2></div></div><p style={{ padding: "14px 18px" }} className={s.muted}>{draft.why} Relay didn't know who to send this to, so there's no draft yet. Ask in the panel on the right, e.g. "draft this to Rob at Qube".</p></div>;
   }
-  const dirty = local.subject !== (mail.subject ?? "") || local.body !== mail.main || splitAddrs(local.cc).join(",") !== mail.cc_emails.join(",") || splitAddrs(local.bcc).join(",") !== mail.bcc_emails.join(",");
-  const save = async (): Promise<Local | null> => {
-    if (!dirty) return local;
+  const isDirty = (l: Local) => l.subject !== (mail.subject ?? "") || splitAddrs(l.to).join(",") !== mail.to_emails.join(",") || l.body !== mail.main || splitAddrs(l.cc).join(",") !== mail.cc_emails.join(",") || splitAddrs(l.bcc).join(",") !== mail.bcc_emails.join(",");
+  const save = async (edited: Local = local): Promise<Local | null> => {
+    if (!isDirty(edited)) return edited;
     setSaving(true);
     try {
-      const updated = await api<{ updated_at: string; subject: string | null; cc_emails: string[]; bcc_emails: string[]; editable: { main: string } }>(`/api/mail/drafts/${mail.id}`, { method: "PATCH", body: { subject: local.subject, body: local.body, cc: splitAddrs(local.cc), bcc: splitAddrs(local.bcc), updated_at: local.updated_at } });
-      const next = { subject: updated.subject ?? "", body: updated.editable.main, cc: updated.cc_emails.join(", "), bcc: updated.bcc_emails.join(", "), updated_at: updated.updated_at };
+      const updated = await api<{ updated_at: string; subject: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; editable: { main: string } }>(`/api/mail/drafts/${mail.id}`, { method: "PATCH", body: { subject: edited.subject, body: edited.body, to: splitAddrs(edited.to), cc: splitAddrs(edited.cc), bcc: splitAddrs(edited.bcc), updated_at: edited.updated_at } });
+      const next = { subject: updated.subject ?? "", body: updated.editable.main, to: updated.to_emails.join(", "), cc: updated.cc_emails.join(", "), bcc: updated.bcc_emails.join(", "), updated_at: updated.updated_at };
       setLocal(next);
       void reload();
       return next;
     } catch (err) { say(err instanceof Error ? err.message : "Couldn't save."); return null; } finally { setSaving(false); }
   };
+  const useTo = async (address: string) => { const next = { ...local, to: address }; setLocal(next); await save(next); };
   const sent = draft.state === "sent";
-  const to = mail.to_emails;
+  const to = splitAddrs(local.to);
   const verdict = beforeYouSend({ to, body: local.body, attachments: mail.attachments.length }, item.facts);
   const blocked = verdict.state === "stop";
   const send = async () => {
@@ -573,7 +573,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
     catch (err) { say(err instanceof Error ? err.message : "Couldn't remove it."); }
   };
   const issueText = (issue: Issue, k: number) => (
-    <span key={k}>{issue.text}{issue.fix && <> <button type="button" className={s.fixl} onClick={() => setToOverride(issue.fix!.to)}>{issue.fix.label}</button></>} </span>
+    <span key={k}>{issue.text}{issue.fix && <> <button type="button" className={s.fixl} onClick={() => void useTo(issue.fix!.to)}>{issue.fix.label}</button></>} </span>
   );
   const lead = verdict.state === "stop" ? "Fix this before sending." : verdict.state === "check" ? (verdict.issues.length === 1 ? "One thing to check." : `${verdict.issues.length} things to check.`) : "Ready to send.";
   const okLine = verdict.good.length ? `${verdict.state === "ok" ? "" : "Otherwise "}${verdict.good.join(", ").replace(/, ([^,]*)$/, " and $1")}.` : "";
@@ -588,7 +588,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
       {draft.role === "primary" && draft.source_note && <div className={s.fromnote}>Drafted from your note: <b>&ldquo;{draft.source_note}&rdquo;</b></div>}
       {draft.agent_log.length > 0 && <div className={s.log}>{draft.agent_log.map((l, k) => <span key={k}>{l}</span>)}</div>}
       <div className={s.field} style={{ marginTop: 6 }}><span>From</span><div className={s.ro}>{mail.from_email}</div></div>
-      <div className={s.field}><span>To</span><div className={s.ro}>{to.join(", ") || "No recipient"}{toOverride && <span className={s.muted}> · to send to {toOverride}, use Add to Gmail drafts and change it there</span>}</div></div>
+      <div className={s.field}><label htmlFor={`to-${draft.id}`}>To</label><input id={`to-${draft.id}`} value={local.to} disabled={sent} placeholder="Add an address" onChange={(e) => setLocal({ ...local, to: e.target.value })} onBlur={() => void save()} /></div>
       {(["cc", "bcc"] as const).map((k) => <div key={k} className={s.field}><label htmlFor={`${k}-${draft.id}`}>{k === "cc" ? "Cc" : "Bcc"}</label><input id={`${k}-${draft.id}`} value={local[k]} disabled={sent || mail.transport !== "gmail"} placeholder="Add addresses, separated by commas" onChange={(e) => setLocal({ ...local, [k]: e.target.value })} onBlur={() => void save()} /></div>)}
       <div className={s.field}><label htmlFor={`sj-${draft.id}`}>Subject</label><input id={`sj-${draft.id}`} value={local.subject} disabled={sent} onChange={(e) => setLocal({ ...local, subject: e.target.value })} onBlur={() => void save()} /></div>
       <textarea ref={bodyRef} className={s.body} value={local.body} disabled={sent} aria-label="Email body" onChange={(e) => setLocal({ ...local, body: e.target.value })} onBlur={() => void save()} />

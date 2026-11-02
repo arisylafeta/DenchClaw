@@ -97,7 +97,20 @@ describe("MailDraftView", () => {
     expect(await screen.findByRole("heading", { name: "New subject" })).toBeInTheDocument();
     const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
     expect(patch[0]).toBe("/api/mail/drafts/d1");
-    expect(JSON.parse(String(patch[1]!.body))).toEqual({ subject: "New subject", body: "Changed", cc: [], bcc: [], updated_at: "2026-10-20T10:00:00Z" });
+    expect(JSON.parse(String(patch[1]!.body))).toEqual({ subject: "New subject", body: "Changed", to: ["admin@example.test"], cc: [], bcc: [], updated_at: "2026-10-20T10:00:00Z" });
+  });
+  it("replaces the To recipient and refuses to save with none", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify(init?.method === "PATCH" ? { ...draft, to_emails: ["matt@x.co"], updated_at: "2026-10-20T10:05:00Z" } : draft)));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MailDraftView draftId="d1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit draft" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "To" }), { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox", { name: "To" }), { target: { value: "Matt@x.co" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Saved.");
+    const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    expect(JSON.parse(String(patch[1]!.body)).to).toEqual(["matt@x.co"]);
   });
   it("edits Cc and Bcc as text and saves them as lists", async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify(init?.method === "PATCH" ? { ...draft, cc_emails: ["a@x.co", "b@x.co"], updated_at: "2026-10-20T10:05:00Z" } : draft)));

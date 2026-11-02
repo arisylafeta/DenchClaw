@@ -21,6 +21,13 @@ it('scopes both reads to the signed-in user',async()=>{
  expect(await (await read(new Request('http://localhost/x'),{params:Promise.resolve({id:'d1'})})).json()).toEqual({id:'d1',editable:{main:'copy',signature:null}});
  expect(readMailDraft).toHaveBeenCalledWith('d1','u1');
 });
+it('passes a replaced To list through to the edit',async()=>{
+ currentUser.mockResolvedValue({id:'u1'}); readMailDraft.mockResolvedValue({id:'d1',updated_at:new Date('2026-10-26T12:08:17.871Z')}); editDraft.mockClear();
+ const res = await patch(new Request('http://x',{method:'PATCH',body:JSON.stringify({to:['matt@x.co'],updated_at:'2026-10-26T12:08:17.871Z'})}),{params:Promise.resolve({id:'d1'})});
+ expect(res.status).toBe(200); expect(editDraft).toHaveBeenCalledWith(expect.objectContaining({id:'d1'}),expect.objectContaining({to:['matt@x.co']}));
+ const bad = await patch(new Request('http://x',{method:'PATCH',body:JSON.stringify({to:'matt@x.co',updated_at:'2026-10-26T12:08:17.871Z'})}),{params:Promise.resolve({id:'d1'})});
+ expect(bad.status).toBe(400);
+});
 it('returns 404 for a missing or foreign draft',async()=>{
  currentUser.mockResolvedValue({id:'u1'}); readMailDraft.mockResolvedValue(null);
  expect((await read(new Request('http://localhost/x'),{params:Promise.resolve({id:'nope'})})).status).toBe(404);
@@ -28,7 +35,7 @@ it('returns 404 for a missing or foreign draft',async()=>{
 it('saves an edit when the database returns a Date and the browser echoes the ISO string',async()=>{
  currentUser.mockResolvedValue({id:'u1'}); readMailDraft.mockResolvedValue({id:'d1',updated_at:new Date('2026-10-26T12:08:17.871Z')});
  const res = await patch(new Request('http://x',{method:'PATCH',body:JSON.stringify({subject:'New',updated_at:'2026-10-26T12:08:17.871Z'})}),{params:Promise.resolve({id:'d1'})});
- expect(res.status).toBe(200); expect(editDraft).toHaveBeenCalledWith(expect.objectContaining({id:'d1'}),{subject:'New',body:undefined});
+ expect(res.status).toBe(200); expect(editDraft).toHaveBeenCalledWith(expect.objectContaining({id:'d1'}),expect.objectContaining({subject:'New',body:undefined}));
  const stale = await patch(new Request('http://x',{method:'PATCH',body:JSON.stringify({subject:'New',updated_at:'2026-10-26T12:00:00.000Z'})}),{params:Promise.resolve({id:'d1'})});
  expect(stale.status).toBe(409);
 });
