@@ -49,8 +49,9 @@ export function chatImageSource(src: string, currentHost = ""): { src: string; p
   if (/^https?:/i.test(value)) {
     try {
       const url = new URL(value);
-      if (currentHost && url.host.toLowerCase() === currentHost.toLowerCase()) {
-        return url.pathname === RAW_FILE_PATH ? own(value) : none;
+      // Without a known host (server render) any absolute /api/ URL could be this app's own, so refuse it.
+      if (!currentHost ? url.pathname.startsWith("/api/") : url.host.toLowerCase() === currentHost.toLowerCase()) {
+        return url.pathname === RAW_FILE_PATH && currentHost ? own(value) : none;
       }
     } catch { return none; }
     return { src: value, path: null };

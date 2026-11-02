@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rawFileLinkPath } from "./raw-file-link";
+import { chatImageSource, rawFileLinkPath } from "./raw-file-link";
 
 const HOST = "crm.rebattery.io";
 
@@ -23,7 +23,6 @@ describe("rawFileLinkPath", () => {
   });
 });
 
-import { chatImageSource } from "./raw-file-link";
 describe("chatImageSource", () => {
   it("serves local image paths through the raw-file route and leaves web sources alone", () => {
     expect(chatImageSource("/root/.hermes/workspace/a%20b.png")).toEqual({ src: "/api/workspace/raw-file?path=%2Froot%2F.hermes%2Fworkspace%2Fa%20b.png", path: "/root/.hermes/workspace/a b.png" });
@@ -43,6 +42,8 @@ describe("chatImageSource", () => {
     expect(chatImageSource("https://crm.test/api/auth/logout", "crm.test")).toEqual({ src: "", path: null });
     expect(chatImageSource("https://crm.test/api/workspace/raw-file?path=%2Froot%2Fsecret.txt", "crm.test")).toEqual({ src: "", path: null });
     expect(chatImageSource("https://other.test/api/auth/logout", "crm.test")).toEqual({ src: "https://other.test/api/auth/logout", path: null });
+    expect(chatImageSource("https://crm.test/api/auth/logout")).toEqual({ src: "", path: null });
+    expect(chatImageSource("https://img.test/a.png")).toEqual({ src: "https://img.test/a.png", path: null });
     expect(chatImageSource("file://localhost/tmp/a.png").path).toBe("/tmp/a.png");
     for (const bad of ["", "/api/auth/session", "//cdn.test/a.png", "javascript:alert(1)", "C:\\x\\a.png", "ftp://h/a.png", "/root/report.html", "/root/secret.txt", "data:text/html,x", "/api/workspace/raw-file?path=%2Froot%2Fa.html", "file://evil.host/share/a.png", "/root/x.png?v=1"]) {
       expect(chatImageSource(bad)).toEqual({ src: "", path: null });
