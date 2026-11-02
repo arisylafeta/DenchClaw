@@ -4,8 +4,24 @@ import { transcribeElevenLabsAudio } from "@/lib/elevenlabs-voice";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-function buildUnavailableResponse(reason: string, status = 409) {
-  return Response.json({ error: reason }, { status });
+const LOCAL_STT_URL = process.env.DENCH_STT_URL ?? "http://127.0.0.1:3917";
+
+/** On-device Parakeet service (apps/dench-stt); used when ElevenLabs is not configured. */
+async function transcribeLocally(file: File) {
+  try {
+    const response = await fetch(`${LOCAL_STT_URL}/transcribe`, {
+      method: "POST",
+      body: Buffer.from(await file.arrayBuffer()),
+      signal: AbortSignal.timeout(60_000),
+    });
+    const payload = await response.json().catch(() => ({})) as { text?: string; error?: string };
+    if (!response.ok) {
+      return Response.json({ error: payload.error ?? "Local transcription failed." }, { status: 502 });
+    }
+    return Response.json({ text: payload.text ?? "" });
+  } catch {
+    return Response.json({ error: "Local transcription service is unavailable." }, { status: 503 });
+  }
 }
 
 export async function POST(request: Request) {
@@ -22,14 +38,9 @@ export async function POST(request: Request) {
   }
 
   const voiceState = await getCloudVoiceState();
-  if (voiceState.status === "no_key" || !voiceState.apiKey) {
-    return buildUnavailableResponse("A valid ReBattery Cloud API key is required.");
-  }
-  if (voiceState.status === "invalid_key") {
-    return buildUnavailableResponse(voiceState.validationError ?? "The ReBattery Cloud API key is invalid.");
-  }
-  if (!voiceState.elevenLabsEnabled) {
-    return buildUnavailableResponse("Enable ElevenLabs in Integrations to use server-side transcription.");
+  const cloudKey = voiceState.status === "valid" && voiceState.elevenLabsEnabled ? voiceState.apiKey : null;
+  if (!cloudKey) {
+    return transcribeLocally(uploaded);
   }
 
   const file = uploaded;
@@ -37,7 +48,7 @@ export async function POST(request: Request) {
   try {
     const transcript = await transcribeElevenLabsAudio({
       gatewayUrl: voiceState.gatewayUrl,
-      apiKey: voiceState.apiKey,
+      apiKey: cloudKey,
       file,
     });
     return Response.json(transcript);

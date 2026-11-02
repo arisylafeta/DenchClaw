@@ -1462,9 +1462,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			};
 		}, [runtimeStatus, messages.length, currentSessionId]);
 
-		const preferServerVoiceInput = Boolean(
-			cloudState?.status === "valid" && cloudState.elevenLabsEnabled,
-		);
+		// The transcribe route uses ElevenLabs when configured, else the local Parakeet service.
+		const preferServerVoiceInput = true;
 		const voicePlaybackEnabled = Boolean(
 			cloudState?.status === "valid" && cloudState.elevenLabsEnabled,
 		);

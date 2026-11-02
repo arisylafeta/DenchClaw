@@ -55,4 +55,19 @@ describe("voice transcribe API", () => {
     expect(payload.text).toBe("hello from voice");
     expect(mockedTranscribe).toHaveBeenCalledTimes(1);
   });
+
+  it("falls back to the local Parakeet service when ElevenLabs is not enabled", async () => {
+    mockedVoiceState.mockResolvedValue({ status: "no_key" } as Awaited<ReturnType<typeof getCloudVoiceState>>);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ text: "local words" }));
+
+    const body = new FormData();
+    body.set("file", new File(["audio"], "recording.webm", { type: "audio/webm" }));
+    const response = await POST(new Request("http://localhost/api/voice/transcribe", { method: "POST", body }));
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).text).toBe("local words");
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/transcribe$/);
+    expect(mockedTranscribe).not.toHaveBeenCalled();
+    fetchMock.mockRestore();
+  });
 });
