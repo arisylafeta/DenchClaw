@@ -11,11 +11,16 @@ import {
 } from "@/app/components/ui/dialog";
 import { Switch } from "@/app/components/ui/switch";
 import {
+  disablePush,
+  enablePush,
   isIos,
   isStandalone,
   notificationsSupported,
+  pushActive,
+  pushSupported,
   readNotificationPrefs,
   registerServiceWorker,
+  sendTestPush,
   showAgentNotification,
   writeNotificationPrefs,
   type NotificationPrefs,
@@ -43,18 +48,35 @@ export function NotificationSettingsDialog({ open, onOpenChange }: { open: boole
   const [permission, setPermission] = useState<Permission>("default");
   const [prefs, setPrefs] = useState<NotificationPrefs>({ start: true, done: true, input: true });
   const [needsInstall, setNeedsInstall] = useState(false);
+  const [closedApp, setClosedApp] = useState(false);
+  const [pushNote, setPushNote] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     setPermission(notificationsSupported() ? Notification.permission : "unsupported");
     setPrefs(readNotificationPrefs());
     // iOS only exposes notifications to a site added to the Home Screen.
     setNeedsInstall(isIos() && !isStandalone());
+    setClosedApp(pushActive());
   }, []);
   useEffect(() => { if (open) refresh(); }, [open, refresh]);
 
   const enable = async () => {
     await registerServiceWorker();
-    setPermission(await Notification.requestPermission());
+    const result = await Notification.requestPermission();
+    setPermission(result);
+    if (result === "granted") { await toggleClosedApp(true); }
+  };
+  const toggleClosedApp = async (on: boolean) => {
+    setPushNote(null);
+    if (!on) { await disablePush(); setClosedApp(false); return; }
+    const ok = await enablePush();
+    setClosedApp(ok);
+    if (!ok) { setPushNote("Could not turn this on. Closed-app notifications may not be set up on the server."); }
+  };
+  const test = async () => {
+    setPushNote(null);
+    if (closedApp && (await sendTestPush())) { setPushNote("Sent. It arrives from the server, so you can close the app to check."); return; }
+    void showAgentNotification({ title: "ReBattery CRM", body: "Notifications are working.", tag: "test" });
   };
   const update = (patch: Partial<NotificationPrefs>) => {
     const next = { ...prefs, ...patch };
@@ -96,18 +118,22 @@ export function NotificationSettingsDialog({ open, onOpenChange }: { open: boole
           <Row label="Response started" hint="When an agent begins replying" checked={prefs.start} disabled={!enabled} onChange={(start) => update({ start })} />
           <Row label="Waiting for input" hint="When a chat needs an approval or an answer" checked={prefs.input} disabled={!enabled} onChange={(input) => update({ input })} />
           <Row label="Agent finished" hint="When a reply is complete" checked={prefs.done} disabled={!enabled} onChange={(done) => update({ done })} />
+          {pushSupported() && (
+            <Row label="When the app is closed" hint="Finished and waiting-for-input alerts for your own chats, even with the app closed" checked={closedApp} disabled={!enabled} onChange={(on) => void toggleClosedApp(on)} />
+          )}
         </div>
 
         {enabled && (
           <button
             type="button"
-            onClick={() => void showAgentNotification({ title: "ReBattery CRM", body: "Notifications are working.", tag: "test" })}
+            onClick={() => void test()}
             className="self-start text-xs underline"
             style={muted}
           >
             Send a test notification
           </button>
         )}
+        {pushNote && <p className="text-xs" style={muted}>{pushNote}</p>}
       </DialogContent>
     </Dialog>
   );

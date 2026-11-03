@@ -6,6 +6,10 @@ export async function register() {
     const { startChatAgentGc } = await import("./lib/chat-agent-registry");
     startChatAgentGc();
 
+    // Server-side finished/needs-input detection so Web Push reaches devices whose app is closed.
+    const { startPushWatcher } = await import("./lib/push-watcher");
+    startPushWatcher();
+
     // Apply the latest schema migrations on startup so workspaces that
     // were init'd before a column/field/object was added still get it
     // without forcing the user to re-init. Idempotent: ALTER TABLE … IF

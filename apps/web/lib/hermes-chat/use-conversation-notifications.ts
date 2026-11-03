@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import { appIsBackgrounded, showAgentNotification } from '../agent-notify'
 import { bundledProfileAvatar } from '../profile-avatars'
 import type { HermesConversation } from '../hermes-conversations'
+import { conversationTransition } from './conversation-transitions'
 
 type Seen = { working: boolean; blocked: boolean }
 
@@ -23,7 +24,7 @@ export function useConversationNotifications(rows: HermesConversation[] | undefi
       const was = before?.get(row.key)
       if (!was || row.source === 'cron') continue
       if (selectedKey === row.key && !appIsBackgrounded()) continue
-      const kind = !was.blocked && now.blocked ? 'input' : was.working && !now.working && !now.blocked && row.working === false ? 'done' : null
+      const kind = conversationTransition(was, row)
       if (!kind) continue
       const profile = row.profile ?? row.participants[0]?.profile
       void showAgentNotification({
