@@ -9,7 +9,7 @@ const row = { key: "k%201", title: "Fix bug", profile: "devon", working: false, 
 
 describe("pushFor", () => {
   it("builds a finished push with a deep link to the chat", () => {
-    expect(pushFor("u1", was, row)).toMatchObject({ kind: "done", title: "Fix bug", body: "Finished", tag: "agent-k%201", url: "/?chat=k%2520" + "1" });
+    expect(pushFor("u1", was, row)).toMatchObject({ kind: "done", title: "Fix bug", body: "Finished", tag: "agent-k%201", chat: "k%201", url: "/?chat=k%2520" + "1" });
   });
   it("builds a needs-input push", () => {
     expect(pushFor("u1", was, { ...row, working: true, blocked: true })).toMatchObject({ kind: "input", body: "Waiting for your input" });

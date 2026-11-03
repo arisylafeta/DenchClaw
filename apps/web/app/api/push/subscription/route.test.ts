@@ -15,12 +15,12 @@ beforeEach(() => { user.mockReset(); save.mockReset(); });
 describe("push subscription route", () => {
   it("requires a signed-in user", async () => {
     user.mockResolvedValue(null);
-    expect((await GET()).status).toBe(401);
+    expect((await GET(new Request("http://x/api/push/subscription"))).status).toBe(401);
     expect((await put({})).status).toBe(401);
   });
   it("returns the public key", async () => {
     user.mockResolvedValue({ id: "u1" });
-    expect(await (await GET()).json()).toEqual({ publicKey: "pub" });
+    expect(await (await GET(new Request("http://x/api/push/subscription"))).json()).toEqual({ publicKey: "pub" });
   });
   it("stores a valid subscription for the caller only", async () => {
     user.mockResolvedValue({ id: "u1" });

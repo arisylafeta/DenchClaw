@@ -88,6 +88,14 @@ export async function syncPushPrefs(prefs: NotificationPrefs = readNotificationP
   try {
     const sub = await currentPushSubscription();
     if (!sub) { setPushActive(false); return; }
+    // The server deletes endpoints the push service reports gone; start over with a fresh subscription then.
+    const check = await fetch(`/api/push/subscription?endpoint=${encodeURIComponent(sub.endpoint)}`);
+    if (check.ok && (await check.json() as { registered?: boolean }).registered === false) {
+      await sub.unsubscribe();
+      setPushActive(false);
+      await enablePush();
+      return;
+    }
     await uploadSubscription(sub, prefs);
   } catch { /* retried on the next load */ }
 }

@@ -4,25 +4,30 @@ import { queryPg } from "@/lib/postgres";
 
 export type PushKind = "done" | "input";
 export type PushPrefs = Record<PushKind, boolean>;
-export type PushPayload = { kind?: PushKind; title: string; body: string; icon?: string; tag: string; url: string };
+export type PushPayload = { kind?: PushKind; chat?: string; title: string; body: string; icon?: string; tag: string; url: string };
 export type PushSubscriptionInput = { endpoint: string; keys: { p256dh: string; auth: string } };
 
 const DEFAULT_PREFS: PushPrefs = { done: true, input: true };
 const SECRET_PATH = process.env.DENCH_WEB_PUSH_FILE || "/root/.hermes/workspace/secrets/dench-web-push.json";
 
 type Vapid = { publicKey: string; privateKey: string; subject: string };
-let vapid: Vapid | null | undefined;
+let vapid: Vapid | undefined;
 
 /** VAPID keys live in a 0600 file outside the repo. Missing or malformed means push is off, never a crash. */
 export function vapidConfig(): Vapid | null {
   if (vapid !== undefined) { return vapid; }
   try {
     const raw = JSON.parse(readFileSync(SECRET_PATH, "utf8")) as Partial<Vapid>;
-    vapid = raw.publicKey && raw.privateKey && raw.subject ? { publicKey: raw.publicKey, privateKey: raw.privateKey, subject: raw.subject } : null;
-  } catch { vapid = null; }
-  return vapid;
+    vapid = raw.publicKey && raw.privateKey && raw.subject ? { publicKey: raw.publicKey, privateKey: raw.privateKey, subject: raw.subject } : undefined;
+  } catch { vapid = undefined; }
+  // A missing file is retried on the next call, so adding the keys needs no restart.
+  return vapid ?? null;
 }
 export function resetVapidForTests() { vapid = undefined; }
+
+export async function isRegistered(userId: string, endpoint: string): Promise<boolean> {
+  return (await queryPg("select 1 from crm_push_subscriptions where endpoint = $1 and user_id = $2", [endpoint, userId])).length > 0;
+}
 
 export function pushPublicKey(): string | null { return vapidConfig()?.publicKey ?? null; }
 
@@ -42,14 +47,14 @@ export function parseSubscription(value: unknown): PushSubscriptionInput | null 
   return { endpoint, keys: { p256dh, auth } };
 }
 
-export async function saveSubscription(userId: string, sub: PushSubscriptionInput, prefs: PushPrefs, userAgent: string | null) {
+export async function saveSubscription(userId: string, sub: PushSubscriptionInput, prefs: PushPrefs | null, userAgent: string | null) {
   // The endpoint is the device's identity: re-subscribing after a sign-in as someone else moves it to the new user.
   await queryPg(
     `insert into crm_push_subscriptions (endpoint, user_id, p256dh, auth, prefs, user_agent)
      values ($1, $2, $3, $4, $5::jsonb, $6)
      on conflict (endpoint) do update set user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth,
-       prefs = excluded.prefs, user_agent = excluded.user_agent, last_seen_at = now()`,
-    [sub.endpoint, userId, sub.keys.p256dh, sub.keys.auth, JSON.stringify(prefs), userAgent?.slice(0, 300) ?? null],
+       prefs = case when $7 then excluded.prefs else crm_push_subscriptions.prefs end, user_agent = excluded.user_agent, last_seen_at = now()`,
+    [sub.endpoint, userId, sub.keys.p256dh, sub.keys.auth, JSON.stringify(prefs ?? { done: true, input: true }), userAgent?.slice(0, 300) ?? null, prefs !== null],
   );
 }
 

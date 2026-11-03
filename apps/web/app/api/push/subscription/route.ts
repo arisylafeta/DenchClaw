@@ -1,6 +1,6 @@
 import { currentUser } from "@/lib/auth";
 import {
-  parsePrefs, parseSubscription, pushPublicKey, removeSubscription, saveSubscription, sendPushToUser,
+  isRegistered, parsePrefs, parseSubscription, pushPublicKey, removeSubscription, saveSubscription, sendPushToUser,
 } from "@/lib/web-push";
 
 export const dynamic = "force-dynamic";
@@ -12,8 +12,11 @@ const readBody = async (req: Request): Promise<Record<string, unknown> | null> =
 };
 
 /** The public VAPID key, or 404 when push is not configured on this server. */
-export async function GET() {
-  if (!(await currentUser())) { return unauthorized(); }
+export async function GET(req: Request) {
+  const user = await currentUser();
+  if (!user) { return unauthorized(); }
+  const endpoint = new URL(req.url).searchParams.get("endpoint");
+  if (endpoint) { return Response.json({ registered: await isRegistered(user.id, endpoint) }); }
   const publicKey = pushPublicKey();
   return publicKey ? Response.json({ publicKey }) : Response.json({ error: "Push is not configured" }, { status: 404 });
 }
@@ -26,7 +29,7 @@ export async function PUT(req: Request) {
   const body = await readBody(req);
   const subscription = parseSubscription(body?.subscription);
   if (!body || !subscription) { return Response.json({ error: "A valid push subscription is required" }, { status: 400 }); }
-  await saveSubscription(user.id, subscription, parsePrefs(body.prefs), req.headers.get("user-agent"));
+  await saveSubscription(user.id, subscription, body.prefs === undefined ? null : parsePrefs(body.prefs), req.headers.get("user-agent"));
   return Response.json({ ok: true });
 }
 

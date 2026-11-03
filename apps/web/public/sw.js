@@ -6,11 +6,13 @@ self.addEventListener("push", (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { title: "ReBattery CRM", body: event.data ? event.data.text() : "" }; }
   event.waitUntil((async () => {
-    // A focused, visible window already shows the chat. iOS requires every push to display a notice, so it never skips.
-    const ios = /iphone|ipad|ipod/i.test(self.navigator.userAgent);
-    if (!ios && data.tag !== "test") {
+    // Skip only when a focused window already shows THIS chat. Apple browsers (iPhone, iPad, Mac) revoke
+    // subscriptions that receive pushes without a notice, so they always display.
+    const apple = /iphone|ipad|ipod|macintosh/i.test(self.navigator.userAgent);
+    if (!apple && data.chat) {
       const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      if (all.some((c) => c.visibilityState === "visible" && c.focused)) return;
+      const needle = encodeURIComponent(data.chat);
+      if (all.some((c) => c.visibilityState === "visible" && c.focused && (c.url.includes(needle) || c.url.includes(data.chat)))) return;
     }
     await self.registration.showNotification(data.title || "ReBattery CRM", {
       body: data.body || "",
@@ -20,6 +22,17 @@ self.addEventListener("push", (event) => {
       renotify: true,
       data: { url: data.url || "/" },
     });
+  })());
+});
+// The browser rotated the subscription: register the new one (the server keeps the device's prefs when none are sent).
+self.addEventListener("pushsubscriptionchange", (event) => {
+  event.waitUntil((async () => {
+    try {
+      const old = event.oldSubscription;
+      const sub = event.newSubscription || (old && await self.registration.pushManager.subscribe(old.options));
+      if (!sub) return;
+      await fetch("/api/push/subscription", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ subscription: sub.toJSON() }) });
+    } catch {}
   })());
 });
 self.addEventListener("notificationclick", (event) => {

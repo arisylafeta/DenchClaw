@@ -4,7 +4,7 @@ import { conversationTransition, type ConversationSeen } from "@/lib/hermes-chat
 import { bundledProfileAvatar } from "@/lib/profile-avatars";
 import { sendPushToUser, vapidConfig, type PushPayload } from "@/lib/web-push";
 
-const INTERVAL_MS = 10_000;
+const INTERVAL_MS = 15_000;
 
 type Row = {
   key: string; title?: string; profile?: string; source?: string; working?: boolean; blocked?: boolean;
@@ -20,8 +20,10 @@ export function pushFor(userId: string, was: ConversationSeen | undefined, row: 
     kind,
     title: row.title || profile || "ReBattery CRM",
     body: kind === "input" ? "Waiting for your input" : "Finished",
-    icon: (profile && bundledProfileAvatar(profile)) || (profile ? `/api/workspace/avatar?name=${encodeURIComponent(profile)}` : undefined),
+    // Only bundled avatars: the OS fetches the icon without the session cookie.
+    icon: profile ? bundledProfileAvatar(profile) : undefined,
     tag: `agent-${row.key}`,
+    chat: row.key,
     url: `/?chat=${encodeURIComponent(row.key)}`,
   };
 }
@@ -29,6 +31,7 @@ export function pushFor(userId: string, was: ConversationSeen | undefined, row: 
 const seen = new Map<string, Map<string, ConversationSeen>>();
 
 export async function watchOnce(): Promise<void> {
+  if (!vapidConfig()) { return; }
   const users = await queryPg<{ id: string; email: string; display_name: string }>(
     `select distinct u.id, u.email, u.display_name from crm_push_subscriptions s
        join crm_users u on u.id = s.user_id and u.is_active`,
@@ -54,7 +57,7 @@ export async function watchOnce(): Promise<void> {
 /** Server-side edge detection for chats, so finished/blocked chats notify devices whose app is closed. */
 export function startPushWatcher(): void {
   const g = globalThis as { __denchPushWatcher?: boolean };
-  if (g.__denchPushWatcher || !vapidConfig()) { return; }
+  if (g.__denchPushWatcher) { return; }
   g.__denchPushWatcher = true;
   let running = false;
   setInterval(() => {
