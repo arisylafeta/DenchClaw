@@ -177,6 +177,10 @@ describe("gateway chat service", () => {
     expect(socket.frames.find(frame => frame.method === "slash.exec")?.params).toEqual({ session_id: "runtime-one", profile: "ari", command: `/Help ${arg}` });
     expect(socket.frames.find(frame => frame.method === "command.dispatch")?.params).toEqual({ session_id: "runtime-one", profile: "ari", name: "help", arg });
     expect(socket.frames.filter(frame => frame.method === "session.resume")).toHaveLength(1);
+    socket.slashErrorCode = undefined;
+    await expect(service.slashExecute(key, { command: "/goal ship it" }, actor)).resolves.toBeDefined();
+    expect(socket.frames.filter(frame => frame.method === "slash.exec").at(-1)?.params).toMatchObject({ command: "/goal ship it" });
+    socket.slashErrorCode = 4018;
     await service.slashComplete(key, { text: "/exa" }, actor);
     expect(socket.frames.filter(frame => frame.method === "complete.slash").at(-1)?.params).toEqual({ text: "/exa", profile: "ari", session_id: "runtime-one" });
     socket.slashErrorCode = 4010;
