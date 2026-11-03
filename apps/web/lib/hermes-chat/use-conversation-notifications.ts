@@ -3,9 +3,8 @@ import { useEffect, useRef } from 'react'
 import { appIsBackgrounded, showAgentNotification } from '../agent-notify'
 import { bundledProfileAvatar } from '../profile-avatars'
 import type { HermesConversation } from '../hermes-conversations'
-import { conversationTransition } from './conversation-transitions'
+import { conversationTransition, seenOf, type ConversationSeen } from './conversation-transitions'
 
-type Seen = { working: boolean; blocked: boolean }
 
 /**
  * Notify for every listed chat that finishes or starts waiting for input, including chats whose
@@ -13,13 +12,13 @@ type Seen = { working: boolean; blocked: boolean }
  * you are looking at in a focused window stays quiet.
  */
 export function useConversationNotifications(rows: HermesConversation[] | undefined, selectedKey: string | undefined) {
-  const previous = useRef<Map<string, Seen> | null>(null)
+  const previous = useRef<Map<string, ConversationSeen> | null>(null)
   useEffect(() => {
     if (!rows) return
-    const next = new Map<string, Seen>()
+    const next = new Map<string, ConversationSeen>()
     const before = previous.current
     for (const row of rows) {
-      const now: Seen = { working: row.working === true, blocked: row.blocked === true }
+      const now = seenOf(row)
       next.set(row.key, now)
       const was = before?.get(row.key)
       if (!was || row.source === 'cron') continue
@@ -28,9 +27,9 @@ export function useConversationNotifications(rows: HermesConversation[] | undefi
       if (!kind) continue
       const profile = row.profile ?? row.participants[0]?.profile
       void showAgentNotification({
-        kind,
+        kind: kind === 'subagents' ? 'done' : kind,
         title: row.title || profile || 'ReBattery CRM',
-        body: kind === 'input' ? 'Waiting for your input' : 'Finished',
+        body: kind === 'input' ? 'Waiting for your input' : kind === 'subagents' ? 'Subagents finished' : 'Finished',
         icon: (profile && bundledProfileAvatar(profile)) || (profile ? `/api/workspace/avatar?name=${encodeURIComponent(profile)}` : undefined),
         tag: `agent-${row.key}`,
         url: '/',

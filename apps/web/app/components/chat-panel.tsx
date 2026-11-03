@@ -1428,7 +1428,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 			groupSending;
 		const runtimeStatus = nativeGateway ? (nativeChat.active ? "streaming" : "ready") : status;
 		useEffect(() => { isStreamingRef.current = isStreaming; }, [isStreaming]);
-		useAgentNotifications({ active: nativeGateway && nativeChat.active, messages: nativeChat.state.messages, conversationKey: nativeConversationKey, title: sessionTitle, profile: agentProfile });
+		useAgentNotifications({ active: nativeGateway && nativeChat.active, messages: nativeChat.state.messages, conversationKey: nativeConversationKey, title: sessionTitle, profile: agentProfile, subagentsRunning: nativeChat.state.subagents.items.some((item) => item.status === "queued" || item.status === "running") });
 
 		// Keep cloud catalog + primary model in sync (hero, session switches, and after
 		// completed turns — agent tools may change agents.defaults.model.primary).

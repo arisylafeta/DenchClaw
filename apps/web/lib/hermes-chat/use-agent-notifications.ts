@@ -11,6 +11,8 @@ interface Options {
   messages: ChatMessage[]
   conversationKey?: string
   title?: string
+  /** Subagents still working: a turn that ends then is a handoff, and the conversation listing reports them when done. */
+  subagentsRunning?: boolean
   /** Solo agent profile; its avatar becomes the notification icon. */
   profile?: string | null
 }
@@ -21,11 +23,11 @@ const clip = (text: string, max = 140) => {
 }
 
 /** Notify when a backgrounded app gets its first response text, and when the agent finishes. */
-export function useAgentNotifications({ active, messages, conversationKey, title, profile }: Options) {
+export function useAgentNotifications({ active, messages, conversationKey, title, profile, subagentsRunning }: Options) {
   const wasActive = useRef(false)
   const announcedStart = useRef(false)
-  const latest = useRef({ messages, conversationKey, title, profile })
-  latest.current = { messages, conversationKey, title, profile }
+  const latest = useRef({ messages, conversationKey, title, profile, subagentsRunning })
+  latest.current = { messages, conversationKey, title, profile, subagentsRunning }
 
   const lastAssistantText = () => {
     for (let i = latest.current.messages.length - 1; i >= 0; i--) {
@@ -51,7 +53,7 @@ export function useAgentNotifications({ active, messages, conversationKey, title
   useEffect(() => {
     if (active && !wasActive.current) announcedStart.current = false
     if (!active && wasActive.current) {
-      if (appIsBackgrounded()) notify('done', clip(lastAssistantText()) || 'Finished')
+      if (appIsBackgrounded() && !latest.current.subagentsRunning) notify('done', clip(lastAssistantText()) || 'Finished')
       announcedStart.current = false
     }
     wasActive.current = active
