@@ -37,11 +37,11 @@ function Card({ row, today, onOpen }: { row: SheetRow; today: string; onOpen: (r
         <span className="flex items-start gap-2">
           <ScoreCircle score={row.score} size={24} />
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="text-[12px] font-medium leading-snug [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden" style={{ color: "var(--bt-muted)" }}>{row.title}</span>
             <span className="flex min-w-0 items-center gap-1.5">
               <SideChip side={row.side} />
               {row.company && <span className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight">{row.company}</span>}
             </span>
+            <span className="text-[12px] font-medium leading-snug [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden" style={{ color: "var(--bt-muted)" }}>{row.title}</span>
           </span>
           <span data-card-owner><DriverAvatar owner={row.owner} /></span>
         </span>
