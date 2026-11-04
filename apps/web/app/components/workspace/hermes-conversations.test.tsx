@@ -354,7 +354,7 @@ describe("conversation privacy controls", () => {
     sessions = [solo, group, { ...solo, key: "unknown", title: "Unknown access", access: undefined }, { ...solo, key: "foreign", title: "Foreign private", access: { ...access, ownerId: "other" } }];
     const user = userEvent.setup(); render(<Harness2 />);
     expect(within(await screen.findByRole("region", { name: "My chats" })).getByText(solo.title)).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Shared" })).getByText(group.title)).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Shared · Groups" })).getByText(group.title)).toBeInTheDocument();
     expect(screen.queryByText("Unknown access")).not.toBeInTheDocument();
     expect(screen.queryByText("Foreign private")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "More options for Shared room" }));

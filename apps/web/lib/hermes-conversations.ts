@@ -117,7 +117,7 @@ export function applyChatView(rows: HermesConversation[], view: ChatView, query:
     const base = scope === "mine" ? "My chats" : "Shared";
     const bucket = pins.has(row.key) ? { key: "pinned", label: "Pinned" }
       : automation(row) ? { key: "automation", label: `${base} · Automation` }
-      : detail.key === "chats" || detail.key === "group" ? { key: scope, label: base }
+      : detail.key === "chats" ? { key: scope, label: base }
       : { key: `${scope}:${detail.key}`, label: `${base} · ${detail.label}` };
     const section = sections.get(bucket.key) ?? { ...bucket, rows: [] };
     section.rows.push(row); sections.set(bucket.key, section);

@@ -6,7 +6,7 @@ it("orders source sections, keeps native groups distinct and emits each composit
   const rows = [row("cron"), row("whatsapp"), row("discord"), row("web"), row("discord", "beta"), row("telegram"), { ...row("group"), kind: "group" as const }];
   const view = { ...DEFAULT_VIEW, pins: [rows[2].key] };
   const result = applyChatView([...rows, rows[2]], view, "");
-  expect(result.sections.map((s) => s.label)).toEqual(["Pinned", "My chats", "Shared", "Shared · Telegram", "Shared · WhatsApp", "Shared · Discord", "Shared · Automation"]);
+  expect(result.sections.map((s) => s.label)).toEqual(["Pinned", "My chats", "Shared · Groups", "Shared · Telegram", "Shared · WhatsApp", "Shared · Discord", "Shared · Automation"]);
   const keys = result.sections.flatMap((s) => s.rows.map((r) => r.key));
   expect(new Set(keys).size).toBe(rows.length); expect(keys).toHaveLength(rows.length);
   expect(result.sections.find((s) => s.key === "shared:discord")?.rows[0].profile).toBe("beta");
