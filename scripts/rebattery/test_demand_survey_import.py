@@ -162,6 +162,26 @@ class ReviewedRows(unittest.TestCase):
 TEST_URL = os.environ.get("BULK_TRADES_TEST_DATABASE_URL")
 
 
+class QuantityAndDateRule(unittest.TestCase):
+    """A qualifying ask needs a quantity and a timing; the timing may be top-level or in the spec."""
+
+    def test_matrix(self):
+        cases = [
+            ("quantity only", {"quantity": "10 packs"}, False),
+            ("timing only", {"timing": "Q1 2027"}, False),
+            ("neither", {}, False),
+            ("both", {"quantity": "10 packs", "timing": "Q1 2027"}, True),
+            ("both, with needed_by", {"quantity": 5, "needed_by": "2026-12-01"}, True),
+            ("timing inside the spec", {"quantity": "10 packs", "spec": {"timing": "Q1 2027"}}, True),
+            ("needed_by inside the spec", {"quantity": "10 packs", "spec": {"needed_by": "2026-12-01"}}, True),
+            ("empty values are not a date", {"quantity": "10 packs", "timing": "", "spec": {"needed_by": ""}}, False),
+            ("a quantity of zero is not a quantity", {"quantity": 0, "timing": "Q1 2027"}, False),
+        ]
+        for name, row, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(survey.has_quantity_and_date(row), expected)
+
+
 @unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
 class Writing(unittest.TestCase):
     def test_stated_profile_preserves_constraints_and_attributed_note_criteria(self):
@@ -305,6 +325,23 @@ class Writing(unittest.TestCase):
         conn.close()
         self.assertEqual(saved["buyer_profile_basis"], "researched")
         self.assertEqual(saved["buyer_profile"]["wants"], "EV modules")
+
+
+    def test_spec_needed_by_still_makes_it_a_qualifying_ask(self):
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(TEST_URL)
+        with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("insert into crm_companies (id, name) values ('co_spec_date', 'Spec Date Ltd') on conflict do nothing")
+            row = {"company_id": "co_spec_date", "wants": "Leaf packs", "quantity": "10 packs", "kind": "request",
+                   "spec": {"needed_by": "2026-12-01"}, "source_kind": "survey", "source_id": "criteria:spec-date"}
+            row = survey.link(cur, row)
+            self.assertEqual(row["buyer"], "Spec Date Ltd")
+            self.assertTrue(survey.insert(cur, row))
+            cur.execute("select status, quantity from crm_bulk_demand where source_id = 'criteria:spec-date'")
+            saved = cur.fetchone()
+        conn.close()
+        self.assertEqual((saved["status"], saved["quantity"]), ("qualifying", "10 packs"))
 
 
 @unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")

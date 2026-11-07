@@ -419,16 +419,35 @@ COLUMNS = ["status", "product_family", "reputation", "kind", "basis", "buyer", "
            "confirmed_on", "source_kind", "source_id", "source_label", "source_url", "source_quote"]
 
 
+def timing_value(row):
+    """The buyer's timing: a window or a date, at the top level or inside the spec a reviewed row carries.
+
+    Every mapper sets it at the top level; a research row may put `needed_by` in `spec`. Either counts.
+    """
+    spec = row.get("spec") if isinstance(row.get("spec"), dict) else {}
+    for source in (row, spec):
+        for key in ("timing", "needed_by"):
+            value = source.get(key)
+            if value not in (None, "", [], {}):
+                return value
+    return None
+
+
+def has_quantity_and_date(row):
+    """Only a quantity and a timing together make a qualifying ask; either alone is standing interest."""
+    return bool(row.get("quantity")) and timing_value(row) is not None
+
+
 def insert(cur, row):
     """Adds the row unless its source is already in (then only a still-unfinished survey answer is refreshed).
     Returns True when a row was added or refreshed."""
     # A demand row needs a quantity and a date. Anything else is standing interest: it belongs on the
     # profile (or, for a company with a dossier, on the dossier's stale list), never on qualifying demand.
-    has_quantity_and_date = bool(row.get("quantity")) and bool(row.get("timing") or row.get("needed_by"))
+    qualifies = has_quantity_and_date(row)
     sourcing_request = str(row.get("source_id", "")).startswith("sourcing_request:")
     profile_only = (row.get("source_id", "").startswith("saved_search:") or row.get("source_kind") == "research"
-                    or (row.get("source_kind") == "survey" and not has_quantity_and_date)
-                    or (sourcing_request and not has_quantity_and_date))
+                    or (row.get("source_kind") == "survey" and not qualifies)
+                    or (sourcing_request and not qualifies))
     if profile_only:
         return merge_profile(cur, row, "researched" if row.get("source_kind") == "research" else "stated")
     row = {**row, "status": "qualifying", "product_family": family_key(row.get("product_family") or row["wants"]),
