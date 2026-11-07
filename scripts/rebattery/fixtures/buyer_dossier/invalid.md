@@ -4,6 +4,7 @@ company: "Broken Fixture Ltd"
 buyer_type: reseller
 colour: red
 origins: [Germany, D1]
+source_countries: [DEU, "de"]
 min_soh: 120
 needs_continuity: "yes"
 timing:

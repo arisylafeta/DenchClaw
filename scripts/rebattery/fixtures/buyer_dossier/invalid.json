@@ -8,6 +8,10 @@
       "Germany",
       "D1"
     ],
+    "source_countries": [
+      "DEU",
+      "de"
+    ],
     "min_soh": 120,
     "needs_continuity": "yes",
     "timing": {
@@ -42,13 +46,14 @@
   },
   "body": "Body text.\n",
   "errors": [
-    "colour: unknown top-level key (allowed: company_id, company, buyer_type, intent, countries, products, rules_out, substitution, price, evidence_required, quantity, logistics, capability, decision_speed, last_verified, conflicts, alerts, needs_continuity, timing, origins, min_soh)",
+    "colour: unknown top-level key (allowed: company_id, company, buyer_type, intent, countries, products, rules_out, substitution, price, evidence_required, quantity, logistics, capability, decision_speed, last_verified, conflicts, alerts, needs_continuity, timing, origins, source_countries, min_soh)",
     "buyer_type: 'reseller' is not a valid buyer_type (integrator, trader, recycler, module_builder, rnd, oem, other)",
     "needs_continuity: must be true, false or null, got 'yes'",
     "timing.window: unknown key (allowed: max_lead_days, notes)",
     "timing.max_lead_days: must be a whole number of days, got 2.5",
-    "origins[0]: 'Germany' is not an ISO-2 country code",
-    "origins[1]: 'D1' is not an ISO-2 country code",
+    "origins[0]: 'Germany' is not a valid origin (Passenger EV, Bus or truck, Stationary storage, Industrial, Consumer or other)",
+    "origins[1]: 'D1' is not a valid origin (Passenger EV, Bus or truck, Stationary storage, Industrial, Consumer or other)",
+    "source_countries[0]: 'DEU' is not an ISO-2 country code",
     "min_soh: 120 is outside 0-100",
     "rules_out.chemistries[1]: 'Lead acid' is not a valid chemistry (LFP, NMC, NCA, LMO, LMFP, LTO, Sodium-ion, Lead-acid, Mixed)",
     "rules_out.damaged: must be true, false or null, got 'no'",

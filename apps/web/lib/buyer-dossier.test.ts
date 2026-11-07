@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { deriveProfile, mergeDerivedProfile, parseDossier, stableStringify, validateDossier } from "./buyer-dossier";
+import { TEST_REGISTRY } from "./bulk-registry.fixture";
+import { ORIGINS, deriveProfile, mergeDerivedProfile, parseDossier, stableStringify, validateDossier } from "./buyer-dossier";
 
 // The same fixtures drive scripts/rebattery/test_buyer_dossier.py, so the TypeScript and Python
 // implementations cannot drift silently. Synthetic companies only: no real company data in git.
@@ -122,6 +123,9 @@ describe("merge parity with scripts/rebattery/buyer_dossier.py", () => {
       "pass-through keys survive and derived keys are replaced",
       "the same dossier over its own derived profile changes nothing",
       "a derived key the dossier no longer states is dropped, not kept stale",
+      "the kwh range comes from the asks, not an older smaller purchase",
+      "with no capacity in the asks the range falls back to what they bought",
+      "origins is the application origin and source countries stay in the dossier",
     ]);
   });
 
@@ -137,7 +141,50 @@ describe("merge parity with scripts/rebattery/buyer_dossier.py", () => {
   }
 });
 
+describe("derive", () => {
+  it("derives the range from the asks even when an older purchase is smaller", () => {
+    const frontmatter = parseDossier(`---
+company_id: connected-energy-like
+products:
+  - format: packs
+    chemistry: LFP
+    kwh: [30]
+    status: asked
+  - make: Renault
+    format: packs
+    chemistry: LMO
+    kwh: [22]
+    status: bought
+---
+`).frontmatter;
+    const profile = deriveProfile(frontmatter);
+    expect([profile.kwh_min, profile.kwh_max]).toEqual([30, 30]);
+  });
+
+  it("keeps source countries out of the flat profile", () => {
+    const profile = deriveProfile(parseDossier(
+      "---\ncompany_id: x\norigins: ['bus or truck', 'Passenger EV']\nsource_countries: [FR, DE]\n---\n",
+    ).frontmatter);
+    expect(profile.origins).toEqual(["Passenger EV", "Bus or truck"]);
+    expect(profile).not.toHaveProperty("source_countries");
+  });
+});
+
 describe("dossier validation", () => {
+  it("keeps the origin vocabulary identical to the attribute registry", () => {
+    // `origins` in the buy box is the battery's application origin, seeded by migration 064.
+    expect(ORIGINS).toEqual(TEST_REGISTRY.specLists.origins);
+  });
+
+  it("rejects a country in origins and an ISO-2 code that is not a country", () => {
+    const errors = validateDossier(
+      parseDossier("---\ncompany_id: x\norigins: [DE, 'Passenger EV']\nsource_countries: [DEU, de]\n---\n").frontmatter,
+    );
+    expect(errors.some((error) => error.startsWith("origins[0]:"))).toBe(true);
+    expect(errors.some((error) => error.startsWith("source_countries[0]:"))).toBe(true);
+    expect(errors.some((error) => error.startsWith("source_countries[1]:"))).toBe(false);
+  });
+
   it("requires company_id and keeps it text", () => {
     expect(validateDossier(parseDossier("---\ncompany: no id\n---\n").frontmatter)).toContain(
       "company_id: required (the company the dossier belongs to)",

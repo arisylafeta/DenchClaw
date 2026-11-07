@@ -20,6 +20,9 @@ import { parse as parseYaml } from "yaml";
 // compares formats exactly and chemistries upper-cased.
 export const CHEMISTRIES = ["LFP", "NMC", "NCA", "LMO", "LMFP", "LTO", "Sodium-ion", "Lead-acid", "Mixed"];
 export const FORMATS = ["Cells", "Modules", "Packs", "Systems"];
+// `origins` is the battery's application origin in the buy box (attribute key `origins`, kind 'set'),
+// not the country the goods come from: that is `source_countries`, which stays dossier-only.
+export const ORIGINS = ["Passenger EV", "Bus or truck", "Stationary storage", "Industrial", "Consumer or other"];
 export const MAKES = [
   "Tesla", "VW Group", "Renault", "Nissan", "Hyundai or Kia", "BMW or Mini", "Mercedes-Benz",
   "Stellantis", "Ford", "GM", "BYD", "MG or SAIC", "Volvo or Polestar", "JLR", "Toyota or Lexus",
@@ -35,6 +38,8 @@ const BUYER_TYPES = ["integrator", "trader", "recycler", "module_builder", "rnd"
 const INTENTS = ["reuse", "repair", "cells", "recycling"];
 const PRODUCT_STATUSES = ["bought", "asked", "said_interested", "declined"];
 const ACTIVE_STATUSES = new Set(["bought", "asked", "said_interested"]);
+// What they want now, as opposed to what they once bought: the kWh range prefers these.
+const ASK_STATUSES = new Set(["asked", "said_interested"]);
 const CELL_FORMATS = ["18650", "21700", "prismatic", "pouch", "Cylindrical"];
 const CADENCES = ["one_off", "repeat", "standing"];
 const COLLECTS = ["own_haulier", "needs_delivery", "either"];
@@ -49,7 +54,7 @@ export const TOP_LEVEL_KEYS = [
   "company_id", "company", "buyer_type", "intent", "countries", "products", "rules_out",
   "substitution", "price", "evidence_required", "quantity", "logistics", "capability",
   "decision_speed", "last_verified", "conflicts", "alerts",
-  "needs_continuity", "timing", "origins", "min_soh",
+  "needs_continuity", "timing", "origins", "source_countries", "min_soh",
 ];
 const PRODUCT_KEYS = [
   "part_number", "platform", "make", "model", "format", "chemistry", "kwh", "module_series",
@@ -260,6 +265,22 @@ function checkList(errors: string[], where: string, value: unknown, allowed: str
   value.forEach((item, index) => checkEnum(errors, `${where}[${index}]`, item, allowed, label));
 }
 
+/** An ISO-2 country-code list (dossier `source_countries`), or nothing stated. */
+function checkCountryList(errors: string[], where: string, value: unknown): void {
+  if (value === null || value === undefined) {
+    return;
+  }
+  if (!Array.isArray(value)) {
+    errors.push(`${where}: must be a list of ISO-2 country codes`);
+    return;
+  }
+  value.forEach((code, index) => {
+    if (typeof code !== "string" || !/^[A-Za-z]{2}$/.test(code.trim())) {
+      errors.push(`${where}[${index}]: ${pyRepr(code)} is not an ISO-2 country code`);
+    }
+  });
+}
+
 /** The value of a rules_out or evidence_required entry: a plain string, or its {value, ...} mapping. */
 function entryValue(item: unknown): string | null {
   if (isRecord(item)) {
@@ -365,17 +386,8 @@ export function validateDossier(frontmatter: unknown): string[] {
   }
 
   const origins = fm.origins;
-  if (origins !== null && origins !== undefined) {
-    if (!Array.isArray(origins)) {
-      errors.push("origins: must be a list of ISO-2 country codes");
-    } else {
-      origins.forEach((origin, index) => {
-        if (typeof origin !== "string" || !/^[A-Za-z]{2}$/.test(origin.trim())) {
-          errors.push(`origins[${index}]: ${pyRepr(origin)} is not an ISO-2 country code`);
-        }
-      });
-    }
-  }
+  checkList(errors, "origins", origins, ORIGINS, "origin");
+  checkCountryList(errors, "source_countries", fm.source_countries);
 
   const minSoh = fm.min_soh;
   if (minSoh !== null && minSoh !== undefined) {
@@ -677,9 +689,14 @@ function wantsLine(product: Json): string {
  *
  * Products that are bought, asked or said_interested drive the buy box. Declined products are
  * history and are excluded. `rules_out` removes a chemistry or format; its entries are plain values
- * or {value, seen, src} mappings, and only the value matters here. `origins` and `min_soh` pass
- * through under their own flat names because the readers already understand them, and are left out
- * when the dossier does not state them. Deterministic: same frontmatter, same output.
+ * or {value, seen, src} mappings, and only the value matters here.
+ *
+ * The kWh range comes from what they asked for or said they were interested in; only when no such
+ * product states a capacity does it fall back to what they bought, so an older, smaller purchase
+ * does not lower the minimum they now ask for. `origins` is the battery's application origin, one
+ * of the registry's origin values, and flattens under the same name; `source_countries` is where the
+ * goods come from and stays in the dossier copy only. `min_soh` also passes through flat.
+ * Deterministic: same frontmatter, same output.
  */
 export function deriveProfile(frontmatter: unknown): Json {
   const fm = asDict(jsonable(frontmatter ?? {}));
@@ -703,7 +720,6 @@ export function deriveProfile(frontmatter: unknown): Json {
   const makes: string[] = [];
   const cellMakers: string[] = [];
   const partNumbers: string[] = [];
-  const kwh: number[] = [];
   const wants: string[] = [];
 
   for (const product of active) {
@@ -730,10 +746,16 @@ export function deriveProfile(frontmatter: unknown): Json {
     if (typeof partNumber === "string" && partNumber.trim() && !partNumbers.includes(partNumber.trim())) {
       partNumbers.push(partNumber.trim());
     }
-    kwh.push(...kwhValues(product));
     const line = wantsLine(product);
     if (!wants.includes(line)) {wants.push(line);}
   }
+
+  const askedKwh = products
+    .filter((product) => ASK_STATUSES.has(String(product.status)))
+    .flatMap(kwhValues);
+  const kwh = askedKwh.length
+    ? askedKwh
+    : products.filter((product) => String(product.status) === "bought").flatMap(kwhValues);
 
   const makeOrder = new Map(MAKES.map((value, index) => [value, index]));
   makes.sort((a, b) => (makeOrder.get(a) ?? MAKES.length) - (makeOrder.get(b) ?? MAKES.length));
@@ -759,13 +781,19 @@ export function deriveProfile(frontmatter: unknown): Json {
     dossier: fm,
   };
 
-  // Sourcing origins and a minimum SoH have flat names the readers already look for.
+  // Application origin and a minimum SoH have flat names the readers already look for.
+  // Only registry values survive; anything else is a validation error before a save.
   const origins: string[] = [];
   for (const origin of Array.isArray(fm.origins) ? fm.origins : []) {
-    const code = typeof origin === "string" ? origin.trim().toUpperCase() : "";
-    if (/^[A-Z]{2}$/.test(code) && !origins.includes(code)) {origins.push(code);}
+    const value = canonical(origin, ORIGINS);
+    if (value && !origins.includes(value)) {origins.push(value);}
   }
-  if (origins.length) {profile.origins = origins;}
+  if (origins.length) {
+    const originOrder = new Map(ORIGINS.map((value, index) => [value, index]));
+    profile.origins = origins.toSorted(
+      (a, b) => (originOrder.get(a) ?? ORIGINS.length) - (originOrder.get(b) ?? ORIGINS.length),
+    );
+  }
   const minSoh = fm.min_soh;
   if (isNumber(minSoh)) {profile.min_soh = Number.isInteger(minSoh) ? minSoh : minSoh;}
   return profile;

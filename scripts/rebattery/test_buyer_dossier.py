@@ -183,18 +183,28 @@ class ValidateTests(unittest.TestCase):
         self.assertTrue(any("alerts[0].frequency" in e for e in bd.validate(frontmatter)))
 
     def test_continuity_timing_origins_and_min_soh_are_accepted(self):
-        frontmatter = parse_valid(needs_continuity=True, origins=["DE", "pl"], min_soh=70,
+        frontmatter = parse_valid(needs_continuity=True, origins=["Passenger EV", "bus or truck"],
+                                  source_countries=["DE", "pl"], min_soh=70,
                                   timing={"max_lead_days": 30, "notes": "wants stock within a month"})
         self.assertEqual(bd.validate(frontmatter), [])
 
     def test_new_keys_reject_wrong_values(self):
-        errors = bd.validate(parse_valid(needs_continuity="yes", origins=["DEU"], min_soh=120))
+        errors = bd.validate(parse_valid(needs_continuity="yes", origins=["Germany"], min_soh=120))
         self.assertTrue(any(e.startswith("needs_continuity:") for e in errors), errors)
         self.assertTrue(any(e.startswith("origins[0]:") for e in errors), errors)
         self.assertTrue(any("min_soh" in e and "outside 0-100" in e for e in errors), errors)
         errors = bd.validate(parse_valid(origins="DE", min_soh="80"))
         self.assertTrue(any(e.startswith("origins: must be a list") for e in errors), errors)
         self.assertTrue(any(e.startswith("min_soh: must be a number") for e in errors), errors)
+
+    def test_origins_is_an_application_origin_and_source_countries_is_iso2(self):
+        # A country in `origins` is a real mistake: the buy box reads it as the battery's application.
+        errors = bd.validate(parse_valid(origins=["DE"], source_countries=["DEU", "D"]))
+        self.assertTrue(any(e.startswith("origins[0]:") for e in errors), errors)
+        self.assertTrue(any(e.startswith("source_countries[0]:") for e in errors), errors)
+        self.assertTrue(any(e.startswith("source_countries[1]:") for e in errors), errors)
+        self.assertTrue(any(e.startswith("source_countries: must be a list") for e in
+                            bd.validate(parse_valid(source_countries="DE"))))
 
     def test_timing_rejects_unknown_keys_and_bad_lead(self):
         errors = bd.validate(parse_valid(timing={"max_lead_days": "ten", "sla": 3}))
@@ -234,18 +244,52 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(self.profile["makes"], ["VW Group"])
         self.assertEqual(self.profile["cell_makers"], ["CALB"])
         self.assertEqual(self.profile["part_numbers"], [])
+        # The range is what they ask for (CALB 0.23 kWh), not the 82 kWh pack they once bought.
         self.assertEqual(self.profile["kwh_min"], 0.23)
-        self.assertEqual(self.profile["kwh_max"], 82)
+        self.assertEqual(self.profile["kwh_max"], 0.23)
 
     def test_no_invented_origins_or_min_soh(self):
         self.assertNotIn("origins", self.profile)
         self.assertNotIn("min_soh", self.profile)
 
     def test_origins_and_min_soh_map_to_flat_keys(self):
-        frontmatter = parse_valid(origins=["de", "PL"], min_soh=70)
+        frontmatter = parse_valid(origins=["bus or truck", "Passenger EV"], min_soh=70,
+                                  source_countries=["DE", "PL"])
         profile = bd.to_buyer_profile(frontmatter)
-        self.assertEqual(profile["origins"], ["DE", "PL"])
+        # Registry spelling and registry order, whatever order the dossier lists them in.
+        self.assertEqual(profile["origins"], ["Passenger EV", "Bus or truck"])
         self.assertEqual(profile["min_soh"], 70)
+        # Where the goods come from is not a buy-box value: it stays in the dossier copy only.
+        self.assertNotIn("source_countries", profile)
+        self.assertEqual(profile["dossier"]["source_countries"], ["DE", "PL"])
+
+    def test_a_country_in_origins_is_not_derived(self):
+        profile = bd.to_buyer_profile(parse_valid(origins=["DE", "PL"]))
+        self.assertNotIn("origins", profile)
+
+    def test_kwh_range_prefers_the_asks_over_an_older_smaller_purchase(self):
+        frontmatter = parse_valid(products=[
+            {"format": "packs", "chemistry": "LFP", "kwh": [30], "status": "asked"},
+            {"make": "Renault", "format": "packs", "chemistry": "LMO", "kwh": [22], "status": "bought"},
+        ])
+        profile = bd.to_buyer_profile(frontmatter)
+        self.assertEqual((profile["kwh_min"], profile["kwh_max"]), (30, 30))
+
+    def test_kwh_range_falls_back_to_bought_when_no_ask_states_a_capacity(self):
+        frontmatter = parse_valid(products=[
+            {"make": "BYD", "format": "systems", "status": "said_interested"},
+            {"make": "Renault", "format": "packs", "chemistry": "LMO", "kwh": [22], "status": "bought"},
+        ])
+        profile = bd.to_buyer_profile(frontmatter)
+        self.assertEqual((profile["kwh_min"], profile["kwh_max"]), (22, 22))
+
+    def test_a_declined_product_never_sets_the_range(self):
+        frontmatter = parse_valid(products=[
+            {"make": "Tesla", "format": "packs", "chemistry": "NMC", "kwh": [75], "status": "declined"},
+            {"make": "Renault", "format": "packs", "chemistry": "LMO", "kwh": [22], "status": "bought"},
+        ])
+        profile = bd.to_buyer_profile(frontmatter)
+        self.assertEqual((profile["kwh_min"], profile["kwh_max"]), (22, 22))
 
     def test_dated_rules_out_entry_still_removes_chemistry(self):
         frontmatter = parse_valid()
@@ -455,6 +499,9 @@ class MergeFixtureTests(unittest.TestCase):
             "pass-through keys survive and derived keys are replaced",
             "the same dossier over its own derived profile changes nothing",
             "a derived key the dossier no longer states is dropped, not kept stale",
+            "the kwh range comes from the asks, not an older smaller purchase",
+            "with no capacity in the asks the range falls back to what they bought",
+            "origins is the application origin and source countries stay in the dossier",
         ])
 
     def test_merge_matches_the_expected_profile(self):

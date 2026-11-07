@@ -33,6 +33,9 @@ import yaml
 # compares formats exactly and chemistries upper-cased.
 CHEMISTRIES = ["LFP", "NMC", "NCA", "LMO", "LMFP", "LTO", "Sodium-ion", "Lead-acid", "Mixed"]
 FORMATS = ["Cells", "Modules", "Packs", "Systems"]
+# `origins` is the battery's application origin in the buy box (attribute key `origins`, kind 'set'),
+# not the country the goods come from: that is `source_countries`, which stays dossier-only.
+ORIGINS = ["Passenger EV", "Bus or truck", "Stationary storage", "Industrial", "Consumer or other"]
 MAKES = [
     "Tesla", "VW Group", "Renault", "Nissan", "Hyundai or Kia", "BMW or Mini", "Mercedes-Benz",
     "Stellantis", "Ford", "GM", "BYD", "MG or SAIC", "Volvo or Polestar", "JLR", "Toyota or Lexus",
@@ -47,6 +50,8 @@ BUYER_TYPES = ["integrator", "trader", "recycler", "module_builder", "rnd", "oem
 INTENTS = ["reuse", "repair", "cells", "recycling"]
 PRODUCT_STATUSES = ["bought", "asked", "said_interested", "declined"]
 ACTIVE_STATUSES = ["bought", "asked", "said_interested"]
+# What they want now, as opposed to what they once bought: the kWh range prefers these.
+ASK_STATUSES = ["asked", "said_interested"]
 CELL_FORMATS = ["18650", "21700", "prismatic", "pouch", "Cylindrical"]
 CADENCES = ["one_off", "repeat", "standing"]
 COLLECTS = ["own_haulier", "needs_delivery", "either"]
@@ -61,7 +66,7 @@ TOP_LEVEL_KEYS = [
     "company_id", "company", "buyer_type", "intent", "countries", "products", "rules_out",
     "substitution", "price", "evidence_required", "quantity", "logistics", "capability",
     "decision_speed", "last_verified", "conflicts", "alerts",
-    "needs_continuity", "timing", "origins", "min_soh",
+    "needs_continuity", "timing", "origins", "source_countries", "min_soh",
 ]
 PRODUCT_KEYS = [
     "part_number", "platform", "make", "model", "format", "chemistry", "kwh", "module_series",
@@ -168,6 +173,18 @@ def _check_list(errors, where, value, allowed=None, label="value"):
         _check_enum(errors, f"{where}[{i}]", item, allowed, label)
 
 
+def _check_country_list(errors, where, value):
+    """An ISO-2 country-code list (dossier `source_countries`), or nothing stated."""
+    if value is None:
+        return
+    if not isinstance(value, list):
+        errors.append(f"{where}: must be a list of ISO-2 country codes")
+        return
+    for i, code in enumerate(value):
+        if not isinstance(code, str) or not re.fullmatch(r"[A-Za-z]{2}", code.strip()):
+            errors.append(f"{where}[{i}]: {code!r} is not an ISO-2 country code")
+
+
 def entry_value(item):
     """The value of a rules_out or evidence_required entry: a plain string, or its {value, ...} mapping."""
     if isinstance(item, dict):
@@ -252,13 +269,8 @@ def validate(frontmatter):
             errors.append(f"timing.notes: must be text, got {type(notes).__name__}")
 
     origins = frontmatter.get("origins")
-    if origins is not None:
-        if not isinstance(origins, list):
-            errors.append("origins: must be a list of ISO-2 country codes")
-        else:
-            for i, origin in enumerate(origins):
-                if not isinstance(origin, str) or not re.fullmatch(r"[A-Za-z]{2}", origin.strip()):
-                    errors.append(f"origins[{i}]: {origin!r} is not an ISO-2 country code")
+    _check_list(errors, "origins", origins, ORIGINS, "origin")
+    _check_country_list(errors, "source_countries", frontmatter.get("source_countries"))
 
     min_soh = frontmatter.get("min_soh")
     if min_soh is not None:
@@ -506,9 +518,14 @@ def to_buyer_profile(frontmatter):
 
     Products that are bought, asked or said_interested drive the buy box. Declined products are
     history and are excluded. `rules_out` removes a chemistry or format; its entries are plain
-    values or {value, seen, src} mappings, and only the value matters here. `origins` and `min_soh`
-    pass through under their own flat names because the readers already understand them, and are
-    left out when the dossier does not state them. Deterministic: same frontmatter, same output.
+    values or {value, seen, src} mappings, and only the value matters here.
+
+    The kWh range comes from what they asked for or said they were interested in; only when no such
+    product states a capacity does it fall back to what they bought, so an older, smaller purchase
+    does not lower the minimum they now ask for. `origins` is the battery's application origin, one
+    of the registry's origin values, and flattens under the same name; `source_countries` is where
+    the goods come from and stays in the dossier copy only. `min_soh` also passes through flat.
+    Deterministic: same frontmatter, same output.
     """
     frontmatter = _as_dict(_jsonable(frontmatter or {}))
     products = [p for p in (frontmatter.get("products") or []) if isinstance(p, dict)]
@@ -519,7 +536,6 @@ def to_buyer_profile(frontmatter):
     blocked_formats = {_canonical(entry_value(f), FORMATS) for f in (rules_out.get("formats") or [])}
 
     chemistries, formats, makes, cell_makers, part_numbers = [], [], [], [], []
-    kwh = []
     wants = []
 
     for product in active:
@@ -539,10 +555,15 @@ def to_buyer_profile(frontmatter):
         part_number = product.get("part_number")
         if isinstance(part_number, str) and part_number.strip() and part_number.strip() not in part_numbers:
             part_numbers.append(part_number.strip())
-        kwh.extend(_kwh_values(product))
         line = _wants_line(product)
         if line not in wants:
             wants.append(line)
+
+    asked = [p for p in products if p.get("status") in ASK_STATUSES]
+    kwh = [value for product in asked for value in _kwh_values(product)]
+    if not kwh:
+        kwh = [value for product in products if product.get("status") == "bought"
+               for value in _kwh_values(product)]
 
     order = {value: i for i, value in enumerate(MAKES)}
     makes.sort(key=lambda m: order.get(m, len(order)))
@@ -569,14 +590,16 @@ def to_buyer_profile(frontmatter):
         if profile[key] is not None and float(profile[key]).is_integer():
             profile[key] = int(profile[key])
 
-    # Sourcing origins and a minimum SoH have flat names the readers already look for.
+    # Application origin and a minimum SoH have flat names the readers already look for.
+    # Only registry values survive; anything else is a validation error before a save.
     origins = []
     for origin in frontmatter.get("origins") or []:
-        code = origin.strip().upper() if isinstance(origin, str) else ""
-        if re.fullmatch(r"[A-Z]{2}", code) and code not in origins:
-            origins.append(code)
+        value = _canonical(origin, ORIGINS)
+        if value and value not in origins:
+            origins.append(value)
     if origins:
-        profile["origins"] = origins
+        order = {value: i for i, value in enumerate(ORIGINS)}
+        profile["origins"] = sorted(origins, key=lambda o: order.get(o, len(order)))
     min_soh = frontmatter.get("min_soh")
     if isinstance(min_soh, (int, float)) and not isinstance(min_soh, bool):
         profile["min_soh"] = int(min_soh) if float(min_soh).is_integer() else float(min_soh)

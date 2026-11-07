@@ -5,7 +5,8 @@ buyer_type: module_builder
 intent: [reuse, cells]
 countries: [DE, NL]
 needs_continuity: true
-origins: [DE, PL, "cz"]
+origins: ["Passenger EV", "bus or truck"]
+source_countries: [DE, PL, "cz"]
 min_soh: 60
 products:
   - platform: MEB

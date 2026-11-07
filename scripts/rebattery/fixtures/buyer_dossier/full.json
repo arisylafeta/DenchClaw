@@ -13,6 +13,10 @@
     ],
     "needs_continuity": true,
     "origins": [
+      "Passenger EV",
+      "bus or truck"
+    ],
+    "source_countries": [
       "DE",
       "PL",
       "cz"
@@ -181,7 +185,7 @@
       "5WA915233"
     ],
     "kwh_min": 2.6,
-    "kwh_max": 82,
+    "kwh_max": 60,
     "wants": "MEB 82 kWh packs (bought 2026-06-15)\nMG, Stellantis, Tesla 40-60 kWh packs (asked 2026-07-01)\nStellantis / FPT / Kokam 2.6 kWh modules (said interested)",
     "dossier": {
       "company_id": "company-synthetic-1",
@@ -197,6 +201,10 @@
       ],
       "needs_continuity": true,
       "origins": [
+        "Passenger EV",
+        "bus or truck"
+      ],
+      "source_countries": [
         "DE",
         "PL",
         "cz"
@@ -342,9 +350,8 @@
       ]
     },
     "origins": [
-      "DE",
-      "PL",
-      "CZ"
+      "Passenger EV",
+      "Bus or truck"
     ],
     "min_soh": 60
   }

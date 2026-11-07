@@ -5,7 +5,9 @@
       "existing": {
         "evidence_url": "https://example.test/a",
         "custom_note": "keep me",
-        "chemistries": ["LTO"],
+        "chemistries": [
+          "LTO"
+        ],
         "wants": "old wants"
       },
       "frontmatter": {
@@ -15,19 +17,30 @@
             "make": "Renault",
             "format": "packs",
             "chemistry": "LFP",
-            "kwh": [24],
+            "kwh": [
+              24
+            ],
             "status": "asked",
             "seen": "2026-09-01"
           }
         ]
       },
-      "expected_passed_through": ["custom_note", "evidence_url"],
+      "expected_passed_through": [
+        "custom_note",
+        "evidence_url"
+      ],
       "expected_profile": {
         "custom_note": "keep me",
         "evidence_url": "https://example.test/a",
-        "chemistries": ["LFP"],
-        "formats": ["Packs"],
-        "makes": ["Renault"],
+        "chemistries": [
+          "LFP"
+        ],
+        "formats": [
+          "Packs"
+        ],
+        "makes": [
+          "Renault"
+        ],
         "cell_makers": [],
         "part_numbers": [],
         "kwh_min": 24,
@@ -40,7 +53,9 @@
               "make": "Renault",
               "format": "packs",
               "chemistry": "LFP",
-              "kwh": [24],
+              "kwh": [
+                24
+              ],
               "status": "asked",
               "seen": "2026-09-01"
             }
@@ -52,9 +67,15 @@
     {
       "name": "the same dossier over its own derived profile changes nothing",
       "existing": {
-        "chemistries": ["LFP"],
-        "formats": ["Packs"],
-        "makes": ["Renault"],
+        "chemistries": [
+          "LFP"
+        ],
+        "formats": [
+          "Packs"
+        ],
+        "makes": [
+          "Renault"
+        ],
         "cell_makers": [],
         "part_numbers": [],
         "kwh_min": 24,
@@ -67,7 +88,9 @@
               "make": "Renault",
               "format": "packs",
               "chemistry": "LFP",
-              "kwh": [24],
+              "kwh": [
+                24
+              ],
               "status": "asked",
               "seen": "2026-09-01"
             }
@@ -81,7 +104,9 @@
             "make": "Renault",
             "format": "packs",
             "chemistry": "LFP",
-            "kwh": [24],
+            "kwh": [
+              24
+            ],
             "status": "asked",
             "seen": "2026-09-01"
           }
@@ -89,9 +114,15 @@
       },
       "expected_passed_through": [],
       "expected_profile": {
-        "chemistries": ["LFP"],
-        "formats": ["Packs"],
-        "makes": ["Renault"],
+        "chemistries": [
+          "LFP"
+        ],
+        "formats": [
+          "Packs"
+        ],
+        "makes": [
+          "Renault"
+        ],
         "cell_makers": [],
         "part_numbers": [],
         "kwh_min": 24,
@@ -104,7 +135,9 @@
               "make": "Renault",
               "format": "packs",
               "chemistry": "LFP",
-              "kwh": [24],
+              "kwh": [
+                24
+              ],
               "status": "asked",
               "seen": "2026-09-01"
             }
@@ -117,9 +150,13 @@
       "name": "a derived key the dossier no longer states is dropped, not kept stale",
       "existing": {
         "evidence_url": "https://example.test/c",
-        "origins": ["FR"],
+        "origins": [
+          "FR"
+        ],
         "min_soh": 80,
-        "chemistries": ["LFP"]
+        "chemistries": [
+          "LFP"
+        ]
       },
       "frontmatter": {
         "company_id": "company-merge-3",
@@ -133,12 +170,20 @@
           }
         ]
       },
-      "expected_passed_through": ["evidence_url"],
+      "expected_passed_through": [
+        "evidence_url"
+      ],
       "expected_profile": {
         "evidence_url": "https://example.test/c",
-        "chemistries": ["NMC"],
-        "formats": ["Packs"],
-        "makes": ["Tesla"],
+        "chemistries": [
+          "NMC"
+        ],
+        "formats": [
+          "Packs"
+        ],
+        "makes": [
+          "Tesla"
+        ],
         "cell_makers": [],
         "part_numbers": [],
         "kwh_min": null,
@@ -156,6 +201,236 @@
             }
           ]
         }
+      },
+      "changed": true
+    },
+    {
+      "name": "the kwh range comes from the asks, not an older smaller purchase",
+      "existing": {
+        "evidence_url": "https://example.test/d"
+      },
+      "frontmatter": {
+        "company_id": "company-merge-4",
+        "products": [
+          {
+            "format": "packs",
+            "chemistry": "LFP",
+            "kwh": [
+              30
+            ],
+            "status": "asked",
+            "seen": "2026-08-20"
+          },
+          {
+            "make": "Renault",
+            "model": "Kangoo Gen1",
+            "format": "packs",
+            "chemistry": "LMO",
+            "kwh": [
+              22
+            ],
+            "status": "bought",
+            "seen": "2026-09-11"
+          }
+        ]
+      },
+      "expected_passed_through": [
+        "evidence_url"
+      ],
+      "expected_profile": {
+        "evidence_url": "https://example.test/d",
+        "chemistries": [
+          "LFP",
+          "LMO"
+        ],
+        "formats": [
+          "Packs"
+        ],
+        "makes": [
+          "Renault"
+        ],
+        "cell_makers": [],
+        "part_numbers": [],
+        "kwh_min": 30,
+        "kwh_max": 30,
+        "wants": "LFP 30 kWh packs (asked 2026-08-20)\nRenault 22 kWh packs (bought 2026-09-11)",
+        "dossier": {
+          "company_id": "company-merge-4",
+          "products": [
+            {
+              "format": "packs",
+              "chemistry": "LFP",
+              "kwh": [
+                30
+              ],
+              "status": "asked",
+              "seen": "2026-08-20"
+            },
+            {
+              "make": "Renault",
+              "model": "Kangoo Gen1",
+              "format": "packs",
+              "chemistry": "LMO",
+              "kwh": [
+                22
+              ],
+              "status": "bought",
+              "seen": "2026-09-11"
+            }
+          ]
+        }
+      },
+      "changed": true
+    },
+    {
+      "name": "with no capacity in the asks the range falls back to what they bought",
+      "existing": {},
+      "frontmatter": {
+        "company_id": "company-merge-5",
+        "products": [
+          {
+            "make": "BYD",
+            "format": "systems",
+            "status": "said_interested",
+            "seen": "2026-06-04"
+          },
+          {
+            "make": "Renault",
+            "format": "packs",
+            "chemistry": "LMO",
+            "kwh": [
+              22
+            ],
+            "status": "bought",
+            "seen": "2026-09-11"
+          }
+        ]
+      },
+      "expected_passed_through": [],
+      "expected_profile": {
+        "chemistries": [
+          "LMO"
+        ],
+        "formats": [
+          "Packs",
+          "Systems"
+        ],
+        "makes": [
+          "Renault",
+          "BYD"
+        ],
+        "cell_makers": [],
+        "part_numbers": [],
+        "kwh_min": 22,
+        "kwh_max": 22,
+        "wants": "BYD systems (said interested 2026-06-04)\nRenault 22 kWh packs (bought 2026-09-11)",
+        "dossier": {
+          "company_id": "company-merge-5",
+          "products": [
+            {
+              "make": "BYD",
+              "format": "systems",
+              "status": "said_interested",
+              "seen": "2026-06-04"
+            },
+            {
+              "make": "Renault",
+              "format": "packs",
+              "chemistry": "LMO",
+              "kwh": [
+                22
+              ],
+              "status": "bought",
+              "seen": "2026-09-11"
+            }
+          ]
+        }
+      },
+      "changed": true
+    },
+    {
+      "name": "origins is the application origin and source countries stay in the dossier",
+      "existing": {
+        "evidence_url": "https://example.test/e",
+        "origins": [
+          "FR"
+        ],
+        "min_soh": 80
+      },
+      "frontmatter": {
+        "company_id": "company-merge-6",
+        "origins": [
+          "Bus or truck",
+          "Passenger EV"
+        ],
+        "source_countries": [
+          "FR",
+          "DE",
+          "PL"
+        ],
+        "min_soh": 60,
+        "products": [
+          {
+            "make": "Tesla",
+            "format": "packs",
+            "chemistry": "NMC",
+            "kwh": [
+              75
+            ],
+            "status": "asked",
+            "seen": "2026-05-04"
+          }
+        ]
+      },
+      "expected_passed_through": [
+        "evidence_url"
+      ],
+      "expected_profile": {
+        "evidence_url": "https://example.test/e",
+        "chemistries": [
+          "NMC"
+        ],
+        "formats": [
+          "Packs"
+        ],
+        "makes": [
+          "Tesla"
+        ],
+        "cell_makers": [],
+        "part_numbers": [],
+        "kwh_min": 75,
+        "kwh_max": 75,
+        "wants": "Tesla 75 kWh packs (asked 2026-05-04)",
+        "dossier": {
+          "company_id": "company-merge-6",
+          "origins": [
+            "Bus or truck",
+            "Passenger EV"
+          ],
+          "source_countries": [
+            "FR",
+            "DE",
+            "PL"
+          ],
+          "min_soh": 60,
+          "products": [
+            {
+              "make": "Tesla",
+              "format": "packs",
+              "chemistry": "NMC",
+              "kwh": [
+                75
+              ],
+              "status": "asked",
+              "seen": "2026-05-04"
+            }
+          ]
+        },
+        "origins": [
+          "Passenger EV",
+          "Bus or truck"
+        ],
+        "min_soh": 60
       },
       "changed": true
     }
