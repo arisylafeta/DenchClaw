@@ -1,11 +1,14 @@
 import { addOffer, OfferConflict } from "@/lib/crm-postgres/bulk-offers";
 import { supplyBuyers } from "@/lib/crm-postgres/supply-buyers";
+import { REASON_MAX, recordSupplyVerdict } from "@/lib/crm-postgres/supply-matches";
+import { verdictKey } from "@/lib/crm-postgres/demand-match-supply";
 import { queryPg } from "@/lib/postgres";
 import { badRequest, guardBulkTrades, linkedWrite, notFound, readJson } from "@/lib/bulk-trades-route";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 type Context = { params: Promise<{ id: string }> };
+const VERDICTS = ["shortlist", "not_a_fit", "clear"] as const;
 
 /** CRM buyer companies whose buy box fits this supply listing. Suggestions only. */
 export async function GET(_req: Request, { params }: Context) {
@@ -15,7 +18,7 @@ export async function GET(_req: Request, { params }: Context) {
   return result ? Response.json(result) : notFound("Supply listing");
 }
 
-/** Save one suggested company as a `candidate` offer on the supply. Nothing is sent. */
+/** Shortlist or Not a fit (with a short reason) one company for this supply, or save it as a `candidate` offer. Nothing is sent. */
 export async function POST(req: Request, { params }: Context) {
   const guard = await guardBulkTrades();
   if ("response" in guard) return guard.response;
@@ -23,9 +26,19 @@ export async function POST(req: Request, { params }: Context) {
   const body = await readJson(req) as Record<string, unknown> | null;
   if (!body || typeof body.companyId !== "string" || !body.companyId) return badRequest("Which company?");
   if (body.personId != null && typeof body.personId !== "string") return badRequest("personId must be text.");
+  if (body.reason != null && typeof body.reason !== "string") return badRequest("reason must be text.");
   const [company] = await queryPg<{ id: string; name: string }>(`select id, name from crm_companies where id = $1`, [body.companyId]);
   if (!company) return notFound("Company");
   if (!(await supplyBuyers(id))) return notFound("Supply listing");
+  if (body.verdict != null) {
+    if (!(VERDICTS as readonly unknown[]).includes(body.verdict)) return badRequest("Invalid verdict.");
+    const reason = (body.reason as string | undefined)?.trim() ?? "";
+    if (body.verdict === "not_a_fit" && !reason) return badRequest("Say briefly why this company is not a fit.");
+    if (reason.length > REASON_MAX) return badRequest(`Keep the reason under ${REASON_MAX} characters.`);
+    return linkedWrite(async () => Response.json({ activity: await recordSupplyVerdict(id, {
+      key: verdictKey.company(company.id), verdict: body.verdict as (typeof VERDICTS)[number], label: company.name, reason,
+    }, guard.userId) }, { status: 201 }));
+  }
   const [person] = body.personId ? await queryPg<{ id: string; full_name: string | null; email: string | null }>(
     `select id, full_name, email from crm_people where id = $1 and company_id = $2`, [body.personId, company.id]) : [];
   if (body.personId && !person) return badRequest("That person is not at this company.");

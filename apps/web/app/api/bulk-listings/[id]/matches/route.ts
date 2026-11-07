@@ -1,5 +1,6 @@
 import { getDemand } from "@/lib/crm-postgres/bulk-demand";
 import { REASON_MAX, recordSupplyVerdict, supplyMatches } from "@/lib/crm-postgres/supply-matches";
+import { verdictKey } from "@/lib/crm-postgres/demand-match-supply";
 import { badRequest, guardBulkTrades, linkedWrite, notFound, readJson } from "@/lib/bulk-trades-route";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +34,7 @@ export async function POST(req: Request, { params }: Context) {
   if (!demand) return notFound("Demand");
   if (!await supplyMatches(id)) return notFound("Supply listing");
   return linkedWrite(async () => Response.json({ activity: await recordSupplyVerdict(id, {
-    key: `demand:${demand.id}`, verdict: body.verdict as (typeof VERDICTS)[number], label: demand.buyer,
+    key: verdictKey.demand(demand.id), verdict: body.verdict as (typeof VERDICTS)[number], label: demand.buyer,
     reason, note: body.note as string | null,
   }, guard.userId) }, { status: 201 }));
 }

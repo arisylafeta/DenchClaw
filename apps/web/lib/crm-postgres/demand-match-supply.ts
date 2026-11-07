@@ -167,6 +167,12 @@ export function feedRowCandidate(row: FeedRow): Candidate {
 /** Every candidate for one demand row, plus the units hidden as "Not a fit" for it. */
 export type MatchVerdict = { verdict: "shortlist" | "not_a_fit"; at: string; note: string | null; reason: string | null };
 
+/** Verdict keys used on a supply listing's activity: one per open demand, one per CRM buyer company. */
+export const verdictKey = {
+  demand: (demandId: string) => `demand:${demandId}`,
+  company: (companyId: string) => `company:${companyId}`,
+};
+
 /** The latest Shortlist / Not a fit per unit, kept as Supply activity on the demand so it shows in the timeline. */
 export async function matchVerdicts(demandId: string): Promise<Map<string, MatchVerdict>> {
   const rows = await queryPg<{ key: string; verdict: string; at: string; note: string | null; reason: string | null }>(

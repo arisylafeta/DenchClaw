@@ -97,4 +97,26 @@ describe("Buyers from the CRM (REB-564)", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Save as candidate" })[0]);
     await waitFor(() => expect(calls.some((c) => c.startsWith("POST") && c.endsWith('{"companyId":"c1","personId":"p1"}'))).toBe(true));
   });
+
+  it("shortlists a company in one click and asks why before Not a fit", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
+      if (url.endsWith("/buyers")) return new Response(JSON.stringify({ ...noBuyers, notAFit: 1, notAFitReasons: [{ company: "Hidden Co", reason: "Takes packs only" }], ranked: [buyer({})] }), { status: 200 });
+      return new Response(JSON.stringify({ matches: [], notAFit: 0, notAFitReasons: [], blocked: null }), { status: 200 });
+    }));
+    render(<SupplyMatchesTab listingId="bts_1" active onOpenListing={() => {}} />);
+    expect(await screen.findByText(/1 marked not a fit/)).toBeTruthy();
+    expect(screen.getByText(/Takes packs only/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Shortlist Exigo" }));
+    await waitFor(() => expect(calls.some((c) => c.startsWith("POST") && c.endsWith('{"companyId":"c1","verdict":"shortlist"}'))).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Not a fit: Exigo" }));
+    const input = screen.getByLabelText("Not a fit reason for Exigo") as HTMLInputElement;
+    const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.change(input, { target: { value: "Only buys packs" } });
+    fireEvent.submit(save.closest("form")!);
+    await waitFor(() => expect(calls.some((c) => c.startsWith("POST")
+      && c.endsWith('{"companyId":"c1","verdict":"not_a_fit","reason":"Only buys packs"}'))).toBe(true));
+  });
 });

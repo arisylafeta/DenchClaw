@@ -7,7 +7,7 @@ import type { Demand } from "../bulk-demand";
 import { matchDemand, type Check, type Match } from "../demand-match";
 import { listDemand } from "./bulk-demand";
 import { getListing } from "./bulk-listings";
-import { feedRowCandidate, matchVerdicts, type FeedRow, type MatchVerdict } from "./demand-match-supply";
+import { feedRowCandidate, matchVerdicts, verdictKey, type FeedRow, type MatchVerdict } from "./demand-match-supply";
 
 export type SupplyMatchRow = {
   demandId: string;
@@ -33,9 +33,7 @@ export type SupplyMatches = {
   blocked: string | null;
 };
 
-const key = (demandId: string) => `demand:${demandId}`;
-/** A company-level verdict on the same listing: keyed separately from its demand rows. */
-export const companyKey = (companyId: string) => `company:${companyId}`;
+const key = (demandId: string) => verdictKey.demand(demandId);
 /** Longest Not a fit reason we keep. Short enough to read in a list. */
 export const REASON_MAX = 200;
 const same = (a: string | null | undefined, b: string | null | undefined) => !!a && !!b && a === b;

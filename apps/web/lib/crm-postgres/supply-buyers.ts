@@ -5,6 +5,7 @@ import "server-only";
 import { queryPg } from "../postgres";
 import { countryFromText } from "../demand-match";
 import { compareBuyers, isLead, scoreBuyer, type BuyerFit, type BuyerProfile, type SupplyProfile } from "../buyer-suggestions";
+import { matchVerdicts, verdictKey } from "./demand-match-supply";
 import { getListing } from "./bulk-listings";
 
 export type BuyerContact = { id: string; name: string | null; email: string | null; jobTitle: string | null; main: boolean; optedOut: boolean };
@@ -14,8 +15,15 @@ export type BuyerSuggestion = {
   /** Latest email in or out with anyone at the company. */
   lastTouch: string | null;
   fit: BuyerFit; contacts: BuyerContact[];
+  /** Our verdict on this company for this supply; a company marked not a fit is hidden instead. */
+  userVerdict: "shortlist" | "not_a_fit" | null;
 };
-export type SupplyBuyers = { ranked: BuyerSuggestion[]; leads: BuyerSuggestion[]; supply: SupplyProfile };
+export type SupplyBuyers = {
+  ranked: BuyerSuggestion[]; leads: BuyerSuggestion[]; supply: SupplyProfile;
+  notAFit: number;
+  /** Why each hidden company was marked Not a fit. */
+  notAFitReasons: { company: string; reason: string | null }[];
+};
 
 const CHEM = /\b(LFP|NMC|NCA|LTO|LMO|NIMH|LEAD)\b/i;
 const FORMAT: [RegExp, string][] = [[/\bcells?\b|\bcylindrical\b|\bprismatic\b|\bpouch\b/i, "Cells"], [/\bmodules?\b/i, "Modules"], [/\bpacks?\b/i, "Packs"], [/\b(bess|container|systems?|cabinet)\b/i, "Systems"]];
@@ -50,8 +58,17 @@ export async function supplyBuyers(supplyId: string): Promise<SupplyBuyers | nul
        and ($2::text is null or c.id <> $2)
        and not exists (select 1 from crm_bulk_offers o where o.bulk_listing_id = $1 and o.role = 'counterparty' and o.company_id = c.id)`,
     [supplyId, listing.company_id]);
-  const scored = companies.flatMap((c) => { const fit = scoreBuyer(supply, c.profile); return fit ? [{ c, fit }] : []; });
-  if (!scored.length) return { ranked: [], leads: [], supply };
+  // Verdicts are company-level on this supply listing (key `company:<id>`), so a company stays judged across reloads.
+  const verdicts = await matchVerdicts(supplyId);
+  const notAFitReasons: { company: string; reason: string | null }[] = [];
+  const kept = companies.filter((c) => {
+    const verdict = verdicts.get(verdictKey.company(c.id));
+    if (verdict?.verdict !== "not_a_fit") { return true; }
+    notAFitReasons.push({ company: c.name, reason: verdict.reason ?? null });
+    return false;
+  });
+  const scored = kept.flatMap((c) => { const fit = scoreBuyer(supply, c.profile); return fit ? [{ c, fit }] : []; });
+  if (!scored.length) return { ranked: [], leads: [], supply, notAFit: notAFitReasons.length, notAFitReasons };
   const ids = scored.map((s) => s.c.id);
   const [people, touches] = await Promise.all([
     queryPg<{ id: string; company_id: string; full_name: string | null; email: string | null; job_title: string | null; email_opted_out: boolean | null }>(
@@ -69,7 +86,13 @@ export async function supplyBuyers(supplyId: string): Promise<SupplyBuyers | nul
   const rows = scored.map(({ c, fit }) => ({
     companyId: c.id, name: c.name, stage: c.stage, tier: c.tier, basis: c.basis, wants: c.profile.wants ?? null, evidenceUrl: c.profile.evidence_url ?? null,
     nextStep: c.next_step, lastTouch: touch.get(c.id) ?? null, fit,
+    userVerdict: verdicts.get(verdictKey.company(c.id))?.verdict === "shortlist" ? "shortlist" as const : null,
     contacts: (byCompany.get(c.id) ?? []).sort((a, b) => Number(b.main) - Number(a.main)).slice(0, 5),
   } satisfies BuyerSuggestion)).sort(compareBuyers);
-  return { ranked: rows.filter((r) => !isLead(r)), leads: rows.filter(isLead), supply };
+  // Shortlisted companies first, keeping the buyer-quality order inside each half.
+  const ordered = rows.toSorted((a, b) => Number(b.userVerdict === "shortlist") - Number(a.userVerdict === "shortlist"));
+  return {
+    ranked: ordered.filter((r) => !isLead(r)), leads: ordered.filter(isLead), supply,
+    notAFit: notAFitReasons.length, notAFitReasons,
+  };
 }
