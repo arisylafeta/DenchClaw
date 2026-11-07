@@ -23,10 +23,20 @@ case "${1:-}" in
       -e POSTGRES_PASSWORD=test -e POSTGRES_DB=denchclaw postgres:16 >/dev/null
     for _ in $(seq 1 30); do docker exec "$NAME" pg_isready -U postgres -q && break; sleep 1; done
     # schema.sql, then migrations in file-name order (two files share the 003 prefix; both load).
+    # A few early migrations (046_dismantler_stock_sync, 047_stock_opportunity_rejected) reference
+    # crm_stock_opportunities, which 076 creates; a failed file is retried once after the rest, so the
+    # real dependency order settles without editing old migrations. A file that fails twice is fatal.
+    deferred=()
     for file in "$SQL_DIR/schema.sql" $(ls "$SQL_DIR"/migrations/*.sql | sort); do
       case "$(basename "$file")" in
         034_*) docker exec "$NAME" psql -U postgres -d denchclaw -v ON_ERROR_STOP=1 -q -c "insert into crm_objects (id, name, entity_table, display_field) values ('obj_people','people','crm_people','name') on conflict do nothing" >/dev/null ;;
       esac
+      if ! docker exec -i -e PGOPTIONS="-c client_min_messages=warning" "$NAME" psql -U postgres -d denchclaw -v ON_ERROR_STOP=1 -q < "$file" >/dev/null 2>&1; then
+        deferred+=("$file")
+      fi
+    done
+    for file in "${deferred[@]:-}"; do
+      [ -n "$file" ] || continue
       docker exec -i -e PGOPTIONS="-c client_min_messages=warning" "$NAME" psql -U postgres -d denchclaw -v ON_ERROR_STOP=1 -q < "$file" >/dev/null \
         || { echo "Failed loading $(basename "$file")" >&2; exit 1; }
     done
