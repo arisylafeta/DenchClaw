@@ -73,6 +73,12 @@ ALERT_KEYS = ["label", "filters", "status", "seen", "src"]
 TIMING_KEYS = ["max_lead_days", "notes"]
 # A list entry is a plain value, or a mapping that dates the evidence for it.
 ENTRY_KEYS = ["value", "seen", "src"]
+# The flat keys derived from the dossier. A dossier save replaces these and passes every other key through.
+# Mirrored by DERIVED_KEYS in apps/web/lib/buyer-dossier.ts.
+DERIVED_KEYS = [
+    "chemistries", "formats", "makes", "cell_makers", "part_numbers", "kwh_min", "kwh_max", "wants", "dossier",
+    "origins", "min_soh",
+]
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _SPLIT_RE = re.compile(r"[/,;|]|\band\b", re.IGNORECASE)
@@ -574,6 +580,19 @@ def to_buyer_profile(frontmatter):
     return profile
 
 
+def merge_profile(existing, frontmatter):
+    """(profile, passed_through, derived) for a dossier save: derived keys overwrite, the rest survive.
+
+    A derived key the dossier no longer states is dropped rather than kept stale, exactly as the
+    TypeScript saveDossier does.
+    """
+    derived = to_buyer_profile(frontmatter)
+    passed_through = sorted(key for key in (existing or {}) if key not in DERIVED_KEYS)
+    profile = {key: (existing or {})[key] for key in passed_through}
+    profile.update(derived)
+    return profile, passed_through, sorted(derived)
+
+
 # --- diff --------------------------------------------------------------------------------------
 def _as_set(value):
     if isinstance(value, list):
@@ -619,25 +638,31 @@ def _read_profile(company_id, dsn):
     return None if row is None else (row["buyer_profile"] or {})
 
 
-def _print_diff(diff):
+def diff_lines(diff):
+    """One line per changed key, for the CLI and the loader."""
     if not diff:
-        print("no change")
-        return
+        return ["no change"]
+    lines = []
     for key in sorted(diff):
         change = diff[key]
         if key == "dossier":
             new = change.get("new") or {}
             products = new.get("products") or []
-            print(f"+ dossier: full frontmatter ({len(new)} keys, {len(products)} products)")
+            lines.append(f"+ dossier: full frontmatter ({len(new)} keys, {len(products)} products)")
             continue
         if "added" in change or "removed" in change:
             for value in change.get("added", []):
-                print(f"+ {key}: {value}")
+                lines.append(f"+ {key}: {value}")
             for value in change.get("removed", []):
-                print(f"- {key}: {value}")
+                lines.append(f"- {key}: {value}")
         else:
-            print(f"~ {key}: {json.dumps(change['old'], ensure_ascii=False)}"
-                  f" -> {json.dumps(change['new'], ensure_ascii=False)}")
+            lines.append(f"~ {key}: {json.dumps(change['old'], ensure_ascii=False)}"
+                         f" -> {json.dumps(change['new'], ensure_ascii=False)}")
+    return lines
+
+
+def _print_diff(diff):
+    print("\n".join(diff_lines(diff)))
 
 
 # --- CLI ---------------------------------------------------------------------------------------
