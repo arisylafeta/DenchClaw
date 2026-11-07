@@ -51,9 +51,27 @@ describe("dealSummaryText", () => {
     expect(text).not.toContain("owner_email");
   });
   it("gives a supplier on the deal only what it is, with no buyer, price, note or site", () => {
-    const text = dealSummaryText({ ...colvert, context: {} }, "gintas@gtvgroup.lt");
-    expect(text).toContain("15x Renault Zoe 41-52kWh for [the other side]");
+    const text = dealSummaryText({ ...colvert, context: { listing_title: "15x Renault Zoe for Colvert SAS" } }, "gintas@gtvgroup.lt");
+    expect(text).toContain("title: 15x Renault Zoe for [the other side] SAS");
     expect(text).toContain("quantity: 15 packs");
     for (const secret of ["Colvert", "colvert.eu", "25", "Montpellier", "Max EUR"]) expect(text).not.toContain(secret);
+  });
+  it("never falls back to the summary, which can carry the buyer's budget and site", () => {
+    const row = { ...colvert, context: {}, summary: "Battery Partners, Leeds: automotive packs at €10-15/kWh, up to €20/kWh" };
+    const text = dealSummaryText(row, "gintas@gtvgroup.lt");
+    for (const secret of ["Leeds", "€", "20/kWh", "Battery Partners"]) expect(text).not.toContain(secret);
+  });
+  it("drops a hand-written title that names a price", () => {
+    const text = dealSummaryText({ ...colvert, context: { listing_title: "15x Zoe up to EUR 2,000 a pack" } }, "gintas@gtvgroup.lt");
+    expect(text).not.toContain("2,000");
+  });
+  it("tells the draft to keep the owner's facts out of other emails", () => {
+    expect(dealSummaryText(colvert, "thomas@colvert.eu")).toMatch(/^Private to this deal's owner/);
+  });
+});
+
+describe("ownsDeal with personal and ISP mail", () => {
+  it("never matches two people on the same personal or ISP domain", () => {
+    for (const d of ["btinternet.com", "sky.com", "wp.pl", "gmail.com"]) expect(ownsDeal(`buyer@${d}`, `seller@${d}`)).toBe(false);
   });
 });

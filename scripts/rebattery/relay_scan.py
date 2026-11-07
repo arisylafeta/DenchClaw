@@ -63,7 +63,8 @@ SKIP_LABELS = {"SPAM", "TRASH", "DRAFT", "CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL
 FYI_LABELS = {"CATEGORY_UPDATES", "CATEGORY_FORUMS"}
 FREEMAIL = {"gmail.com", "googlemail.com", "hotmail.com", "outlook.com", "live.com", "yahoo.com", "icloud.com",
             "me.com", "aol.com", "gmx.de", "gmx.net", "web.de", "proton.me", "protonmail.com", "seznam.cz", "wp.pl",
-            "mail.ru", "yandex.ru", "msn.com", "hotmail.co.uk", "yahoo.co.uk", "btinternet.com", "orange.fr", "free.fr"}
+            "mail.ru", "yandex.ru", "msn.com", "hotmail.co.uk", "yahoo.co.uk", "btinternet.com", "orange.fr", "free.fr",
+            "o2.pl", "onet.pl", "sky.com", "virginmedia.com", "talktalk.net", "ntlworld.com"}
 
 AUTOMATED_LOCAL = re.compile(
     r"^(no-?reply|do-?not-?reply|donotreply|notifications?|notify|alerts?|mailer-daemon|postmaster|bounces?|"
@@ -611,13 +612,20 @@ def choose_deal(counterpart: str | None, contact_type: str | None, linked: set[s
 
 
 def load_offered_demands(cur) -> dict[str, list[dict]]:
-    """Buyers' demand listings each supplier holds a counterparty offer on, keyed by their email and company domain ("@domain")."""
+    """Open buyers' demands each supplier is paired with, keyed by their email and company domain ("@domain"): a
+    counterparty offer on the demand, or the supplier's own supply listing offered against it (counterpart_id)."""
     if not table_exists(cur, "crm_bulk_offers"):
         return {}
     cur.execute(
-        """select distinct b.id, b.kind, b.status, b.summary, b.quantity, b.updated_at, lower(p.email) as email
-             from crm_bulk_offers o join crm_bulk_listings b on b.id = o.bulk_listing_id join crm_people p on p.id = o.person_id
-            where b.kind = 'demand' and o.role = 'counterparty' and p.email is not null""")
+        """select distinct d.id, d.kind, d.status, d.summary, d.quantity, d.updated_at, x.email
+             from (select o.bulk_listing_id as demand_id, lower(p.email) as email
+                     from crm_bulk_offers o join crm_people p on p.id = o.person_id where o.role = 'counterparty'
+                   union
+                   select o.counterpart_id, lower(coalesce(s.email, sp.email))
+                     from crm_bulk_offers o join crm_bulk_listings s on s.id = o.bulk_listing_id and s.kind = 'supply'
+                     left join crm_people sp on sp.id = s.person_id where o.counterpart_id is not null) x
+             join crm_bulk_listings d on d.id = x.demand_id
+            where d.kind = 'demand' and d.status <> 'closed' and x.email is not null""")
     out: dict[str, list[dict]] = {}
     for r in cur.fetchall():
         email = email_of(r["email"])
