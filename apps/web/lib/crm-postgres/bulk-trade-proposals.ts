@@ -150,6 +150,10 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
     case "buyer_update": {
       const status = text(proposed.status);
       const stage = status ? buyerStage(status) : null;
+      // A declined offer carries a reason (see the offers PATCH): the status text, then the proposal's own wording.
+      const declinedReason = stage === "declined"
+        ? ((status?.startsWith("Declined: ") ? status.slice(10).trim() : "") || text(p.summary) || "Declined (no reason given in source)").slice(0, 500)
+        : null;
       const updated = await queryPg(
         `update crm_bulk_offers set
            stage = coalesce($3, stage),
@@ -159,7 +163,7 @@ async function apply(p: Proposal & { source_date: string | null }, user: { id: s
            updated_at = now()
          where id = $2 and bulk_listing_id = $1
          returning name`,
-        [lotId, p.target, stage, status?.startsWith("Declined: ") ? status.slice(10) : null,
+        [lotId, p.target, stage, declinedReason,
           date(proposed.last_touch_on), text(proposed.last_touch_via), date(proposed.chase_on)]);
       if (!updated.length) throw new Error("That buyer is no longer on this trade.");
       await queryPg(

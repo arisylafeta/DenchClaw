@@ -169,6 +169,18 @@ describe.skipIf(!TEST_URL)("inbox check proposals", () => {
     expect(await proposals.decideProposal(id,"accept",user)).toMatchObject({ok:false,status:404});
   });
 
+  it("gives a declined buyer proposal a reason, from its status or from the proposal itself", async () => {
+    const buyer = `btb_${crypto.randomUUID()}`;
+    await pg.queryPg("insert into crm_bulk_offers (id, bulk_listing_id, role, name, stage) values ($1, $2, 'counterparty', 'Declining Buyer', 'offered')", [buyer, lotId]);
+    const read = async () => (await pg.queryPg<{ stage: string; declined_reason: string | null }>(
+      "select stage, declined_reason from crm_bulk_offers where id = $1", [buyer]))[0];
+    // "Declined" with no reason text: the proposal's own summary becomes the reason, so the offer is never reasonless.
+    expect(await proposals.decideProposal(await propose("buyer_update", buyer, { status: "Declined" }), "accept", user)).toMatchObject({ ok: true });
+    expect(await read()).toEqual({ stage: "declined", declined_reason: "Summary" });
+    expect(await proposals.decideProposal(await propose("buyer_update", buyer, { status: "Declined: price too high" }), "accept", user)).toMatchObject({ ok: true });
+    expect(await read()).toEqual({ stage: "declined", declined_reason: "price too high" });
+  });
+
   it("puts a proposal back to new when it can no longer apply", async () => {
     const id = await propose("buyer_update", "btb_gone", { status: "Won" });
     const result = await proposals.decideProposal(id, "accept", user);
