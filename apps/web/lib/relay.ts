@@ -11,6 +11,7 @@ import type { DraftAttachment } from "./mail-types";
 import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
+import { dealSummaryText, replyIdentity, type ReplyIdentity } from "./relay-identity";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -230,23 +231,15 @@ async function threadMessages(mailThreadId: string | null): Promise<ThreadMessag
      order by coalesce(sent_at, accepted_at, created_at) desc limit 8`, [mailThreadId]);
 }
 
-async function dealSummary(listingId: string | null): Promise<string> {
+async function dealSummary(listingId: string | null, counterpartEmail: string | null): Promise<string> {
   if (!listingId) return "";
-  const [row] = await queryPg<Record<string, unknown>>("select * from crm_bulk_listings where id = $1", [listingId]).catch(() => []);
-  if (!row) return "";
-  const keep = Object.entries(row).filter(([key, value]) => value !== null && value !== "" && !/(_at|_id|^id|match_hash)$/.test(key) && !(value instanceof Date)).slice(0, 40);
-  return keep.map(([key, value]) => `${key}: ${(typeof value === "object" ? JSON.stringify(value) : String(value)).slice(0, 400)}`).join("\n");
+  const [row] = await queryPg<Record<string, unknown>>(
+    `select b.*, lower(coalesce(b.email, p.email)) as owner_email from crm_bulk_listings b left join crm_people p on p.id = b.person_id where b.id = $1`,
+    [listingId]).catch(() => []);
+  return row ? dealSummaryText(row, counterpartEmail) : "";
 }
 
 const stripQuoted = (text: string) => text.split(/\n(?:On .{5,120}wrote:|-{2,} ?Original Message|From: .+\nSent: )/)[0].replace(/\n>.*$/gm, "").trim();
-
-function replyIdentity(messages: ThreadMessage[]): "alex" | "supply" {
-  const latest = messages.find((m) => m.direction === "inbound") ?? messages[0];
-  const addresses = [...(latest?.to_emails ?? []), ...(latest?.cc_emails ?? [])].map((a) => a.toLowerCase());
-  if (latest?.identity_key === "supply" || addresses.includes("supply@rebattery.io")) return "supply";
-  const sent = messages.find((m) => m.direction === "outbound");
-  return sent?.identity_key === "supply" ? "supply" : "alex";
-}
 
 // ---------- the agent ----------
 
@@ -322,14 +315,14 @@ async function activeGuide(ownerId: string): Promise<string | null> {
 async function draftContext(item: RelayItem, ownerId: string, note: string) {
   const messages = await threadMessages(item.mail_thread_id);
   const rules = await activeRules(ownerId);
-  const deal = await dealSummary(item.bulk_listing_id);
   const lastInbound = messages.find((m) => m.direction === "inbound");
+  const deal = await dealSummary(item.bulk_listing_id, lastInbound?.from_email ?? item.counterpart_email);
   const voice = await voiceFor(ownerId, item, stripQuoted(lastInbound?.body_text ?? item.last_message?.text ?? ""));
   const transcript = [...messages].reverse().map((m) => `--- ${m.direction === "inbound" ? `From ${m.from_email}` : `From Alex (${m.from_email})`} · ${m.at}\nTo: ${m.to_emails.join(", ")}${m.cc_emails.length ? `\nCc: ${m.cc_emails.join(", ")}` : ""}\nSubject: ${m.subject ?? ""}\n${stripQuoted(m.body_text ?? "").slice(0, 3000)}`).join("\n\n");
   const prompt = `${voice ? voiceExamplesBlock(voice.card, voice.examples) : ""}Alex's note (what he wants to say):\n${note}\n\n${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
   const to = (lastInbound?.from_email ?? item.counterpart_email ?? "").trim();
   if (!to) throw new RelayError(400, "Relay couldn't find who to reply to on this thread.");
-  return { messages, rules, prompt, to, identity: replyIdentity(messages), guide: voice?.guide ?? null };
+  return { messages, rules, prompt, to, identity: replyIdentity(messages, item.contact_type), guide: voice?.guide ?? null };
 }
 
 /** Turns the owner's note into draft v1 (plus follow-ons and to-dos) and moves the item to Review. Notes that need work start an agent job instead. */
@@ -487,7 +480,7 @@ export async function finaliseJobs(ownerId: string): Promise<void> {
   }
 }
 
-type NewDraft = { identity: "alex" | "supply"; to: string[]; ccThread: boolean; thread: string | null; subject: string; body: string };
+type NewDraft = { identity: ReplyIdentity; to: string[]; ccThread: boolean; thread: string | null; subject: string; body: string };
 
 /** Creates a mail_message draft through the mail CLI, so threading, the identity signature and content policy apply. */
 async function createMailDraft(d: NewDraft): Promise<string> {
@@ -528,7 +521,7 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
   const facts = new Map<string, RelayFacts>();
   for (const item of items) {
     const messages = await threadMessages(item.mail_thread_id);
-    const deal = await dealSummary(item.bulk_listing_id);
+    const deal = await dealSummary(item.bulk_listing_id, messages.find((m) => m.direction === "inbound")?.from_email ?? item.counterpart_email);
     const notes = drafts.filter((d) => d.item_id === item.id).map((d) => `${d.source_note}\n${Array.isArray(d.agent_log) ? (d.agent_log as unknown[]).join("\n") : ""}`).join("\n");
     const corpus = [deal, notes, item.context, item.last_message?.text ?? "", ...messages.map((m) => m.body_text ?? "")].join("\n");
     const participants = [...new Set(messages.flatMap((m) => [m.from_email ?? "", ...m.to_emails, ...m.cc_emails]).concat(item.counterpart_email ?? "")

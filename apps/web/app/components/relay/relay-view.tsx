@@ -582,7 +582,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
   return (
     <div className={cx(s.card, s.editor)}>
       <div className={s.ebar}>
-        <div><div className={s.lab}>{draft.role === "primary" ? "Primary email" : "Follow-on email"} · {mail.identity_key === "supply" ? "supply@" : "alex@"}</div><h2>{draft.title}</h2></div>
+        <div><div className={s.lab}>{draft.role === "primary" ? "Primary email" : "Follow-on email"} · {mail.identity_key === "supply" ? "supply@" : mail.identity_key === "buy" ? "buy@" : "alex@"}</div><h2>{draft.title}</h2></div>
         <span className={cx(s.pill, sent ? s.ok : s.warn)}><i />{sent ? "Sent" : draft.state === "gmail" ? "In Gmail drafts" : saving ? "Saving…" : "Draft"}</span>
       </div>
       {draft.role === "primary" && draft.source_note && <div className={s.fromnote}>Drafted from your note: <b>&ldquo;{draft.source_note}&rdquo;</b></div>}
