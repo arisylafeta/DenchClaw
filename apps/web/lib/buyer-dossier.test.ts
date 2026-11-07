@@ -18,7 +18,7 @@ type Fixture = {
 function fixtures(): [string, Fixture][] {
   return fs
     .readdirSync(FIXTURES)
-    .filter((name) => name.endsWith(".md"))
+    .filter((name) => name.endsWith(".md") && name !== "README.md")
     .sort()
     .map((name) => [
       name.replace(/\.md$/, ""),

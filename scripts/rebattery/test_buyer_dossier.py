@@ -405,6 +405,8 @@ class SharedFixtureTests(unittest.TestCase):
 
     def cases(self):
         for markdown in sorted(self.FIXTURES.glob("*.md")):
+            if markdown.name == "README.md":
+                continue
             yield markdown.stem, json.loads(markdown.with_suffix(".json").read_text(encoding="utf-8"))
 
     def test_the_fixture_set_is_present(self):
