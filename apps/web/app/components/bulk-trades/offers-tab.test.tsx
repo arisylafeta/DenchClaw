@@ -94,6 +94,31 @@ describe("Offers tab", () => {
     await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Stage" }), "contract_out");
     expect(calls.some((c) => c.method === "PATCH" && c.body === JSON.stringify({ stage: "contract_out" }))).toBe(true);
   });
+
+  it("asks for a reason before saving Declined or Lost, then saves both together", async () => {
+    const calls: { url: string; method: string; body?: string }[] = [];
+    stub(calls);
+    render(<OffersTab demandId="d1" onChanged={() => {}} />);
+    await userEvent.click(await screen.findByText("Attero Recycling"));
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Stage" }), "declined");
+    // Nothing is saved until the reason is written.
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    const reason = screen.getByLabelText("Outcome reason") as HTMLInputElement;
+    const save = screen.getByRole("button", { name: "Save outcome" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.change(reason, { target: { value: "Price too high" } });
+    expect(save.disabled).toBe(false);
+    fireEvent.submit(save.closest("form")!);
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH"
+      && c.body === JSON.stringify({ stage: "declined", declinedReason: "Price too high" }))).toBe(true));
+  });
+
+  it("shows a lost or declined reason on the row", async () => {
+    const declined = { ...offer, stage: "declined" as const, declined_reason: "Chose another supplier" };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ offers: [declined] }), { status: 200 })));
+    render(<OffersTab demandId="d1" onChanged={() => {}} />);
+    expect(await screen.findByText(/Why: Chose another supplier/)).toBeInTheDocument();
+  });
 });
 
 describe("offer pairing labels (REB-565)", () => {

@@ -133,7 +133,7 @@ function OfferList({ offers, error, base, onUpdated }: {
                       {!loading && <WaitingPill offer={o} />}
                     </span>
                     <span className="mt-0.5 block truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>
-                      <Sh on={loading} chars={32}>{[o.incoming && o.from_kind ? `From ${o.from_kind}: ${o.from_label ?? ""}` : null, terms, o.next_step ? `Next: ${o.next_step}` : null, o.last_touch_on ? `Last touch ${dateOf(o.last_touch_on)}${o.last_touch_via ? ` by ${o.last_touch_via}` : ""}` : null].filter(Boolean).join(" · ") || "No contact yet"}</Sh>
+                      <Sh on={loading} chars={32}>{[o.incoming && o.from_kind ? `From ${o.from_kind}: ${o.from_label ?? ""}` : null, terms, o.declined_reason && (o.stage === "declined" || o.stage === "lost") ? `Why: ${o.declined_reason}` : null, o.next_step ? `Next: ${o.next_step}` : null, o.last_touch_on ? `Last touch ${dateOf(o.last_touch_on)}${o.last_touch_via ? ` by ${o.last_touch_via}` : ""}` : null].filter(Boolean).join(" · ") || "No contact yet"}</Sh>
                     </span>
                   </span>
                   <span className="shrink-0 text-[11px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={2}>{o.messages > 0 ? `${o.messages} ${o.messages === 1 ? "message" : "messages"}${o.last_message_at ? ` · ${dateOf(o.last_message_at)}` : ""}` : "No messages"}</Sh></span>
@@ -158,6 +158,9 @@ function ThreadPanel({ base, offerId, onUpdated }: { base: string; offerId: stri
   const [thread, setThread] = useState<ThreadEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** A lost or declined stage waits here until its reason is written. */
+  const [outcomeStage, setOutcomeStage] = useState<"declined" | "lost" | null>(null);
+  const [outcomeReason, setOutcomeReason] = useState("");
   const apply = (r: { offer: Offer; thread?: ThreadEntry[] }) => {
     setOffer(r.offer); if (r.thread) setThread(r.thread);
   };
@@ -174,11 +177,39 @@ function ThreadPanel({ base, offerId, onUpdated }: { base: string; offerId: stri
     <BusyRegion busy={loading} label="Loading thread" className="flex w-full flex-col gap-4 pb-4 pl-12 pr-4">
       <div className="flex items-center gap-3">
         <p className="min-w-0 flex-1 truncate text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={30}>{[current.contact, current.wants].filter(Boolean).join(" · ") || "No contact details yet"}</Sh></p>
-        <select aria-label="Stage" value={current.stage ?? "candidate"} disabled={busy || !offer} onChange={(e) => void patch({ stage: e.target.value })}
+        <select aria-label="Stage" value={outcomeStage ?? current.stage ?? "candidate"} disabled={busy || !offer}
+          onChange={(e) => {
+            const next = e.target.value as OfferStage;
+            if (!offer) { return; }
+            // Lost and declined need a reason first, so the stage only saves once it is written.
+            if (next === "declined" || next === "lost") { setOutcomeStage(next); setOutcomeReason(offer.declined_reason ?? ""); return; }
+            setOutcomeStage(null); void patch({ stage: next });
+          }}
           className="border px-2 py-1 text-[12px]" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
           {STAGES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </div>
+      {outcomeStage && (
+        <form aria-label={`Reason for ${STAGE_LABEL[outcomeStage].toLowerCase()}`} className="flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const reason = outcomeReason.trim();
+            if (!reason) { return; }
+            const stage = outcomeStage;
+            setOutcomeStage(null);
+            void patch({ stage, declinedReason: reason });
+          }}>
+          <span className="text-[12px]" style={{ color: "var(--bt-muted)" }}>{STAGE_LABEL[outcomeStage]}: why?</span>
+          <input aria-label="Outcome reason" required maxLength={500} autoFocus value={outcomeReason} onChange={(e) => setOutcomeReason(e.target.value)}
+            placeholder="Why it ended, e.g. price too high, chose another supplier"
+            className={`${inputClass} min-w-[240px] flex-1 text-[12px]`} style={inputStyle} />
+          <button type="submit" disabled={busy || !outcomeReason.trim()} className={`${rowFocus} ${buttonClass}`} style={buttonStyle}>Save outcome</button>
+          <button type="button" disabled={busy} className={`${rowFocus} ${buttonClass}`} style={buttonStyle} onClick={() => setOutcomeStage(null)}>Cancel</button>
+        </form>
+      )}
+      {offer?.declined_reason && (offer.stage === "declined" || offer.stage === "lost") && (
+        <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}><span className="font-semibold">{STAGE_LABEL[offer.stage]}</span>: {offer.declined_reason}</p>
+      )}
       {offer && !offer.incoming && offer.link_options.length > 0 && (
         <label className="flex items-center gap-2 text-[12px]" style={{ color: "var(--bt-muted)" }}>
           Not linked.

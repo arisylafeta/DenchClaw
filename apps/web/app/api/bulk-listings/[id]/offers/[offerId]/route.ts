@@ -30,6 +30,13 @@ export async function PATCH(req: Request, { params }: Context) {
     if (key in body) { if (body[key] != null && typeof body[key] !== "string") return badRequest(`${key} must be text.`); patch[key] = (body[key] as string | null) || null; }
   }
   if ("nextDue" in body && patch.nextDue && !/^\d{4}-\d{2}-\d{2}$/.test(patch.nextDue)) return badRequest("Use a date like 2026-10-30.");
+  // A lost or declined offer is only useful with the reason: it feeds what we learn about the buyer.
+  if (patch.stage === "declined" || patch.stage === "lost") {
+    const reason = patch.declinedReason?.trim() ?? "";
+    if (!reason) { return badRequest(`Give a short reason for ${patch.stage === "declined" ? "Declined" : "Lost"}.`); }
+    if (reason.length > 500) { return badRequest("Keep the reason under 500 characters."); }
+    patch.declinedReason = reason;
+  }
   if ("terms" in body) { if (!body.terms || typeof body.terms !== "object" || Array.isArray(body.terms)) return badRequest("Terms must be an object."); patch.terms = body.terms as OfferPatch["terms"]; }
   if ("counterpartId" in body) {
     if (body.counterpartId != null && typeof body.counterpartId !== "string") return badRequest("counterpartId must be text or null.");
