@@ -103,13 +103,20 @@ export function buildChecklist(listing: ChecklistListing, fields: ChecklistField
   };
 }
 
+/** What is still missing (by label) and what is in but doubtful (label and doubt), split into required and helpful. */
+function gapLists(c: DealChecklist): { required: string[]; helpful: string[] } {
+  return {
+    required: [
+      ...c.required.filter((i) => !i.have).map((i) => i.label.toLowerCase()),
+      ...c.required.filter((i) => i.have && i.warn).map((i) => `${i.label.toLowerCase()} (${i.warn})`),
+    ],
+    helpful: c.helpful.filter((i) => !i.have || i.warn).map((i) => (i.warn ? `${i.label.toLowerCase()} (${i.warn})` : i.label.toLowerCase())),
+  };
+}
+
 /** The sentence Relay AI gets for "Add missing to draft". Null when nothing is missing. */
 export function missingInstruction(c: DealChecklist): string | null {
-  const required = [
-    ...c.required.filter((i) => !i.have).map((i) => i.label.toLowerCase()),
-    ...c.required.filter((i) => i.have && i.warn).map((i) => `${i.label.toLowerCase()} (${i.warn})`),
-  ];
-  const helpful = c.helpful.filter((i) => !i.have || i.warn).map((i) => (i.warn ? `${i.label.toLowerCase()} (${i.warn})` : i.label.toLowerCase()));
+  const { required, helpful } = gapLists(c);
   if (!required.length && !helpful.length) return null;
   return [
     required.length ? `Ask them for, or to confirm, what we still need: ${required.join(", ")}.` : "",
@@ -118,15 +125,29 @@ export function missingInstruction(c: DealChecklist): string | null {
   ].filter(Boolean).join(" ");
 }
 
-/** The note "Draft the ask" drafts from: the playbook's first ask while we have next to nothing, otherwise only the gaps.
- * Null when nothing is missing or doubtful. */
+const firstAsk = (c: DealChecklist) => c.required.filter((i) => i.have).length <= 2;
+
+/** The note "Draft the ask" drafts from: the playbook's first ask while we have two facts or fewer, otherwise only the gaps
+ * and doubts. Null when nothing is missing or doubtful. */
 export function askInstruction(c: DealChecklist): string | null {
-  const gaps = missingInstruction(c);
-  if (!gaps) return null;
-  if (c.required.filter((i) => i.have).length <= 2) {
+  const { required, helpful } = gapLists(c);
+  if (!required.length && !helpful.length) return null;
+  if (firstAsk(c)) {
     const docs = c.kind === "demand" ? "their spec sheet, the packs they would accept and the tests they need" : "stock list, label photos, test reports with their dates and datasheets";
     const must = c.required.filter((i) => !i.have).map((i) => i.label.toLowerCase());
     return `First reply from the intake guide: thank them, ask them to send everything they have (${docs}), then list what it must cover: ${must.join(", ")}. Never offer a price.`;
   }
-  return `Second reply from the intake guide: ${gaps}`;
+  return [
+    "Second reply from the intake guide: thank them for what they sent.",
+    required.length ? `Ask them for, or to confirm, what we still need: ${required.join(", ")}, and say why it matters.` : "",
+    helpful.length ? `If it fits naturally, also ask for: ${helpful.join(", ")}.` : "",
+    "Never name a price or range yourself.",
+  ].filter(Boolean).join(" ");
+}
+
+/** The short line Review shows for a draft made by "Draft the ask". */
+export function askLabel(c: DealChecklist): string {
+  if (firstAsk(c)) return "Draft the ask: first ask, everything they have";
+  const { required, helpful } = gapLists(c);
+  return `Draft the ask: ${[...required, ...helpful].slice(0, 5).join(", ")}`;
 }

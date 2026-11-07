@@ -13,7 +13,7 @@ import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
 import { dealResultFits, dealSummaryText, ownsDeal, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
-import { askInstruction, buildChecklist, MANUAL_KEYS, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
+import { askInstruction, askLabel, buildChecklist, MANUAL_KEYS, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -483,9 +483,15 @@ export async function draftAsk(itemId: string, ownerId: string): Promise<RelayIt
   const view = await dealChecklistFor(itemId, ownerId);
   if (view.counterparty) throw new RelayError(409, "This email answers someone else's deal, so there's no ask to draft from here.");
   if (!view.checklist) throw new RelayError(409, "This email isn't linked to a deal yet. Create the deal first.");
-  const note = askInstruction(view.checklist);
-  if (!note) throw new RelayError(409, "Nothing is missing on this deal, so there's nothing to ask for.");
-  return draftFromNote(itemId, ownerId, note, "quick");
+  const instruction = askInstruction(view.checklist);
+  if (!instruction) throw new RelayError(409, "Nothing is missing on this deal, so there's nothing to ask for.");
+  const item = await readRelayItem(itemId, ownerId);
+  if (!item) throw new RelayError(404, "Not found");
+  // Drafted straight from the checklist: Alex's own note on the email is left as it is.
+  const ctx = await draftContext(item, ownerId, instruction);
+  const parsed = parseJson(await askAgent(DRAFT_SYSTEM(ctx.rules, ctx.guide), ctx.prompt));
+  await saveDraftOutputs(item, ownerId, askLabel(view.checklist), ctx, parsed, []);
+  return (await readRelayItem(itemId, ownerId))!;
 }
 
 /** Applies finished deal jobs: links the email to the deal Matcha made or updated, if it is this email's deal, and records what it found. */

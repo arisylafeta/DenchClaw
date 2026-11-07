@@ -363,7 +363,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
                       </div>
                     )}
                     {i.earlier.length > 0 && <div className={s.earlier}>{i.earlier.map((e, k) => <span key={k}><b>{e.who}</b> · {e.when}: {e.summary}</span>)}</div>}
-                    <DealBar item={i} busy={!!busy[i.id]} onRun={(action) => void dealJob(i, action)} onAsk={() => void draftAsk(i)} onOpenListing={onOpenListing} />
+                    <DealBar item={i} busy={!!busy[i.id]} onRun={(action) => void dealJob(i, action)} onAsk={tab === "action" && i.can_ask ? () => void draftAsk(i) : undefined} onOpenListing={onOpenListing} />
                   </div>
                 )}
                 {tab !== "other" && (
@@ -1169,7 +1169,7 @@ Todos.Suggested = function Suggested({ item, draft, reload, say }: { item: Relay
 const dealWorking = (i: RelayItem) => !!i.deal_job && ["queued", "running", "ready", "finalising"].includes(i.deal_job.status);
 
 /** The deal under an open email: which inbox it came to, Matcha's latest result, and Create deal or Update deal from this reply. */
-function DealBar({ item: i, busy, onRun, onAsk, onOpenListing }: { item: RelayItem; busy: boolean; onRun: (action: "create" | "update") => void; onAsk: () => void; onOpenListing?: (id: string, label?: string) => void }) {
+function DealBar({ item: i, busy, onRun, onAsk, onOpenListing }: { item: RelayItem; busy: boolean; onRun: (action: "create" | "update") => void; onAsk?: () => void; onOpenListing?: (id: string, label?: string) => void }) {
   const job = i.deal_job;
   if (!i.inbox && !i.deal_action && !job && !i.bulk_listing_id) return null;
   const working = dealWorking(i);
@@ -1186,7 +1186,7 @@ function DealBar({ item: i, busy, onRun, onAsk, onOpenListing }: { item: RelayIt
       </div>
       <div className={s.dealbtns}>
         {i.bulk_listing_id && <button type="button" className={s.btn} onClick={() => onOpenListing?.(i.bulk_listing_id!, i.deal_label ?? undefined)}>Open deal</button>}
-        {!working && i.can_ask && <button type="button" className={s.btn} disabled={busy} title="Drafts the playbook's ask for what the deal is still missing, from supply@ or buy@. You read it in Review and send." onClick={onAsk}>Draft the ask</button>}
+        {!working && onAsk && <button type="button" className={s.btn} disabled={busy} title="Drafts the playbook's ask for what the deal is still missing, from the inbox this thread uses. You read it in Review and send." onClick={onAsk}>Draft the ask</button>}
         {!working && i.deal_action && <button type="button" className={cx(s.btn, s.pri)} disabled={busy} onClick={() => onRun(i.deal_action!)}>
           {job?.status === "failed" && job.action === i.deal_action ? "Try again" : i.deal_action === "create" ? "Create deal" : "Update deal from this reply"}</button>}
       </div>

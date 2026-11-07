@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { askInstruction, buildChecklist, missingInstruction, type ChecklistListing } from "./relay-checklist";
+import { askInstruction, askLabel, buildChecklist, missingInstruction, type ChecklistListing } from "./relay-checklist";
 
 const now = new Date("2026-11-07T12:00:00Z");
 const supply: ChecklistListing = {
@@ -96,6 +96,19 @@ describe("askInstruction", () => {
       { field_key: "clear_by", value: "30 Nov", status: "confirmed" }, { field_key: "soh", value: "80%+", status: "confirmed" },
     ], [], now);
     const text = askInstruction(most)!;
-    expect(text).toMatch(/^Second reply from the intake guide: Ask them for, or to confirm, what we still need: price\./);
+    expect(text).toMatch(/^Second reply from the intake guide: thank them for what they sent\. Ask them for, or to confirm, what we still need: price, and say why it matters\./);
+    expect(text).not.toContain("Keep the rest of the email");
+    expect(askLabel(most)).toMatch(/^Draft the ask: price/);
+  });
+  it("switches from the first ask to the gaps at three facts, counting doubtful ones", () => {
+    const three = buildChecklist(supply, [{ field_key: "model", value: "Leaf", status: "unverified" }], [], now);  // what, how many, where
+    expect(three.required.filter((i) => i.have).length).toBe(3);
+    expect(askInstruction(three)).toMatch(/^Second reply/);
+    expect(askInstruction(three)).toContain("what (kWh not stated)");
+  });
+  it("asks a buyer for their spec sheet first", () => {
+    const buyer = buildChecklist({ ...supply, kind: "demand", quantity: null, location: null, context: {}, product_family: "Zoe packs" }, [], [], now);
+    expect(askInstruction(buyer)).toContain("their spec sheet");
+    expect(askLabel(buyer)).toBe("Draft the ask: first ask, everything they have");
   });
 });
