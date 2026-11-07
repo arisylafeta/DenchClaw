@@ -193,7 +193,8 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
         <ErrorText error={actionError} />
         {tab === "today" ? (
           <TodayView rows={shown} owner={filters.owner} loading={!sheetLoaded && !sheetError} error={sheetError} today={today}
-            onOpen={open} onNext={saveNext} onOpenBoard={() => setTab("board")} />
+            onOpen={open} onNext={saveNext} onOpenBoard={() => setTab("board")}
+            onOpenCompany={onOpenEntry ? (id) => onOpenEntry("company", id) : undefined} />
         ) : tab === "board" ? (
           <div className="flex flex-col gap-4">
             <SheetFilterBar rows={tabRows} filters={filters} onFilters={setFilters} hideProgress />

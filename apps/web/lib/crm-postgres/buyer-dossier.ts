@@ -173,6 +173,31 @@ export async function getCompanyDossier(companyId: string): Promise<CompanyDossi
   };
 }
 
+export type DossierToReview = {
+  company_id: string;
+  name: string;
+  stale_since: string;
+  reasons: DossierStaleReason[];
+  version: number;
+};
+
+/**
+ * Every company whose dossier intake has flagged since it was last reviewed, oldest flag first: the
+ * "Dossiers to review" list on the Trades Preview home. A dossier is only stale once it exists, so
+ * companies still on the derived-profile path are not listed.
+ */
+export async function listDossiersToReview(limit = 50): Promise<DossierToReview[]> {
+  return queryPg<DossierToReview>(
+    `select id as company_id, name, ${ISO("buyer_dossier_stale_since")} as stale_since,
+       buyer_dossier_stale_reasons as reasons, buyer_dossier_version::int as version
+     from crm_companies
+     where buyer_dossier is not null and buyer_dossier_stale_since is not null
+     order by buyer_dossier_stale_since, name
+     limit $1`,
+    [limit],
+  );
+}
+
 /** Saved searches intake recorded for the company (category saved_search), newest first. */
 export async function listSavedSearchAlerts(companyId: string): Promise<SavedSearchAlert[]> {
   return queryPg<SavedSearchAlert>(

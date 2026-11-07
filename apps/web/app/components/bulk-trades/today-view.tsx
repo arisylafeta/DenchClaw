@@ -10,6 +10,7 @@ import { NextActionCell } from "./next-action-cell";
 import { ProgressChip } from "./opportunities-sheet";
 import { DriverAvatar, DueText } from "./desk-bits";
 import { ErrorText } from "./trade-ui";
+import { DossiersToReview } from "./dossiers-to-review";
 
 /** Whole thousands for the target, e.g. £27k, €31k. */
 const roundK = (symbol: string, value: number) => `${symbol}${Math.round(value / 1000).toLocaleString("en-GB")}k`;
@@ -111,9 +112,10 @@ function summary(rows: SheetRow[], owner: DealOwner | "all", groups: { key: Toda
 }
 
 /** Today: the quarter target, then every open listing's next action by when it is due. Nothing else. */
-export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, onOpenBoard }: {
+export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, onOpenBoard, onOpenCompany }: {
   rows: SheetRow[]; owner: DealOwner | "all"; loading: boolean; error: string | null; today: string;
   onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void>; onOpenBoard: () => void;
+  onOpenCompany?: (id: string) => void;
 }) {
   const groups = useMemo(() => todayGroups(rows, today), [rows, today]);
   const busy = loading && !rows.length;
@@ -124,6 +126,7 @@ export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, 
         {(busy || (!error && rows.length > 0)) && <p data-today-summary className="text-[13px]" style={{ color: "var(--bt-text-2)" }}><Sh on={busy} chars={48}>{summary(rows, owner, groups)}</Sh></p>}
       </div>
       <QuarterTarget rows={rows} owner={owner} loading={busy} onOpenBoard={onOpenBoard} />
+      <DossiersToReview onOpenCompany={onOpenCompany} />
       <ErrorText error={error} />
       <section aria-label="Next actions" className="overflow-hidden rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
         <header className="flex items-baseline justify-between gap-2 border-b px-4 py-3" style={{ borderColor: "var(--bt-divider)" }}>
