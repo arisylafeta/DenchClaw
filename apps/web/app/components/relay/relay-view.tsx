@@ -1168,9 +1168,8 @@ function DealBar({ item: i, busy, onRun, onOpenListing }: { item: RelayItem; bus
       </div>
       <div className={s.dealbtns}>
         {i.bulk_listing_id && <button type="button" className={s.btn} onClick={() => onOpenListing?.(i.bulk_listing_id!, i.deal_label ?? undefined)}>Open deal</button>}
-        {!working && i.deal_action === "update" && <button type="button" className={cx(s.btn, s.pri)} disabled={busy} onClick={() => onRun("update")}>Update deal from this reply</button>}
-        {!working && i.deal_action === "create" && <button type="button" className={cx(s.btn, s.pri)} disabled={busy} onClick={() => onRun("create")}>Create deal</button>}
-        {!working && job?.status === "failed" && <button type="button" className={s.btn} disabled={busy} onClick={() => onRun(job.action)}>Try again</button>}
+        {!working && i.deal_action && <button type="button" className={cx(s.btn, s.pri)} disabled={busy} onClick={() => onRun(i.deal_action!)}>
+          {job?.status === "failed" && job.action === i.deal_action ? "Try again" : i.deal_action === "create" ? "Create deal" : "Update deal from this reply"}</button>}
       </div>
     </div>
   );

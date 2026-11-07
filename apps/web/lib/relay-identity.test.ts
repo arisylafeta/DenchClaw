@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dealSummaryText, ownsDeal, replyIdentity, suggestDealAction, threadInbox } from "./relay-identity";
+import { dealResultFits, dealSummaryText, ownsDeal, replyIdentity, suggestDealAction, threadInbox } from "./relay-identity";
 
 const inbound = (to: string[], cc: string[] = [], identity_key: string | null = null) => ({ direction: "inbound", to_emails: to, cc_emails: cc, identity_key });
 const outbound = (identity_key: string | null) => ({ direction: "outbound", to_emails: ["x@seller.com"], cc_emails: [], identity_key });
@@ -93,5 +93,30 @@ describe("threadInbox and suggestDealAction", () => {
   it("offers Update deal only when their reply is the newest message", () => {
     expect(suggestDealAction(email("btd_1", "supplier", "inbound"), "supply")).toBe("update");
     expect(suggestDealAction(email("btd_1", "supplier", "outbound"), "supply")).toBeNull();
+  });
+});
+
+describe("deal buttons after Matcha has run", () => {
+  const email = { bulk_listing_id: "btd_1", contact_type: "supplier", last_message: { direction: "inbound", at: "2026-11-07T10:00:00Z" } };
+  it("hides the button while Matcha works, and after a run newer than their last message", () => {
+    expect(suggestDealAction(email, "supply", { status: "running", created_at: "2026-11-07T10:05:00Z" })).toBeNull();
+    expect(suggestDealAction(email, "supply", { status: "done", created_at: "2026-11-07T10:05:00Z" })).toBeNull();
+  });
+  it("offers it again when they write after Matcha's last run, or after a failure", () => {
+    expect(suggestDealAction(email, "supply", { status: "done", created_at: "2026-11-07T09:00:00Z" })).toBe("update");
+    expect(suggestDealAction(email, "supply", { status: "failed", created_at: "2026-11-07T10:05:00Z" })).toBe("update");
+  });
+});
+
+describe("dealResultFits", () => {
+  const base = { listingId: "btd_9", currentListingId: null, threadLinked: false, ownerEmail: null, counterpartEmail: "sam@breakers.co.uk" };
+  it("refuses a listing that isn't this email's", () => {
+    expect(dealResultFits(base)).toBe(false);
+    expect(dealResultFits({ ...base, ownerEmail: "thomas@colvert.eu" })).toBe(false);
+  });
+  it("accepts the current deal, a thread-tagged one, or one the sender owns", () => {
+    expect(dealResultFits({ ...base, currentListingId: "btd_9" })).toBe(true);
+    expect(dealResultFits({ ...base, threadLinked: true })).toBe(true);
+    expect(dealResultFits({ ...base, ownerEmail: "sam@breakers.co.uk" })).toBe(true);
   });
 });

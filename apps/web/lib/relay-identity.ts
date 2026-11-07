@@ -73,11 +73,24 @@ export function threadInbox(supply: boolean, buy: boolean, contactType?: string 
   return supply ? "supply" : buy ? "buy" : null;
 }
 
-/** What Relay offers for the deal: create one for a seller or buyer email with none, or update it when their reply is newest. */
+type LastDealJob = { status: string; created_at: string } | null | undefined;
+
+/** What Relay offers for the deal: create one for a seller or buyer email with none, or update it when their reply is newest.
+ * Nothing while Matcha works, and nothing again until a new message arrives after Matcha's last finished run. */
 export function suggestDealAction(
-  item: { bulk_listing_id: string | null; contact_type: string | null; last_message: { direction: string | null } | null },
+  item: { bulk_listing_id: string | null; contact_type: string | null; last_message: { direction: string | null; at?: string | null } | null },
   inbox: "supply" | "buy" | null,
+  lastJob?: LastDealJob,
 ): "create" | "update" | null {
+  if (lastJob && ["queued", "running", "ready", "finalising"].includes(lastJob.status)) return null;
+  const at = item.last_message?.at ? Date.parse(item.last_message.at) : NaN;
+  if (lastJob?.status === "done" && (Number.isNaN(at) || Date.parse(lastJob.created_at) >= at)) return null;
   if (item.bulk_listing_id) return item.last_message?.direction === "inbound" ? "update" : null;
   return inbox || item.contact_type === "buyer" || item.contact_type === "supplier" ? "create" : null;
+}
+
+/** A deal Matcha names may be linked to the email only when it is this email's deal already, the thread is tagged with it,
+ * or the person writing owns it. A made-up or someone else's listing is refused. */
+export function dealResultFits(d: { listingId: string; currentListingId: string | null; threadLinked: boolean; ownerEmail: string | null; counterpartEmail: string | null }): boolean {
+  return d.listingId === d.currentListingId || d.threadLinked || ownsDeal(d.ownerEmail, d.counterpartEmail);
 }
