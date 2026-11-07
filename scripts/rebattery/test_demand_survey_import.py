@@ -335,6 +335,9 @@ class DossierCompanies(unittest.TestCase):
         return self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     def company(self, cur, company_id, dossier=None, profile=None):
+        if dossier:
+            # A company that already has dossier text is written by the dossier path, which the guard checks.
+            cur.execute("select set_config('crm.dossier_write', 'on', true)")
         cur.execute("""insert into crm_companies (id, name, buyer_profile, buyer_dossier, buyer_dossier_version)
                        values (%s, %s, coalesce(%s::jsonb, '{}'::jsonb), %s, %s)""",
                     (company_id, company_id, json.dumps(profile) if profile else None,
@@ -468,6 +471,74 @@ class DossierCompanies(unittest.TestCase):
             self.assertEqual(saved["status"], "qualifying")
             self.assertEqual(saved["kind"], "request")
             self.assertEqual(saved["quantity"], "More than 10 units")
+            self.conn.rollback()
+
+    def stale_rows(self, cur):
+        cur.execute("""select buyer_dossier_stale_since::text as stale_since, buyer_dossier_stale_reasons as reasons
+                       from crm_companies where id = %s""", (self.company_id,))
+        return cur.fetchone()
+
+    def test_evidence_without_a_source_id_is_recorded_once(self):
+        """The dedupe key no longer depends on source_id: a row without one must not grow the list."""
+        import demand_lifecycle as lifecycle
+        self.company_id, email = self.cid("nosrc"), self.email("no.source")
+        with self.cursor() as cur:
+            self.company(cur, self.company_id, dossier=self.dossier(self.company_id))
+            self.person(cur, f"p_dossier_nosrc_{self.run_id}", email, self.company_id)
+            row = {"company_id": self.company_id, "wants": "Leaf packs", "observed_on": "2026-10-11",
+                   "source_kind": "import", "source_label": "Sourcing request", "source_id": None, "spec": {}}
+            self.assertTrue(lifecycle.merge_profile(cur, dict(row)))
+            self.assertFalse(lifecycle.merge_profile(cur, dict(row)))
+            saved = self.stale_rows(cur)
+            self.assertEqual(saved["stale_since"], "2026-10-11")
+            self.assertEqual(len(saved["reasons"]), 1)
+            self.assertIsNone(saved["reasons"][0]["source_id"])
+            first_key = saved["reasons"][0]["key"]
+            self.assertTrue(first_key.startswith("intake:"))
+
+            # A demand row that has an id keys on that id, so the same row is one reason.
+            keyed = {**row, "id": f"btd_{self.run_id}", "source_label": "Jules"}
+            self.assertTrue(lifecycle.merge_profile(cur, dict(keyed)))
+            self.assertFalse(lifecycle.merge_profile(cur, dict(keyed)))
+            reasons = self.stale_rows(cur)["reasons"]
+            self.assertEqual([reason["key"] for reason in reasons], [first_key, f"demand:btd_{self.run_id}"])
+            self.conn.rollback()
+
+    def test_the_reason_list_keeps_the_newest_fifty(self):
+        import demand_lifecycle as lifecycle
+        self.company_id, email = self.cid("cap"), self.email("cap")
+        with self.cursor() as cur:
+            self.company(cur, self.company_id, dossier=self.dossier(self.company_id))
+            for i in range(55):
+                row = {"company_id": self.company_id, "wants": f"Ask {i}", "observed_on": f"2026-10-{(i % 28) + 1:02d}",
+                       "source_kind": "import", "source_label": "Sourcing request", "source_id": f"cap:{i}", "spec": {}}
+                self.assertTrue(lifecycle.merge_profile(cur, row))
+            reasons = self.stale_rows(cur)["reasons"]
+            self.assertEqual(len(reasons), lifecycle.STALE_REASONS_MAX)
+            self.assertEqual(reasons[-1]["source_id"], "cap:54")
+            self.assertEqual(reasons[0]["source_id"], "cap:5")
+            self.conn.rollback()
+
+    def test_a_changed_saved_search_updates_its_alert_note_in_place(self):
+        company_id, email = self.cid("searchedit"), self.email("saved.search.edit")
+        with self.cursor() as cur:
+            self.company(cur, company_id, dossier=self.dossier(company_id), profile={"wants": "dossier text"})
+            self.person(cur, f"p_dossier_searchedit_{self.run_id}", email, company_id)
+            base = {"id": f"dossier-search-edit-{self.run_id}", "email": email, "confirmed_at": "2026-10-21",
+                    "label": "LFP packs", "frequency": "daily", "status": "active",
+                    "catalog_path": "/marketplace/listings"}
+            first = self.saved_search.map_saved_search({**base, "filters": {"format": ["pack"], "chemistry": ["lfp"]}})
+            self.assertTrue(survey.insert(cur, survey.link(cur, first)))
+            # The same search, now asking for NMC: the alert note follows the buyer's filters.
+            second = self.saved_search.map_saved_search({**base, "filters": {"format": ["pack"], "chemistry": ["nmc"]}})
+            self.assertTrue(survey.insert(cur, survey.link(cur, second)))
+            self.assertFalse(survey.insert(cur, survey.link(cur, second)))
+            cur.execute("""select note from crm_company_context_notes
+                           where company_id = %s and category = 'saved_search'""", (company_id,))
+            notes = cur.fetchall()
+            self.assertEqual(len(notes), 1)
+            self.assertIn("Chemistries: NMC", notes[0]["note"])
+            self.assertNotIn("Chemistries: LFP", notes[0]["note"])
             self.conn.rollback()
 
 

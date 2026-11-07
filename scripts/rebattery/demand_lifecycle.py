@@ -1,5 +1,6 @@
 """Buyer identity, reputation and explicit demand ageing rules used by intake jobs."""
 import datetime as dt
+import hashlib
 import json
 import uuid
 
@@ -94,33 +95,60 @@ def expiry_transition(row, today):
     return None
 
 
+# The stale list is a short working queue for a person, not a log: keep the newest reasons.
+STALE_REASONS_MAX = 50
+
+
+def _stale_key(entry):
+    """Stable identity for one stale reason, so a re-import of the same evidence never adds a second.
+
+    A source id when the evidence has one, else the stored key (a demand row's own id on first write),
+    else a digest of the dated reason. Nightly imports of the same survey answer or saved search keep
+    the list at one entry per source.
+    """
+    if entry.get('key'):
+        return str(entry['key'])
+    if entry.get('source_id'):
+        return str(entry['source_id'])
+    digest = hashlib.sha1(f"{entry.get('date')}|{entry.get('reason')}".encode('utf-8')).hexdigest()[:16]
+    return f'intake:{digest}'
+
+
 def _mark_dossier_stale(cur, row, today):
     """A company with a dossier keeps its text: intake only flags it for a person to review.
 
-    The earliest stale date is kept and each source is recorded once (by source_id), so a nightly
-    re-import of the same survey answer or saved search does not grow the list.
+    The earliest stale date is kept and each source is recorded once, keyed by its stable id (see
+    `_stale_key`), so a nightly re-import of the same survey answer or saved search does not grow the
+    list. The list is capped at the newest `STALE_REASONS_MAX` reasons.
     """
     observed = row.get('observed_on') or today
     source_id = row.get('source_id')
     label = row.get('source_label') or row.get('source_kind') or 'intake'
     reason = ' '.join(f"{label}: {row.get('wants') or 'new evidence'}".split())[:200]
     entry = {'date': str(observed)[:10], 'reason': reason, 'source_id': source_id}
-    marker = json.dumps([{'source_id': source_id}]) if source_id else None
+    entry['key'] = f"demand:{row['id']}" if source_id is None and row.get('id') else _stale_key(entry)
+
+    cur.execute("""select buyer_dossier_stale_since::text as stale_since, buyer_dossier_stale_reasons as reasons
+                   from crm_companies where id = %s for update""", (row['company_id'],))
+    current = cur.fetchone() or {}
+    reasons = [item for item in (current.get('reasons') or []) if isinstance(item, dict)]
+    if any(_stale_key(item) == entry['key'] for item in reasons):
+        return False
+    reasons = [*reasons, entry][-STALE_REASONS_MAX:]
     cur.execute("""update crm_companies set
         buyer_dossier_stale_since = coalesce(buyer_dossier_stale_since, %s::date),
-        buyer_dossier_stale_reasons = buyer_dossier_stale_reasons || %s::jsonb,
+        buyer_dossier_stale_reasons = %s::jsonb,
         updated_at = now()
-      where id = %s
-        and (%s::jsonb is null or not buyer_dossier_stale_reasons @> %s::jsonb)
-      returning id""",
-      (str(observed)[:10], json.dumps([entry]), row['company_id'], marker, marker))
+      where id = %s returning id""",
+      (str(observed)[:10], json.dumps(reasons), row['company_id']))
     return cur.fetchone() is not None
 
 
 def _record_saved_search(cur, row):
     """A dossier company's saved search also becomes a dated context note: the Buyer tab lists it as an alert.
 
-    Idempotent on the platform's search id, so the nightly import adds each alert once.
+    Idempotent on the platform's search id, so the nightly import adds each alert once and updates the
+    note in place when the buyer's filters change.
     """
     search_id = str(row.get('source_id') or '').split(':', 1)[-1]
     if not search_id:
@@ -139,7 +167,9 @@ def _record_saved_search(cur, row):
     cur.execute("""insert into crm_company_context_notes
         (id, company_id, note, category, source_kind, source_ref, observed_on, source_url)
       values (%s, %s, %s, 'saved_search', 'saved_search', %s, %s::date, %s)
-      on conflict (id) do nothing returning id""",
+      on conflict (id) do update set note = excluded.note
+        where crm_company_context_notes.note is distinct from excluded.note
+      returning id""",
       (f"ccn_savedsearch_{search_id}"[:200], row['company_id'], note, row.get('source_id'),
        str(confirmed)[:10], row.get('source_url')))
     return cur.fetchone() is not None
