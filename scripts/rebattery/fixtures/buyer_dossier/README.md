@@ -20,6 +20,10 @@ and the Python module (`scripts/rebattery/buyer_dossier.py`) cannot drift silent
 
 Synthetic companies only. No real company data belongs in git.
 
+`merge.json` holds the merge cases (existing profile + dossier frontmatter -> expected profile,
+pass-through keys and changed flag). Both suites read it, so the derive-as-merge rule that
+`saveDossier`, the loader and the Python module each rely on is exercised in one place.
+
 Regenerate the expected JSON from the Python module after changing a `.md` fixture (the Python module
 is the schema's written reference; the TypeScript suite then proves the runtime matches it):
 
@@ -30,6 +34,8 @@ from pathlib import Path
 sys.path.insert(0, '.')
 import buyer_dossier as bd
 for md in sorted(Path('fixtures/buyer_dossier').glob('*.md')):
+    if md.name == 'README.md':
+        continue
     fm, body = bd.load(md)
     errors = bd.validate(fm)
     out = {'frontmatter': fm, 'body': body, 'errors': errors,

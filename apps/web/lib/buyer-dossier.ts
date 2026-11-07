@@ -325,8 +325,10 @@ export function validateDossier(frontmatter: unknown): string[] {
     errors.push(`${key}: unknown top-level key (allowed: ${TOP_LEVEL_KEYS.join(", ")})`);
   }
 
-  const companyId = fm.company_id === undefined ? "" : fm.company_id;
-  if (typeof companyId !== "string" && typeof companyId !== "number") {
+  const companyId = fm.company_id === undefined || fm.company_id === null ? "" : fm.company_id;
+  if (typeof companyId === "string" && !companyId.trim()) {
+    errors.push("company_id: required (the company the dossier belongs to)");
+  } else if (typeof companyId !== "string" && typeof companyId !== "number") {
     errors.push("company_id: must be a string");
   }
   checkEnum(errors, "buyer_type", fm.buyer_type, BUYER_TYPES, "buyer_type");

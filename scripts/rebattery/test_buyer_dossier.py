@@ -136,6 +136,14 @@ class ValidateTests(unittest.TestCase):
         errors = bd.validate(parse_valid(notes="free text"))
         self.assertTrue(any(e.startswith("notes: unknown top-level key") for e in errors), errors)
 
+    def test_company_id_is_required_and_must_be_text(self):
+        frontmatter = parse_valid()
+        del frontmatter["company_id"]
+        self.assertIn("company_id: required (the company the dossier belongs to)", bd.validate(frontmatter))
+        self.assertIn("company_id: required (the company the dossier belongs to)",
+                      bd.validate(parse_valid(company_id="   ")))
+        self.assertTrue(any(e == "company_id: must be a string" for e in bd.validate(parse_valid(company_id=["a"]))))
+
     def test_unknown_product_key_is_rejected(self):
         frontmatter = parse_valid()
         frontmatter["products"][0]["price_hint"] = "cheap"
@@ -432,6 +440,36 @@ class SharedFixtureTests(unittest.TestCase):
             with self.subTest(name=name):
                 frontmatter, _ = bd.load(self.FIXTURES / f"{name}.md")
                 self.assertEqual(bd.to_buyer_profile(frontmatter), expected["profile"])
+
+
+class MergeFixtureTests(unittest.TestCase):
+    """The merge fixtures drive apps/web/lib/buyer-dossier.test.ts too: one merge rule, both languages."""
+
+    FIXTURES = Path(__file__).resolve().parent / "fixtures" / "buyer_dossier"
+
+    def cases(self):
+        return json.loads((self.FIXTURES / "merge.json").read_text(encoding="utf-8"))["cases"]
+
+    def test_the_merge_fixture_set_is_present(self):
+        self.assertEqual([case["name"] for case in self.cases()], [
+            "pass-through keys survive and derived keys are replaced",
+            "the same dossier over its own derived profile changes nothing",
+            "a derived key the dossier no longer states is dropped, not kept stale",
+        ])
+
+    def test_merge_matches_the_expected_profile(self):
+        for case in self.cases():
+            with self.subTest(name=case["name"]):
+                profile, passed_through, _ = bd.merge_profile(case["existing"], case["frontmatter"])
+                self.assertEqual(passed_through, case["expected_passed_through"])
+                self.assertEqual(profile, case["expected_profile"])
+
+    def test_change_detection_matches_the_fixture(self):
+        for case in self.cases():
+            with self.subTest(name=case["name"]):
+                profile, _, _ = bd.merge_profile(case["existing"], case["frontmatter"])
+                changed = json.dumps(case["existing"], sort_keys=True) != json.dumps(profile, sort_keys=True)
+                self.assertEqual(changed, case["changed"])
 
 
 if __name__ == "__main__":

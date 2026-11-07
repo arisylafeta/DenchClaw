@@ -1,0 +1,163 @@
+{
+  "cases": [
+    {
+      "name": "pass-through keys survive and derived keys are replaced",
+      "existing": {
+        "evidence_url": "https://example.test/a",
+        "custom_note": "keep me",
+        "chemistries": ["LTO"],
+        "wants": "old wants"
+      },
+      "frontmatter": {
+        "company_id": "company-merge-1",
+        "products": [
+          {
+            "make": "Renault",
+            "format": "packs",
+            "chemistry": "LFP",
+            "kwh": [24],
+            "status": "asked",
+            "seen": "2026-09-01"
+          }
+        ]
+      },
+      "expected_passed_through": ["custom_note", "evidence_url"],
+      "expected_profile": {
+        "custom_note": "keep me",
+        "evidence_url": "https://example.test/a",
+        "chemistries": ["LFP"],
+        "formats": ["Packs"],
+        "makes": ["Renault"],
+        "cell_makers": [],
+        "part_numbers": [],
+        "kwh_min": 24,
+        "kwh_max": 24,
+        "wants": "Renault 24 kWh packs (asked 2026-09-01)",
+        "dossier": {
+          "company_id": "company-merge-1",
+          "products": [
+            {
+              "make": "Renault",
+              "format": "packs",
+              "chemistry": "LFP",
+              "kwh": [24],
+              "status": "asked",
+              "seen": "2026-09-01"
+            }
+          ]
+        }
+      },
+      "changed": true
+    },
+    {
+      "name": "the same dossier over its own derived profile changes nothing",
+      "existing": {
+        "chemistries": ["LFP"],
+        "formats": ["Packs"],
+        "makes": ["Renault"],
+        "cell_makers": [],
+        "part_numbers": [],
+        "kwh_min": 24,
+        "kwh_max": 24,
+        "wants": "Renault 24 kWh packs (asked 2026-09-01)",
+        "dossier": {
+          "company_id": "company-merge-2",
+          "products": [
+            {
+              "make": "Renault",
+              "format": "packs",
+              "chemistry": "LFP",
+              "kwh": [24],
+              "status": "asked",
+              "seen": "2026-09-01"
+            }
+          ]
+        }
+      },
+      "frontmatter": {
+        "company_id": "company-merge-2",
+        "products": [
+          {
+            "make": "Renault",
+            "format": "packs",
+            "chemistry": "LFP",
+            "kwh": [24],
+            "status": "asked",
+            "seen": "2026-09-01"
+          }
+        ]
+      },
+      "expected_passed_through": [],
+      "expected_profile": {
+        "chemistries": ["LFP"],
+        "formats": ["Packs"],
+        "makes": ["Renault"],
+        "cell_makers": [],
+        "part_numbers": [],
+        "kwh_min": 24,
+        "kwh_max": 24,
+        "wants": "Renault 24 kWh packs (asked 2026-09-01)",
+        "dossier": {
+          "company_id": "company-merge-2",
+          "products": [
+            {
+              "make": "Renault",
+              "format": "packs",
+              "chemistry": "LFP",
+              "kwh": [24],
+              "status": "asked",
+              "seen": "2026-09-01"
+            }
+          ]
+        }
+      },
+      "changed": false
+    },
+    {
+      "name": "a derived key the dossier no longer states is dropped, not kept stale",
+      "existing": {
+        "evidence_url": "https://example.test/c",
+        "origins": ["FR"],
+        "min_soh": 80,
+        "chemistries": ["LFP"]
+      },
+      "frontmatter": {
+        "company_id": "company-merge-3",
+        "products": [
+          {
+            "make": "Tesla",
+            "format": "packs",
+            "chemistry": "NMC",
+            "status": "bought",
+            "seen": "2026-05-04"
+          }
+        ]
+      },
+      "expected_passed_through": ["evidence_url"],
+      "expected_profile": {
+        "evidence_url": "https://example.test/c",
+        "chemistries": ["NMC"],
+        "formats": ["Packs"],
+        "makes": ["Tesla"],
+        "cell_makers": [],
+        "part_numbers": [],
+        "kwh_min": null,
+        "kwh_max": null,
+        "wants": "Tesla packs (bought 2026-05-04)",
+        "dossier": {
+          "company_id": "company-merge-3",
+          "products": [
+            {
+              "make": "Tesla",
+              "format": "packs",
+              "chemistry": "NMC",
+              "status": "bought",
+              "seen": "2026-05-04"
+            }
+          ]
+        }
+      },
+      "changed": true
+    }
+  ]
+}

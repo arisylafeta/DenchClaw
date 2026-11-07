@@ -218,7 +218,10 @@ def validate(frontmatter):
     for key in unknown:
         errors.append(f"{key}: unknown top-level key (allowed: {', '.join(TOP_LEVEL_KEYS)})")
 
-    if not isinstance(frontmatter.get("company_id", ""), (str, int)):
+    company_id = frontmatter.get("company_id")
+    if company_id is None or (isinstance(company_id, str) and not company_id.strip()):
+        errors.append("company_id: required (the company the dossier belongs to)")
+    elif not isinstance(company_id, (str, int)) or isinstance(company_id, bool):
         errors.append("company_id: must be a string")
     _check_enum(errors, "buyer_type", frontmatter.get("buyer_type"), BUYER_TYPES, "buyer_type")
     _check_list(errors, "intent", frontmatter.get("intent"), INTENTS, "intent")

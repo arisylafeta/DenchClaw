@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { deriveProfile, mergeDerivedProfile, parseDossier, validateDossier } from "./buyer-dossier";
+import { deriveProfile, mergeDerivedProfile, parseDossier, stableStringify, validateDossier } from "./buyer-dossier";
 
 // The same fixtures drive scripts/rebattery/test_buyer_dossier.py, so the TypeScript and Python
 // implementations cannot drift silently. Synthetic companies only: no real company data in git.
@@ -98,5 +98,55 @@ describe("derive as a merge", () => {
       wants: "",
       dossier: {},
     });
+  });
+});
+
+type MergeCase = {
+  name: string;
+  existing: Record<string, unknown>;
+  frontmatter: Record<string, unknown>;
+  expected_passed_through: string[];
+  expected_profile: Record<string, unknown>;
+  changed: boolean;
+};
+
+// scripts/rebattery/fixtures/buyer_dossier/merge.json drives the Python merge too, and `changed` is
+// the same comparison saveDossier writes buyer_profile on.
+const MERGE_CASES: MergeCase[] = (
+  JSON.parse(fs.readFileSync(path.join(FIXTURES, "merge.json"), "utf8")) as { cases: MergeCase[] }
+).cases;
+
+describe("merge parity with scripts/rebattery/buyer_dossier.py", () => {
+  it("finds the shared merge fixtures", () => {
+    expect(MERGE_CASES.map((item) => item.name)).toEqual([
+      "pass-through keys survive and derived keys are replaced",
+      "the same dossier over its own derived profile changes nothing",
+      "a derived key the dossier no longer states is dropped, not kept stale",
+    ]);
+  });
+
+  for (const item of MERGE_CASES) {
+    it(`merges and detects change: ${item.name}`, () => {
+      const merged = mergeDerivedProfile(item.existing, item.frontmatter);
+      // The fixture lists the pass-through keys alphabetically (Python's order); only the set matters.
+      expect([...merged.passedThrough].toSorted()).toEqual(item.expected_passed_through);
+      expect(merged.profile).toEqual(item.expected_profile);
+      const changed = stableStringify(item.existing) !== stableStringify(merged.profile);
+      expect(changed).toBe(item.changed);
+    });
+  }
+});
+
+describe("dossier validation", () => {
+  it("requires company_id and keeps it text", () => {
+    expect(validateDossier(parseDossier("---\ncompany: no id\n---\n").frontmatter)).toContain(
+      "company_id: required (the company the dossier belongs to)",
+    );
+    expect(validateDossier(parseDossier("---\ncompany_id: '  '\n---\n").frontmatter)).toContain(
+      "company_id: required (the company the dossier belongs to)",
+    );
+    expect(validateDossier(parseDossier("---\ncompany_id: [a, b]\n---\n").frontmatter)).toContain(
+      "company_id: must be a string",
+    );
   });
 });
