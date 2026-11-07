@@ -31,7 +31,11 @@ describe.skipIf(!TEST_URL)("buyer profile", () => {
     expect(buyer.profile).toMatchObject({ stage: "Contacted", tier: "A", capabilities: ["Recycle"], can_receive_waste: true });
     expect(buyer.profile.stage_changed_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(buyer.changes.map((c) => [c.field, c.old_value, c.new_value]).toSorted()).toEqual([
-      ["buyer_can_receive_waste", null, true], ["buyer_capabilities", null, ["Recycle"]], ["buyer_stage", null, "Contacted"],
+      // The insert also logs the buyer_* columns that carry a default: buyer_profile (migration 044) and the
+      // dossier columns (migration 104).
+      ["buyer_can_receive_waste", null, true], ["buyer_capabilities", null, ["Recycle"]],
+      ["buyer_dossier_stale_reasons", null, []], ["buyer_dossier_version", null, 0],
+      ["buyer_profile", null, {}], ["buyer_stage", null, "Contacted"],
       ["buyer_tier", null, "A"], ["relationship_stage", null, "Contacted"], // Stage follows Buyer Stage
     ]);
     expect(buyer.demand.map((d) => d.wants)).toEqual(["LFP packs"]);

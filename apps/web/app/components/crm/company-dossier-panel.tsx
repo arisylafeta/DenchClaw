@@ -69,10 +69,23 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
     try {
       const res = await fetch(`/api/crm/companies/${encodeURIComponent(companyId)}/buyer-dossier`);
       if (!res.ok) {throw new Error(res.status === 404 ? "Company not found." : `Could not load the dossier (HTTP ${res.status}).`);}
-      const data = (await res.json()) as CompanyDossier;
-      setDossier(data);
+      const data = (await res.json()) as Partial<CompanyDossier>;
+      // A partial or unexpected payload must not take the Buyer tab down with it.
+      const normalised: CompanyDossier = {
+        company_id: String(data.company_id ?? companyId),
+        text: typeof data.text === "string" ? data.text : null,
+        body: typeof data.body === "string" ? data.body : null,
+        frontmatter: data.frontmatter && typeof data.frontmatter === "object" ? data.frontmatter : null,
+        version: Number(data.version ?? 0),
+        updated_at: data.updated_at ?? null,
+        stale_since: data.stale_since ?? null,
+        stale_reasons: Array.isArray(data.stale_reasons) ? data.stale_reasons : [],
+        last_verified: data.last_verified ?? null,
+        saved_searches: Array.isArray(data.saved_searches) ? data.saved_searches : [],
+      };
+      setDossier(normalised);
       setLoadError(null);
-      return data;
+      return normalised;
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Could not load the dossier.");
       return null;
@@ -110,7 +123,9 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
         setErrors([body.error ?? "The dossier changed while you were editing it."]);
         if (typeof body.current_text === "string") {
           setDraft(body.current_text);
-          setDossier((current) => (current ? { ...current, text: body.current_text ?? null, version: body.current_version ?? current.version } : current));
+          setDossier((current) => (current
+            ? { ...current, text: body.current_text ?? null, version: body.current_version ?? current.version }
+            : current));
         }
         return;
       }
@@ -168,11 +183,11 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
         )}
         {editing ? (
           <>
-            <Button size="sm" variant="outline" onClick={() => { setEditing(false); setErrors([]); }}>Cancel</Button>
-            <Button size="sm" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save"}</Button>
+            <Button size="sm" variant="outline" onClick={() => { setEditing(false); setErrors([]); }}>Discard</Button>
+            <Button size="sm" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save dossier"}</Button>
           </>
         ) : (
-          <Button size="sm" variant="outline" onClick={startEditing} disabled={!dossier}>{dossier?.text ? "Edit" : "Add dossier"}</Button>
+          <Button size="sm" variant="outline" onClick={startEditing} disabled={!dossier}>{dossier?.text ? "Edit dossier" : "Add dossier"}</Button>
         )}
       </div>
 
@@ -186,7 +201,7 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
         </div>
       )}
 
-      {stale && dossier?.stale_reasons.length ? (
+      {stale && dossier?.stale_reasons?.length ? (
         <ul aria-label="Why it needs review" className="mb-3 space-y-1 text-[12px]" style={muted}>
           {dossier.stale_reasons.map((reason) => (
             <li key={`${reason.date}-${reason.source_id}-${reason.reason}`}>
@@ -222,7 +237,7 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
         </p>
       )}
 
-      {dossier?.saved_searches.length ? (
+      {dossier?.saved_searches?.length ? (
         <div className="mt-4">
           <h4 className="mb-1 text-[13px] font-semibold" style={{ color: "var(--color-text)" }}>Saved searches on rebattery.io</h4>
           <ul className="space-y-1 text-[12px]" style={muted}>

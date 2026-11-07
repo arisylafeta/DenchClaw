@@ -59,11 +59,11 @@ describe("dossier panel", () => {
 
   it("saves the editor text with the version it loaded", async () => {
     render(<DossierPanel companyId="co_1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit dossier" }));
     const textarea = screen.getByLabelText("Dossier text") as HTMLTextAreaElement;
     expect(textarea.value).toContain("Second-life MEB packs.");
     fireEvent.change(textarea, { target: { value: "---\ncompany_id: co_1\n---\nEdited" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save dossier" }));
     await waitFor(() => expect(calls.filter((call) => call.method === "PATCH")).toHaveLength(1));
     expect(calls.find((call) => call.method === "PATCH")?.body).toEqual({
       text: "---\ncompany_id: co_1\n---\nEdited",
@@ -75,8 +75,8 @@ describe("dossier panel", () => {
   it("shows the conflict and reloads the stored text into the editor", async () => {
     patchResponse = { status: 409, body: { error: "The dossier changed while you were editing it.", current_version: 5 } };
     render(<DossierPanel companyId="co_1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit dossier" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save dossier" }));
     expect(await screen.findByText(/changed while you were editing/)).toBeTruthy();
     expect((screen.getByLabelText("Dossier text") as HTMLTextAreaElement).value).toBe(DOSSIER.text);
     expect(screen.queryByText("Saved.")).toBeNull();
@@ -85,8 +85,8 @@ describe("dossier panel", () => {
   it("lists validation errors and keeps the editor open", async () => {
     patchResponse = { status: 400, body: { error: "Dossier has errors.", errors: ["products[0].status: required (one of bought, asked, said_interested, declined)"] } };
     render(<DossierPanel companyId="co_1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit dossier" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save dossier" }));
     expect(await screen.findByText(/products\[0\]\.status/)).toBeTruthy();
     expect(screen.getByLabelText("Dossier text")).toBeTruthy();
   });
