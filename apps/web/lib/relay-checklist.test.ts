@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChecklist, missingInstruction, type ChecklistListing } from "./relay-checklist";
+import { askInstruction, buildChecklist, missingInstruction, type ChecklistListing } from "./relay-checklist";
 
 const now = new Date("2026-11-07T12:00:00Z");
 const supply: ChecklistListing = {
@@ -78,5 +78,24 @@ describe("evidence that does not count", () => {
   it("shows when two sources disagree", () => {
     const c = buildChecklist({ ...supply, quantity: null }, [{ field_key: "quantity", value: "680,000 cells", status: "conflict" }], [], now);
     expect(c.required.find((i) => i.key === "how_many")!.warn).toBe("sources disagree");
+  });
+});
+
+describe("askInstruction", () => {
+  const bare = buildChecklist({ ...supply, quantity: "30 packs", location: null, context: {} }, [{ field_key: "model", value: "Nissan Leaf", status: "confirmed" }], [], now);
+  it("writes the first ask while we have next to nothing", () => {
+    const text = askInstruction(bare)!;
+    expect(text).toMatch(/^First reply from the intake guide/);
+    expect(text).toContain("stock list, label photos");
+    expect(text).toContain("price, when, where, health");
+    expect(text).toContain("Never offer a price");
+  });
+  it("asks only for the gaps once most facts are in", () => {
+    const most = buildChecklist(supply, [
+      { field_key: "model", value: "Leaf", status: "confirmed" }, { field_key: "capacity", value: "40 kWh", status: "confirmed" },
+      { field_key: "clear_by", value: "30 Nov", status: "confirmed" }, { field_key: "soh", value: "80%+", status: "confirmed" },
+    ], [], now);
+    const text = askInstruction(most)!;
+    expect(text).toMatch(/^Second reply from the intake guide: Ask them for, or to confirm, what we still need: price\./);
   });
 });

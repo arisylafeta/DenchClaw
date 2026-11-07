@@ -117,3 +117,16 @@ export function missingInstruction(c: DealChecklist): string | null {
     "Keep the rest of the email as it is. Never name a price or range yourself.",
   ].filter(Boolean).join(" ");
 }
+
+/** The note "Draft the ask" drafts from: the playbook's first ask while we have next to nothing, otherwise only the gaps.
+ * Null when nothing is missing or doubtful. */
+export function askInstruction(c: DealChecklist): string | null {
+  const gaps = missingInstruction(c);
+  if (!gaps) return null;
+  if (c.required.filter((i) => i.have).length <= 2) {
+    const docs = c.kind === "demand" ? "their spec sheet, the packs they would accept and the tests they need" : "stock list, label photos, test reports with their dates and datasheets";
+    const must = c.required.filter((i) => !i.have).map((i) => i.label.toLowerCase());
+    return `First reply from the intake guide: thank them, ask them to send everything they have (${docs}), then list what it must cover: ${must.join(", ")}. Never offer a price.`;
+  }
+  return `Second reply from the intake guide: ${gaps}`;
+}
