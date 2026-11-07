@@ -27,12 +27,25 @@ end $$;
 -- One write path. Once a company has a dossier, buyer_profile and buyer_dossier change only inside the dossier write
 -- function, which sets crm.dossier_write = 'on' for the length of its transaction. Every other writer (the generic
 -- entry update, the enrich route, a manual SQL edit) fails loudly instead of silently diverging from the dossier.
--- The first load that sets a dossier from null goes through the same path. The stale columns are deliberately not
--- guarded: intake marks a dossier stale without touching its text.
+-- The first load that sets a dossier from null goes through the same path, on UPDATE and on INSERT alike: a company
+-- created with dossier text must use the setting too, while buyer_profile alone stays free on insert (creating a
+-- lead keeps writing the profile it inferred). The stale columns are deliberately not guarded: intake marks a
+-- dossier stale without touching its text.
 create or replace function crm_guard_buyer_dossier() returns trigger language plpgsql as $$
 begin
-  if coalesce(current_setting('crm.dossier_write', true), '') <> 'on'
-     and (old.buyer_dossier is not null or new.buyer_dossier is not null)
+  if coalesce(current_setting('crm.dossier_write', true), '') = 'on' then
+    return new;
+  end if;
+  if tg_op = 'INSERT' then
+    if new.buyer_dossier is not null then
+      raise exception using
+        errcode = 'check_violation',
+        message = format('company %s has a buyer dossier: buyer_dossier is written only by the dossier write path '
+                         '(set crm.dossier_write = ''on'' in that transaction)', new.id);
+    end if;
+    return new;
+  end if;
+  if (old.buyer_dossier is not null or new.buyer_dossier is not null)
      and (new.buyer_profile is distinct from old.buyer_profile
           or new.buyer_dossier is distinct from old.buyer_dossier) then
     raise exception using
@@ -45,7 +58,7 @@ end $$;
 
 drop trigger if exists trg_crm_companies_guard_buyer_dossier on crm_companies;
 create trigger trg_crm_companies_guard_buyer_dossier
-  before update on crm_companies
+  before insert or update on crm_companies
   for each row execute function crm_guard_buyer_dossier();
 
 -- The existing crm_log_buyer_profile_change trigger already logs every buyer_* column, so each dossier save and each

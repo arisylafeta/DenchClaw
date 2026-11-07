@@ -50,14 +50,12 @@ export async function PATCH(
   if (typeof body.text !== "string") {
     return Response.json({ error: "text is required." }, { status: 400 });
   }
-  const expected = body.expected_version === null || body.expected_version === undefined
-    ? null
-    : Number(body.expected_version);
-  if (expected !== null && !Number.isInteger(expected)) {
-    return Response.json({ error: "expected_version must be a whole number." }, { status: 400 });
+  // No silent last-writer-wins: the editor must say which version it read.
+  if (typeof body.expected_version !== "number" || !Number.isInteger(body.expected_version)) {
+    return Response.json({ error: "expected_version is required and must be a whole number." }, { status: 400 });
   }
 
-  const result: DossierSaveResult = await saveDossier(companyId, body.text, expected);
+  const result: DossierSaveResult = await saveDossier(companyId, body.text, body.expected_version);
   switch (result.kind) {
     case "missing":
       return Response.json({ error: "Company not found." }, { status: 404 });
@@ -81,6 +79,7 @@ export async function PATCH(
         derived: result.derived,
         passed_through: result.passedThrough,
         profile_changed: result.profileChanged,
+        unchanged: result.unchanged === true,
       });
   }
 }

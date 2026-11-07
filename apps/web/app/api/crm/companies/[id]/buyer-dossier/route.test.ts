@@ -107,9 +107,12 @@ describe("buyer dossier API", () => {
     await expect(res.json()).resolves.toMatchObject({ errors: ["products[0].status: required"] });
   });
 
-  it("rejects a body without text or with a version that is not a number", async () => {
+  it("rejects a body without text, without a version, or with a version that is not a whole number", async () => {
     expect((await PATCH(patch({ expected_version: 3 }), ctx)).status).toBe(400);
-    expect((await PATCH(patch({ text: "x", expected_version: "three" }), ctx)).status).toBe(400);
+    expect((await PATCH(patch({ text: "x" }), ctx)).status).toBe(400);
+    expect((await PATCH(patch({ text: "x", expected_version: null }), ctx)).status).toBe(400);
+    expect((await PATCH(patch({ text: "x", expected_version: "3" }), ctx)).status).toBe(400);
+    expect((await PATCH(patch({ text: "x", expected_version: 1.5 }), ctx)).status).toBe(400);
     expect(saveDossierMock).not.toHaveBeenCalled();
   });
 

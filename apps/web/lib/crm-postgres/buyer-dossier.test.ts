@@ -98,7 +98,7 @@ describe.skipIf(!TEST_URL)("buyer dossier write path", () => {
     expect(first.profile.wants).toContain("Volkswagen");
     expect(first.profile.evidence_url).toBe("https://example.test/evidence");
 
-    // Same text: the dossier version moves, the derived profile does not.
+    // The same text again is a no-op: the version does not move and nothing is written.
     const [beforeSecond] = await pg.queryPg<{ id: string }>(
       "select coalesce(max(id), 0)::text as id from crm_buyer_profile_changes where company_id = $1",
       [id],
@@ -106,13 +106,36 @@ describe.skipIf(!TEST_URL)("buyer dossier write path", () => {
     const second = await dossiers.saveDossier(id, dossierFor(id), 1);
     expect(second.kind).toBe("saved");
     if (second.kind !== "saved") return;
-    expect(second.version).toBe(2);
+    expect(second.unchanged).toBe(true);
+    expect(second.version).toBe(1);
     expect(second.profileChanged).toBe(false);
-    const profileWrites = await pg.queryPg(
-      "select 1 from crm_buyer_profile_changes where company_id = $1 and field = 'buyer_profile' and id > $2::bigint",
+    const [afterSecond] = await pg.queryPg<{ version: number }>(
+      "select buyer_dossier_version::int as version from crm_companies where id = $1",
+      [id],
+    );
+    expect(afterSecond.version).toBe(1);
+    const writes = await pg.queryPg(
+      "select 1 from crm_buyer_profile_changes where company_id = $1 and id > $2::bigint",
       [id, beforeSecond.id],
     );
-    expect(profileWrites).toHaveLength(0);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("refuses a dossier whose frontmatter names a different company", async () => {
+    const id = await company("wrong-company");
+    const other = await company("wrong-company-target");
+    const result = await dossiers.saveDossier(id, dossierFor(other), 0);
+    expect(result.kind).toBe("invalid");
+    if (result.kind !== "invalid") {
+      return;
+    }
+    expect(result.errors.join(" ")).toContain("company_id");
+    const [row] = await pg.queryPg<{ buyer_dossier: string | null; version: number }>(
+      "select buyer_dossier, buyer_dossier_version::int as version from crm_companies where id = $1",
+      [id],
+    );
+    expect(row.buyer_dossier).toBeNull();
+    expect(row.version).toBe(0);
   });
 
   it("refuses a stale editor with a conflict and leaves the text alone", async () => {
@@ -170,6 +193,65 @@ describe.skipIf(!TEST_URL)("buyer dossier write path", () => {
       [id],
     );
     expect(row.buyer_dossier).toBeNull();
+  });
+
+  it("refuses dossier text on insert unless the setting is on, and lets a plain profile insert through", async () => {
+    const id = `co_dossier_insert_${suffix}`;
+    await expect(
+      pg.queryPg("insert into crm_companies (id, name, buyer_dossier) values ($1, 'Insert Guard', 'text')", [id]),
+    ).rejects.toThrow(/written only by the dossier write path/);
+    const plain = `co_dossier_insert_plain_${suffix}`;
+    await pg.queryPg("insert into crm_companies (id, name, buyer_profile) values ($1, 'Plain Insert', '{\"wants\":\"x\"}'::jsonb)", [plain]);
+    const [row] = await pg.queryPg<{ buyer_dossier: string | null }>(
+      "select buyer_dossier from crm_companies where id = $1",
+      [plain],
+    );
+    expect(row.buyer_dossier).toBeNull();
+  });
+
+  it("rejects the generic entry update on buyer_profile but lets another company column through", async () => {
+    const id = await company("entry-path");
+    expect((await dossiers.saveDossier(id, dossierFor(id), 0)).kind).toBe("saved");
+
+    // The disposable database is built from schema.sql and the migrations, which seed no 'company' object (production
+    // has one). Register it plus a buyer_profile field for this test so the generic entry update path is exercised
+    // against the guard; both rows go afterwards.
+    const objectId = `obj_test_${suffix}_company`;
+    const fieldId = `fld_test_${suffix}_buyer_profile`;
+    const stageFieldId = `fld_test_${suffix}_buyer_stage`;
+    await pg.queryPg(
+      `insert into crm_objects (id, name, entity_table, display_field)
+       values ($1, 'company', 'crm_companies', 'name') on conflict (name) do nothing`,
+      [objectId],
+    );
+    await pg.queryPg(
+      `insert into crm_fields (id, object_id, name, type, canonical_column, sort_order)
+       select $1, id, 'ZZ Test Buyer Profile', 'text', 'buyer_profile', 999 from crm_objects where name = 'company'`,
+      [fieldId],
+    );
+    await pg.queryPg(
+      `insert into crm_fields (id, object_id, name, type, canonical_column, sort_order)
+       select $1, id, 'Buyer Stage', 'enum', 'buyer_stage', 1 from crm_objects where name = 'company'`,
+      [stageFieldId],
+    );
+    try {
+      const mutations = await import("./entry-mutations");
+      await expect(
+        mutations.updatePostgresEntry("company", id, { "ZZ Test Buyer Profile": '{"wants":"diverged"}' }),
+      ).rejects.toThrow(/written only by the dossier write path/);
+      await expect(
+        mutations.updatePostgresEntry("company", id, { "Buyer Stage": "Contacted" }),
+      ).resolves.toMatchObject({ ok: true });
+    } finally {
+      await pg.queryPg("delete from crm_fields where id = any($1::text[])", [[fieldId, stageFieldId]]);
+      await pg.queryPg("delete from crm_objects where id = $1", [objectId]);
+    }
+    const [row] = await pg.queryPg<{ stage: string | null; wants: string }>(
+      "select buyer_stage as stage, buyer_profile->>'wants' as wants from crm_companies where id = $1",
+      [id],
+    );
+    expect(row.stage).toBe("Contacted");
+    expect(row.wants).toContain("Volkswagen");
   });
 
   it("marks a dossier reviewed without touching its text", async () => {

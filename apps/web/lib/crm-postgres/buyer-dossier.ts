@@ -44,6 +44,8 @@ export type DossierSaveResult =
       derived: string[];
       passedThrough: string[];
       profileChanged: boolean;
+      /** True when the text matched the stored dossier: nothing was written and the version did not move. */
+      unchanged?: boolean;
     }
   | { kind: "conflict"; currentVersion: number; currentText: string | null }
   | { kind: "invalid"; errors: string[] }
@@ -52,6 +54,8 @@ export type DossierSaveResult =
 type CompanyRow = {
   buyer_dossier: string | null;
   buyer_dossier_version: number | string;
+  /** `buyer_dossier_updated_at::text`, aliased in the locking select. */
+  updated_at: string | null;
   buyer_profile: Record<string, unknown> | null;
 };
 
@@ -62,12 +66,14 @@ const ISO = (column: string) => `to_char(${column}, 'YYYY-MM-DD')`;
  *
  * `buyer_profile` and `buyer_dossier` are guarded by trg_crm_companies_guard_buyer_dossier, so the
  * transaction sets `crm.dossier_write = 'on'` for the length of the update and nothing else does.
- * A mismatch on `expectedVersion` returns a conflict and writes nothing; validation errors do the same.
+ * `expectedVersion` is required and must match the stored version: a mismatch returns a conflict and
+ * writes nothing, never a silent last-writer-wins. Validation errors write nothing either. Re-saving
+ * identical text is a no-op: the version does not move.
  */
 export async function saveDossier(
   companyId: string,
   text: string,
-  expectedVersion: number | null = null,
+  expectedVersion: number,
 ): Promise<DossierSaveResult> {
   const trimmed = (text ?? "").trim();
   // An empty dossier would derive an empty buy box. That is a write-path guard, not a schema rule:
@@ -77,7 +83,7 @@ export async function saveDossier(
   return withPgTransaction(async (tx: PgTransaction) => {
     const [current] = (
       await tx.query<CompanyRow>(
-        `select buyer_dossier, buyer_dossier_version, buyer_profile
+        `select buyer_dossier, buyer_dossier_version, buyer_dossier_updated_at::text as updated_at, buyer_profile
          from crm_companies where id = $1 for update`,
         [companyId],
       )
@@ -85,13 +91,34 @@ export async function saveDossier(
     if (!current) {return { kind: "missing" } as const;}
 
     const currentVersion = Number(current.buyer_dossier_version ?? 0);
-    if (expectedVersion !== null && Number(expectedVersion) !== currentVersion) {
+    if (Number(expectedVersion) !== currentVersion) {
       return { kind: "conflict", currentVersion, currentText: current.buyer_dossier } as const;
     }
 
     const { frontmatter } = parseDossier(text);
     const errors = validateDossier(frontmatter);
+    const rawCompany = frontmatter.company_id;
+    const dossierCompany = typeof rawCompany === "string"
+      ? rawCompany.trim()
+      : typeof rawCompany === "number" ? String(rawCompany) : "";
+    if (!errors.length && dossierCompany !== companyId) {
+      errors.push(`company_id: ${dossierCompany || "missing"} is not company ${companyId}`);
+    }
     if (errors.length) {return { kind: "invalid", errors } as const;}
+
+    // The same text again changes nothing: no version bump, no write, no change-log entry.
+    if (text === current.buyer_dossier) {
+      return {
+        kind: "saved",
+        version: currentVersion,
+        updated_at: current.updated_at,
+        profile: current.buyer_profile ?? {},
+        derived: [],
+        passedThrough: [],
+        profileChanged: false,
+        unchanged: true,
+      } as const;
+    }
 
     const merged = mergeDerivedProfile(current.buyer_profile, frontmatter);
     const profileChanged = stableStringify(current.buyer_profile ?? {}) !== stableStringify(merged.profile);
