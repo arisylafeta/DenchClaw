@@ -6,14 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { queryPg, withPgTransaction } from "./postgres";
-import { isBundledPersonalDomain } from "./personal-email-blocklist";
 import { draftAttachments, readMailDraft } from "./crm-postgres/mail";
 import { editDraft, editableCopy, identitySignatures, sameVersion, textToHtml, splitCopy } from "./mail-draft-actions";
 import type { DraftAttachment } from "./mail-types";
 import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
-import { dealResultFits, dealSummaryText, ownsDeal, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
+import { dealResultFits, dealSummaryText, isPersonalDomain, ownsDeal, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
 import { askInstruction, askLabel, buildChecklist, dismantlerInstruction, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
 
 const run = promisify(execFile);
@@ -379,13 +378,15 @@ async function withDealInfo(items: RelayItem[]): Promise<RelayItem[]> {
     "select b.id, lower(coalesce(b.email, p.email)) as owner_email from crm_bulk_listings b left join crm_people p on p.id = b.person_id where b.id = any($1)", [listingIds]).catch(() => []) : [];
   const ownerOf = new Map(owners.map((o) => [o.id, o.owner_email]));
   const jobs = await dealJobsFor(items.map((i) => i.id));
-  const dismantlers = await dismantlerPhases(items.map((i) => i.counterpart_email ?? "").filter(Boolean));
+  const dismantlers = await dismantlerPhases(items.map((i) => i.counterpart_email ?? "").filter(Boolean)).catch(() => new Map<string, DismantlerPhase>());
   return items.map((i) => {
     const box = i.mail_thread_id ? byThread.get(i.mail_thread_id) : undefined;
     const inbox = threadInbox(!!box?.supply, !!box?.buy, i.contact_type);
     const job = jobs.get(i.id) ?? null;
     const can_ask = !!i.bulk_listing_id && ownsDeal(ownerOf.get(i.bulk_listing_id), i.counterpart_email);
-    return { ...i, inbox, deal_action: suggestDealAction(i, inbox, job), deal_job: job, can_ask, dismantler: dismantlers.get((i.counterpart_email ?? "").toLowerCase()) ?? null };
+    // A dismantler writing as a buyer is a buyer: the dismantler channel is for their packs, not their purchases.
+    const dismantler = i.contact_type === "buyer" || inbox === "buy" ? null : dismantlers.get((i.counterpart_email ?? "").toLowerCase()) ?? null;
+    return { ...i, inbox, deal_action: suggestDealAction(i, inbox, job), deal_job: job, can_ask, dismantler };
   });
 }
 
@@ -393,14 +394,14 @@ async function withDealInfo(items: RelayItem[]): Promise<RelayItem[]> {
 async function dismantlerPhases(emails: string[]): Promise<Map<string, DismantlerPhase>> {
   const list = [...new Set(emails.map((e) => e.toLowerCase().trim()))];
   if (!list.length) return new Map();
-  const domains = list.map((e) => e.split("@")[1] ?? "").filter((d) => d && !isBundledPersonalDomain(d));
+  const domains = list.map((e) => e.split("@")[1] ?? "").filter((d) => d && !isPersonalDomain(d));
   const rows = await queryPg<{ email: string; phase: DismantlerPhase }>(
     `select distinct on (x.email) x.email, dm.stock_phase as phase
        from unnest($1::text[]) as x(email)
        join crm_dismantlers dm on dm.company_id in (
          select p.company_id from crm_people p where lower(p.email) = x.email and p.company_id is not null
          union select c.id from crm_companies c where lower(c.domain) = split_part(x.email, '@', 2) and split_part(x.email, '@', 2) = any($2::text[]))
-      order by x.email, case dm.stock_phase when 'marketplace' then 0 when 'stock_only' then 1 else 2 end`, [list, domains]).catch(() => []);
+      order by x.email, case dm.stock_phase when 'marketplace' then 0 when 'stock_only' then 1 else 2 end`, [list, domains]);
   return new Map(rows.map((r) => [r.email, r.phase]));
 }
 
@@ -517,6 +518,9 @@ export async function draftAsk(itemId: string, ownerId: string): Promise<RelayIt
 export async function dismantlerReply(itemId: string, ownerId: string): Promise<RelayItem> {
   const item = await readRelayItem(itemId, ownerId);
   if (!item) throw new RelayError(404, "Not found");
+  if (item.bulk_listing_id) throw new RelayError(409, "This email is on a deal. Use Update deal from this reply.");
+  const messages = await threadMessages(item.mail_thread_id);
+  if (item.contact_type === "buyer" || replyIdentity(messages, item.contact_type) === "buy") throw new RelayError(409, "This sender is writing as a buyer, so there are no packs to list.");
   const phase = (await dismantlerPhases([item.counterpart_email ?? ""])).get((item.counterpart_email ?? "").toLowerCase());
   if (!phase) throw new RelayError(409, "This sender isn't a dismantler in the CRM.");
   const ctx = await draftContext(item, ownerId, dismantlerInstruction(phase));

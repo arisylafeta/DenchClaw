@@ -120,3 +120,11 @@ describe("dealResultFits", () => {
     expect(dealResultFits({ ...base, ownerEmail: "sam@breakers.co.uk" })).toBe(true);
   });
 });
+
+describe("isPersonalDomain", () => {
+  it("treats personal and UK ISP mail as never a company", async () => {
+    const { isPersonalDomain } = await import("./relay-identity");
+    for (const d of ["gmail.com", "btinternet.com", "sky.com", "virginmedia.com", "BTINTERNET.COM"]) expect(isPersonalDomain(d)).toBe(true);
+    expect(isPersonalDomain("donkersvagparts.nl")).toBe(false);
+  });
+});
