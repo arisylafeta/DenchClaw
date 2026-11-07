@@ -45,6 +45,24 @@ def _list(value: Any) -> list[str]:
     return []
 
 
+def _rule_entry_value(item: Any) -> str | None:
+    """One rules_out or evidence_required entry: a plain value, or a {value, seen, src} mapping."""
+    if isinstance(item, dict):
+        value = item.get("value")
+        return value.strip() if isinstance(value, str) and value.strip() else None
+    if isinstance(item, (str, int, float)) and str(item).strip():
+        return str(item).strip()
+    return None
+
+
+def _rule_values(value: Any) -> list[str]:
+    """rules_out and evidence_required lists, with dated entries unwrapped to their value."""
+    if isinstance(value, list):
+        return [v for v in (_rule_entry_value(x) for x in value) if v]
+    single = _rule_entry_value(value)
+    return [single] if single else []
+
+
 def norm(text: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
 
@@ -399,10 +417,10 @@ def rule_out(listing: dict[str, Any], buyer: dict[str, Any]) -> tuple[str, str] 
     fmt = (listing.get("format") or "").lower()
 
     if is_dossier:
-        ruled = [str(c).upper() for c in _list(rules.get("chemistries"))]
+        ruled = [str(c).upper() for c in _rule_values(rules.get("chemistries"))]
         if chem and chem in ruled:
             return ("chemistry", f"rules_out.chemistries includes {chem}")
-        ruled_formats = [str(f).lower() for f in _list(rules.get("formats"))]
+        ruled_formats = [str(f).lower() for f in _rule_values(rules.get("formats"))]
         if fmt and fmt in ruled_formats:
             return ("format", f"rules_out.formats includes {fmt}")
     else:
@@ -415,7 +433,7 @@ def rule_out(listing: dict[str, Any], buyer: dict[str, Any]) -> tuple[str, str] 
 
     # A platform is only a conflict when the buyer explicitly refuses it.
     if is_dossier and listing.get("platform"):
-        for phrase in _list(rules.get("other")):
+        for phrase in _rule_values(rules.get("other")):
             text = norm(phrase)
             if platform_match(listing.get("platform"), phrase) or f" {norm(listing.get('platform'))} " in f" {text} ":
                 if any(word in text for word in ("will not accept", "not interchangeable", "not acceptable", "refuses")):

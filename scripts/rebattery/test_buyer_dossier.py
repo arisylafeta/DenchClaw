@@ -173,6 +173,46 @@ class ValidateTests(unittest.TestCase):
         frontmatter = parse_valid(alerts=[{"label": "x", "filters": {}, "frequency": "daily"}])
         self.assertTrue(any("alerts[0].frequency" in e for e in bd.validate(frontmatter)))
 
+    def test_continuity_timing_origins_and_min_soh_are_accepted(self):
+        frontmatter = parse_valid(needs_continuity=True, origins=["DE", "pl"], min_soh=70,
+                                  timing={"max_lead_days": 30, "notes": "wants stock within a month"})
+        self.assertEqual(bd.validate(frontmatter), [])
+
+    def test_new_keys_reject_wrong_values(self):
+        errors = bd.validate(parse_valid(needs_continuity="yes", origins=["DEU"], min_soh=120))
+        self.assertTrue(any(e.startswith("needs_continuity:") for e in errors), errors)
+        self.assertTrue(any(e.startswith("origins[0]:") for e in errors), errors)
+        self.assertTrue(any("min_soh" in e and "outside 0-100" in e for e in errors), errors)
+        errors = bd.validate(parse_valid(origins="DE", min_soh="80"))
+        self.assertTrue(any(e.startswith("origins: must be a list") for e in errors), errors)
+        self.assertTrue(any(e.startswith("min_soh: must be a number") for e in errors), errors)
+
+    def test_timing_rejects_unknown_keys_and_bad_lead(self):
+        errors = bd.validate(parse_valid(timing={"max_lead_days": "ten", "sla": 3}))
+        self.assertTrue(any(e.startswith("timing.max_lead_days:") for e in errors), errors)
+        self.assertTrue(any(e.startswith("timing.sla: unknown key") for e in errors), errors)
+        self.assertTrue(any(e.startswith("timing: must be a mapping") for e in bd.validate(parse_valid(timing=3))))
+
+    def test_dated_rule_and_evidence_entries_are_valid(self):
+        frontmatter = parse_valid(
+            rules_out={"chemistries": [{"value": "LTO", "seen": "2026-05-01", "src": "gmail_msg_test9"}],
+                       "formats": [{"value": "systems", "seen": "2026-05-02"}],
+                       "other": [{"value": "no damaged stock", "seen": "2026-05-03"}]},
+            evidence_required=[{"value": "tested_soh", "seen": "2026-05-04", "src": "whatsapp:message:test9"},
+                               "sds"],
+        )
+        self.assertEqual(bd.validate(frontmatter), [])
+
+    def test_dated_entry_errors_are_reported(self):
+        errors = bd.validate(parse_valid(
+            rules_out={"chemistries": [{"value": "LTO", "seen": "01/05/2026", "note": "x"}, {"value": ""}]},
+            evidence_required=[{"value": "tested_soh", "seen": "2026-13-40"}],
+        ))
+        self.assertTrue(any("rules_out.chemistries[0].note" in e for e in errors), errors)
+        self.assertTrue(any("rules_out.chemistries[0].seen" in e for e in errors), errors)
+        self.assertTrue(any("rules_out.chemistries[1].value" in e for e in errors), errors)
+        self.assertTrue(any("evidence_required[0].seen" in e for e in errors), errors)
+
 
 class MappingTests(unittest.TestCase):
     def setUp(self):
@@ -188,8 +228,21 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(self.profile["kwh_min"], 0.23)
         self.assertEqual(self.profile["kwh_max"], 82)
 
-    def test_no_invented_origins(self):
+    def test_no_invented_origins_or_min_soh(self):
         self.assertNotIn("origins", self.profile)
+        self.assertNotIn("min_soh", self.profile)
+
+    def test_origins_and_min_soh_map_to_flat_keys(self):
+        frontmatter = parse_valid(origins=["de", "PL"], min_soh=70)
+        profile = bd.to_buyer_profile(frontmatter)
+        self.assertEqual(profile["origins"], ["DE", "PL"])
+        self.assertEqual(profile["min_soh"], 70)
+
+    def test_dated_rules_out_entry_still_removes_chemistry(self):
+        frontmatter = parse_valid()
+        frontmatter["rules_out"]["chemistries"] = [{"value": "NMC", "seen": "2026-05-01"}]
+        profile = bd.to_buyer_profile(frontmatter)
+        self.assertEqual(profile["chemistries"], ["LFP"])
 
     def test_full_frontmatter_kept_under_dossier(self):
         self.assertEqual(self.profile["dossier"]["company"], "Example Modules Ltd")

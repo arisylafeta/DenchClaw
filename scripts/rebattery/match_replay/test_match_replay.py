@@ -133,6 +133,16 @@ class RulesTest(unittest.TestCase):
         buyer = self.buyer(profile={"formats": ["Packs"]})
         self.assertIsNone(rules.rule_out(self.listing(), buyer))
 
+    def test_dated_rules_out_entry_still_rules_out(self) -> None:
+        # A dossier may date its rules as {value, seen, src}; the value still has to bite.
+        buyer = self.buyer(dossier={"frontmatter": {
+            "products": [{"format": "packs", "chemistry": "NMC", "status": "asked"}],
+            "rules_out": {"chemistries": [{"value": "NMC", "seen": "2026-05-01", "src": "gmail_msg_test"}]},
+        }})
+        found = rules.rule_out(self.listing(), buyer)
+        self.assertIsNotNone(found)
+        self.assertEqual(found[0], "chemistry")
+
     def test_whole_batch_conflict(self) -> None:
         buyer = self.buyer(dossier={"frontmatter": {"quantity": {"whole_batch_ok": False}}, "body": ""})
         self.assertIsNotNone(rules.rule_out(self.listing(whole_batch=True), buyer))

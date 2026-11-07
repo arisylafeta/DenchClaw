@@ -61,6 +61,7 @@ TOP_LEVEL_KEYS = [
     "company_id", "company", "buyer_type", "intent", "countries", "products", "rules_out",
     "substitution", "price", "evidence_required", "quantity", "logistics", "capability",
     "decision_speed", "last_verified", "conflicts", "alerts",
+    "needs_continuity", "timing", "origins", "min_soh",
 ]
 PRODUCT_KEYS = [
     "part_number", "platform", "make", "model", "format", "chemistry", "kwh", "module_series",
@@ -69,6 +70,9 @@ PRODUCT_KEYS = [
 PRICE_KEYS = ["eur_per_kwh", "eur_per_unit", "currency_original", "basis", "incoterm", "seen", "src"]
 RULES_OUT_KEYS = ["chemistries", "formats", "damaged", "bess_systems", "other"]
 ALERT_KEYS = ["label", "filters", "status", "seen", "src"]
+TIMING_KEYS = ["max_lead_days", "notes"]
+# A list entry is a plain value, or a mapping that dates the evidence for it.
+ENTRY_KEYS = ["value", "seen", "src"]
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _SPLIT_RE = re.compile(r"[/,;|]|\band\b", re.IGNORECASE)
@@ -158,6 +162,47 @@ def _check_list(errors, where, value, allowed=None, label="value"):
         _check_enum(errors, f"{where}[{i}]", item, allowed, label)
 
 
+def entry_value(item):
+    """The value of a rules_out or evidence_required entry: a plain string, or its {value, ...} mapping."""
+    if isinstance(item, dict):
+        value = item.get("value")
+        return value if isinstance(value, str) else None
+    return item if isinstance(item, str) else None
+
+
+def _check_entry_list(errors, where, value, allowed=None, label="value"):
+    """A list whose items are plain values, or {value, seen, src} mappings that date the evidence.
+
+    The plain form stays valid, so existing dossiers need no edit.
+    """
+    if value is None:
+        return
+    if not isinstance(value, list):
+        errors.append(f"{where}: must be a list, got {type(value).__name__}")
+        return
+    for i, item in enumerate(value):
+        item_where = f"{where}[{i}]"
+        if isinstance(item, dict):
+            for key in sorted(set(item) - set(ENTRY_KEYS)):
+                errors.append(f"{item_where}.{key}: unknown key (allowed: {', '.join(ENTRY_KEYS)})")
+            if not isinstance(item.get("value"), str) or not item["value"].strip():
+                errors.append(f"{item_where}.value: required text")
+            if "seen" in item:
+                reason = _date_error(item["seen"])
+                if reason:
+                    errors.append(f"{item_where}.seen: {reason}")
+            if "src" in item and not isinstance(item["src"], str):
+                errors.append(f"{item_where}.src: must be text")
+            if allowed:
+                _check_enum(errors, item_where, item.get("value"), allowed, label)
+            continue
+        if not isinstance(item, str) or not item.strip():
+            errors.append(f"{item_where}: must be text or a mapping with value (and seen, src)")
+            continue
+        if allowed:
+            _check_enum(errors, item_where, item, allowed, label)
+
+
 def validate(frontmatter):
     """Human-readable errors; an empty list means the dossier can be synced."""
     if not isinstance(frontmatter, dict):
@@ -171,14 +216,47 @@ def validate(frontmatter):
         errors.append("company_id: must be a string")
     _check_enum(errors, "buyer_type", frontmatter.get("buyer_type"), BUYER_TYPES, "buyer_type")
     _check_list(errors, "intent", frontmatter.get("intent"), INTENTS, "intent")
-    _check_list(errors, "evidence_required", frontmatter.get("evidence_required"), EVIDENCE_REQUIRED,
-                "evidence_required")
+    _check_entry_list(errors, "evidence_required", frontmatter.get("evidence_required"), EVIDENCE_REQUIRED,
+                      "evidence_required")
     _check_enum(errors, "decision_speed", frontmatter.get("decision_speed"), DECISION_SPEEDS,
                 "decision_speed")
     if "last_verified" in frontmatter:
         reason = _date_error(frontmatter["last_verified"])
         if reason:
             errors.append(f"last_verified: {reason}")
+
+    continuity = frontmatter.get("needs_continuity")
+    if continuity is not None and not isinstance(continuity, bool):
+        errors.append(f"needs_continuity: must be true, false or null, got {continuity!r}")
+
+    timing = frontmatter.get("timing")
+    if timing is not None and not isinstance(timing, dict):
+        errors.append("timing: must be a mapping")
+    elif isinstance(timing, dict):
+        for key in sorted(set(timing) - set(TIMING_KEYS)):
+            errors.append(f"timing.{key}: unknown key (allowed: {', '.join(TIMING_KEYS)})")
+        lead = timing.get("max_lead_days")
+        if lead is not None and (not isinstance(lead, int) or isinstance(lead, bool) or lead < 0):
+            errors.append(f"timing.max_lead_days: must be a whole number of days, got {lead!r}")
+        notes = timing.get("notes")
+        if notes is not None and not isinstance(notes, str):
+            errors.append(f"timing.notes: must be text, got {type(notes).__name__}")
+
+    origins = frontmatter.get("origins")
+    if origins is not None:
+        if not isinstance(origins, list):
+            errors.append("origins: must be a list of ISO-2 country codes")
+        else:
+            for i, origin in enumerate(origins):
+                if not isinstance(origin, str) or not re.fullmatch(r"[A-Za-z]{2}", origin.strip()):
+                    errors.append(f"origins[{i}]: {origin!r} is not an ISO-2 country code")
+
+    min_soh = frontmatter.get("min_soh")
+    if min_soh is not None:
+        if not _is_number(min_soh):
+            errors.append(f"min_soh: must be a number 0-100, got {min_soh!r}")
+        elif not 0 <= float(min_soh) <= 100:
+            errors.append(f"min_soh: {min_soh!r} is outside 0-100")
 
     quantity = frontmatter.get("quantity") or {}
     if not isinstance(quantity, dict):
@@ -213,14 +291,14 @@ def validate(frontmatter):
     else:
         for key in sorted(set(rules_out) - set(RULES_OUT_KEYS)):
             errors.append(f"rules_out.{key}: unknown key (allowed: {', '.join(RULES_OUT_KEYS)})")
-        _check_list(errors, "rules_out.chemistries", rules_out.get("chemistries"), CHEMISTRIES,
-                    "chemistry")
-        _check_list(errors, "rules_out.formats", rules_out.get("formats"), FORMATS, "format")
+        _check_entry_list(errors, "rules_out.chemistries", rules_out.get("chemistries"), CHEMISTRIES,
+                          "chemistry")
+        _check_entry_list(errors, "rules_out.formats", rules_out.get("formats"), FORMATS, "format")
         for key in ("damaged", "bess_systems"):
             value = rules_out.get(key)
             if value is not None and not isinstance(value, bool):
                 errors.append(f"rules_out.{key}: must be true, false or null, got {value!r}")
-        _check_list(errors, "rules_out.other", rules_out.get("other"))
+        _check_entry_list(errors, "rules_out.other", rules_out.get("other"))
 
     products = frontmatter.get("products") or []
     if not isinstance(products, list):
@@ -418,17 +496,18 @@ def to_buyer_profile(frontmatter):
     """The derived flat profile: only what current readers compare, plus the full dossier.
 
     Products that are bought, asked or said_interested drive the buy box. Declined products are
-    history and are excluded. `rules_out` removes a chemistry or format. No origins are derived
-    because the dossier has no sourcing-origin key; inventing them would tighten scoring on a
-    guess. Deterministic: same frontmatter, same output, lists in a stable order.
+    history and are excluded. `rules_out` removes a chemistry or format; its entries are plain
+    values or {value, seen, src} mappings, and only the value matters here. `origins` and `min_soh`
+    pass through under their own flat names because the readers already understand them, and are
+    left out when the dossier does not state them. Deterministic: same frontmatter, same output.
     """
     frontmatter = _as_dict(_jsonable(frontmatter or {}))
     products = [p for p in (frontmatter.get("products") or []) if isinstance(p, dict)]
     active = [p for p in products if p.get("status") in ACTIVE_STATUSES]
 
     rules_out = _as_dict(frontmatter.get("rules_out"))
-    blocked_chems = {_canonical(c, CHEMISTRIES) for c in (rules_out.get("chemistries") or [])}
-    blocked_formats = {_canonical(f, FORMATS) for f in (rules_out.get("formats") or [])}
+    blocked_chems = {_canonical(entry_value(c), CHEMISTRIES) for c in (rules_out.get("chemistries") or [])}
+    blocked_formats = {_canonical(entry_value(f), FORMATS) for f in (rules_out.get("formats") or [])}
 
     chemistries, formats, makes, cell_makers, part_numbers = [], [], [], [], []
     kwh = []
@@ -480,6 +559,18 @@ def to_buyer_profile(frontmatter):
     for key in ("kwh_min", "kwh_max"):
         if profile[key] is not None and float(profile[key]).is_integer():
             profile[key] = int(profile[key])
+
+    # Sourcing origins and a minimum SoH have flat names the readers already look for.
+    origins = []
+    for origin in frontmatter.get("origins") or []:
+        code = origin.strip().upper() if isinstance(origin, str) else ""
+        if re.fullmatch(r"[A-Z]{2}", code) and code not in origins:
+            origins.append(code)
+    if origins:
+        profile["origins"] = origins
+    min_soh = frontmatter.get("min_soh")
+    if isinstance(min_soh, (int, float)) and not isinstance(min_soh, bool):
+        profile["min_soh"] = int(min_soh) if float(min_soh).is_integer() else float(min_soh)
     return profile
 
 
