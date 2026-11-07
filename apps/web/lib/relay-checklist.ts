@@ -151,3 +151,17 @@ export function askLabel(c: DealChecklist): string {
   const { required, helpful } = gapLists(c);
   return `Draft the ask: ${[...required, ...helpful].slice(0, 5).join(", ")}`;
 }
+
+/** A dismantler's listing permission (`crm_dismantlers.stock_phase`). */
+export type DismantlerPhase = "none" | "stock_only" | "marketplace";
+
+/** The note "Reply: list it" drafts from: one or a few packs from a dismantler go through the marketplace or their stock
+ * list, never a bulk deal, and we never quote blind. */
+export function dismantlerInstruction(phase: DismantlerPhase): string {
+  const ask = phase === "marketplace"
+    ? "ask them to list the packs on their ReBattery marketplace account, with health readings, photos and their asking price, so our buyers see them straight away"
+    : phase === "stock_only"
+      ? "ask them to add the packs to the stock list they send us, with health readings, photos and their asking price per pack, and say we'll put them in front of our buyers"
+      : "ask them to send their stock list with health readings, photos and their asking price per pack, and offer to set them up on the ReBattery marketplace so our buyers can see their packs";
+  return `Reply to a dismantler about one or a few packs: thank them, say we don't quote without seeing the packs, and ${ask}. Never offer a price.`;
+}
