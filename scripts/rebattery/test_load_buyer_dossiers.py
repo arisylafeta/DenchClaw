@@ -113,6 +113,60 @@ class Loading(unittest.TestCase):
         self.conn.rollback()
         self.assertEqual(self.company()["buyer_profile"]["chemistries"], ["LFP"])
 
+    def test_apply_refuses_to_run_without_an_explicit_dsn(self):
+        # The default DSN is the production CRM: a write must say where it goes.
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            with self.assertRaises(SystemExit) as raised:
+                loader.main([self.dossier_file(), "--apply"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--dsn", err.getvalue())
+        self.assertIsNone(self.company()["buyer_dossier"])
+
+    def test_a_write_aborts_when_the_version_moved_after_the_dry_run(self):
+        import psycopg2.extras
+        path = self.dossier_file()
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            company_id, text, profile, _, errors, current = loader.plan(Path(path), cur)
+            self.assertEqual(errors, [])
+            planned = int(current["buyer_dossier_version"])
+        self.conn.rollback()
+        # Another writer saved in between.
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute("select set_config('crm.dossier_write', 'on', true)")
+            cur.execute("update crm_companies set buyer_dossier = 'someone else', buyer_dossier_version = 1 where id = %s",
+                        (company_id,))
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            with self.assertRaises(RuntimeError) as raised:
+                loader.write(cur, company_id, text, profile, planned)
+        self.conn.rollback()
+        self.assertIn("version moved", str(raised.exception))
+        self.assertEqual(self.company()["buyer_dossier"], "someone else")
+
+    def test_a_body_only_edit_bumps_the_version_without_touching_buyer_profile(self):
+        path = self.dossier_file()
+        self.assertEqual(self.run_loader(path, "--apply")[0], 0)
+        first = self.company()
+        with self.conn.cursor() as cur:
+            cur.execute("select coalesce(max(id), 0) as id from crm_buyer_profile_changes where company_id = %s",
+                        (self.company_id,))
+            highest = cur.fetchone()[0]
+        self.conn.rollback()
+
+        edited = self.dossier_file(Path(path).read_text(encoding="utf-8").replace("Leaf packs only.", "Now also modules."))
+        code, output = self.run_loader(edited, "--apply")
+        self.assertEqual(code, 0)
+        self.assertIn("buyer_profile unchanged", output)
+        second = self.company()
+        self.assertEqual(second["version"], 2)
+        self.assertEqual(second["buyer_profile"], first["buyer_profile"])
+        with self.conn.cursor() as cur:
+            cur.execute("""select count(*) from crm_buyer_profile_changes
+                           where company_id = %s and field = 'buyer_profile' and id > %s""",
+                        (self.company_id, highest))
+            self.assertEqual(cur.fetchone()[0], 0)
+        self.conn.rollback()
+
     def test_an_invalid_dossier_is_refused_and_a_missing_company_is_reported(self):
         code, output = self.run_loader(self.dossier_file(DOSSIER.replace("status: asked", "status: maybe")))
         self.assertEqual(code, 1)

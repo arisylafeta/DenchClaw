@@ -4,8 +4,9 @@
   python3 scripts/rebattery/load_buyer_dossiers.py PILOT/*.md                  # dry run: validation and the diff
   python3 scripts/rebattery/load_buyer_dossiers.py --dir PILOT --apply         # write, one transaction per company
 
-Every file needs `company_id` in its frontmatter. The dry run prints, per company, what the stored
-buyer_profile would gain and lose; nothing is written without --apply.
+Every file needs `company_id` in its frontmatter; that id is the target row. The dry run prints, per
+company, what the stored buyer_profile would gain and lose; nothing is written without --apply, and
+--apply refuses to run without an explicit --dsn so it can never fall back to the production CRM.
 
 A write sets `crm.dossier_write = 'on'` for its own transaction (the guard trigger rejects any other
 writer), bumps buyer_dossier_version, derives buyer_profile only when it changes, and reads the row
@@ -36,6 +37,11 @@ def read_company(cur, company_id):
     return cur.fetchone()
 
 
+def _sorted(value):
+    """Key-order-independent JSON, for "did the derived profile actually change" checks."""
+    return json.dumps(value or {}, sort_keys=True, default=str)
+
+
 def plan(path, cur):
     """(company_id, text, profile, passed_through, errors, current) for one file."""
     text = path.read_text(encoding="utf-8")
@@ -53,26 +59,37 @@ def plan(path, cur):
     return company_id, text, profile, passed_through, [], current
 
 
-def write(cur, company_id, text, profile):
-    """Write one dossier inside the caller's transaction and read it back."""
+def write(cur, company_id, text, profile, expected_version):
+    """Write one dossier inside the caller's transaction and read it back.
+
+    `expected_version` is the version the dry run read: if another writer got there first the company
+    is aborted rather than overwriting it, and buyer_profile is written only when the derived JSON
+    actually changed, exactly as the app's saveDossier does.
+    """
     cur.execute("select buyer_profile, buyer_dossier_version from crm_companies where id = %s for update", (company_id,))
     locked = cur.fetchone()
     if locked is None:
         raise RuntimeError(f"no crm_companies row {company_id}")
+    current_version = int(locked["buyer_dossier_version"] or 0)
+    if current_version != expected_version:
+        raise RuntimeError(f"version moved from v{expected_version} to v{current_version}; re-run the dry run")
+    profile_changed = _sorted(locked["buyer_profile"]) != _sorted(profile)
     cur.execute("select set_config('crm.dossier_write', 'on', true)")
     cur.execute("""update crm_companies set
         buyer_dossier = %s,
         buyer_dossier_version = buyer_dossier_version + 1,
         buyer_dossier_updated_at = now(),
-        buyer_profile = %s::jsonb,
+        buyer_profile = case when %s then %s::jsonb else buyer_profile end,
         updated_at = now()
-      where id = %s""", (text, json.dumps(profile), company_id))
+      where id = %s""", (text, profile_changed, json.dumps(profile), company_id))
     cur.execute("""select buyer_dossier, buyer_profile, buyer_dossier_version
                    from crm_companies where id = %s""", (company_id,))
     saved = cur.fetchone()
-    if saved["buyer_dossier"] != text or saved["buyer_profile"] != profile:
+    if saved["buyer_dossier"] != text:
         raise RuntimeError(f"read-back mismatch for {company_id}")
-    return saved["buyer_dossier_version"]
+    if profile_changed and saved["buyer_profile"] != profile:
+        raise RuntimeError(f"read-back mismatch for {company_id}")
+    return saved["buyer_dossier_version"], profile_changed
 
 
 def main(argv=None):
@@ -82,15 +99,20 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("files", nargs="*", help="dossier Markdown files")
     parser.add_argument("--dir", action="append", default=[], help="a directory of dossier Markdown files")
-    parser.add_argument("--dsn", default=DEFAULT_DSN)
+    parser.add_argument("--dsn", help=f"database to read or write (default for a dry run: {DEFAULT_DSN}); "
+                                      "required with --apply")
     parser.add_argument("--apply", action="store_true", help="write; without it nothing is saved")
     args = parser.parse_args(argv)
 
     paths = files_from(args)
     if not paths:
         parser.error("no dossier files (pass files or --dir)")
+    if args.apply and not args.dsn:
+        # A write must name its database: the default DSN here is the production CRM.
+        parser.error("--apply needs an explicit --dsn")
+    dsn = args.dsn or DEFAULT_DSN
 
-    conn = psycopg2.connect(args.dsn)
+    conn = psycopg2.connect(dsn)
     checked = changed = applied = 0
     failed = []
     try:
@@ -123,9 +145,10 @@ def main(argv=None):
             if args.apply:
                 try:
                     with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                        new_version = write(cur, company_id, text, profile)
+                        new_version, profile_changed = write(cur, company_id, text, profile, int(version))
                     applied += 1
-                    print(f"  written: v{new_version}, read back")
+                    print(f"  written: v{new_version}, read back"
+                          f"{'' if profile_changed else ', buyer_profile unchanged'}")
                 except Exception as error:  # one company's failure must not stop the rest
                     conn.rollback()
                     failed.append(path)
