@@ -94,14 +94,76 @@ def expiry_transition(row, today):
     return None
 
 
+def _mark_dossier_stale(cur, row, today):
+    """A company with a dossier keeps its text: intake only flags it for a person to review.
+
+    The earliest stale date is kept and each source is recorded once (by source_id), so a nightly
+    re-import of the same survey answer or saved search does not grow the list.
+    """
+    observed = row.get('observed_on') or today
+    source_id = row.get('source_id')
+    label = row.get('source_label') or row.get('source_kind') or 'intake'
+    reason = ' '.join(f"{label}: {row.get('wants') or 'new evidence'}".split())[:200]
+    entry = {'date': str(observed)[:10], 'reason': reason, 'source_id': source_id}
+    marker = json.dumps([{'source_id': source_id}]) if source_id else None
+    cur.execute("""update crm_companies set
+        buyer_dossier_stale_since = coalesce(buyer_dossier_stale_since, %s::date),
+        buyer_dossier_stale_reasons = buyer_dossier_stale_reasons || %s::jsonb,
+        updated_at = now()
+      where id = %s
+        and (%s::jsonb is null or not buyer_dossier_stale_reasons @> %s::jsonb)
+      returning id""",
+      (str(observed)[:10], json.dumps([entry]), row['company_id'], marker, marker))
+    return cur.fetchone() is not None
+
+
+def _record_saved_search(cur, row):
+    """A dossier company's saved search also becomes a dated context note: the Buyer tab lists it as an alert.
+
+    Idempotent on the platform's search id, so the nightly import adds each alert once.
+    """
+    search_id = str(row.get('source_id') or '').split(':', 1)[-1]
+    if not search_id:
+        return False
+    summary = []
+    for key, value in (row.get('spec') or {}).items():
+        if isinstance(value, list) and value:
+            summary.append(f"{key.replace('_', ' ').capitalize()}: {', '.join(str(item) for item in value)}")
+        elif value not in (None, '', {}, []):
+            summary.append(f"{key.replace('_', ' ').capitalize()}: {value}")
+    summary += [line for line in str(row.get('note') or '').split('\n')
+                if line and not line.startswith('Saved search on rebattery.io')]
+    label = str(row.get('wants') or 'Saved search').strip()
+    note = f"{label} — {' · '.join(summary)}" if summary else label
+    confirmed = row.get('observed_on') or dt.date.today()
+    cur.execute("""insert into crm_company_context_notes
+        (id, company_id, note, category, source_kind, source_ref, observed_on, source_url)
+      values (%s, %s, %s, 'saved_search', 'saved_search', %s, %s::date, %s)
+      on conflict (id) do nothing returning id""",
+      (f"ccn_savedsearch_{search_id}"[:200], row['company_id'], note, row.get('source_id'),
+       str(confirmed)[:10], row.get('source_url')))
+    return cur.fetchone() is not None
+
+
 def merge_profile(cur, row, basis='stated'):
-    """Company is the profile home; resolve/create it through intake before calling."""
+    """Company is the profile home; resolve/create it through intake before calling.
+
+    A company with a buyer dossier is not merged into: the dossier owns the buy box, so intake only
+    marks it stale (with a dated reason) and records a saved search as an alert note. Companies
+    without a dossier keep the old behaviour until they get one.
+    """
     if not row.get('company_id'):
         return False
-    cur.execute("select buyer_profile, buyer_profile_basis from crm_companies where id = %s for update", (row["company_id"],))
+    cur.execute("select buyer_profile, buyer_profile_basis, buyer_dossier from crm_companies where id = %s for update",
+                (row["company_id"],))
     current = cur.fetchone()
     if not current:
         return False
+    if current.get("buyer_dossier"):
+        changed = _mark_dossier_stale(cur, row, dt.date.today())
+        if str(row.get('source_id') or '').startswith('saved_search:'):
+            changed = _record_saved_search(cur, row) or changed
+        return changed
     existing = current.get("buyer_profile") or {}
     if basis == 'researched' and current.get('buyer_profile_basis') == 'stated':
         return False

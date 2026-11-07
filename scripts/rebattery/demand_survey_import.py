@@ -8,7 +8,9 @@
   ... --apply                                          # write them
 
 General preferences merge into the company's structured buyer profile (basis stated); research uses basis researched.
-Only a survey with quantity and timing creates a qualifying ask, never immediately matchable demand.
+Only a survey or platform sourcing request with both a quantity and a timing creates a qualifying ask; anything else
+is standing interest and takes the profile path. A company that has a buyer dossier is never merged into: intake only
+marks the dossier stale with a dated reason, so the dossier text stays a person's.
 Sourcing requests start as qualifying. Source IDs make request imports idempotent.
 ReBattery staff and QA submissions are skipped. Profiles link to the existing CRM person/company by email,
 or create a classified inbound buyer lead when the CRM does not yet know them.
@@ -420,8 +422,13 @@ COLUMNS = ["status", "product_family", "reputation", "kind", "basis", "buyer", "
 def insert(cur, row):
     """Adds the row unless its source is already in (then only a still-unfinished survey answer is refreshed).
     Returns True when a row was added or refreshed."""
+    # A demand row needs a quantity and a date. Anything else is standing interest: it belongs on the
+    # profile (or, for a company with a dossier, on the dossier's stale list), never on qualifying demand.
+    has_quantity_and_date = bool(row.get("quantity")) and bool(row.get("timing") or row.get("needed_by"))
+    sourcing_request = str(row.get("source_id", "")).startswith("sourcing_request:")
     profile_only = (row.get("source_id", "").startswith("saved_search:") or row.get("source_kind") == "research"
-                    or (row.get("source_kind") == "survey" and not (row.get("quantity") and (row.get("timing") or row.get("needed_by")))))
+                    or (row.get("source_kind") == "survey" and not has_quantity_and_date)
+                    or (sourcing_request and not has_quantity_and_date))
     if profile_only:
         return merge_profile(cur, row, "researched" if row.get("source_kind") == "research" else "stated")
     row = {**row, "status": "qualifying", "product_family": family_key(row.get("product_family") or row["wants"]),

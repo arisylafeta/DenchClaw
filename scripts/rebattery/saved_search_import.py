@@ -3,6 +3,9 @@
 
 Run without --apply to preview in a rolled-back transaction. --announce reports new requests only.
 Unsubscribing from alerts is not evidence that a buyer stopped buying; unsubscribed searches are skipped.
+For a company that has a buyer dossier the saved search is also recorded as a dated saved_search context note
+(the Buyer tab lists it as an alert) and the dossier is flagged stale, never rewritten. A sourcing request
+without both a quantity and a timing is standing interest and takes the profile path, not the demand queue.
 """
 import argparse
 import datetime as dt
@@ -230,7 +233,7 @@ def map_sourcing_request(request):
     return {
         "kind": "request", "basis": None, "status": "qualifying", "email": email, "contact": None,
         "wants": (request.get("wants") or "Battery").strip(),
-        "quantity": request_quantity(request),
+        "quantity": request_quantity(request), "timing": timing or None,
         "location": request.get("country"), "spec": spec, **structured,
         "note": "\n".join(notes), "observed_on": str(request["created_at"])[:10],
         "source_kind": "jules" if jules else "import", "source_id": f"sourcing_request:{request['id']}",

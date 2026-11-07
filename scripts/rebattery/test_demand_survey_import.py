@@ -307,5 +307,169 @@ class Writing(unittest.TestCase):
         self.assertEqual(saved["buyer_profile"]["wants"], "EV modules")
 
 
+@unittest.skipUnless(TEST_URL, "needs a disposable database: scripts/rebattery/crm-test-db.sh up")
+class DossierCompanies(unittest.TestCase):
+    """A company with a buyer dossier owns its own buy box: intake may flag it, never rewrite it."""
+
+    def setUp(self):
+        import uuid
+
+        import psycopg2
+        import psycopg2.extras
+        import saved_search_import
+        self.saved_search = saved_search_import
+        # The rows outlive the run (deleting a company cascades into the frozen Bulk Trades tables),
+        # so every company and email is unique to this run.
+        self.run_id = uuid.uuid4().hex[:8]
+        self.conn = psycopg2.connect(TEST_URL)
+        self.addCleanup(self.conn.close)
+
+    def cid(self, tag):
+        return f"co_dossier_{tag}_{self.run_id}"
+
+    def email(self, tag):
+        return f"{tag}.{self.run_id}@synthetic.test"
+
+    def cursor(self):
+        import psycopg2.extras
+        return self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    def company(self, cur, company_id, dossier=None, profile=None):
+        cur.execute("""insert into crm_companies (id, name, buyer_profile, buyer_dossier, buyer_dossier_version)
+                       values (%s, %s, coalesce(%s::jsonb, '{}'::jsonb), %s, %s)""",
+                    (company_id, company_id, json.dumps(profile) if profile else None,
+                     dossier, 1 if dossier else 0))
+
+    def person(self, cur, person_id, email, company_id):
+        cur.execute("insert into crm_people (id, full_name, email, company_id) values (%s, %s, %s, %s)",
+                    (person_id, person_id, email, company_id))
+
+    @staticmethod
+    def dossier(company_id):
+        return f"---\ncompany_id: {company_id}\nproducts: []\n---\nText owned by a person.\n"
+
+    def survey_row(self, email, response_id):
+        return {"id": response_id, "created_at": "2026-10-20T09:00:00Z", "finished": True,
+                "data": {"email": email, "formats": ["Packs"], "chemistries": ["LFP"]}}
+
+    def test_a_dossier_company_is_flagged_stale_and_keeps_its_profile(self):
+        company_id, email = self.cid("survey"), self.email("dossier.intake")
+        dossier = self.dossier(company_id)
+        with self.cursor() as cur:
+            self.company(cur, company_id, dossier=dossier, profile={"wants": "the dossier owns this", "chemistries": ["NMC"]})
+            self.person(cur, f"p_dossier_intake_{self.run_id}", email, company_id)
+            row = survey.link(cur, survey.map_formbricks(self.survey_row(email, f"fb_dossier_intake_{self.run_id}")))
+            self.assertEqual(row["company_id"], company_id)
+
+            self.assertTrue(survey.insert(cur, row))
+            cur.execute("""select buyer_profile, buyer_profile_basis, buyer_dossier, buyer_dossier_version,
+                             buyer_dossier_stale_since::text as stale_since, buyer_dossier_stale_reasons as reasons
+                           from crm_companies where id = %s""", (company_id,))
+            saved = cur.fetchone()
+            self.assertEqual(saved["buyer_profile"], {"wants": "the dossier owns this", "chemistries": ["NMC"]})
+            self.assertIsNone(saved["buyer_profile_basis"])
+            self.assertEqual(saved["buyer_dossier"], dossier)
+            self.assertEqual(saved["buyer_dossier_version"], 1)
+            self.assertEqual(saved["stale_since"], "2026-10-20")
+            self.assertEqual(len(saved["reasons"]), 1)
+            self.assertEqual(saved["reasons"][0]["source_id"], f"formbricks:fb_dossier_intake_{self.run_id}")
+            self.assertEqual(saved["reasons"][0]["date"], "2026-10-20")
+            self.assertIn("Formbricks buyer survey", saved["reasons"][0]["reason"])
+
+            # The same answer again changes nothing, so it is not reported as new.
+            self.assertFalse(survey.insert(cur, row))
+            cur.execute("select buyer_dossier_stale_reasons as reasons from crm_companies where id = %s", (company_id,))
+            self.assertEqual(len(cur.fetchone()["reasons"]), 1)
+
+            # A second, different source appends its own dated reason and keeps the earliest date.
+            request = self.saved_search.map_sourcing_request({
+                "id": f"dossier-request-{self.run_id}", "email": email, "wants": "Leaf packs",
+                "quantity": "many", "created_at": "2026-10-25"})
+            self.assertTrue(survey.insert(cur, survey.link(cur, request)))
+            cur.execute("""select buyer_dossier_stale_since::text as stale_since, buyer_dossier_stale_reasons as reasons
+                           from crm_companies where id = %s""", (company_id,))
+            flagged = cur.fetchone()
+            self.assertEqual(flagged["stale_since"], "2026-10-20")
+            self.assertEqual([reason["source_id"] for reason in flagged["reasons"]],
+                             [f"formbricks:fb_dossier_intake_{self.run_id}", f"sourcing_request:dossier-request-{self.run_id}"])
+            self.conn.rollback()
+
+    def test_a_company_without_a_dossier_keeps_todays_merge(self):
+        company_id, email = self.cid("none"), self.email("no.dossier")
+        with self.cursor() as cur:
+            self.company(cur, company_id, profile={"wants": "old wants"})
+            self.person(cur, f"p_dossier_none_{self.run_id}", email, company_id)
+            row = survey.link(cur, survey.map_formbricks(self.survey_row(email, f"fb_no_dossier_{self.run_id}")))
+            self.assertTrue(survey.insert(cur, row))
+            cur.execute("""select buyer_profile, buyer_profile_basis, buyer_dossier_stale_since::text as stale_since
+                           from crm_companies where id = %s""", (company_id,))
+            saved = cur.fetchone()
+            self.assertEqual(saved["buyer_profile"]["chemistries"], ["LFP"])
+            self.assertTrue(saved["buyer_profile"]["wants"].startswith("old wants"))
+            self.assertIn("Packs, LFP", saved["buyer_profile"]["wants"])
+            self.assertEqual(saved["buyer_profile_basis"], "stated")
+            self.assertIsNone(saved["stale_since"])
+            self.conn.rollback()
+
+    def test_a_dossier_companys_saved_search_is_also_a_dated_alert_note(self):
+        company_id, email = self.cid("search"), self.email("saved.search")
+        with self.cursor() as cur:
+            self.company(cur, company_id, dossier=self.dossier(company_id), profile={"wants": "dossier text"})
+            self.person(cur, f"p_dossier_search_{self.run_id}", email, company_id)
+            search = self.saved_search.map_saved_search({
+                "id": f"dossier-search-{self.run_id}", "email": email, "confirmed_at": "2026-10-21",
+                "filters": {"format": ["pack"], "chemistry": ["lfp"]}, "label": "LFP packs",
+                "frequency": "daily", "status": "active", "catalog_path": "/marketplace/listings"})
+            self.assertTrue(survey.insert(cur, survey.link(cur, search)))
+            self.assertFalse(survey.insert(cur, survey.link(cur, search)))
+            cur.execute("""select note, category, source_kind, source_ref, observed_on::text as observed_on, source_url
+                           from crm_company_context_notes where company_id = %s""", (company_id,))
+            notes = cur.fetchall()
+            self.assertEqual(len(notes), 1)
+            self.assertEqual(notes[0]["category"], "saved_search")
+            self.assertEqual(notes[0]["source_ref"], f"saved_search:dossier-search-{self.run_id}")
+            self.assertEqual(notes[0]["observed_on"], "2026-10-21")
+            self.assertTrue(notes[0]["note"].startswith("LFP packs"))
+            self.assertIn("Formats: Packs", notes[0]["note"])
+            self.assertIn("Chemistries: LFP", notes[0]["note"])
+            self.assertEqual(notes[0]["source_url"], "https://www.rebattery.io/marketplace/listings")
+            cur.execute("select buyer_profile from crm_companies where id = %s", (company_id,))
+            self.assertEqual(cur.fetchone()["buyer_profile"], {"wants": "dossier text"})
+            cur.execute("select count(*) as n from crm_bulk_demand where source_id = %s",
+                        (f"saved_search:dossier-search-{self.run_id}",))
+            self.assertEqual(cur.fetchone()["n"], 0)
+            self.conn.rollback()
+
+    def test_a_sourcing_request_without_quantity_and_timing_is_standing_interest(self):
+        company_id, email = self.cid("request"), self.email("sourcing")
+        with self.cursor() as cur:
+            self.company(cur, company_id, dossier=self.dossier(company_id))
+            self.person(cur, f"p_dossier_request_{self.run_id}", email, company_id)
+            vague = self.saved_search.map_sourcing_request({
+                "id": f"vague-{self.run_id}", "email": email, "wants": "Some EV packs",
+                "created_at": "2026-10-22"})
+            self.assertIsNone(vague["quantity"])
+            self.assertIsNone(vague["timing"])
+            survey.insert(cur, survey.link(cur, vague))
+            cur.execute("select count(*) as n from crm_bulk_demand where source_id = %s",
+                        (f"sourcing_request:vague-{self.run_id}",))
+            self.assertEqual(cur.fetchone()["n"], 0)
+            cur.execute("select buyer_dossier_stale_since::text as stale_since from crm_companies where id = %s",
+                        (company_id,))
+            self.assertEqual(cur.fetchone()["stale_since"], "2026-10-22")
+
+            complete = self.saved_search.map_sourcing_request({
+                "id": f"complete-{self.run_id}", "email": email, "wants": "20 Leaf packs",
+                "quantity": "many", "timing": "now", "created_at": "2026-10-23"})
+            self.assertTrue(survey.insert(cur, survey.link(cur, complete)))
+            cur.execute("""select status, kind, quantity from crm_bulk_demand where source_id = %s""",
+                        (f"sourcing_request:complete-{self.run_id}",))
+            saved = cur.fetchone()
+            self.assertEqual(saved["status"], "qualifying")
+            self.assertEqual(saved["kind"], "request")
+            self.assertEqual(saved["quantity"], "More than 10 units")
+            self.conn.rollback()
+
+
 if __name__ == "__main__":
     unittest.main()
