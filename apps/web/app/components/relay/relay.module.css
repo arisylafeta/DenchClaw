@@ -371,3 +371,4 @@
 .cwarn { color: var(--amber); }
 .cfoot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
 .cfoot .btn { padding: 7px 11px; font-size: 12.5px; }
+.dism { display: inline-flex; font-size: 12.5px; font-weight: 600; color: var(--ink2); background: var(--soft); border-radius: 8px; padding: 4px 8px; white-space: nowrap; }

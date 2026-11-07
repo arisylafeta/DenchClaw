@@ -218,6 +218,20 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
       setBusy((b) => ({ ...b, [i.id]: false }));
     }
   };
+  const listReply = async (i: RelayItem) => {
+    setBusy((b) => ({ ...b, [i.id]: true }));
+    say(`Drafting the reply for ${firstName(i.counterpart_name)}…`);
+    try {
+      await api(`/api/relay/items/${i.id}/list-reply`, { method: "POST" });
+      setGone((g) => ({ ...g, [i.id]: true }));
+      await reload();
+      say(`Drafted · ${firstName(i.counterpart_name)} is in Review`, onDrafted);
+    } catch (err) {
+      say(err instanceof Error ? err.message : "Couldn't draft the reply. Try again.");
+    } finally {
+      setBusy((b) => ({ ...b, [i.id]: false }));
+    }
+  };
   const draftAsk = async (i: RelayItem) => {
     setBusy((b) => ({ ...b, [i.id]: true }));
     say(`Drafting the ask for ${firstName(i.counterpart_name)}…`);
@@ -345,6 +359,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M20 12l-8 8-9-9V3h8z" /><circle cx="7.5" cy="7.5" r="1.5" /></svg><span>{i.deal_label || "Deal"}</span>
                         </button>
                       : dealWorking(i) ? <span className={s.nodeal}>Matcha working…</span>
+                      : i.dismantler ? <span className={s.dism} title="A dismantler: one or a few packs go to the marketplace, not a bulk deal">Dismantler</span>
                       : i.deal_action === "create"
                         ? <button type="button" className={s.mkdeal} disabled={busy[i.id]} title={`Matcha creates the deal from this ${i.inbox === "buy" ? "buyer" : i.inbox === "supply" ? "seller" : ""} email and fills the card`} onClick={(e) => { e.stopPropagation(); void dealJob(i, "create"); }}>+ Create deal</button>
                         : <span className={s.nodeal}>No deal</span>}
@@ -363,7 +378,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
                       </div>
                     )}
                     {i.earlier.length > 0 && <div className={s.earlier}>{i.earlier.map((e, k) => <span key={k}><b>{e.who}</b> · {e.when}: {e.summary}</span>)}</div>}
-                    <DealBar item={i} busy={!!busy[i.id]} onRun={(action) => void dealJob(i, action)} onAsk={tab === "action" && i.can_ask ? () => void draftAsk(i) : undefined} onOpenListing={onOpenListing} />
+                    <DealBar item={i} busy={!!busy[i.id]} onRun={(action) => void dealJob(i, action)} onAsk={tab === "action" && i.can_ask ? () => void draftAsk(i) : undefined} onListReply={tab !== "other" ? () => void listReply(i) : undefined} />
                   </div>
                 )}
                 {tab !== "other" && (
@@ -1169,9 +1184,12 @@ Todos.Suggested = function Suggested({ item, draft, reload, say }: { item: Relay
 const dealWorking = (i: RelayItem) => !!i.deal_job && ["queued", "running", "ready", "finalising"].includes(i.deal_job.status);
 
 /** The deal under an open email: which inbox it came to, Matcha's latest result, and Create deal or Update deal from this reply. */
-function DealBar({ item: i, busy, onRun, onAsk, onOpenListing }: { item: RelayItem; busy: boolean; onRun: (action: "create" | "update") => void; onAsk?: () => void; onOpenListing?: (id: string, label?: string) => void }) {
+function DealBar({ item: i, busy, onRun, onAsk, onListReply }: { item: RelayItem; busy: boolean; onRun: (action: "create" | "update") => void; onAsk?: () => void; onListReply?: () => void }) {
   const job = i.deal_job;
-  if (!i.inbox && !i.deal_action && !job && !i.bulk_listing_id) return null;
+  // Shown only when it adds something: a deal to update or ask about, Matcha's run, or a dismantler to point to the marketplace.
+  // "+ Create deal" and opening the deal live in the row.
+  if (!i.bulk_listing_id && !job && !i.dismantler) return null;
+  const dismantlerOnly = !i.bulk_listing_id && !!i.dismantler;
   const working = dealWorking(i);
   const result = job?.status === "done" ? job.result : null;
   return (
@@ -1182,13 +1200,15 @@ function DealBar({ item: i, busy, onRun, onAsk, onOpenListing }: { item: RelayIt
           : job?.status === "failed" ? <span className={s.dealerr}>Matcha couldn&apos;t finish: {job.error ?? "unknown error"}</span>
           : result ? <span>{result.action === "none" ? `No deal: ${result.next ?? "too small for Bulk Trades"}` : <>{result.action === "created" ? "Deal created" : "Deal updated"}{result.gaps?.length ? <> · missing <b>{result.gaps.join(", ")}</b></> : " · card full"}{result.owner === "Sean" ? " · now Sean's" : ""}{result.next ? <> · next: {result.next}</> : null}</>}</span>
           : i.bulk_listing_id ? <span>Linked to {i.deal_label || "a deal"}</span>
+          : dismantlerOnly ? <span>A dismantler{i.dismantler === "marketplace" ? " on the marketplace" : i.dismantler === "stock_only" ? " that sends us stock lists" : ""}. One or a few packs go to the marketplace, not a bulk deal.</span>
           : <span>Not linked to a deal yet</span>}
       </div>
       <div className={s.dealbtns}>
-        {i.bulk_listing_id && <button type="button" className={s.btn} onClick={() => onOpenListing?.(i.bulk_listing_id!, i.deal_label ?? undefined)}>Open deal</button>}
         {!working && onAsk && <button type="button" className={s.btn} disabled={busy} title="Drafts the playbook's ask for what the deal is still missing, from the inbox this thread uses. You read it in Review and send." onClick={onAsk}>Draft the ask</button>}
-        {!working && i.deal_action && <button type="button" className={cx(s.btn, s.pri)} disabled={busy} onClick={() => onRun(i.deal_action!)}>
-          {job?.status === "failed" && job.action === i.deal_action ? "Try again" : i.deal_action === "create" ? "Create deal" : "Update deal from this reply"}</button>}
+        {!working && dismantlerOnly && onListReply && <button type="button" className={cx(s.btn, s.pri)} disabled={busy} title="Thanks them, says we don't quote blind, and points them to the marketplace or their stock list" onClick={onListReply}>Reply: list it</button>}
+        {!working && i.deal_action === "update" && <button type="button" className={cx(s.btn, s.pri)} disabled={busy} onClick={() => onRun("update")}>
+          {job?.status === "failed" && job.action === "update" ? "Try again" : "Update deal from this reply"}</button>}
+        {!working && dismantlerOnly && i.deal_action === "create" && <button type="button" className={s.btn} disabled={busy} title="Only for a real lot, about 10 packs or €20k and up" onClick={() => onRun("create")}>{job?.status === "failed" && job.action === "create" ? "Try again: create deal" : "+ Create deal"}</button>}
       </div>
     </div>
   );

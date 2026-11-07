@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { askInstruction, askLabel, buildChecklist, missingInstruction, type ChecklistListing } from "./relay-checklist";
+import { askInstruction, askLabel, buildChecklist, dismantlerInstruction, missingInstruction, type ChecklistListing } from "./relay-checklist";
 
 const now = new Date("2026-11-07T12:00:00Z");
 const supply: ChecklistListing = {
@@ -110,5 +110,14 @@ describe("askInstruction", () => {
     const buyer = buildChecklist({ ...supply, kind: "demand", quantity: null, location: null, context: {}, product_family: "Zoe packs" }, [], [], now);
     expect(askInstruction(buyer)).toContain("their spec sheet");
     expect(askLabel(buyer)).toBe("Draft the ask: first ask, everything they have");
+  });
+});
+
+describe("dismantlerInstruction", () => {
+  it("points each dismantler to the channel they have, and never prices", () => {
+    expect(dismantlerInstruction("marketplace")).toContain("marketplace account");
+    expect(dismantlerInstruction("stock_only")).toContain("stock list they send us");
+    expect(dismantlerInstruction("none")).toContain("set them up on the ReBattery marketplace");
+    for (const p of ["marketplace", "stock_only", "none"] as const) expect(dismantlerInstruction(p)).toContain("Never offer a price");
   });
 });

@@ -612,14 +612,19 @@ def choose_deal(counterpart: str | None, contact_type: str | None, linked: set[s
 
 
 def load_offered_demands(cur) -> dict[str, list[dict]]:
-    """Open buyers' demands each supplier is paired with, keyed by their email and company domain ("@domain"): a
-    counterparty offer on the demand, or the supplier's own supply listing offered against it (counterpart_id)."""
+    """Open buyers' demands each supplier is paired with, keyed by their email and company domain ("@domain"): a priced
+    counterparty offer on the demand, or the supplier's own supply listing offered against it (counterpart_id). A dismantler
+    who has only been asked, with no price on the table, stays off the deal and goes to the dismantler channel (7 Nov)."""
     if not table_exists(cur, "crm_bulk_offers"):
         return {}
     cur.execute(
         """select distinct d.id, d.kind, d.status, d.summary, d.quantity, d.updated_at, x.email
              from (select o.bulk_listing_id as demand_id, lower(p.email) as email
-                     from crm_bulk_offers o join crm_people p on p.id = o.person_id where o.role = 'counterparty'
+                     from crm_bulk_offers o join crm_people p on p.id = o.person_id
+                    where o.role = 'counterparty'
+                      -- only a priced offer: a supplier who has only been asked, or answered "what do you offer?", is not on the deal
+                      and (o.terms ?| array['amount', 'amount_low', 'amount_high', 'our_ask']
+                           or jsonb_path_exists(coalesce(o.terms, '{}'::jsonb), '$.items[*].amount'))
                    union
                    select o.counterpart_id, lower(coalesce(s.email, sp.email))
                      from crm_bulk_offers o join crm_bulk_listings s on s.id = o.bulk_listing_id and s.kind = 'supply'
