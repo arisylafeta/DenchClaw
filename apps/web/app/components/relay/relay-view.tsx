@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HermesConversation } from "@/lib/hermes-conversations";
 import { describeWhen, parseWhen } from "@/lib/relay-when";
 import type { RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayRule, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
+import { missingInstruction, type ChecklistItem, type DealChecklist } from "@/lib/relay-checklist";
 import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
 import s from "./relay.module.css";
 
@@ -463,7 +464,10 @@ function Review({ data, reload, say, onBack, sending, startSend }: {
           )}
           <Todos.Suggested item={item} draft={draft} reload={reload} say={say} />
         </div>
-        <AiPanel key={item.id} item={item} draft={draft} rules={data.rules} reload={reload} say={say} />
+        <div className={s.aicol}>
+          <AiPanel key={item.id} item={item} draft={draft} rules={data.rules} reload={reload} say={say} />
+          <DealChecklistCard key={`check-${item.id}`} item={item} draft={draft} reload={reload} say={say} />
+        </div>
       </div>
     </section>
   );
@@ -1172,5 +1176,61 @@ function DealBar({ item: i, busy, onRun, onOpenListing }: { item: RelayItem; bus
           {job?.status === "failed" && job.action === i.deal_action ? "Try again" : i.deal_action === "create" ? "Create deal" : "Update deal from this reply"}</button>}
       </div>
     </div>
+  );
+}
+
+/** Under Relay AI: what we have from this seller or buyer and what is still missing, from the linked deal. */
+function DealChecklistCard({ item, draft, reload, say }: { item: RelayReviewItem; draft: RelayDraftView | undefined; reload: () => Promise<void>; say: (t: string) => void }) {
+  const [list, setList] = useState<DealChecklist | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const linked = !!item.bulk_listing_id;
+  useEffect(() => {
+    if (!linked) return;
+    let live = true;
+    api<{ checklist: DealChecklist | null }>(`/api/relay/items/${item.id}/checklist`).then((r) => { if (live) setList(r.checklist); }).catch(() => { if (live) setList(null); });
+    return () => { live = false; };
+  }, [item.id, linked, item.updated_at]);
+  if (!linked) return item.contact_type === "buyer" || item.contact_type === "supplier"
+    ? <div className={cx(s.card, s.check)}><b>No deal yet</b><span className={s.muted}>Create the deal from the inbox and this lists what we have and what is missing.</span></div>
+    : null;
+  if (list === undefined) return <div className={cx(s.card, s.check)}><span className={s.muted}>Loading the deal…</span></div>;
+  if (!list) return null;
+  const tick = async (row: ChecklistItem) => {
+    setBusy(true);
+    try { setList((await api<{ checklist: DealChecklist }>(`/api/relay/items/${item.id}/checklist`, { method: "POST", body: { key: row.key, have: !row.have } })).checklist); }
+    catch (err) { say(err instanceof Error ? err.message : "Couldn't save that."); }
+    finally { setBusy(false); }
+  };
+  const instruction = missingInstruction(list);
+  const addMissing = async () => {
+    if (!instruction || !draft?.mail || draft.state === "sent") return;
+    setBusy(true);
+    try { await api(`/api/relay/drafts/${draft.id}/rewrite`, { method: "POST", body: { instruction } }); say("Added what's missing to the draft"); await reload(); }
+    catch (err) { say(err instanceof Error ? err.message : "Couldn't change the draft."); }
+    finally { setBusy(false); }
+  };
+  const who = firstName(item.counterpart_name) || "them";
+  const group = (name: string, rows: ChecklistItem[]) => (
+    <div className={s.cgroup}>
+      <div className={s.chead}><span>{name}</span><span>{rows.filter((r) => r.have).length} of {rows.length}</span></div>
+      {rows.map((r) => (
+        <label key={r.key} className={cx(s.crow, !r.have && s.cmiss)}>
+          <input type="checkbox" checked={r.have} disabled={!r.manual || busy} onChange={() => void tick(r)} />
+          <span>{r.label}</span>
+          <span className={cx(s.cval, r.warn && s.cwarn)}>{r.have ? [r.value, r.warn].filter(Boolean).join(" · ") || "Yes" : r.manual ? "Tick if you know" : "Missing"}</span>
+        </label>
+      ))}
+    </div>
+  );
+  return (
+    <section className={cx(s.card, s.check)} aria-label="What we have">
+      <div className={s.ctitle}><b>What we have from {who}</b><span>{list.kind === "demand" ? "buyer" : "seller"}</span></div>
+      {group("Required", list.required)}
+      {group("Helpful", list.helpful)}
+      <div className={s.cfoot}>
+        <span className={s.muted}>Matcha ticks these from their emails. Tick the ones without a field yourself.</span>
+        {instruction && draft?.mail && draft.state !== "sent" && <button type="button" className={s.btn} disabled={busy} onClick={() => void addMissing()}>Add missing to draft</button>}
+      </div>
+    </section>
   );
 }

@@ -13,6 +13,7 @@ import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
 import { dealResultFits, dealSummaryText, ownsDeal, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
+import { buildChecklist, MANUAL_KEYS, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -428,6 +429,36 @@ export async function startDealJob(itemId: string, ownerId: string, action: "cre
   writeFileSync(join(dir, "prompt.txt"), prompt, { mode: 0o600 });
   const child = spawn("/usr/bin/python3", [JOB_RUNNER, job.id], { detached: true, stdio: "ignore" });
   child.unref();
+}
+
+/** The deal checklist for an email in Review: what we have from them and what is still missing. Null when no deal is linked. */
+export async function dealChecklistFor(itemId: string, ownerId: string): Promise<DealChecklist | null> {
+  const item = await readRelayItem(itemId, ownerId);
+  if (!item) throw new RelayError(404, "Not found");
+  if (!item.bulk_listing_id) return null;
+  const [listing] = await queryPg<ChecklistListing>(
+    `select b.id, b.kind, b.summary as title, b.quantity, b.location, b.clear_by::text as clear_by, b.context, b.spec,
+       d.volume, d.volume_unit, d.max_price, d.price_currency, d.price_unit, d.needed_by::text as needed_by, d.product_family
+     from crm_bulk_listings b left join crm_bulk_demand d on d.id = b.id where b.id = $1`, [item.bulk_listing_id]);
+  if (!listing) return null;
+  const fields = await queryPg<ChecklistField>("select field_key, value, status from crm_bulk_listing_fields where bulk_listing_id = $1", [listing.id]);
+  const docs = await queryPg<ChecklistDoc>(
+    "select file_name, title, doc_type, source_date::text as source_date, created_at::text as created_at from crm_bulk_listing_documents where bulk_listing_id = $1", [listing.id]);
+  return buildChecklist(listing, fields, docs);
+}
+
+/** Ticks or unticks a helpful fact the CRM has no field for, on the email's deal (`context.intake_ticks`). */
+export async function setChecklistTick(itemId: string, ownerId: string, key: string, have: boolean): Promise<void> {
+  const item = await readRelayItem(itemId, ownerId);
+  if (!item?.bulk_listing_id) throw new RelayError(404, "This email isn't linked to a deal.");
+  const [listing] = await queryPg<{ kind: string }>("select kind from crm_bulk_listings where id = $1", [item.bulk_listing_id]);
+  if (!listing) throw new RelayError(404, "The deal is no longer in the CRM.");
+  const keys: string[] = MANUAL_KEYS[listing.kind === "demand" ? "demand" : "supply"].map(([k]) => k);
+  if (!keys.includes(key)) throw new RelayError(400, "That one fills in from the deal itself.");
+  await queryPg(
+    `update crm_bulk_listings set context = jsonb_set(coalesce(context, '{}'::jsonb), '{intake_ticks}',
+       coalesce(context->'intake_ticks', '{}'::jsonb) || jsonb_build_object($2::text, $3::boolean)), updated_at = now() where id = $1`,
+    [item.bulk_listing_id, key, have]);
 }
 
 /** Applies finished deal jobs: links the email to the deal Matcha made or updated, if it is this email's deal, and records what it found. */

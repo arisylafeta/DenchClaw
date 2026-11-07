@@ -1,0 +1,61 @@
+import { describe, expect, it } from "vitest";
+import { buildChecklist, missingInstruction, type ChecklistListing } from "./relay-checklist";
+
+const now = new Date("2026-11-07T12:00:00Z");
+const supply: ChecklistListing = {
+  id: "btd_s", kind: "supply", title: "30x Nissan Leaf packs", quantity: "30 packs", location: "Leeds, UK", clear_by: null,
+  context: { listing_title: "30x Nissan Leaf 40kWh", intake_ticks: { split: true } }, spec: {},
+  volume: null, volume_unit: null, max_price: null, price_currency: null, price_unit: null, needed_by: null, product_family: null,
+};
+
+describe("buildChecklist for a seller", () => {
+  const c = buildChecklist(supply, [
+    { field_key: "model", value: "Nissan Leaf", status: "confirmed" },
+    { field_key: "seller_price", value: null, status: "missing" },
+    { field_key: "clear_by", value: "Gone by 30 Nov", status: "confirmed" },
+    { field_key: "soh", value: "18 of 30 read, 81-92%", status: "unverified" },
+  ], [
+    { file_name: "Test report.pdf", title: null, doc_type: null, source_date: "2024-03-10", created_at: null },
+    { file_name: "label1.jpg", title: null, doc_type: null, source_date: null, created_at: null },
+    { file_name: "label2.jpg", title: null, doc_type: null, source_date: null, created_at: null },
+  ], now);
+
+  it("ticks what the CRM holds and leaves the price missing", () => {
+    expect(c.required.map((i) => [i.key, i.have])).toEqual([["what", true], ["how_many", true], ["price", false], ["when", true], ["where", true], ["health", true]]);
+    expect(c.required[0].warn).toBe("kWh not stated");
+  });
+  it("dates the test report, flags it as old and counts photos", () => {
+    const test = c.helpful.find((i) => i.key === "test_report")!;
+    expect(test.value).toBe("Dated March 2024");
+    expect(test.warn).toBe("over a year old");
+    expect(c.helpful.find((i) => i.key === "photos")!.value).toBe("2 on file");
+  });
+  it("uses hand ticks only for facts the CRM has no field for", () => {
+    expect(c.helpful.filter((i) => i.manual).map((i) => [i.key, i.have])).toEqual([["per_pack_health", false], ["split", true], ["owner", false]]);
+  });
+  it("turns the gaps into one instruction for Relay AI", () => {
+    const text = missingInstruction(c)!;
+    expect(text).toContain("Ask them for what we still need: price.");
+    expect(text).toContain("test report (over a year old)");
+    expect(text).toContain("health per pack with tag");
+    expect(text).not.toContain("whole lot or split");
+  });
+});
+
+describe("buildChecklist for a buyer", () => {
+  it("reads the demand's own columns", () => {
+    const c = buildChecklist({ ...supply, id: "btd_d", kind: "demand", quantity: null, location: "France", context: {}, spec: { min_soh: 80 },
+      volume: 15, volume_unit: "packs", max_price: 50, price_currency: "EUR", price_unit: null, needed_by: "2026-12-31", product_family: "Renault Zoe packs" }, [], [], now);
+    expect(c.required.map((i) => i.value)).toEqual(["Renault Zoe packs", "15 packs", "Max EUR 50", "2026-12-31", "France"]);
+    expect(c.required[2].warn).toBe("unit not stated");
+    expect(c.helpful[0].value).toBe("80%");
+  });
+  it("needs nothing added when every box is ticked", () => {
+    const full = buildChecklist({ ...supply, context: { intake_ticks: { per_pack_health: true, split: true, owner: true } } }, [
+      { field_key: "model", value: "Leaf", status: "confirmed" }, { field_key: "capacity", value: "40 kWh", status: "confirmed" },
+      { field_key: "seller_price", value: "€1,900 a pack", status: "confirmed" }, { field_key: "clear_by", value: "30 Nov", status: "confirmed" },
+      { field_key: "soh", value: "80%+", status: "confirmed" },
+    ], [{ file_name: "report.pdf", title: "Test report", doc_type: null, source_date: "2026-11-01", created_at: null }, { file_name: "a.jpg", title: null, doc_type: null, source_date: null, created_at: null }], now);
+    expect(missingInstruction(full)).toBeNull();
+  });
+});
