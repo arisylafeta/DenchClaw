@@ -378,7 +378,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
                       </div>
                     )}
                     {i.earlier.length > 0 && <div className={s.earlier}>{i.earlier.map((e, k) => <span key={k}><b>{e.who}</b> · {e.when}: {e.summary}</span>)}</div>}
-                    <DealBar item={i} busy={!!busy[i.id]} onRun={(action) => void dealJob(i, action)} onAsk={tab === "action" && i.can_ask ? () => void draftAsk(i) : undefined} onListReply={tab !== "other" ? () => void listReply(i) : undefined} />
+                    <DealBar item={i} busy={!!busy[i.id]} onRun={(action) => void dealJob(i, action)} onAsk={tab === "action" && i.can_ask ? () => void draftAsk(i) : undefined} onListReply={tab === "action" ? () => void listReply(i) : undefined} />
                   </div>
                 )}
                 {tab !== "other" && (

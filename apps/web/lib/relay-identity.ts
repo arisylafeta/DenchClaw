@@ -26,6 +26,9 @@ export function replyIdentity(messages: IdentityMessage[], contactType?: string 
 const MORE_PERSONAL = new Set(["seznam.cz", "wp.pl", "o2.pl", "onet.pl", "btinternet.com", "sky.com", "virginmedia.com", "talktalk.net", "ntlworld.com"]);
 const domainOf = (email: string) => email.split("@")[1] ?? "";
 
+/** A personal or ISP mail domain, which never identifies a company. */
+export const isPersonalDomain = (domain: string) => isBundledPersonalDomain(domain) || MORE_PERSONAL.has(domain.toLowerCase());
+
 /** True when the person on the thread owns the deal: the same address, or the same company domain (never a personal one). */
 export function ownsDeal(ownerEmail: string | null | undefined, counterpartEmail: string | null | undefined): boolean {
   const owner = (ownerEmail ?? "").toLowerCase().trim();

@@ -623,8 +623,9 @@ def load_offered_demands(cur) -> dict[str, list[dict]]:
                      from crm_bulk_offers o join crm_people p on p.id = o.person_id
                     where o.role = 'counterparty'
                       -- only a priced offer: a supplier who has only been asked, or answered "what do you offer?", is not on the deal
-                      and (o.terms ?| array['amount', 'amount_low', 'amount_high', 'our_ask']
-                           or jsonb_path_exists(coalesce(o.terms, '{}'::jsonb), '$.items[*].amount'))
+                      and (exists (select 1 from jsonb_each(coalesce(o.terms, '{}'::jsonb)) t
+                                    where t.key in ('amount', 'amount_low', 'amount_high', 'our_ask') and jsonb_typeof(t.value) <> 'null')
+                           or jsonb_path_exists(coalesce(o.terms, '{}'::jsonb), '$.items[*].amount ? (@ != null)'))
                    union
                    select o.counterpart_id, lower(coalesce(s.email, sp.email))
                      from crm_bulk_offers o join crm_bulk_listings s on s.id = o.bulk_listing_id and s.kind = 'supply'
