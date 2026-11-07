@@ -19,7 +19,11 @@ export type SavedSearchAlert = {
 
 export type CompanyDossier = {
   company_id: string;
+  /** The whole dossier, frontmatter included. */
   text: string | null;
+  /** What the panel renders: the Markdown after the frontmatter. */
+  body: string | null;
+  frontmatter: Record<string, unknown> | null;
   version: number;
   updated_at: string | null;
   stale_since: string | null;
@@ -153,10 +157,13 @@ export async function getCompanyDossier(companyId: string): Promise<CompanyDossi
   if (!row) return null;
 
   const savedSearches = await listSavedSearchAlerts(companyId);
-  const lastVerified = row.buyer_dossier ? parseDossier(row.buyer_dossier).frontmatter.last_verified : null;
+  const parsed = row.buyer_dossier ? parseDossier(row.buyer_dossier) : null;
+  const lastVerified = parsed?.frontmatter.last_verified ?? null;
   return {
     company_id: row.id,
     text: row.buyer_dossier,
+    body: parsed ? parsed.body : null,
+    frontmatter: parsed ? parsed.frontmatter : null,
     version: Number(row.buyer_dossier_version ?? 0),
     updated_at: row.buyer_dossier_updated_at,
     stale_since: row.stale_since,

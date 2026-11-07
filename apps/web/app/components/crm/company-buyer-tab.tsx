@@ -18,6 +18,7 @@ import {
 import { Button } from "../ui/button";
 import { useRegistry } from "../bulk-trades/use-registry";
 import { formatDayLabel, formatRelativeDate } from "./format-relative-date";
+import { DossierPanel } from "./company-dossier-panel";
 
 export type BuyerData = {
   profile: BuyerProfile;
@@ -196,6 +197,8 @@ export function BuyerTab({ companyId, buyer, people, onSaved }: {
           <p className="mt-3 text-[12px]" style={muted}>Email from both mailboxes, calendar and Bulk Trades. WhatsApp is not included.</p>
         </section>
       )}
+
+      <DossierPanel companyId={companyId} onSaved={onSaved} />
 
       <section aria-label="Buyer profile" className="rounded-2xl border p-4" style={cardStyle}>
         <div className="mb-3 flex flex-wrap items-center gap-2">
