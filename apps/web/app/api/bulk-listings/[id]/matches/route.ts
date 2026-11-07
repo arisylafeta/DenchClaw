@@ -26,10 +26,10 @@ export async function POST(req: Request, { params }: Context) {
   if (!body || typeof body.demandId !== "string" || !body.demandId) return badRequest("Which demand?");
   if (!(VERDICTS as readonly unknown[]).includes(body.verdict)) return badRequest("Invalid verdict.");
   if (body.note != null && typeof body.note !== "string") return badRequest("note must be text.");
-  if (body.reason != null && typeof body.reason !== "string") return badRequest("reason must be text.");
+  if (body.reason != null && typeof body.reason !== "string") { return badRequest("reason must be text."); }
   const reason = (body.reason as string | undefined)?.trim() ?? "";
-  if (body.verdict === "not_a_fit" && !reason) return badRequest("Say briefly why it is not a fit.");
-  if (reason.length > REASON_MAX) return badRequest(`Keep the reason under ${REASON_MAX} characters.`);
+  if (body.verdict === "not_a_fit" && !reason) { return badRequest("Say briefly why it is not a fit."); }
+  if (reason.length > REASON_MAX) { return badRequest(`Keep the reason under ${REASON_MAX} characters.`); }
   const demand = await getDemand(body.demandId);
   if (!demand) return notFound("Demand");
   if (!await supplyMatches(id)) return notFound("Supply listing");

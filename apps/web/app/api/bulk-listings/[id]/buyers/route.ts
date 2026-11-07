@@ -26,15 +26,15 @@ export async function POST(req: Request, { params }: Context) {
   const body = await readJson(req) as Record<string, unknown> | null;
   if (!body || typeof body.companyId !== "string" || !body.companyId) return badRequest("Which company?");
   if (body.personId != null && typeof body.personId !== "string") return badRequest("personId must be text.");
-  if (body.reason != null && typeof body.reason !== "string") return badRequest("reason must be text.");
+  if (body.reason != null && typeof body.reason !== "string") { return badRequest("reason must be text."); }
   const [company] = await queryPg<{ id: string; name: string }>(`select id, name from crm_companies where id = $1`, [body.companyId]);
   if (!company) return notFound("Company");
   if (!(await supplyBuyers(id))) return notFound("Supply listing");
   if (body.verdict != null) {
-    if (!(VERDICTS as readonly unknown[]).includes(body.verdict)) return badRequest("Invalid verdict.");
+    if (!(VERDICTS as readonly unknown[]).includes(body.verdict)) { return badRequest("Invalid verdict."); }
     const reason = (body.reason as string | undefined)?.trim() ?? "";
-    if (body.verdict === "not_a_fit" && !reason) return badRequest("Say briefly why this company is not a fit.");
-    if (reason.length > REASON_MAX) return badRequest(`Keep the reason under ${REASON_MAX} characters.`);
+    if (body.verdict === "not_a_fit" && !reason) { return badRequest("Say briefly why this company is not a fit."); }
+    if (reason.length > REASON_MAX) { return badRequest(`Keep the reason under ${REASON_MAX} characters.`); }
     return linkedWrite(async () => Response.json({ activity: await recordSupplyVerdict(id, {
       key: verdictKey.company(company.id), verdict: body.verdict as (typeof VERDICTS)[number], label: company.name, reason,
     }, guard.userId) }, { status: 201 }));
