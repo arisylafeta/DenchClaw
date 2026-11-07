@@ -13,6 +13,7 @@ import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
 import { dealResultFits, dealSummaryText, ownsDeal, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
+import { askInstruction, askLabel, buildChecklist, MANUAL_KEYS, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -53,6 +54,8 @@ export type RelayItem = {
   deal_action?: "create" | "update" | null;
   /** The latest Create deal or Update deal job on this email. */
   deal_job?: RelayDealJob | null;
+  /** The email is from the linked deal's own seller or buyer, so "Draft the ask" can write the playbook's ask. */
+  can_ask?: boolean;
 };
 
 export type RelayDraftView = {
@@ -368,12 +371,17 @@ async function withDealInfo(items: RelayItem[]): Promise<RelayItem[]> {
        bool_or(m.identity_key = 'buy' or exists (select 1 from unnest(coalesce(m.to_emails,'{}') || coalesce(m.cc_emails,'{}')) a where lower(a) = 'buy@rebattery.io')) as buy
      from mail_message m where m.thread_id::text = any($1) group by 1`, [threads]).catch(() => []) : [];
   const byThread = new Map(inboxes.map((r) => [r.thread_id, r]));
+  const listingIds = [...new Set(items.map((i) => i.bulk_listing_id).filter((id): id is string => !!id))];
+  const owners = listingIds.length ? await queryPg<{ id: string; owner_email: string | null }>(
+    "select b.id, lower(coalesce(b.email, p.email)) as owner_email from crm_bulk_listings b left join crm_people p on p.id = b.person_id where b.id = any($1)", [listingIds]).catch(() => []) : [];
+  const ownerOf = new Map(owners.map((o) => [o.id, o.owner_email]));
   const jobs = await dealJobsFor(items.map((i) => i.id));
   return items.map((i) => {
     const box = i.mail_thread_id ? byThread.get(i.mail_thread_id) : undefined;
     const inbox = threadInbox(!!box?.supply, !!box?.buy, i.contact_type);
     const job = jobs.get(i.id) ?? null;
-    return { ...i, inbox, deal_action: suggestDealAction(i, inbox, job), deal_job: job };
+    const can_ask = !!i.bulk_listing_id && ownsDeal(ownerOf.get(i.bulk_listing_id), i.counterpart_email);
+    return { ...i, inbox, deal_action: suggestDealAction(i, inbox, job), deal_job: job, can_ask };
   });
 }
 
@@ -428,6 +436,62 @@ export async function startDealJob(itemId: string, ownerId: string, action: "cre
   writeFileSync(join(dir, "prompt.txt"), prompt, { mode: 0o600 });
   const child = spawn("/usr/bin/python3", [JOB_RUNNER, job.id], { detached: true, stdio: "ignore" });
   child.unref();
+}
+
+export type RelayChecklistView = { checklist: DealChecklist | null; counterparty: boolean };
+
+/** The deal checklist for an email in Review: what we have from them and what is still missing. No checklist when no deal is
+ * linked, or when the sender is answering someone else's deal (a supplier on a buyer's request): the card would show the
+ * other side's facts as theirs. */
+export async function dealChecklistFor(itemId: string, ownerId: string): Promise<RelayChecklistView> {
+  const item = await readRelayItem(itemId, ownerId);
+  if (!item) throw new RelayError(404, "Not found");
+  if (!item.bulk_listing_id) return { checklist: null, counterparty: false };
+  const [listing] = await queryPg<ChecklistListing & { owner_email: string | null }>(
+    `select b.id, b.kind, b.summary as title, b.quantity, b.location, b.clear_by::text as clear_by, b.context, b.spec,
+       d.volume, d.volume_unit, d.max_price, d.price_currency, d.price_unit, d.needed_by::text as needed_by, d.product_family,
+       lower(coalesce(b.email, p.email)) as owner_email
+     from crm_bulk_listings b left join crm_bulk_demand d on d.id = b.id left join crm_people p on p.id = b.person_id where b.id = $1`, [item.bulk_listing_id]);
+  if (!listing) return { checklist: null, counterparty: false };
+  const messages = await threadMessages(item.mail_thread_id);
+  const sender = messages.find((m) => m.direction === "inbound")?.from_email ?? item.counterpart_email;
+  if (!ownsDeal(listing.owner_email, sender)) return { checklist: null, counterparty: true };
+  const fields = await queryPg<ChecklistField>("select field_key, value, status from crm_bulk_listing_fields where bulk_listing_id = $1", [listing.id]);
+  const docs = await queryPg<ChecklistDoc>(
+    `select file_name, title, doc_type, source_date::text as source_date, created_at::text as created_at from crm_bulk_listing_documents
+     where bulk_listing_id = $1 and state = 'received'`, [listing.id]);  // documents they sent, not ones we made or still want
+  return { checklist: buildChecklist(listing, fields, docs), counterparty: false };
+}
+
+/** Ticks or unticks a helpful fact the CRM has no field for, on the email's deal (`context.intake_ticks`). */
+export async function setChecklistTick(itemId: string, ownerId: string, key: string, have: boolean): Promise<void> {
+  const item = await readRelayItem(itemId, ownerId);
+  if (!item?.bulk_listing_id) throw new RelayError(404, "This email isn't linked to a deal.");
+  if ((await dealChecklistFor(itemId, ownerId)).counterparty) throw new RelayError(409, "This email answers someone else's deal, so its checklist can't be ticked from here.");
+  const [listing] = await queryPg<{ kind: string }>("select kind from crm_bulk_listings where id = $1", [item.bulk_listing_id]);
+  if (!listing) throw new RelayError(404, "The deal is no longer in the CRM.");
+  const keys: string[] = MANUAL_KEYS[listing.kind === "demand" ? "demand" : "supply"].map(([k]) => k);
+  if (!keys.includes(key)) throw new RelayError(400, "That one fills in from the deal itself.");
+  await queryPg(
+    `update crm_bulk_listings set context = jsonb_set(coalesce(context, '{}'::jsonb), '{intake_ticks}',
+       coalesce(context->'intake_ticks', '{}'::jsonb) || jsonb_build_object($2::text, $3::boolean)), updated_at = now() where id = $1`,
+    [item.bulk_listing_id, key, have]);
+}
+
+/** "Draft the ask": drafts the playbook's ask for what the deal is still missing, straight from the checklist, with no note from Alex. */
+export async function draftAsk(itemId: string, ownerId: string): Promise<RelayItem> {
+  const view = await dealChecklistFor(itemId, ownerId);
+  if (view.counterparty) throw new RelayError(409, "This email answers someone else's deal, so there's no ask to draft from here.");
+  if (!view.checklist) throw new RelayError(409, "This email isn't linked to a deal yet. Create the deal first.");
+  const instruction = askInstruction(view.checklist);
+  if (!instruction) throw new RelayError(409, "Nothing is missing on this deal, so there's nothing to ask for.");
+  const item = await readRelayItem(itemId, ownerId);
+  if (!item) throw new RelayError(404, "Not found");
+  // Drafted straight from the checklist: Alex's own note on the email is left as it is.
+  const ctx = await draftContext(item, ownerId, instruction);
+  const parsed = parseJson(await askAgent(DRAFT_SYSTEM(ctx.rules, ctx.guide), ctx.prompt));
+  await saveDraftOutputs(item, ownerId, askLabel(view.checklist), ctx, parsed, []);
+  return (await readRelayItem(itemId, ownerId))!;
 }
 
 /** Applies finished deal jobs: links the email to the deal Matcha made or updated, if it is this email's deal, and records what it found. */

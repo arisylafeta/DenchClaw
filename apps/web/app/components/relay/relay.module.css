@@ -353,3 +353,21 @@
 .dealerr { color: var(--red); }
 .dealbtns { display: flex; flex-wrap: wrap; gap: 8px; }
 .dealbtns .btn { padding: 7px 12px; font-size: 13px; }
+
+/* Under Relay AI: what we have from the seller or buyer, and what is missing. */
+.aicol { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.aicol .ai { position: static; }
+.check { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; font-size: 13.5px; }
+.ctitle { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.ctitle span { font-size: 12px; color: var(--muted); }
+.cgroup { display: flex; flex-direction: column; gap: 6px; }
+.cgroup + .cgroup { border-top: 1px solid var(--line); padding-top: 10px; }
+.chead { display: flex; justify-content: space-between; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.crow { display: grid; grid-template-columns: 18px auto minmax(0, 1fr); gap: 8px; align-items: center; }
+.crow input { accent-color: var(--ink); margin: 0; }
+.cval { text-align: right; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmiss .cval { color: var(--muted); }
+.cmiss > span:nth-child(2) { font-weight: 600; }
+.cwarn { color: var(--amber); }
+.cfoot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
+.cfoot .btn { padding: 7px 11px; font-size: 12.5px; }
