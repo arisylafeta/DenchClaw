@@ -735,6 +735,60 @@ def eval_predraft(args) -> None:
     print(json.dumps(summary))
 
 
+OPTIONS_JUDGE = """Relay offers Alex Polglase three one-line replies to choose from before he answers an email ("tap to reply"); one tap
+drafts the email from that line. For each item you get the thread as Relay saw it (oldest first, including Alex's own earlier emails),
+what Alex actually sent next, and Relay's options in order. Judge whether Alex could have tapped one of them and got the email he wanted.
+Same intent counts; wording and detail can differ; a [price] or [date] placeholder he would fill in counts.
+Reply with ONLY a JSON array:
+[{"id": "...",
+  "match": "first" | "other" | "partial" | "none",
+     first: the first option is what Alex did; other: a later option is; partial: one option is close but misses a key part of what he did;
+     none: no option fits,
+  "invented": true|false (an option states a fact or event found nowhere in the thread, or promises an action Alex never said he would take),
+  "why": "<10 words>"}]"""
+
+
+def eval_options(args) -> None:
+    """Tap to reply: do Relay's three suggested replies cover what Alex actually did? Replays past emails; stores nothing in the CRM."""
+    out = owner_dir(args.work, args.owner)
+    cases = predraft_cases(out, args.n, args.chases)
+    results: dict[str, dict] = {}
+    url = args.url.rstrip("/") + "/api/relay/internal/predraft"
+    batches = [cases[i:i + 5] for i in range(0, len(cases), 5)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
+        payloads = [{"mode": "options", "cases": [{k: v for k, v in c.items() if k != "_row"} for c in b]} for b in batches]
+        for reply in pool.map(lambda p: post_internal(url, p), payloads):
+            for r in reply.get("results", []):
+                results[r["id"]] = r
+    items = []
+    for c in cases:
+        r, res = c["_row"], results.get(c["id"], {})
+        ask = (res.get("suggestion") or {}).get("needs_input") or {}
+        items.append({"id": c["id"], "kind": r["kind"], "situation": r.get("situation"), "thread": (res.get("thread") or "")[-5000:],
+                      "alex_actual": r["text"][:1500], "options": ask.get("options") or [], "error": res.get("error")})
+    verdicts = {}
+    for i in range(0, len(items), 5):
+        chunk = [{k: v for k, v in it.items() if k in ("id", "thread", "alex_actual", "options")} for it in items[i:i + 5] if not it["error"] and it["options"]]
+        if chunk:
+            raw = rs.run_hermes(OPTIONS_JUDGE + "\n\n" + json.dumps(chunk, ensure_ascii=False))
+            for obj in json.loads(raw[raw.find("["):raw.rfind("]") + 1]):
+                verdicts[obj["id"]] = obj
+    for it in items:
+        it.update({k: verdicts.get(it["id"], {}).get(k) for k in ("match", "invented", "why")})
+    ok = [it for it in items if not it["error"] and it["options"]]
+    count = lambda m: sum(it.get("match") == m for it in ok)
+    summary = {
+        "cases": len(items), "errors": len(items) - len(ok), "first": count("first"), "other": count("other"), "partial": count("partial"),
+        "none": count("none"), "invented": sum(bool(it.get("invented")) for it in ok),
+        "by_kind": {k: {"n": sum(it["kind"] == k for it in ok), "covered": sum(it["kind"] == k and it.get("match") in ("first", "other") for it in ok)} for k in ("reply", "chase")},
+    }
+    summary["covered_pct"] = round(100 * (summary["first"] + summary["other"]) / max(1, len(ok)))
+    summary["first_pct"] = round(100 * summary["first"] / max(1, len(ok)))
+    write_jsonl(out / "options-eval.jsonl", items)
+    write_private(out / "options-eval-summary.json", json.dumps(summary, indent=2))
+    print(json.dumps(summary))
+
+
 def normalise_amount(raw: str) -> str:
     """Mirrors relay-checks normaliseAmount: "£1,500.00" and "£1500" compare equal; "€30k" is €30000."""
     text = raw.strip().rstrip(",.")
@@ -778,7 +832,7 @@ def publish(args) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("command", choices=["extract", "tag", "synthesize", "eval", "eval-predraft", "publish", "render"])
+    parser.add_argument("command", choices=["extract", "tag", "synthesize", "eval", "eval-predraft", "eval-options", "publish", "render"])
     parser.add_argument("--owner", default="alex@rebattery.io")
     parser.add_argument("--dsn", default=DEFAULT_DSN)
     parser.add_argument("--work", type=Path)
@@ -792,7 +846,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline", choices=["active", "none"], default="active", help="eval: compare with the voice in use, or with no voice")
     parser.add_argument("--render-to", type=Path, default=VOICE_FILE, help="render: the file every other drafter reads")
     args = parser.parse_args(argv)
-    {"extract": extract, "tag": tag, "synthesize": synthesize, "eval": eval_, "eval-predraft": eval_predraft, "publish": publish, "render": render}[args.command](args)
+    {"extract": extract, "tag": tag, "synthesize": synthesize, "eval": eval_, "eval-predraft": eval_predraft, "eval-options": eval_options, "publish": publish, "render": render}[args.command](args)
     return 0
 
 

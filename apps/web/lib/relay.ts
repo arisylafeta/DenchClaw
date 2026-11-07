@@ -312,6 +312,17 @@ Return ONLY JSON:
  "needs_input": null | {"question": "…", "options": ["…", "…"]},
  "todos": [ {"title": "short task", "detail": "one line", "kind": "promise"} ] (only what the reply commits Alex to)}`;
 
+/** "Tap to reply": instead of guessing a draft, Relay offers the replies Alex would most likely choose. One tap drafts from it as his note. */
+const OPTIONS_SYSTEM = (rules: string[], guide?: string | null) => `You are Relay, Alex Polglase's email assistant at ReBattery (a UK marketplace and broker for used EV and storage batteries).
+Alex has not written a note. Do not write the email. Offer the three replies he would most likely choose, as short notes he could have typed
+himself, each one line in his words (for example "thank him and ask for the price per pack", "propose a call this week", "make our offer of [price] a pack").${voiceGuideBlock(guide)}
+- Put the most likely first. Make them genuinely different intents, not three wordings of one reply.
+- Where the reply needs a value only Alex knows (a price, a date, a quantity), leave it as [price], [date] or [quantity] for him to fill.
+- When the prompt includes ReBattery's intake guide and the reply is its standard first or second ask, or this is a follow-up chase, make that the first option.
+- Take facts only from the thread and the deal. Never state a fact, event or promise the thread does not show.
+- Writing rules Alex's emails follow, for the wording of the options: ${rules.join(" ")}
+Return ONLY JSON: {"subject": "Re: …", "body": "", "needs_input": {"question": "How do you want to reply?", "options": ["…", "…", "…"]}, "todos": []}`;
+
 export type DraftResult = { item: RelayItem };
 
 // ---------- voice ----------
@@ -601,7 +612,7 @@ async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, 
 // ---------- Relay's own drafts (before a note) ----------
 
 /** Relay's draft for one item, written as of now (or as of a past message, beforeId, to replay one Alex already answered). */
-async function suggestFor(item: RelayItem, ownerId: string, beforeId?: string): Promise<{ suggestion: Suggestion; amounts: string[]; thread: string }> {
+async function suggestFor(item: RelayItem, ownerId: string, beforeId?: string, mode: "draft" | "options" = "draft"): Promise<{ suggestion: Suggestion; amounts: string[]; thread: string }> {
   const ctx = await draftContext(item, ownerId, null, beforeId);
   // The date Alex is replying on: now, or when he actually replied in a replay. Without it, dates in the thread read as past.
   const [asOf] = beforeId ? await queryPg<{ at: string }>("select coalesce(sent_at, accepted_at, created_at)::text as at from mail_message where id = $1", [beforeId]) : [];
@@ -609,7 +620,7 @@ async function suggestFor(item: RelayItem, ownerId: string, beforeId?: string): 
   const dated = `Today is ${today.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Europe/London" })}.\n\n${ctx.prompt}`;
   // The guide's approved commercial lines are for drafting from Alex's note; without a note, pitching is his call (see the prompt).
   const guide = ctx.guide ? ctx.guide.replace(/## Commercial lines[\s\S]*?(?=\n## |$)/, "") : ctx.guide;
-  const parsed = parseSuggestion(await askAgent(PREDRAFT_SYSTEM(ctx.rules, guide), dated, 90_000));
+  const parsed = parseSuggestion(await askAgent((mode === "options" ? OPTIONS_SYSTEM : PREDRAFT_SYSTEM)(ctx.rules, guide), dated, 90_000));
   const corpus = [ctx.deal, item.context, ...ctx.messages.map((m) => m.body_text ?? "")].join("\n");
   return { suggestion: { ...parsed, for_message_id: item.last_seen_message_id, voice_version: ctx.voiceVersion, at: new Date().toISOString() }, amounts: amountsIn(corpus), thread: ctx.transcript };
 }
@@ -654,7 +665,7 @@ export async function predraftPending(ownerId: string, limit = 10, budgetMs = 36
 
 /** Replays past emails for the eval: what Relay would have drafted just before each message Alex actually sent. Stores nothing. */
 export async function predraftReplay(ownerId: string, cases: { id: string; mail_thread_id: string; before_message_id: string; tab: "action" | "follow";
-  counterpart_email: string | null; counterpart_name: string | null; situation: string | null; contact_type: string | null }[]) {
+  counterpart_email: string | null; counterpart_name: string | null; situation: string | null; contact_type: string | null }[], mode: "draft" | "options" = "draft") {
   const out: { id: string; suggestion?: Suggestion; amounts?: string[]; thread?: string; error?: string }[] = [];
   for (const c of cases) {
     try {
@@ -666,7 +677,7 @@ export async function predraftReplay(ownerId: string, cases: { id: string; mail_
         contact_type: c.contact_type, headline: "", context: "", last_message: null, earlier: [], bulk_listing_id: linked?.bulk_listing_id ?? null, deal_label: null, waiting_since: null, note: "",
         mail_thread_id: c.mail_thread_id, gmail_thread_id: thread.gmail_thread_id, updated_at: new Date().toISOString(), situation: c.situation, suggestion: null,
         last_seen_message_id: null } satisfies RelayItem;
-      out.push({ id: c.id, ...(await suggestFor(item, ownerId, c.before_message_id)) });
+      out.push({ id: c.id, ...(await suggestFor(item, ownerId, c.before_message_id, mode)) });
     } catch (error) {
       out.push({ id: c.id, error: error instanceof Error ? error.message.slice(0, 200) : "failed" });
     }
