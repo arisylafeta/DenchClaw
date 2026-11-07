@@ -1,10 +1,11 @@
 """Run the Phase 1 Matches replay end to end.
 
 Arms:
-  A0  today's buyer-suggestions.ts scorer, run through Node on the real TS
-  A1  the new rules layer (BUILD-PLAN "Matching pipeline")
-  B0  one caseworker call over A1's top 30, buyer_profile only
-  B1  the same call, with as-of dossiers for the pilot buyers
+  A0   today's buyer-suggestions.ts scorer, run through Node on the real TS
+  A1S  the rules layer over a strict as-of dossier, frontmatter only
+  A1   the same layer plus product keywords from dated body lines
+  B0   one caseworker call over A1's top 30, buyer_profile only
+  B1   the same call, with strict as-of dossiers for the pilot buyers
 
 All paths are arguments. The script writes outputs and caches only under the
 replay directory; it never writes to Postgres.
@@ -110,6 +111,8 @@ def run_a1(
     buyers: list[dict[str, Any]],
     dossiers: dict[str, dict[str, Any]],
     out_dir: Path,
+    arm: str = "A1",
+    body_fallback: bool = True,
 ) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for case in cases:
@@ -120,11 +123,11 @@ def run_a1(
             if buyer["id"] in dossiers:
                 view = dossier_mod.load_dossier(dossiers[buyer["id"]]["path"], as_of)
             views.append(buyer_view(buyer, view))
-        rows = rules.rank_a1(case["listing"], views, as_of, top=30)
+        rows = rules.rank_a1(case["listing"], views, as_of, top=30, body_fallback=body_fallback)
         for index, row in enumerate(rows):
             row["rank"] = index + 1
         out[case["id"]] = {"ranked": rows}
-    dump_json(out_dir / "a1.json", {"cases": out})
+    dump_json(out_dir / f"{arm.lower()}.json", {"cases": out})
     return out
 
 
@@ -172,7 +175,11 @@ def run_b(
             arm_out[case["id"]] = {
                 "ranked": rows,
                 "dropped_ids": result["dropped_ids"],
+                "rejected_rows": result.get("rejected_rows", []),
                 "candidate_count": result["candidate_count"],
+                "attempt_count": result.get("attempt_count", 1),
+                "shortfall": result.get("shortfall", 0),
+                "retry_error": result.get("retry_error"),
             }
         out[arm] = arm_out
         dump_json(out_dir / f"{arm.lower()}.json", {"cases": arm_out})
@@ -219,6 +226,7 @@ def compute_metrics(
         recalls = {5: 0, 8: 0, 30: 0}
         buyer_hits = {5: 0, 8: 0, 30: 0}
         first_ranks: list[int] = []
+        first_ranks_penalised: list[int] = []
         not_found = 0
         leads_top5 = 0
         violations: list[dict[str, Any]] = []
@@ -239,8 +247,10 @@ def compute_metrics(
                 found = [r for r in found if r is not None]
                 if found:
                     first_ranks.append(min(found))
+                    first_ranks_penalised.append(min(found))
                 else:
                     not_found += 1
+                    first_ranks_penalised.append(31)
                 for k in recalls:
                     if any((rank_of(rows, e["company_id"]) or 10**6) <= k for e in positives):
                         recalls[k] += 1
@@ -269,6 +279,10 @@ def compute_metrics(
             per_case[case_id] = {
                 "expected": ranks,
                 "first_positive_rank": min([r for r in [rank_of(rows, e["company_id"]) for e in positives] if r], default=None) if positives else None,
+                "first_positive_rank_penalised": (
+                    min([r for r in [rank_of(rows, e["company_id"]) for e in positives] if r], default=31)
+                    if positives else None
+                ),
                 "top5_leads": sum(1 for row in top5 if row.get("is_lead")),
             }
         total = len(positive_cases)
@@ -286,10 +300,14 @@ def compute_metrics(
             "buyer_recall@30": round(buyer_hits[30] / positive_buyers, 3) if positive_buyers else None,
             "buyer_hits@5": buyer_hits[5],
             "mean_first_positive_rank_found": round(sum(first_ranks) / len(first_ranks), 2) if first_ranks else None,
+            "mean_first_positive_rank_penalised": (
+                round(sum(first_ranks_penalised) / len(first_ranks_penalised), 2) if first_ranks_penalised else None
+            ),
             "positive_cases_not_found_top30": not_found,
             "top5_leads_total": leads_top5,
             "top5_leads_mean": round(leads_top5 / len(cases), 2) if cases else None,
             "rule_violations": violations,
+            "rule_violation_count": len(violations),
             "per_case": per_case,
         }
     metrics["positive_case_count"] = len(positive_cases)
@@ -303,14 +321,16 @@ def main() -> None:
     parser.add_argument("--pool", required=True)
     parser.add_argument("--dossiers", required=True)
     parser.add_argument("--replay-dir", required=True)
+    parser.add_argument("--outputs-dir", default=None)
+    parser.add_argument("--cache-dir", default=None)
     parser.add_argument("--ts-script", default=str(Path(__file__).with_name("a0_parity.ts")))
-    parser.add_argument("--arms", default="A0,A1,B0,B1")
+    parser.add_argument("--arms", default="A0,A1S,A1,B0,B1")
     parser.add_argument("--judgements", default=None)
     args = parser.parse_args()
 
     replay_dir = Path(args.replay_dir)
-    out_dir = replay_dir / "outputs"
-    cache_dir = replay_dir / "cache"
+    out_dir = Path(args.outputs_dir) if args.outputs_dir else replay_dir / "outputs"
+    cache_dir = Path(args.cache_dir) if args.cache_dir else replay_dir / "cache"
     cases = load_json(Path(args.cases))["cases"]
     pool = load_json(Path(args.pool))["buyers"]
     dossiers = load_dossiers(Path(args.dossiers))
@@ -322,8 +342,10 @@ def main() -> None:
     arms: dict[str, dict[str, Any]] = {}
     if "A0" in arms_wanted:
         arms["A0"] = run_a0(cases, pool, Path(args.ts_script), out_dir)
+    if "A1S" in arms_wanted:
+        arms["A1S"] = run_a1(cases, pool, dossiers, out_dir, arm="A1S", body_fallback=False)
     if "A1" in arms_wanted:
-        arms["A1"] = run_a1(cases, pool, dossiers, out_dir)
+        arms["A1"] = run_a1(cases, pool, dossiers, out_dir, arm="A1", body_fallback=True)
     b_arms = [a for a in arms_wanted if a in {"B0", "B1"}]
     if b_arms:
         if "A1" not in arms:
@@ -336,6 +358,11 @@ def main() -> None:
     metrics = compute_metrics(cases, arms, expected, pool, dossiers, judgements)
     metrics["missing_expected"] = missing
     metrics["case_count"] = len(cases)
+    shortfalls = {
+        arm: {case_id: c["shortfall"] for case_id, c in arm_cases.items() if c.get("shortfall")}
+        for arm, arm_cases in arms.items() if arm in {"B0", "B1"}
+    }
+    metrics["caseworker_shortfalls"] = shortfalls
     dump_json(out_dir / "metrics.json", metrics)
     print(json.dumps({"metrics": str(out_dir / "metrics.json"), "arms": list(arms)}))
 

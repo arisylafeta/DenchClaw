@@ -1,14 +1,16 @@
-"""Read a buyer dossier and build an as-of view for the Matches replay.
+"""Read a buyer dossier and build a strict as-of view for the Matches replay.
 
-The as-of view keeps only frontmatter products and price entries whose `seen`
-date is strictly before the listing's offer date, and removes dated body lines
-on or after that date. It also drops the "Open threads and promises" and
-"Sources" sections, and whole "Bought from us" items dated on or after the
-offer date.
+The as-of view is deliberately literal:
 
-This is a leakage control, not a general dossier reader. It is deliberately
-conservative: undated prose can still describe later events, which the report
-records as a caveat.
+- a frontmatter ``products`` or ``price`` row survives only when it carries a
+  parseable ``seen`` date strictly before the listing's offer date;
+- a body line survives only when it starts with an ISO date strictly before
+  that date (an optional leading ``- `` bullet is allowed); undated lines are
+  dropped, section headings are the only exception;
+- the "Open threads and promises" and "Sources" sections are dropped wholesale.
+
+Undated evidence is not shown to any arm. This is the leakage control the v1
+report asked for, and it is stricter than a best-effort date parse.
 """
 
 from __future__ import annotations
@@ -27,11 +29,8 @@ MONTHS = {
     "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
 }
 
-DATE_PATTERNS = [
-    re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"),
-    re.compile(r"\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\b"),
-    re.compile(r"\b([A-Za-z]{3,9})\s+(\d{4})\b"),
-]
+# A body fact line must open with an ISO date, optionally after a bullet.
+ISO_LINE = re.compile(r"^\s*(?:[-*]\s*)?(\d{4})-(\d{2})-(\d{2})\b")
 
 
 def parse_date(value: Any) -> dt.date | None:
@@ -59,14 +58,15 @@ def parse_date(value: Any) -> dt.date | None:
     return None
 
 
-def latest_date_in_text(text: str) -> dt.date | None:
-    best: dt.date | None = None
-    for pattern in DATE_PATTERNS:
-        for m in pattern.finditer(text):
-            parsed = parse_date(m.group(0))
-            if parsed and (best is None or parsed > best):
-                best = parsed
-    return best
+def line_date(line: str) -> dt.date | None:
+    """Date a body line only when it opens with an ISO date."""
+    m = ISO_LINE.match(line)
+    if not m:
+        return None
+    try:
+        return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
 
 
 def split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
@@ -103,46 +103,17 @@ def _drop_section(title: str) -> bool:
     return lowered.startswith("open threads") or lowered.startswith("sources")
 
 
-def _filter_bought_items(lines: list[str], as_of: dt.date) -> list[str]:
-    kept: list[str] = []
-    block: list[str] = []
-
-    def flush() -> None:
-        if not block:
-            return
-        first = block[0]
-        dated = latest_date_in_text(first)
-        if dated is None or dated < as_of:
-            kept.extend(block)
-        block.clear()
-
-    for line in lines:
-        if line.startswith("- "):
-            flush()
-            block.append(line)
-        elif block and (line.startswith("  ") or line.startswith("\t")):
-            block.append(line)
-        else:
-            flush()
-            kept.append(line)
-    flush()
-    return kept
-
-
 def filter_body(body: str, as_of: dt.date) -> str:
+    """Keep only dated, strictly-earlier fact lines; keep section headings."""
     out: list[str] = []
     for title, lines in _split_sections(body):
         if _drop_section(title):
             continue
-        if title.strip().lower() == "bought from us":
-            lines = _filter_bought_items(lines, as_of)
-        # Drop any remaining single dated line dated on or after the offer.
         kept: list[str] = []
         for line in lines:
-            dated = latest_date_in_text(line)
-            if dated is not None and dated >= as_of:
-                continue
-            kept.append(line)
+            dated = line_date(line)
+            if dated is not None and dated < as_of:
+                kept.append(line)
         if title:
             out.append(f"## {title}")
         out.extend(kept)
@@ -160,7 +131,7 @@ def filter_frontmatter(front: dict[str, Any], as_of: dt.date) -> dict[str, Any]:
             if not isinstance(row, dict):
                 continue
             seen = parse_date(row.get("seen"))
-            if seen is None or seen < as_of:
+            if seen is not None and seen < as_of:
                 kept.append(row)
         front[key] = kept
     # These fields routinely restate later evidence. Drop them from the

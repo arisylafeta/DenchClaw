@@ -244,12 +244,13 @@ def _product_platforms(buyer: dict[str, Any]) -> list[str]:
 
 
 def _filtered_past_asks(profile: dict[str, Any], as_of: str) -> list[str]:
+    """Dated asks strictly before the offer; undated asks are dropped."""
     out = []
     for item in profile.get("past_asks") or []:
         if not isinstance(item, dict):
             continue
         date = str(item.get("date") or "")[:10]
-        if date and date >= as_of:
+        if not date or date >= as_of:
             continue
         if item.get("wants"):
             out.append(str(item["wants"]))
@@ -257,26 +258,27 @@ def _filtered_past_asks(profile: dict[str, Any], as_of: str) -> list[str]:
 
 
 def _fallback_text(buyer: dict[str, Any], as_of: str) -> str:
-    """Product words from the filtered dossier body and dated past asks.
+    """Product words from the strict-dated dossier body and dated past asks.
 
-    Pilot product rows carry the payment date, so a strict as-of frontmatter
-    view loses a buyer whose ask predates the offer. This fallback gives the
-    rules layer a second, still date-filtered look at the same dossier.
+    ``dossier.body`` has already been reduced to lines dated strictly before
+    the offer, so this second look cannot read undated prose. A buyer with no
+    dossier contributes nothing here; the profile checks above still apply.
     """
     parts: list[str] = []
     dossier = buyer.get("dossier") or {}
     if dossier.get("body"):
         parts.append(str(dossier["body"]))
     profile = buyer.get("profile") or {}
-    parts.append(str(profile.get("wants") or ""))
-    parts.extend(_list(profile.get("models")))
-    parts.extend(_list(profile.get("part_numbers")))
     parts.extend(_filtered_past_asks(profile, as_of))
     return f" {norm_loose(' '.join(parts))} "
 
 
-def product_tier(listing: dict[str, Any], buyer: dict[str, Any], as_of: str) -> int:
-    """4 part number, 3 model/platform, 2 make, 1 chemistry+format, 0 none."""
+def product_tier(listing: dict[str, Any], buyer: dict[str, Any], as_of: str, body_fallback: bool = True) -> int:
+    """4 part number, 3 model/platform, 2 make, 1 chemistry+format, 0 none.
+
+    ``body_fallback=False`` is the A1-strict arm: frontmatter and profile
+    facts only, with no keyword read of the dossier body.
+    """
     part = norm(listing.get("part_number"))
     if part:
         for candidate in _buyer_part_numbers(buyer):
@@ -323,8 +325,10 @@ def product_tier(listing: dict[str, Any], buyer: dict[str, Any], as_of: str) -> 
         or (fmt_ok and not listing.get("chemistry"))
         or (fmt_ok and not _buyer_chemistries(buyer))
     )
+    if not body_fallback:
+        return 1 if early_tier1 else 0
 
-    # Last resort: product words in the filtered dossier body and dated asks.
+    # Last resort: product words in the strict-dated dossier body and asks.
     text = _fallback_text(buyer, as_of)
     if part and f" {part} " in text:
         return 4
@@ -492,7 +496,13 @@ def _last_touch(buyer: dict[str, Any], as_of: str) -> str:
     return value[:10] if value[:10] <= as_of else ""
 
 
-def rank_a1(listing: dict[str, Any], buyers: list[dict[str, Any]], as_of: str, top: int = 30) -> list[dict[str, Any]]:
+def rank_a1(
+    listing: dict[str, Any],
+    buyers: list[dict[str, Any]],
+    as_of: str,
+    top: int = 30,
+    body_fallback: bool = True,
+) -> list[dict[str, Any]]:
     kept: list[dict[str, Any]] = []
     for buyer in buyers:
         out = rule_out(listing, buyer)
@@ -501,7 +511,7 @@ def rank_a1(listing: dict[str, Any], buyers: list[dict[str, Any]], as_of: str, t
         kept.append(buyer)
     ranked = []
     for buyer in kept:
-        tier = product_tier(listing, buyer, as_of)
+        tier = product_tier(listing, buyer, as_of, body_fallback=body_fallback)
         price = _price_key(listing, buyer)
         ranked.append({
             "company_id": buyer["id"],

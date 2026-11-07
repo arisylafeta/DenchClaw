@@ -1,4 +1,7 @@
-"""Focused tests for the replay rules and as-of filter. No company data."""
+"""Focused tests for the replay rules, strict as-of filter and row checks.
+
+No company data.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import caseworker
 import dossier
 import rules
 
@@ -26,46 +30,79 @@ products:
     kwh: [40]
     status: bought
     seen: "2026-06-10"
+  - part_number: "PN-3"
+    format: packs
+    chemistry: NMC
+    status: asked
 price:
   - eur_per_kwh: 25
     basis: paid
     seen: "2026-01-10"
+  - eur_per_kwh: 30
+    basis: paid
 rules_out:
   chemistries: [LFP]
 ---
 
 ## How to win them
-Buys NMC packs.
+2026-01-05: buys NMC packs.
+An undated lesson that must not survive.
+2026-03-01: dated exactly on the offer, so it must not survive.
+2026-06-10: a later event that must not survive.
 
 ## Bought from us
-- 10 Jun 2026: forty kWh pack, EUR 25/kWh.
-- 10 Jan 2026: eighty kWh pack, EUR 25/kWh.
-
-## Asked for (newest first)
-- 10 Jun 2026: another pack.
-- 10 Jan 2026: an eighty kWh pack.
+- 2026-01-10: eighty kWh pack, EUR 25/kWh.
+- 2026-03-01: on the offer date, dropped.
+- 2026-06-10: forty kWh pack, dropped.
+- 2025-12-01: an earlier pack, kept.
 
 ## Open threads and promises
-- chase the quote.
+- 2026-01-01: chase the quote.
 
 ## Sources
-- gmail_msg_test.
+- 2026-01-01: gmail_msg_test.
 """
 
 
 class DossierFilterTest(unittest.TestCase):
-    def test_as_of_drops_later_products_and_body(self) -> None:
+    def load(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "buyer.md"
             path.write_text(DOSSIER, encoding="utf-8")
-            view = dossier.load_dossier(path, "2026-03-01")
+            return dossier.load_dossier(path, "2026-03-01")
+
+    def test_frontmatter_keeps_only_dated_rows_strictly_before(self) -> None:
+        view = self.load()
         products = view["frontmatter"]["products"]
         self.assertEqual([p["part_number"] for p in products], ["PN-1"])
+        self.assertEqual(len(view["frontmatter"]["price"]), 1)
         self.assertEqual(view["frontmatter"]["price"][0]["eur_per_kwh"], 25)
-        self.assertNotIn("10 Jun 2026", view["body"])
-        self.assertNotIn("Open threads", view["body"])
-        self.assertNotIn("Sources", view["body"])
-        self.assertIn("Buys NMC packs", view["body"])
+
+    def test_undated_body_line_is_dropped(self) -> None:
+        body = self.load()["body"]
+        self.assertNotIn("undated lesson", body)
+
+    def test_line_dated_on_as_of_is_dropped(self) -> None:
+        body = self.load()["body"]
+        self.assertNotIn("dated exactly on the offer", body)
+        self.assertNotIn("on the offer date", body)
+
+    def test_earlier_dated_line_is_kept(self) -> None:
+        body = self.load()["body"]
+        self.assertIn("2026-01-05: buys NMC packs.", body)
+        self.assertIn("- 2026-01-10: eighty kWh pack", body)
+        self.assertIn("2025-12-01: an earlier pack", body)
+
+    def test_later_and_undated_sections_are_dropped(self) -> None:
+        body = self.load()["body"]
+        self.assertNotIn("2026-06-10", body)
+        self.assertNotIn("Open threads", body)
+        self.assertNotIn("Sources", body)
+
+    def test_undated_line_parser_needs_iso_start(self) -> None:
+        self.assertEqual(dossier.line_date("- 2026-01-10: x"), dossier.parse_date("2026-01-10"))
+        self.assertIsNone(dossier.line_date("10 Jan 2026: x"))
+        self.assertIsNone(dossier.line_date("None found. 2026-01-10: x"))
 
 
 class RulesTest(unittest.TestCase):
@@ -108,6 +145,62 @@ class RulesTest(unittest.TestCase):
         self.assertEqual(rules.product_tier(listing, chem_buyer, "2026-03-01"), 1)
         ranked = rules.rank_a1(listing, [chem_buyer, part_buyer], "2026-03-01")
         self.assertEqual(ranked[0]["company_id"], "b1")
+
+    def test_strict_arm_ignores_body_keywords(self) -> None:
+        # Frontmatter has no matching product; only a dated body line names the part.
+        buyer = self.buyer(
+            profile={},
+            dossier={
+                "frontmatter": {"products": []},
+                "body": "## Asked for\n- 2026-01-05: wanted PN-9 modules.\n",
+            },
+        )
+        listing = self.listing(part_number="PN-9", format="modules")
+        self.assertEqual(rules.product_tier(listing, buyer, "2026-03-01", body_fallback=False), 0)
+        self.assertEqual(rules.product_tier(listing, buyer, "2026-03-01", body_fallback=True), 4)
+
+    def test_undated_past_ask_is_ignored(self) -> None:
+        self.assertEqual(
+            rules._filtered_past_asks({"past_asks": [{"wants": "PN-9"}]}, "2026-03-01"),
+            [],
+        )
+        self.assertEqual(
+            rules._filtered_past_asks({"past_asks": [{"date": "2026-01-01", "wants": "PN-9"}]}, "2026-03-01"),
+            ["PN-9"],
+        )
+        self.assertEqual(
+            rules._filtered_past_asks({"past_asks": [{"date": "2026-03-01", "wants": "PN-9"}]}, "2026-03-01"),
+            [],
+        )
+
+
+class CaseworkerRowsTest(unittest.TestCase):
+    def parsed(self, rows):
+        return {"ranked": rows}
+
+    def row(self, company_id, reason="fits the lot", killer="price"):
+        return {"company_id": company_id, "reason": reason, "deal_killer": killer, "question": "q"}
+
+    def test_rejects_unknown_placeholder_and_duplicates(self) -> None:
+        parsed = self.parsed([
+            self.row("a"),
+            self.row("a"),
+            self.row("zzz"),
+            self.row("b", reason="PLACEHOLDER"),
+            self.row("c", killer=""),
+            self.row("d"),
+        ])
+        result = caseworker.clean_rows(parsed, {"a", "b", "c", "d"})
+        self.assertEqual([row["company_id"] for row in result["ranked"]], ["a", "d"])
+        self.assertEqual(result["unknown_ids"], ["a", "zzz"])
+        self.assertEqual(len(result["rejected_rows"]), 2)
+
+    def test_caps_at_eight(self) -> None:
+        ids = {f"b{i}" for i in range(10)}
+        parsed = self.parsed([self.row(f"b{i}") for i in range(10)])
+        result = caseworker.clean_rows(parsed, ids)
+        self.assertEqual(len(result["ranked"]), 8)
+        self.assertEqual(result["over_cap"], 2)
 
 
 if __name__ == "__main__":
