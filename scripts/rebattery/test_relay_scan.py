@@ -557,23 +557,7 @@ def test_choose_deal_none_when_nothing_owned_or_only_unrelated_closed():
     assert rs.choose_deal("a@b.com", "buyer", set(), "Kona packs", owned) is None
 
 
-def test_choose_deal_links_a_supplier_to_the_buyers_demand_they_are_quoting_for():
-    gtv = "gintas@gtvgroup.lt"
-    demand = _listing("colvert", "demand", "open", "15x Renault Zoe 41-52kWh", "thomas@colvert.eu")
-    offered = {gtv: [demand], "@gtvgroup.lt": [demand]}
-    # GTV's own stock listing is not on this thread; the thread is tagged with Colvert's demand, where GTV holds an offer.
-    owned = {gtv: [_listing("gtv-stock", "supply", "open", "Stellantis 50 kWh packs", gtv)]}
-    assert rs.choose_deal(gtv, "supplier", {"colvert"}, "Re: Zoe packs", owned, offered)["bulk_listing_id"] == "colvert"
-    # A colleague at the same company counts too.
-    assert rs.choose_deal("sales@gtvgroup.lt", "supplier", {"colvert"}, "Re: Zoe packs", {}, offered)["bulk_listing_id"] == "colvert"
-
-
-def test_choose_deal_needs_both_the_thread_tag_and_the_offer():
-    gtv = "gintas@gtvgroup.lt"
-    demand = _listing("colvert", "demand", "open", "15x Renault Zoe", "thomas@colvert.eu")
-    assert rs.choose_deal(gtv, "supplier", set(), "Re: Zoe packs", {}, {gtv: [demand]}) is None
-    assert rs.choose_deal(gtv, "supplier", {"colvert"}, "Re: Zoe packs", {}, {}) is None
-    # Their own listing tagged on the thread still wins.
-    owned = {gtv: [_listing("gtv-stock", "supply", "open", "Zoe packs", gtv)]}
-    got = rs.choose_deal(gtv, "supplier", {"colvert", "gtv-stock"}, "Re: Zoe packs", owned, {gtv: [demand]})
-    assert got["bulk_listing_id"] == "gtv-stock"
+def test_choose_deal_never_links_a_supplier_to_someone_elses_demand():
+    rob = "rob@donkersvagparts.nl"
+    # The thread is tagged with R3's demand (Rob's colleague is a candidate on it), but Rob owns no listing.
+    assert rs.choose_deal(rob, "supplier", {"r3-demand"}, "What do you offer for 58 kW packs?", {}) is None

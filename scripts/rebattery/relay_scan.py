@@ -569,30 +569,23 @@ WORD = re.compile(r"[a-z0-9]{3,}")
 STOP = {"the", "and", "for", "with", "from", "packs", "pack", "battery", "batteries", "kwh", "your", "you", "this", "that", "are", "have"}
 
 
-def choose_deal(counterpart: str | None, contact_type: str | None, linked: set[str], text: str, owned: dict[str, list[dict]],
-                offered: dict[str, list[dict]] | None = None) -> dict | None:
-    """The deal this thread is about: the counterpart's own listing, or a buyer's request they are supplying.
+def choose_deal(counterpart: str | None, contact_type: str | None, linked: set[str], text: str, owned: dict[str, list[dict]]) -> dict | None:
+    """The counterpart's own listing for this thread: a buyer's demand request or a supplier's supply opportunity.
 
     Alex, 27 Oct: a buyer emailing about someone else's stock is linked to their demand, never to that supply.
-    A supplier answering our request for a buyer's demand is linked to that demand when the thread is tagged with it and
-    they hold an offer on it (7 Nov), so Relay shows the deal; the draft then sees only what the deal is, not the buyer.
-    Otherwise prefers the listing the thread is tagged with, then the best word match with the email, then open, then newest.
+    Alex, 7 Nov: an email is linked only to the sender's own deal. A supplier answering someone else's request is matched
+    to it on the deal (Matches), never from the email, so stock already allocated elsewhere is never double-counted.
+    Prefers the listing the thread is tagged with, then the best word match with the email, then open, then newest.
     None when the counterpart owns no listing.
     """
     if not counterpart:
         return None
-    keys = (counterpart, "@" + (domain_of(counterpart) or ""))
     seen, candidates = set(), []
-    for key in keys:
+    for key in (counterpart, "@" + (domain_of(counterpart) or "")):
         for row in owned.get(key, []):
             if row["id"] not in seen:
                 seen.add(row["id"])
                 candidates.append(row)
-    if linked and offered and not any(c["id"] in linked for c in candidates):
-        theirs = {row["id"]: row for key in keys for row in offered.get(key, []) if row["id"] in linked}
-        if theirs:
-            best = max(theirs.values(), key=lambda c: (c["status"] in ("open", "qualifying"), c["updated_at"] or dt.datetime.min.replace(tzinfo=dt.timezone.utc)))
-            return {"bulk_listing_id": best["id"], "summary": best["summary"], "quantity": best["quantity"]}
     want = {"buyer": "demand", "supplier": "supply"}.get(contact_type or "")
     if want and any(c["kind"] == want for c in candidates):
         candidates = [c for c in candidates if c["kind"] == want]
@@ -609,40 +602,6 @@ def choose_deal(counterpart: str | None, contact_type: str | None, linked: set[s
     if best["id"] not in linked and best["status"] not in ("open", "qualifying") and score(best)[1] < 2:
         return None
     return {"bulk_listing_id": best["id"], "summary": best["summary"], "quantity": best["quantity"]}
-
-
-def load_offered_demands(cur) -> dict[str, list[dict]]:
-    """Open buyers' demands each supplier is paired with, keyed by their email and company domain ("@domain"): a priced
-    counterparty offer on the demand, or the supplier's own supply listing offered against it (counterpart_id). A dismantler
-    who has only been asked, with no price on the table, stays off the deal and goes to the dismantler channel (7 Nov)."""
-    if not table_exists(cur, "crm_bulk_offers"):
-        return {}
-    cur.execute(
-        """select distinct d.id, d.kind, d.status, d.summary, d.quantity, d.updated_at, x.email
-             from (select o.bulk_listing_id as demand_id, lower(p.email) as email
-                     from crm_bulk_offers o join crm_people p on p.id = o.person_id
-                    where o.role = 'counterparty'
-                      -- only a priced offer: a supplier who has only been asked, or answered "what do you offer?", is not on the deal
-                      and (exists (select 1 from jsonb_each(coalesce(o.terms, '{}'::jsonb)) t
-                                    where t.key in ('amount', 'amount_low', 'amount_high', 'our_ask') and jsonb_typeof(t.value) <> 'null')
-                           or jsonb_path_exists(coalesce(o.terms, '{}'::jsonb), '$.items[*].amount ? (@ != null)'))
-                   union
-                   select o.counterpart_id, lower(coalesce(s.email, sp.email))
-                     from crm_bulk_offers o join crm_bulk_listings s on s.id = o.bulk_listing_id and s.kind = 'supply'
-                     left join crm_people sp on sp.id = s.person_id where o.counterpart_id is not null) x
-             join crm_bulk_listings d on d.id = x.demand_id
-            where d.kind = 'demand' and d.status <> 'closed' and x.email is not null""")
-    out: dict[str, list[dict]] = {}
-    for r in cur.fetchall():
-        email = email_of(r["email"])
-        if not email:
-            continue
-        row = dict(r)
-        out.setdefault(email, []).append(row)
-        domain = domain_of(email)
-        if domain and domain not in FREEMAIL:
-            out.setdefault("@" + domain, []).append(row)
-    return out
 
 
 def load_open_deal_emails(cur) -> set[str]:
@@ -915,8 +874,7 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
         contact_type = ((brief or {}).get("contact_type") if (brief or {}).get("contact_type") in CONTACT_TYPES else None) \
             or purpose_type(person.get("purpose")) or purpose_type(company_row.get("purpose")) \
             or STREAM_TYPE.get(tri.get("automated_stream") or "") or (item or {}).get("contact_type")
-        deal = choose_deal(counterpart, contact_type, ctx_global["deals"].get(tid, set()), thread_text, ctx_global.get("owned", {}),
-                           ctx_global.get("offered", {}))
+        deal = choose_deal(counterpart, contact_type, ctx_global["deals"].get(tid, set()), thread_text, ctx_global.get("owned", {}))
         deal_linked = bool(deal) or counterpart in ctx_global.get("open_deal_emails", set())
         # "Owner wrote to them since" counts only a new email from him, not a reply in another conversation.
         ctx = {"triage": tri, "contact_type": contact_type, "deal_linked": deal_linked,
@@ -1117,7 +1075,6 @@ def main(argv: list[str] | None = None) -> int:
             "deals": load_deals(cur, list(threads)),
             "open_deal_emails": load_open_deal_emails(cur),
             "owned": load_owned_listings(cur),
-            "offered": load_offered_demands(cur),
             "sender_rules": load_sender_rules(cur, owner_id),
             "last_to": last_to, "last_from": last_from, "last_new_to": last_new_to,
         }
