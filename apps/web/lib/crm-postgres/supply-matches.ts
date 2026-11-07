@@ -25,9 +25,19 @@ export type SupplyMatchRow = {
   userVerdict: "shortlist" | "not_a_fit" | null;
 };
 
-export type SupplyMatches = { matches: SupplyMatchRow[]; notAFit: number; blocked: string | null };
+export type SupplyMatches = {
+  matches: SupplyMatchRow[];
+  notAFit: number;
+  /** Why each hidden demand was marked Not a fit, newest evidence first. */
+  notAFitReasons: { buyer: string; reason: string | null }[];
+  blocked: string | null;
+};
 
 const key = (demandId: string) => `demand:${demandId}`;
+/** A company-level verdict on the same listing: keyed separately from its demand rows. */
+export const companyKey = (companyId: string) => `company:${companyId}`;
+/** Longest Not a fit reason we keep. Short enough to read in a list. */
+export const REASON_MAX = 200;
 const same = (a: string | null | undefined, b: string | null | undefined) => !!a && !!b && a === b;
 
 /** The buyer's own listings are not supply for them, and a seller's own demand is not a buyer for their stock. */
@@ -47,7 +57,7 @@ export async function supplyMatches(supplyId: string): Promise<SupplyMatches | n
   const [feed] = await queryPg<FeedRow>(
     `select feed.id, feed.kind, feed.title, feed.seller, feed.size, feed.location, feed.seen, feed.href, null::text as strength, null::text as reason
      from crm_bulk_listing_supply_feed feed where feed.id = $1`, [supplyId]);
-  if (!feed) return { matches: [], notAFit: 0, blocked: "This listing is not in the live supply feed (closed, or not an open supply or trade), so there is nothing to match." };
+  if (!feed) return { matches: [], notAFit: 0, notAFitReasons: [], blocked: "This listing is not in the live supply feed (closed, or not an open supply or trade), so there is nothing to match." };
   const [demand, saved, verdicts] = await Promise.all([
     listDemand(),
     queryPg<{ demand_id: string; strength: "strong" | "partial"; reason: string | null }>(
@@ -57,10 +67,11 @@ export async function supplyMatches(supplyId: string): Promise<SupplyMatches | n
   const savedBy = new Map(saved.map((s) => [s.demand_id, { strength: s.strength, reason: s.reason ?? "" }]));
   const out: SupplyMatchRow[] = [];
   let notAFit = 0;
+  const notAFitReasons: { buyer: string; reason: string | null }[] = [];
   for (const d of demand) {
     if (d.status === "closed" || ownParty(supply, d)) continue;
     const verdict: MatchVerdict | undefined = verdicts.get(key(d.id));
-    if (verdict?.verdict === "not_a_fit") { notAFit += 1; continue; }
+    if (verdict?.verdict === "not_a_fit") { notAFit += 1; notAFitReasons.push({ buyer: d.buyer, reason: verdict.reason ?? null }); continue; }
     const pair = savedBy.get(d.id) ?? null;
     const candidate = { ...feedRowCandidate({ ...feed, strength: pair?.strength ?? null, reason: pair?.reason ?? null }), key: key(d.id) };
     const m: Match | undefined = matchDemand(d, [candidate]).groups[0]?.matches[0];
@@ -74,15 +85,29 @@ export async function supplyMatches(supplyId: string): Promise<SupplyMatches | n
   }
   const order = (r: SupplyMatchRow) => (r.userVerdict === "shortlist" ? 0 : r.verdict === "exact" ? 1 : 2);
   out.sort((a, b) => order(a) - order(b) || (b.marginPct ?? -9) - (a.marginPct ?? -9) || a.buyer.localeCompare(b.buyer));
-  return { matches: out, notAFit, blocked: null };
+  return { matches: out, notAFit, notAFitReasons, blocked: null };
 }
 
-/** Shortlist, Not a fit or Clear for one demand, kept as Supply activity on the supply so it shows in History. */
-export async function recordSupplyVerdict(supplyId: string, input: { demandId: string; verdict: "shortlist" | "not_a_fit" | "clear"; buyer: string; note?: string | null }, userId: string | null) {
+export type Verdict = "shortlist" | "not_a_fit" | "clear";
+export type VerdictInput = {
+  /** `demand:<id>` for one open demand, `company:<id>` for a CRM buyer company. */
+  key: string;
+  verdict: Verdict;
+  /** What the reader sees in the activity title: the buyer or company name. */
+  label: string;
+  /** Why, required for Not a fit. */
+  reason?: string | null;
+  note?: string | null;
+};
+
+/** Shortlist, Not a fit or Clear for one demand or company, kept as Supply activity on the supply so it shows in History. */
+export async function recordSupplyVerdict(supplyId: string, input: VerdictInput, userId: string | null) {
   const verb = input.verdict === "shortlist" ? "Shortlisted" : input.verdict === "not_a_fit" ? "Not a fit" : "Cleared";
+  const reason = input.reason?.trim() ? input.reason.trim().slice(0, REASON_MAX) : null;
   const [row] = await queryPg<{ id: string }>(
     `insert into crm_bulk_listing_activity (bulk_listing_id, kind, title, body, data, actor_user_id)
      values ($1, 'supply', $2, $3, $4::jsonb, $5) returning id::text`,
-    [supplyId, `${verb}: ${input.buyer}`, input.note ?? null, JSON.stringify({ match: { key: key(input.demandId), verdict: input.verdict } }), userId]);
+    [supplyId, `${verb}: ${input.label}`, input.note ?? null,
+      JSON.stringify({ match: { key: input.key, verdict: input.verdict, reason } }), userId]);
   return row;
 }

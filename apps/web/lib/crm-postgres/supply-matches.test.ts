@@ -48,10 +48,11 @@ describe("supplyMatches (REB-565/564)", () => {
       demand({ id: "btd_b", buyer: "B", wants: "Panasonic NCR2170M-4 cells", spec: { formats: ["Cells"] } }),
       demand({ id: "btd_c", buyer: "C", wants: "Panasonic NCR2170M-4 cells", spec: { formats: ["Cells"] } }),
     ];
-    state.verdicts = new Map([["demand:btd_a", { verdict: "not_a_fit" }], ["demand:btd_c", { verdict: "shortlist" }]]);
+    state.verdicts = new Map([["demand:btd_a", { verdict: "not_a_fit", reason: "Only buys packs" }], ["demand:btd_c", { verdict: "shortlist" }]]);
     const { supplyMatches } = await import("./supply-matches");
     const r = await supplyMatches("bts_1");
     expect(r?.notAFit).toBe(1);
+    expect(r?.notAFitReasons).toEqual([{ buyer: "A", reason: "Only buys packs" }]);
     expect(r?.matches.map((m) => m.demandId)).toEqual(["btd_c", "btd_b"]);
     expect(r?.matches[0].userVerdict).toBe("shortlist");
   });

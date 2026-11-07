@@ -165,20 +165,20 @@ export function feedRowCandidate(row: FeedRow): Candidate {
 }
 
 /** Every candidate for one demand row, plus the units hidden as "Not a fit" for it. */
-export type MatchVerdict = { verdict: "shortlist" | "not_a_fit"; at: string; note: string | null };
+export type MatchVerdict = { verdict: "shortlist" | "not_a_fit"; at: string; note: string | null; reason: string | null };
 
 /** The latest Shortlist / Not a fit per unit, kept as Supply activity on the demand so it shows in the timeline. */
 export async function matchVerdicts(demandId: string): Promise<Map<string, MatchVerdict>> {
-  const rows = await queryPg<{ key: string; verdict: string; at: string; note: string | null }>(
+  const rows = await queryPg<{ key: string; verdict: string; at: string; note: string | null; reason: string | null }>(
     `select distinct on (data->'match'->>'key') data->'match'->>'key' as key, data->'match'->>'verdict' as verdict,
-       occurred_at::text as at, body as note
+       occurred_at::text as at, body as note, data->'match'->>'reason' as reason
      from crm_bulk_listing_activity
      where bulk_listing_id = $1 and kind = 'supply' and data ? 'match'
      order by data->'match'->>'key', occurred_at desc, id desc`,
     [demandId],
   );
   return new Map(rows.filter((r) => r.verdict === "shortlist" || r.verdict === "not_a_fit")
-    .map((r) => [r.key, { verdict: r.verdict as MatchVerdict["verdict"], at: r.at, note: r.note }]));
+    .map((r) => [r.key, { verdict: r.verdict as MatchVerdict["verdict"], at: r.at, note: r.note, reason: r.reason }]));
 }
 
 export async function inventoryFor(demandId: string): Promise<{ candidates: Candidate[]; hidden: Set<string>; verdicts: Map<string, MatchVerdict>; errors: string[] }> {

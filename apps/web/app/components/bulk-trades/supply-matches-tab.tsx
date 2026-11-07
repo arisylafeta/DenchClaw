@@ -4,11 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, ExternalLink, Star, X } from "lucide-react";
 import type { SupplyMatchRow, SupplyMatches } from "@/lib/crm-postgres/supply-matches";
 import type { BuyerSuggestion, SupplyBuyers } from "@/lib/crm-postgres/supply-buyers";
-import { buttonClass, buttonStyle } from "./trade-ui";
+import { ErrorText, request, buttonClass, buttonStyle, inputClass, inputStyle } from "./trade-ui";
 import { BusyRegion } from "./bt-shimmer";
 import { rowFocus } from "./demand-page";
 import { FitBadge, pct } from "./demand-supply-tab";
-import { ErrorText, request } from "./trade-ui";
 import css from "./demand-panel.module.css";
 
 const listStyle = { background: "var(--bt-surface)", borderColor: "var(--bt-border)", borderRadius: 10 };
@@ -106,13 +105,21 @@ export function SupplyMatchesTab({ listingId, active, onOpenListing, onSaved = (
     catch (err) { setError(err instanceof Error ? err.message : "Could not load matches."); }
   }, [base]);
   useEffect(() => { if (active) void load(); }, [active, load]);
+  const [reasonFor, setReasonFor] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
   if (!active) return null;
-  async function verdict(row: SupplyMatchRow, v: "shortlist" | "not_a_fit" | "clear") {
+  async function verdict(row: SupplyMatchRow, v: "shortlist" | "not_a_fit" | "clear", why?: string) {
     setBusy(true);
-    try { await request(base, { method: "POST", body: JSON.stringify({ demandId: row.demandId, verdict: v }) }); await load(); }
+    setError(null);
+    try {
+      await request(base, { method: "POST", body: JSON.stringify({ demandId: row.demandId, verdict: v, ...(why ? { reason: why } : {}) }) });
+      setReasonFor(null); setReason("");
+      await load();
+    }
     catch (err) { setError(err instanceof Error ? err.message : "Could not save."); }
     finally { setBusy(false); }
   }
+  const notAFitReasons = data?.notAFitReasons ?? [];
   const loading = data === null && !error;
   return (
     <BusyRegion busy={loading} label="Finding buyers" className="flex w-full min-w-0 flex-col gap-3">
@@ -124,32 +131,55 @@ export function SupplyMatchesTab({ listingId, active, onOpenListing, onSaved = (
             {data.matches.length ? `${data.matches.length} open ${data.matches.length === 1 ? "demand fits" : "demands fit"} this supply` : "No open demand fits this supply yet."}
             {data.notAFit > 0 && ` · ${data.notAFit} marked not a fit`}
           </p>
+          {notAFitReasons.length > 0 && (
+            <details className="text-[12px]" style={{ color: "var(--bt-muted)" }}>
+              <summary className={`${rowFocus} w-fit cursor-pointer`}>Why they are not a fit</summary>
+              <ul className="mt-1 flex flex-col gap-0.5 pl-4">
+                {notAFitReasons.map((r, i) => (
+                  <li key={`${r.buyer}-${i}`}><span className="font-semibold">{r.buyer}</span>{r.reason ? `: ${r.reason}` : " (no reason recorded)"}</li>
+                ))}
+              </ul>
+            </details>
+          )}
           {data.matches.length > 0 && (
             <ul className="flex flex-col overflow-hidden border" style={listStyle}>
               {data.matches.map((m) => (
-                <li key={m.demandId} className="flex items-center gap-3 border-t px-4 py-3 first:border-t-0" style={{ borderColor: "var(--bt-border)" }}>
-                  <FitBadge verdict={m.verdict} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[14px] font-semibold">{m.buyer}</div>
-                    <div className="truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>
-                      {[m.title, m.quantity, m.location].filter(Boolean).join(" · ")}
-                    </div>
-                    {(m.gap || m.saved) && (
+                <li key={m.demandId} className="border-t first:border-t-0" style={{ borderColor: "var(--bt-border)" }}>
+                  <div className="flex items-center gap-3 px-4 py-3">
+                    <FitBadge verdict={m.verdict} />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[14px] font-semibold">{m.buyer}</div>
                       <div className="truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>
-                        {m.gap ? `Check: ${m.gap}` : null}{m.saved ? `${m.gap ? " · " : ""}Saved match: ${m.saved.reason || m.saved.strength}` : null}
-                        {m.marginPct != null ? ` · ${pct(m.marginPct)} margin` : ""}
+                        {[m.title, m.quantity, m.location].filter(Boolean).join(" · ")}
                       </div>
-                    )}
+                      {(m.gap || m.saved) && (
+                        <div className="truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>
+                          {m.gap ? `Check: ${m.gap}` : null}{m.saved ? `${m.gap ? " · " : ""}Saved match: ${m.saved.reason || m.saved.strength}` : null}
+                          {m.marginPct != null ? ` · ${pct(m.marginPct)} margin` : ""}
+                        </div>
+                      )}
+                    </div>
+                    <span className="inline-flex gap-1">
+                      <button type="button" disabled={busy} className={`${rowFocus} ${css.iconButton}`} aria-pressed={m.userVerdict === "shortlist"}
+                        aria-label={m.userVerdict === "shortlist" ? "Remove from shortlist" : "Shortlist"} title="Shortlist"
+                        onClick={() => void verdict(m, m.userVerdict === "shortlist" ? "clear" : "shortlist")}><Star size={14} /></button>
+                      <button type="button" disabled={busy} className={`${rowFocus} ${css.iconButton}`} aria-expanded={reasonFor === m.demandId}
+                        aria-label="Not a fit" title="Not a fit, with a reason"
+                        onClick={() => { setReasonFor(reasonFor === m.demandId ? null : m.demandId); setReason(""); }}><X size={14} /></button>
+                      <button type="button" className={`${rowFocus} ${css.iconButton}`} aria-label="Open demand" title="Open demand"
+                        onClick={() => onOpenListing(m.demandId)}><ExternalLink size={14} /></button>
+                    </span>
                   </div>
-                  <span className="inline-flex gap-1">
-                    <button type="button" disabled={busy} className={`${rowFocus} ${css.iconButton}`} aria-pressed={m.userVerdict === "shortlist"}
-                      aria-label={m.userVerdict === "shortlist" ? "Remove from shortlist" : "Shortlist"} title="Shortlist"
-                      onClick={() => void verdict(m, m.userVerdict === "shortlist" ? "clear" : "shortlist")}><Star size={14} /></button>
-                    <button type="button" disabled={busy} className={`${rowFocus} ${css.iconButton}`} aria-label="Not a fit" title="Not a fit"
-                      onClick={() => void verdict(m, "not_a_fit")}><X size={14} /></button>
-                    <button type="button" className={`${rowFocus} ${css.iconButton}`} aria-label="Open demand" title="Open demand"
-                      onClick={() => onOpenListing(m.demandId)}><ExternalLink size={14} /></button>
-                  </span>
+                  {reasonFor === m.demandId && (
+                    <form className="flex flex-wrap items-center gap-2 px-4 pb-3" aria-label={`Why ${m.buyer} is not a fit`}
+                      onSubmit={(e) => { e.preventDefault(); if (reason.trim()) void verdict(m, "not_a_fit", reason.trim()); }}>
+                      <input aria-label="Not a fit reason" required maxLength={200} autoFocus value={reason} onChange={(e) => setReason(e.target.value)}
+                        placeholder="Why not? e.g. wrong chemistry, too small a lot" className={`${inputClass} min-w-[220px] flex-1 text-[12px]`} style={inputStyle} />
+                      <button type="submit" disabled={busy || !reason.trim()} className={`${rowFocus} ${buttonClass}`} style={buttonStyle}>Save</button>
+                      <button type="button" disabled={busy} className={`${rowFocus} ${buttonClass}`} style={buttonStyle}
+                        onClick={() => { setReasonFor(null); setReason(""); }}>Cancel</button>
+                    </form>
+                  )}
                 </li>
               ))}
             </ul>

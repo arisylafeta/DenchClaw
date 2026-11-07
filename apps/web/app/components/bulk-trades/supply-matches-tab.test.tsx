@@ -37,12 +37,41 @@ describe("Matches tab on a supply listing", () => {
   });
 
   it("shows an empty state, and does not fetch while the tab is hidden", async () => {
-    const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/buyers") ? noBuyers : { matches: [], notAFit: 0, blocked: null }), { status: 200 }));
+    const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/buyers") ? noBuyers : { matches: [], notAFit: 0, notAFitReasons: [], blocked: null }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const { rerender } = render(<SupplyMatchesTab listingId="bts_1" active={false} onOpenListing={() => {}} />);
     expect(fetchMock).not.toHaveBeenCalled();
     rerender(<SupplyMatchesTab listingId="bts_1" active onOpenListing={() => {}} />);
     expect(await screen.findByText("No open demand fits this supply yet.")).toBeTruthy();
+  });
+
+  it("asks for a short reason before Not a fit and posts it with the verdict", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
+      if (url.endsWith("/buyers")) return new Response(JSON.stringify(noBuyers), { status: 200 });
+      return new Response(JSON.stringify({ matches: [row], notAFit: 0, notAFitReasons: [], blocked: null }), { status: 200 });
+    }));
+    render(<SupplyMatchesTab listingId="bts_1" active onOpenListing={() => {}} />);
+    fireEvent.click(await screen.findByLabelText("Not a fit"));
+    const input = screen.getByLabelText("Not a fit reason") as HTMLInputElement;
+    const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(calls.some((c) => c.startsWith("POST"))).toBe(false);
+    fireEvent.change(input, { target: { value: "Wrong chemistry" } });
+    expect(save.disabled).toBe(false);
+    fireEvent.submit(save.closest("form")!);
+    await waitFor(() => expect(calls.some((c) => c.startsWith("POST")
+      && c.includes('"verdict":"not_a_fit"') && c.includes('"reason":"Wrong chemistry"'))).toBe(true));
+  });
+
+  it("lists why hidden demands were marked not a fit", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/buyers") ? noBuyers
+      : { matches: [], notAFit: 2, notAFitReasons: [{ buyer: "ELG Battery", reason: "Takes packs only" }, { buyer: "Old Co", reason: null }], blocked: null }), { status: 200 })));
+    render(<SupplyMatchesTab listingId="bts_1" active onOpenListing={() => {}} />);
+    expect(await screen.findByText("Why they are not a fit")).toBeTruthy();
+    expect(screen.getByText(/Takes packs only/)).toBeTruthy();
+    expect(screen.getByText(/no reason recorded/)).toBeTruthy();
   });
 });
 

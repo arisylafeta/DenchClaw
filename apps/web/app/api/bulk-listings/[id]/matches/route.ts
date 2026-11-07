@@ -1,5 +1,5 @@
 import { getDemand } from "@/lib/crm-postgres/bulk-demand";
-import { recordSupplyVerdict, supplyMatches } from "@/lib/crm-postgres/supply-matches";
+import { REASON_MAX, recordSupplyVerdict, supplyMatches } from "@/lib/crm-postgres/supply-matches";
 import { badRequest, guardBulkTrades, linkedWrite, notFound, readJson } from "@/lib/bulk-trades-route";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ export async function GET(_req: Request, { params }: Context) {
 
 const VERDICTS = ["shortlist", "not_a_fit", "clear"] as const;
 
-/** Shortlist, Not a fit or Clear for one demand. */
+/** Shortlist, Not a fit (with a short reason) or Clear for one demand. */
 export async function POST(req: Request, { params }: Context) {
   const guard = await guardBulkTrades();
   if ("response" in guard) return guard.response;
@@ -25,10 +25,15 @@ export async function POST(req: Request, { params }: Context) {
   if (!body || typeof body.demandId !== "string" || !body.demandId) return badRequest("Which demand?");
   if (!(VERDICTS as readonly unknown[]).includes(body.verdict)) return badRequest("Invalid verdict.");
   if (body.note != null && typeof body.note !== "string") return badRequest("note must be text.");
+  if (body.reason != null && typeof body.reason !== "string") return badRequest("reason must be text.");
+  const reason = (body.reason as string | undefined)?.trim() ?? "";
+  if (body.verdict === "not_a_fit" && !reason) return badRequest("Say briefly why it is not a fit.");
+  if (reason.length > REASON_MAX) return badRequest(`Keep the reason under ${REASON_MAX} characters.`);
   const demand = await getDemand(body.demandId);
   if (!demand) return notFound("Demand");
   if (!await supplyMatches(id)) return notFound("Supply listing");
   return linkedWrite(async () => Response.json({ activity: await recordSupplyVerdict(id, {
-    demandId: demand.id, verdict: body.verdict as (typeof VERDICTS)[number], buyer: demand.buyer, note: body.note as string | null,
+    key: `demand:${demand.id}`, verdict: body.verdict as (typeof VERDICTS)[number], label: demand.buyer,
+    reason, note: body.note as string | null,
   }, guard.userId) }, { status: 201 }));
 }
