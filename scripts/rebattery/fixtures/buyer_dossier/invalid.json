@@ -1,0 +1,62 @@
+{
+  "frontmatter": {
+    "company_id": "company-synthetic-3",
+    "company": "Broken Fixture Ltd",
+    "buyer_type": "reseller",
+    "colour": "red",
+    "origins": [
+      "Germany",
+      "D1"
+    ],
+    "min_soh": 120,
+    "needs_continuity": "yes",
+    "timing": {
+      "max_lead_days": 2.5,
+      "window": "soon"
+    },
+    "products": [
+      {
+        "format": "crates",
+        "chemistry": "LCO",
+        "status": "maybe",
+        "seen": "2026-13-40"
+      }
+    ],
+    "rules_out": {
+      "chemistries": [
+        "LTO",
+        "Lead acid"
+      ],
+      "damaged": "no"
+    },
+    "alerts": [
+      {
+        "filters": {
+          "format": [
+            "pack"
+          ],
+          "seen": "not-a-date"
+        }
+      }
+    ]
+  },
+  "body": "Body text.\n",
+  "errors": [
+    "colour: unknown top-level key (allowed: company_id, company, buyer_type, intent, countries, products, rules_out, substitution, price, evidence_required, quantity, logistics, capability, decision_speed, last_verified, conflicts, alerts, needs_continuity, timing, origins, min_soh)",
+    "buyer_type: 'reseller' is not a valid buyer_type (integrator, trader, recycler, module_builder, rnd, oem, other)",
+    "needs_continuity: must be true, false or null, got 'yes'",
+    "timing.window: unknown key (allowed: max_lead_days, notes)",
+    "timing.max_lead_days: must be a whole number of days, got 2.5",
+    "origins[0]: 'Germany' is not an ISO-2 country code",
+    "origins[1]: 'D1' is not an ISO-2 country code",
+    "min_soh: 120 is outside 0-100",
+    "rules_out.chemistries[1]: 'Lead acid' is not a valid chemistry (LFP, NMC, NCA, LMO, LMFP, LTO, Sodium-ion, Lead-acid, Mixed)",
+    "rules_out.damaged: must be true, false or null, got 'no'",
+    "products[0].status: 'maybe' is not a valid status (bought, asked, said_interested, declined)",
+    "products[0].format: 'crates' is not a valid format (Cells, Modules, Packs, Systems)",
+    "products[0].chemistry: 'LCO' is not a valid chemistry (LFP, NMC, NCA, LMO, LMFP, LTO, Sodium-ion, Lead-acid, Mixed)",
+    "products[0].seen: '2026-13-40' is not a real date",
+    "alerts[0].label: required"
+  ],
+  "profile": null
+}

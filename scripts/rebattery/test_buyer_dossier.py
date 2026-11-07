@@ -5,6 +5,7 @@ Synthetic fixtures only. No real company data belongs in git.
 import json
 import textwrap
 import unittest
+from pathlib import Path
 
 import buyer_dossier as bd
 
@@ -395,6 +396,40 @@ class DiffTests(unittest.TestCase):
 
     def test_no_change_is_empty(self):
         self.assertEqual(bd.diff_profiles({"wants": "a"}, {"wants": "a"}), {})
+
+
+class SharedFixtureTests(unittest.TestCase):
+    """The same fixtures drive apps/web/lib/buyer-dossier.test.ts, so the two derivers cannot drift."""
+
+    FIXTURES = Path(__file__).resolve().parent / "fixtures" / "buyer_dossier"
+
+    def cases(self):
+        for markdown in sorted(self.FIXTURES.glob("*.md")):
+            yield markdown.stem, json.loads(markdown.with_suffix(".json").read_text(encoding="utf-8"))
+
+    def test_the_fixture_set_is_present(self):
+        self.assertEqual([name for name, _ in self.cases()], ["full", "invalid", "minimal", "no-frontmatter"])
+
+    def test_parse_matches_the_expected_frontmatter_and_body(self):
+        for name, expected in self.cases():
+            with self.subTest(name=name):
+                frontmatter, body = bd.load(self.FIXTURES / f"{name}.md")
+                self.assertEqual(frontmatter, expected["frontmatter"])
+                self.assertEqual(body, expected["body"])
+
+    def test_validation_matches_the_expected_errors(self):
+        for name, expected in self.cases():
+            with self.subTest(name=name):
+                frontmatter, _ = bd.load(self.FIXTURES / f"{name}.md")
+                self.assertEqual(bd.validate(frontmatter), expected["errors"])
+
+    def test_mapping_matches_the_expected_profile(self):
+        for name, expected in self.cases():
+            if expected["profile"] is None:
+                continue
+            with self.subTest(name=name):
+                frontmatter, _ = bd.load(self.FIXTURES / f"{name}.md")
+                self.assertEqual(bd.to_buyer_profile(frontmatter), expected["profile"])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,16 @@
+{
+  "frontmatter": {},
+  "body": "# A dossier with no frontmatter\n\nNothing between the fences, so the whole text is body and the frontmatter is empty.\n",
+  "errors": [],
+  "profile": {
+    "chemistries": [],
+    "formats": [],
+    "makes": [],
+    "cell_makers": [],
+    "part_numbers": [],
+    "kwh_min": null,
+    "kwh_max": null,
+    "wants": "",
+    "dossier": {}
+  }
+}
