@@ -72,14 +72,27 @@ describe("dossier panel", () => {
     await waitFor(() => expect(screen.getByText("Saved.")).toBeTruthy());
   });
 
-  it("shows the conflict and reloads the stored text into the editor", async () => {
-    patchResponse = { status: 409, body: { error: "The dossier changed while you were editing it.", current_version: 5 } };
+  it("keeps the draft on a conflict and offers the latest version", async () => {
+    const latest = "---\ncompany_id: co_1\n---\nNewer text from someone else.";
+    patchResponse = {
+      status: 409,
+      body: { error: "The dossier changed while you were editing it.", current_version: 5, current_text: latest },
+    };
     render(<DossierPanel companyId="co_1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit dossier" }));
+    const textarea = screen.getByLabelText<HTMLTextAreaElement>("Dossier text");
+    fireEvent.change(textarea, { target: { value: "my draft in progress" } });
     fireEvent.click(screen.getByRole("button", { name: "Save dossier" }));
-    expect(await screen.findByText(/changed while you were editing/)).toBeTruthy();
-    expect((screen.getByLabelText("Dossier text") as HTMLTextAreaElement).value).toBe(DOSSIER.text);
+
+    expect(await screen.findByText(/Someone saved this dossier while you were editing it \(now v5\)/)).toBeTruthy();
+    // The user's own text is untouched, and the other version is readable without replacing it.
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Dossier text").value).toBe("my draft in progress");
+    expect(screen.getByText(/Newer text from someone else/)).toBeTruthy();
     expect(screen.queryByText("Saved.")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load latest" }));
+    await waitFor(() => expect(screen.getByLabelText<HTMLTextAreaElement>("Dossier text").value).toBe(DOSSIER.text));
+    expect(screen.queryByText(/Someone saved this dossier/)).toBeNull();
   });
 
   it("lists validation errors and keeps the editor open", async () => {
@@ -97,6 +110,24 @@ describe("dossier panel", () => {
     await waitFor(() => expect(calls.some((call) => call.method === "POST")).toBe(true));
     expect(calls.find((call) => call.method === "POST")?.body).toEqual({ action: "mark_reviewed" });
     await waitFor(() => expect(screen.getByText("Marked reviewed.")).toBeTruthy());
+  });
+
+  it("reports a failed mark-reviewed in the message area, not as a load error", async () => {
+    postResponse = { status: 500, body: { error: "boom" } };
+    render(<DossierPanel companyId="co_1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Mark reviewed" }));
+    expect(await screen.findByText("Could not mark the dossier reviewed.")).toBeTruthy();
+    expect(screen.queryByText(/Could not load the dossier/)).toBeNull();
+    expect(screen.getByText(/Second-life MEB packs/)).toBeTruthy();
+  });
+
+  it("says so when the stored text already matches", async () => {
+    patchResponse = { status: 200, body: { ok: true, version: 3, unchanged: true } };
+    render(<DossierPanel companyId="co_1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit dossier" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save dossier" }));
+    expect(await screen.findByText(/No change: the dossier already matches/)).toBeTruthy();
+    expect(screen.getByText("v3")).toBeTruthy();
   });
 
   it("says there is no dossier yet and offers to add one", async () => {

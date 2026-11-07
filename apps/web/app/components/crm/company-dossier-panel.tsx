@@ -62,6 +62,7 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
+  const [conflict, setConflict] = useState<{ version: number; text: string | null } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -99,13 +100,24 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
   function startEditing() {
     setDraft(dossier?.text ?? template(companyId));
     setErrors([]);
+    setConflict(null);
     setMessage(null);
     setEditing(true);
+  }
+
+  /** Keep the user's draft; only load the stored text into the editor when they ask for it. */
+  async function loadLatest() {
+    const latest = await load();
+    if (!latest) {return;}
+    setDraft(latest.text ?? template(companyId));
+    setConflict(null);
+    setMessage("Loaded the latest version. Your previous edits are replaced by it.");
   }
 
   async function save() {
     setBusy(true);
     setErrors([]);
+    setConflict(null);
     setMessage(null);
     try {
       const res = await fetch(`/api/crm/companies/${encodeURIComponent(companyId)}/buyer-dossier`, {
@@ -116,17 +128,16 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
       const body = (await res.json().catch(() => ({}))) as {
         error?: string;
         errors?: string[];
+        unchanged?: boolean;
         current_text?: string | null;
         current_version?: number;
       };
       if (res.status === 409) {
-        setErrors([body.error ?? "The dossier changed while you were editing it."]);
-        if (typeof body.current_text === "string") {
-          setDraft(body.current_text);
-          setDossier((current) => (current
-            ? { ...current, text: body.current_text ?? null, version: body.current_version ?? current.version }
-            : current));
-        }
+        // Nothing was written and the draft stays exactly as typed: the person decides what to keep.
+        setConflict({
+          version: Number(body.current_version ?? dossier?.version ?? 0),
+          text: typeof body.current_text === "string" ? body.current_text : null,
+        });
         return;
       }
       if (!res.ok) {
@@ -134,7 +145,7 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
         return;
       }
       setEditing(false);
-      setMessage("Saved.");
+      setMessage(body.unchanged ? "No change: the dossier already matches the stored text." : "Saved.");
       await load();
       onSaved?.();
     } catch (error) {
@@ -157,7 +168,7 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
       setMessage("Marked reviewed.");
       await load();
     } catch {
-      setLoadError("Could not mark the dossier reviewed.");
+      setMessage("Could not mark the dossier reviewed.");
     } finally {
       setBusy(false);
     }
@@ -183,7 +194,7 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
         )}
         {editing ? (
           <>
-            <Button size="sm" variant="outline" onClick={() => { setEditing(false); setErrors([]); }}>Discard</Button>
+            <Button size="sm" variant="outline" onClick={() => { setEditing(false); setErrors([]); setConflict(null); }}>Discard</Button>
             <Button size="sm" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save dossier"}</Button>
           </>
         ) : (
@@ -193,6 +204,25 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
 
       {loadError && <p role="alert" className="text-[13px]" style={{ color: "var(--color-error, #b42318)" }}>{loadError}</p>}
       {message && <p role="status" className="text-[13px]" style={muted}>{message}</p>}
+      {conflict && (
+        <div role="alert" className="mb-2 rounded-md border px-3 py-2 text-[12px]"
+          style={{ borderColor: "var(--color-error, #b42318)", color: "var(--color-error, #b42318)" }}>
+          <p className="font-medium">
+            Someone saved this dossier while you were editing it (now v{conflict.version}). Nothing was saved and your
+            text is still in the box below.
+          </p>
+          <div className="mt-2">
+            <Button size="sm" variant="outline" onClick={() => void loadLatest()}>Load latest</Button>
+          </div>
+          {conflict.text && (
+            <details className="mt-2">
+              <summary className="cursor-pointer">Latest version (read-only)</summary>
+              <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-md border p-2 text-[11px]"
+                style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}>{conflict.text}</pre>
+            </details>
+          )}
+        </div>
+      )}
       {errors.length > 0 && (
         <div role="alert" className="mb-2 rounded-md border px-3 py-2 text-[12px]"
           style={{ borderColor: "var(--color-error, #b42318)", color: "var(--color-error, #b42318)" }}>
