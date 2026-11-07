@@ -300,7 +300,7 @@ const PREDRAFT_SYSTEM = (rules: string[], guide?: string | null) => `You are Rel
 Alex has not written a note. Write the reply he would most likely send now, in his voice, from what the thread and the deal say.${voiceGuideBlock(guide)} Follow these writing rules strictly:
 ${rules.map((r) => `- ${r}`).join("\n")}
 - Say only what the thread supports: answer what they asked or confirm what they said, as briefly as Alex would. Add no offers, pitches, next steps or reassurance nobody asked for. Never say something happened (sent, resent, booked, invited, passed on, checked) unless the thread shows it, and never promise an action Alex has not already said he will take (I'll book, I'll pass it on, I'll chase, I'll send).
-- Whether to pitch listing on ReBattery is Alex's call. For a seller offering stock, ask him (needs_input) with options such as "pitch listing on ReBattery", "say we'll share it with buyers and come back with offers"; never pitch it yourself.
+- When the prompt includes ReBattery's intake guide (a seller or buyer on supply@ or buy@, or an email on a deal), its first and second replies are standard: write them without asking (ask for everything they have, then only the gaps). Outside that, whether to pitch listing on ReBattery is Alex's call: for a seller offering stock, ask him (needs_input) with options such as "pitch listing on ReBattery", "say we'll share it with buyers and come back with offers"; never pitch it yourself.
 - Never decide for Alex. If the reply needs a decision only he can make (a price or an offer, accepting or proposing terms, committing to a date, quantity or delivery, anything legal, tax or money), or something only he knows or has (a document, an address, what he did since, a status the thread does not show), do not write the email: return needs_input with one short question to him and 2 or 3 options, most likely first, each written as the short note he would type, e.g. "ask for their price", "decline politely".
 - A FOLLOW-UP (Alex wrote last and got no reply) repeats the specific open question from his last email in one short line, not a generic nudge, and adds nothing he has not already said.
 - Never invent facts: prices, quantities, dates, tests, partners, logistics or availability must come from the thread or the deal.
@@ -660,8 +660,10 @@ export async function predraftReplay(ownerId: string, cases: { id: string; mail_
     try {
       const [thread] = await queryPg<{ gmail_thread_id: string }>("select gmail_thread_id from mail_thread where id = $1 and mailbox_owner_id = $2::uuid", [c.mail_thread_id, ownerId]);
       if (!thread) throw new Error("not the owner's thread");
+      // The deal the email is linked to in Relay today, so a replay of a deal email gets the deal's context.
+      const [linked] = await queryPg<{ bulk_listing_id: string | null }>("select bulk_listing_id from relay_item where mail_thread_id = $1 and owner_id = $2::uuid", [c.mail_thread_id, ownerId]);
       const item = { id: c.id, tab: c.tab, status: "open", priority: "medium", counterpart_name: c.counterpart_name, counterpart_email: c.counterpart_email, company: null,
-        contact_type: c.contact_type, headline: "", context: "", last_message: null, earlier: [], bulk_listing_id: null, deal_label: null, waiting_since: null, note: "",
+        contact_type: c.contact_type, headline: "", context: "", last_message: null, earlier: [], bulk_listing_id: linked?.bulk_listing_id ?? null, deal_label: null, waiting_since: null, note: "",
         mail_thread_id: c.mail_thread_id, gmail_thread_id: thread.gmail_thread_id, updated_at: new Date().toISOString(), situation: c.situation, suggestion: null,
         last_seen_message_id: null } satisfies RelayItem;
       out.push({ id: c.id, ...(await suggestFor(item, ownerId, c.before_message_id)) });
