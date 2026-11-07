@@ -33,9 +33,12 @@ describe("buildChecklist for a seller", () => {
   it("uses hand ticks only for facts the CRM has no field for", () => {
     expect(c.helpful.filter((i) => i.manual).map((i) => [i.key, i.have])).toEqual([["per_pack_health", false], ["split", true], ["owner", false]]);
   });
-  it("turns the gaps into one instruction for Relay AI", () => {
+  it("flags facts nobody has confirmed", () => {
+    expect(c.required.find((i) => i.key === "health")!.warn).toBe("unverified");
+  });
+  it("turns the gaps into one instruction for Relay AI, including what to confirm", () => {
     const text = missingInstruction(c)!;
-    expect(text).toContain("Ask them for what we still need: price.");
+    expect(text).toContain("Ask them for, or to confirm, what we still need: price, what (kWh not stated), health (unverified).");
     expect(text).toContain("test report (over a year old)");
     expect(text).toContain("health per pack with tag");
     expect(text).not.toContain("whole lot or split");
@@ -50,6 +53,10 @@ describe("buildChecklist for a buyer", () => {
     expect(c.required[2].warn).toBe("unit not stated");
     expect(c.helpful[0].value).toBe("80%");
   });
+  it("never ticks a buyer's What from the title alone", () => {
+    const c = buildChecklist({ ...supply, kind: "demand", product_family: null, spec: {} }, [], [], now);
+    expect(c.required[0].have).toBe(false);
+  });
   it("needs nothing added when every box is ticked", () => {
     const full = buildChecklist({ ...supply, context: { intake_ticks: { per_pack_health: true, split: true, owner: true } } }, [
       { field_key: "model", value: "Leaf", status: "confirmed" }, { field_key: "capacity", value: "40 kWh", status: "confirmed" },
@@ -57,5 +64,19 @@ describe("buildChecklist for a buyer", () => {
       { field_key: "soh", value: "80%+", status: "confirmed" },
     ], [{ file_name: "report.pdf", title: "Test report", doc_type: null, source_date: "2026-11-01", created_at: null }, { file_name: "a.jpg", title: null, doc_type: null, source_date: null, created_at: null }], now);
     expect(missingInstruction(full)).toBeNull();
+  });
+});
+
+describe("evidence that does not count", () => {
+  it("a stated 'untested' answers Health but is not a test report, and a readout photo is a photo", () => {
+    const c = buildChecklist(supply, [{ field_key: "test_data", value: "Untested", status: "confirmed" }],
+      [{ file_name: "soh_readout.jpg", title: null, doc_type: null, source_date: "2026-11-01", created_at: null }], now);
+    expect(c.required.find((i) => i.key === "health")!.have).toBe(true);
+    expect(c.helpful.find((i) => i.key === "test_report")!.have).toBe(false);
+    expect(c.helpful.find((i) => i.key === "photos")!.value).toBe("1 on file");
+  });
+  it("shows when two sources disagree", () => {
+    const c = buildChecklist({ ...supply, quantity: null }, [{ field_key: "quantity", value: "680,000 cells", status: "conflict" }], [], now);
+    expect(c.required.find((i) => i.key === "how_many")!.warn).toBe("sources disagree");
   });
 });

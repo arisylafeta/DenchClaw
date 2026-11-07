@@ -1182,22 +1182,25 @@ function DealBar({ item: i, busy, onRun, onOpenListing }: { item: RelayItem; bus
 /** Under Relay AI: what we have from this seller or buyer and what is still missing, from the linked deal. */
 function DealChecklistCard({ item, draft, reload, say }: { item: RelayReviewItem; draft: RelayDraftView | undefined; reload: () => Promise<void>; say: (t: string) => void }) {
   const [list, setList] = useState<DealChecklist | null | undefined>(undefined);
+  const [counterparty, setCounterparty] = useState(false);
   const [busy, setBusy] = useState(false);
   const linked = !!item.bulk_listing_id;
   useEffect(() => {
     if (!linked) return;
     let live = true;
-    api<{ checklist: DealChecklist | null }>(`/api/relay/items/${item.id}/checklist`).then((r) => { if (live) setList(r.checklist); }).catch(() => { if (live) setList(null); });
+    api<{ checklist: DealChecklist | null; counterparty: boolean }>(`/api/relay/items/${item.id}/checklist`)
+      .then((r) => { if (live) { setList(r.checklist); setCounterparty(r.counterparty); } }).catch(() => { if (live) setList(null); });
     return () => { live = false; };
   }, [item.id, linked, item.updated_at]);
   if (!linked) return item.contact_type === "buyer" || item.contact_type === "supplier"
     ? <div className={cx(s.card, s.check)}><b>No deal yet</b><span className={s.muted}>Create the deal from the inbox and this lists what we have and what is missing.</span></div>
     : null;
   if (list === undefined) return <div className={cx(s.card, s.check)}><span className={s.muted}>Loading the deal…</span></div>;
+  if (counterparty) return <div className={cx(s.card, s.check)}><b>Answering someone else&apos;s deal</b><span className={s.muted}>{firstName(item.counterpart_name)} is quoting on another party&apos;s request, so that deal&apos;s checklist isn&apos;t shown here. Update deal from this reply records their quote on their offer.</span></div>;
   if (!list) return null;
   const tick = async (row: ChecklistItem) => {
     setBusy(true);
-    try { setList((await api<{ checklist: DealChecklist }>(`/api/relay/items/${item.id}/checklist`, { method: "POST", body: { key: row.key, have: !row.have } })).checklist); }
+    try { setList((await api<{ checklist: DealChecklist | null }>(`/api/relay/items/${item.id}/checklist`, { method: "POST", body: { key: row.key, have: !row.have } })).checklist); }
     catch (err) { say(err instanceof Error ? err.message : "Couldn't save that."); }
     finally { setBusy(false); }
   };

@@ -34,6 +34,12 @@ function fieldValue(fields: ChecklistField[], key: string): string | null {
   return f && f.status !== "missing" && present(f.value) ? String(f.value) : null;
 }
 
+/** A field's doubt worth showing: a value nobody has confirmed, or two sources that disagree. */
+function fieldDoubt(fields: ChecklistField[], ...keys: string[]): string | null {
+  const f = keys.map((k) => fields.find((x) => x.field_key === k)).find((x) => x && x.status !== "missing" && present(x.value));
+  return f?.status === "conflict" ? "sources disagree" : f?.status === "unverified" ? "unverified" : null;
+}
+
 /** "March 2024" style date for a document, and whether it is over a year old at `now`. */
 function docDate(doc: ChecklistDoc, now: Date): { label: string | null; old: boolean } {
   const raw = doc.source_date ?? null;
@@ -55,19 +61,20 @@ export function buildChecklist(listing: ChecklistListing, fields: ChecklistField
     const model = fieldValue(fields, "model");
     const capacity = fieldValue(fields, "capacity");
     const health = fieldValue(fields, "soh") ?? fieldValue(fields, "test_data");
-    const tests = docs.filter((d) => TEST_DOC.test(`${d.title ?? ""} ${d.file_name ?? ""} ${d.doc_type ?? ""}`));
-    const photos = docs.filter((d) => PHOTO_DOC.test(d.file_name ?? "") || /photo|image/i.test(d.doc_type ?? ""));
+    const isPhoto = (d: ChecklistDoc) => PHOTO_DOC.test(d.file_name ?? "") || /photo|image/i.test(d.doc_type ?? "");
+    const photos = docs.filter(isPhoto);
+    const tests = docs.filter((d) => !isPhoto(d) && TEST_DOC.test(`${d.title ?? ""} ${d.file_name ?? ""} ${d.doc_type ?? ""}`));
     const latestTest = tests.map((d) => ({ d, date: docDate(d, now) })).sort((a, b) => String(b.d.source_date ?? "").localeCompare(String(a.d.source_date ?? "")))[0];
-    const testValue = latestTest ? (latestTest.date.label ? `Dated ${latestTest.date.label}` : "Report on file, no date") : fieldValue(fields, "test_data");
+    const testValue = latestTest ? (latestTest.date.label ? `Dated ${latestTest.date.label}` : "Report on file, no date") : null;
     return {
       listingId: listing.id, kind, title,
       required: [
-        item("what", "What", model ? [model, capacity].filter(Boolean).join(" · ") : null, { warn: model && !capacity ? "kWh not stated" : null }),
-        item("how_many", "How many", listing.quantity ?? fieldValue(fields, "quantity")),
-        item("price", "Price", fieldValue(fields, "seller_price")),
-        item("when", "When", listing.clear_by ?? fieldValue(fields, "clear_by")),
-        item("where", "Where", listing.location ?? fieldValue(fields, "location")),
-        item("health", "Health", health),
+        item("what", "What", model ? [model, capacity].filter(Boolean).join(" · ") : null, { warn: model && !capacity ? "kWh not stated" : fieldDoubt(fields, "model") }),
+        item("how_many", "How many", listing.quantity ?? fieldValue(fields, "quantity"), { warn: fieldDoubt(fields, "quantity") }),
+        item("price", "Price", fieldValue(fields, "seller_price"), { warn: fieldDoubt(fields, "seller_price") }),
+        item("when", "When", listing.clear_by ?? fieldValue(fields, "clear_by"), { warn: listing.clear_by ? null : fieldDoubt(fields, "clear_by") }),
+        item("where", "Where", listing.location ?? fieldValue(fields, "location"), { warn: fieldDoubt(fields, "location") }),
+        item("health", "Health", health, { warn: fieldDoubt(fields, "soh", "test_data") }),
       ],
       helpful: [
         item("test_report", "Test report", testValue, { warn: latestTest?.date.old ? "over a year old" : latestTest && !latestTest.date.label ? "date unknown" : null }),
@@ -83,7 +90,7 @@ export function buildChecklist(listing: ChecklistListing, fields: ChecklistField
   return {
     listingId: listing.id, kind, title,
     required: [
-      item("what", "What", listing.product_family ?? (title || null)),
+      item("what", "What", listing.product_family ?? (Array.isArray(spec.makes) && spec.makes.length ? spec.makes.join(", ") : null)),
       item("how_many", "How many", volume),
       item("price", "Max price", price, { warn: price && !listing.price_unit ? "unit not stated" : null }),
       item("when", "Needed by", listing.needed_by),
@@ -98,11 +105,14 @@ export function buildChecklist(listing: ChecklistListing, fields: ChecklistField
 
 /** The sentence Relay AI gets for "Add missing to draft". Null when nothing is missing. */
 export function missingInstruction(c: DealChecklist): string | null {
-  const required = c.required.filter((i) => !i.have).map((i) => i.label.toLowerCase());
+  const required = [
+    ...c.required.filter((i) => !i.have).map((i) => i.label.toLowerCase()),
+    ...c.required.filter((i) => i.have && i.warn).map((i) => `${i.label.toLowerCase()} (${i.warn})`),
+  ];
   const helpful = c.helpful.filter((i) => !i.have || i.warn).map((i) => (i.warn ? `${i.label.toLowerCase()} (${i.warn})` : i.label.toLowerCase()));
   if (!required.length && !helpful.length) return null;
   return [
-    required.length ? `Ask them for what we still need: ${required.join(", ")}.` : "",
+    required.length ? `Ask them for, or to confirm, what we still need: ${required.join(", ")}.` : "",
     helpful.length ? `If it fits naturally, also ask for: ${helpful.join(", ")}.` : "",
     "Keep the rest of the email as it is. Never name a price or range yourself.",
   ].filter(Boolean).join(" ");

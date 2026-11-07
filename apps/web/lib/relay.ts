@@ -431,26 +431,36 @@ export async function startDealJob(itemId: string, ownerId: string, action: "cre
   child.unref();
 }
 
-/** The deal checklist for an email in Review: what we have from them and what is still missing. Null when no deal is linked. */
-export async function dealChecklistFor(itemId: string, ownerId: string): Promise<DealChecklist | null> {
+export type RelayChecklistView = { checklist: DealChecklist | null; counterparty: boolean };
+
+/** The deal checklist for an email in Review: what we have from them and what is still missing. No checklist when no deal is
+ * linked, or when the sender is answering someone else's deal (a supplier on a buyer's request): the card would show the
+ * other side's facts as theirs. */
+export async function dealChecklistFor(itemId: string, ownerId: string): Promise<RelayChecklistView> {
   const item = await readRelayItem(itemId, ownerId);
   if (!item) throw new RelayError(404, "Not found");
-  if (!item.bulk_listing_id) return null;
-  const [listing] = await queryPg<ChecklistListing>(
+  if (!item.bulk_listing_id) return { checklist: null, counterparty: false };
+  const [listing] = await queryPg<ChecklistListing & { owner_email: string | null }>(
     `select b.id, b.kind, b.summary as title, b.quantity, b.location, b.clear_by::text as clear_by, b.context, b.spec,
-       d.volume, d.volume_unit, d.max_price, d.price_currency, d.price_unit, d.needed_by::text as needed_by, d.product_family
-     from crm_bulk_listings b left join crm_bulk_demand d on d.id = b.id where b.id = $1`, [item.bulk_listing_id]);
-  if (!listing) return null;
+       d.volume, d.volume_unit, d.max_price, d.price_currency, d.price_unit, d.needed_by::text as needed_by, d.product_family,
+       lower(coalesce(b.email, p.email)) as owner_email
+     from crm_bulk_listings b left join crm_bulk_demand d on d.id = b.id left join crm_people p on p.id = b.person_id where b.id = $1`, [item.bulk_listing_id]);
+  if (!listing) return { checklist: null, counterparty: false };
+  const messages = await threadMessages(item.mail_thread_id);
+  const sender = messages.find((m) => m.direction === "inbound")?.from_email ?? item.counterpart_email;
+  if (!ownsDeal(listing.owner_email, sender)) return { checklist: null, counterparty: true };
   const fields = await queryPg<ChecklistField>("select field_key, value, status from crm_bulk_listing_fields where bulk_listing_id = $1", [listing.id]);
   const docs = await queryPg<ChecklistDoc>(
-    "select file_name, title, doc_type, source_date::text as source_date, created_at::text as created_at from crm_bulk_listing_documents where bulk_listing_id = $1", [listing.id]);
-  return buildChecklist(listing, fields, docs);
+    `select file_name, title, doc_type, source_date::text as source_date, created_at::text as created_at from crm_bulk_listing_documents
+     where bulk_listing_id = $1 and state = 'received'`, [listing.id]);  // documents they sent, not ones we made or still want
+  return { checklist: buildChecklist(listing, fields, docs), counterparty: false };
 }
 
 /** Ticks or unticks a helpful fact the CRM has no field for, on the email's deal (`context.intake_ticks`). */
 export async function setChecklistTick(itemId: string, ownerId: string, key: string, have: boolean): Promise<void> {
   const item = await readRelayItem(itemId, ownerId);
   if (!item?.bulk_listing_id) throw new RelayError(404, "This email isn't linked to a deal.");
+  if ((await dealChecklistFor(itemId, ownerId)).counterparty) throw new RelayError(409, "This email answers someone else's deal, so its checklist can't be ticked from here.");
   const [listing] = await queryPg<{ kind: string }>("select kind from crm_bulk_listings where id = $1", [item.bulk_listing_id]);
   if (!listing) throw new RelayError(404, "The deal is no longer in the CRM.");
   const keys: string[] = MANUAL_KEYS[listing.kind === "demand" ? "demand" : "supply"].map(([k]) => k);
