@@ -766,13 +766,18 @@ def eval_options(args) -> None:
         ask = (res.get("suggestion") or {}).get("needs_input") or {}
         items.append({"id": c["id"], "kind": r["kind"], "situation": r.get("situation"), "thread": (res.get("thread") or "")[-5000:],
                       "alex_actual": r["text"][:1500], "options": ask.get("options") or [], "error": res.get("error")})
+    write_jsonl(out / "options-eval.jsonl", items)  # the replays are the slow part: keep them even if judging fails
     verdicts = {}
     for i in range(0, len(items), 5):
         chunk = [{k: v for k, v in it.items() if k in ("id", "thread", "alex_actual", "options")} for it in items[i:i + 5] if not it["error"] and it["options"]]
-        if chunk:
+        for _ in range(2 if chunk else 0):
             raw = rs.run_hermes(OPTIONS_JUDGE + "\n\n" + json.dumps(chunk, ensure_ascii=False))
-            for obj in json.loads(raw[raw.find("["):raw.rfind("]") + 1]):
-                verdicts[obj["id"]] = obj
+            try:
+                parsed, _end = json.JSONDecoder().raw_decode(raw[raw.find("["):])
+                verdicts.update({obj["id"]: obj for obj in parsed if isinstance(obj, dict) and "id" in obj})
+                break
+            except ValueError:
+                continue
     for it in items:
         it.update({k: verdicts.get(it["id"], {}).get(k) for k in ("match", "invented", "why")})
     ok = [it for it in items if not it["error"] and it["options"]]
