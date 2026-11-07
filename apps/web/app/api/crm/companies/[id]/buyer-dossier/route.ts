@@ -28,12 +28,12 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const user = await currentUser();
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) {return Response.json({ error: "Unauthorized" }, { status: 401 });}
   const companyId = await companyIdFrom(ctx);
-  if (!companyId) return Response.json({ error: "Missing company id." }, { status: 400 });
+  if (!companyId) {return Response.json({ error: "Missing company id." }, { status: 400 });}
 
   const dossier = await getCompanyDossier(companyId);
-  if (!dossier) return Response.json({ error: "Company not found." }, { status: 404 });
+  if (!dossier) {return Response.json({ error: "Company not found." }, { status: 404 });}
   return Response.json(dossier);
 }
 
@@ -42,9 +42,9 @@ export async function PATCH(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const user = await currentUser();
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) {return Response.json({ error: "Unauthorized" }, { status: 401 });}
   const companyId = await companyIdFrom(ctx);
-  if (!companyId) return Response.json({ error: "Missing company id." }, { status: 400 });
+  if (!companyId) {return Response.json({ error: "Missing company id." }, { status: 400 });}
 
   const body = (await req.json().catch(() => ({}))) as { text?: unknown; expected_version?: unknown };
   if (typeof body.text !== "string") {
@@ -90,15 +90,15 @@ export async function POST(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const user = await currentUser();
-  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!user) {return Response.json({ error: "Unauthorized" }, { status: 401 });}
   const companyId = await companyIdFrom(ctx);
-  if (!companyId) return Response.json({ error: "Missing company id." }, { status: 400 });
+  if (!companyId) {return Response.json({ error: "Missing company id." }, { status: 400 });}
 
   const body = (await req.json().catch(() => ({}))) as { action?: unknown };
   if (body.action !== "mark_reviewed") {
     return Response.json({ error: "Unsupported action." }, { status: 400 });
   }
   const dossier = await getCompanyDossier(companyId);
-  if (!dossier) return Response.json({ error: "Company not found." }, { status: 404 });
+  if (!dossier) {return Response.json({ error: "Company not found." }, { status: 404 });}
   return Response.json(await markDossierReviewed(companyId));
 }

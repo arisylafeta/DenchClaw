@@ -72,7 +72,7 @@ export async function saveDossier(
   const trimmed = (text ?? "").trim();
   // An empty dossier would derive an empty buy box. That is a write-path guard, not a schema rule:
   // an empty frontmatter is valid to the deriver, so a caller clearing the box must say so explicitly.
-  if (!trimmed) return { kind: "invalid", errors: ["Dossier text is empty."] };
+  if (!trimmed) {return { kind: "invalid", errors: ["Dossier text is empty."] };}
 
   return withPgTransaction(async (tx: PgTransaction) => {
     const [current] = (
@@ -82,7 +82,7 @@ export async function saveDossier(
         [companyId],
       )
     ).rows;
-    if (!current) return { kind: "missing" } as const;
+    if (!current) {return { kind: "missing" } as const;}
 
     const currentVersion = Number(current.buyer_dossier_version ?? 0);
     if (expectedVersion !== null && Number(expectedVersion) !== currentVersion) {
@@ -91,7 +91,7 @@ export async function saveDossier(
 
     const { frontmatter } = parseDossier(text);
     const errors = validateDossier(frontmatter);
-    if (errors.length) return { kind: "invalid", errors } as const;
+    if (errors.length) {return { kind: "invalid", errors } as const;}
 
     const merged = mergeDerivedProfile(current.buyer_profile, frontmatter);
     const profileChanged = stableStringify(current.buyer_profile ?? {}) !== stableStringify(merged.profile);
@@ -154,7 +154,7 @@ export async function getCompanyDossier(companyId: string): Promise<CompanyDossi
      from crm_companies where id = $1`,
     [companyId],
   );
-  if (!row) return null;
+  if (!row) {return null;}
 
   const savedSearches = await listSavedSearchAlerts(companyId);
   const parsed = row.buyer_dossier ? parseDossier(row.buyer_dossier) : null;

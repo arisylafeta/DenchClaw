@@ -34,7 +34,7 @@ export const EXTRA_CELL_MAKERS = ["Kokam", "Svolt", "Farasis", "Lishen"];
 const BUYER_TYPES = ["integrator", "trader", "recycler", "module_builder", "rnd", "oem", "other"];
 const INTENTS = ["reuse", "repair", "cells", "recycling"];
 const PRODUCT_STATUSES = ["bought", "asked", "said_interested", "declined"];
-const ACTIVE_STATUSES = ["bought", "asked", "said_interested"];
+const ACTIVE_STATUSES = new Set(["bought", "asked", "said_interested"]);
 const CELL_FORMATS = ["18650", "21700", "prismatic", "pouch", "Cylindrical"];
 const CADENCES = ["one_off", "repeat", "standing"];
 const COLLECTS = ["own_haulier", "needs_delivery", "either"];
@@ -78,32 +78,56 @@ type Json = Record<string, unknown>;
 // below match Python's repr(), type names and number formatting.
 
 function pyTypeOf(value: unknown): string {
-  if (value === null || value === undefined) return "NoneType";
-  if (Array.isArray(value)) return "list";
-  if (typeof value === "boolean") return "bool";
-  if (typeof value === "number") return Number.isInteger(value) ? "int" : "float";
-  if (typeof value === "string") return "str";
+  if (value === null || value === undefined) {
+    return "NoneType";
+  }
+  if (Array.isArray(value)) {
+    return "list";
+  }
+  if (typeof value === "boolean") {
+    return "bool";
+  }
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? "int" : "float";
+  }
+  if (typeof value === "string") {
+    return "str";
+  }
   return "dict";
 }
 
 function pyRepr(value: unknown): string {
-  if (value === null || value === undefined) return "None";
-  if (typeof value === "boolean") return value ? "True" : "False";
-  if (typeof value === "number") return String(value);
-  if (Array.isArray(value)) return `[${value.map(pyRepr).join(", ")}]`;
+  if (value === null || value === undefined) {
+    return "None";
+  }
+  if (typeof value === "boolean") {
+    return value ? "True" : "False";
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(pyRepr).join(", ")}]`;
+  }
   if (typeof value === "object") {
     const entries = Object.entries(value as Json).map(([k, v]) => `${pyRepr(k)}: ${pyRepr(v)}`);
     return `{${entries.join(", ")}}`;
   }
-  const text = String(value);
-  if (text.includes("'") && !text.includes('"')) return `"${text}"`;
+  const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
+  if (text.includes("'") && !text.includes('"')) {
+    return `"${text}"`;
+  }
   return `'${text.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 }
 
 /** Python's `f"{value:g}"`: six significant digits, no trailing zeros. */
 function pyGeneral(value: number): string {
-  if (!Number.isFinite(value)) return String(value);
-  if (value === 0) return "0";
+  if (!Number.isFinite(value)) {
+    return String(value);
+  }
+  if (value === 0) {
+    return "0";
+  }
   const magnitude = Math.abs(value);
   if (magnitude >= 1e6 || magnitude < 1e-4) {
     return value
@@ -124,10 +148,14 @@ function asDict(value: unknown): Json {
 
 /** YAML gives strings and numbers here; this keeps shapes predictable for JSONB and diffs. */
 function jsonable(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(jsonable);
+  if (Array.isArray(value)) {
+    return value.map(jsonable);
+  }
   if (isRecord(value)) {
     const out: Json = {};
-    for (const [key, item] of Object.entries(value)) out[String(key)] = jsonable(item);
+    for (const [key, item] of Object.entries(value)) {
+      out[String(key)] = jsonable(item);
+    }
     return out;
   }
   return value === undefined ? null : value;
@@ -139,7 +167,9 @@ function splitMax(text: string, sep: string, maxSplit: number): string[] {
   let from = 0;
   for (let i = 0; i < maxSplit; i += 1) {
     const at = text.indexOf(sep, from);
-    if (at === -1) break;
+    if (at === -1) {
+      break;
+    }
     parts.push(text.slice(from, at));
     from = at + sep.length;
   }
@@ -153,9 +183,13 @@ export type ParsedDossier = { frontmatter: Json; body: string };
 /** (frontmatter, body). Missing or broken frontmatter yields ({}, whole text). */
 export function parseDossier(markdown: string | null | undefined): ParsedDossier {
   const text = (markdown ?? "").replace(/^\ufeff/, "");
-  if (!text.startsWith("---")) return { frontmatter: {}, body: text };
+  if (!text.startsWith("---")) {
+    return { frontmatter: {}, body: text };
+  }
   const parts = splitMax(text, "---", 2);
-  if (parts.length < 3) return { frontmatter: {}, body: text };
+  if (parts.length < 3) {
+    return { frontmatter: {}, body: text };
+  }
   const body = parts[2].replace(/^[\r\n]+/, "");
   let data: unknown;
   try {
@@ -163,7 +197,9 @@ export function parseDossier(markdown: string | null | undefined): ParsedDossier
   } catch {
     return { frontmatter: {}, body: text };
   }
-  if (!isRecord(data)) return { frontmatter: {}, body: text };
+  if (!isRecord(data)) {
+    return { frontmatter: {}, body: text };
+  }
   return { frontmatter: asDict(jsonable(data)), body };
 }
 
@@ -174,8 +210,12 @@ function isNumber(value: unknown): value is number {
 
 /** null when the value is a valid YYYY-MM-DD date, else a short reason. */
 function dateError(value: unknown): string | null {
-  if (typeof value === "string" && !value.trim()) return null;
-  if (typeof value !== "string" || !DATE_RE.test(value)) return `${pyRepr(value)} is not a YYYY-MM-DD date`;
+  if (typeof value === "string" && !value.trim()) {
+    return null;
+  }
+  if (typeof value !== "string" || !DATE_RE.test(value)) {
+    return `${pyRepr(value)} is not a YYYY-MM-DD date`;
+  }
   const [year, month, day] = value.split("-").map(Number);
   const parsed = new Date(Date.UTC(year, month - 1, day));
   if (
@@ -190,8 +230,12 @@ function dateError(value: unknown): string | null {
 
 function checkEnum(errors: string[], where: string, value: unknown, allowed: string[], label: string): void {
   // An empty YAML value left from the template means "not stated", not a wrong value.
-  if (value === null || value === undefined) return;
-  if (typeof value === "string" && !value.trim()) return;
+  if (value === null || value === undefined) {
+    return;
+  }
+  if (typeof value === "string" && !value.trim()) {
+    return;
+  }
   if (typeof value !== "string") {
     errors.push(`${where}: ${label} must be a string, got ${pyTypeOf(value)}`);
     return;
@@ -203,12 +247,16 @@ function checkEnum(errors: string[], where: string, value: unknown, allowed: str
 }
 
 function checkList(errors: string[], where: string, value: unknown, allowed: string[] | null, label = "value"): void {
-  if (value === null || value === undefined) return;
+  if (value === null || value === undefined) {
+    return;
+  }
   if (!Array.isArray(value)) {
     errors.push(`${where}: must be a list, got ${pyTypeOf(value)}`);
     return;
   }
-  if (!allowed) return;
+  if (!allowed) {
+    return;
+  }
   value.forEach((item, index) => checkEnum(errors, `${where}[${index}]`, item, allowed, label));
 }
 
@@ -226,7 +274,9 @@ function entryValue(item: unknown): string | null {
  * The plain form stays valid, so existing dossiers need no edit.
  */
 function checkEntryList(errors: string[], where: string, value: unknown, allowed: string[] | null, label = "value"): void {
-  if (value === null || value === undefined) return;
+  if (value === null || value === undefined) {
+    return;
+  }
   if (!Array.isArray(value)) {
     errors.push(`${where}: must be a list, got ${pyTypeOf(value)}`);
     return;
@@ -234,32 +284,44 @@ function checkEntryList(errors: string[], where: string, value: unknown, allowed
   value.forEach((item, index) => {
     const itemWhere = `${where}[${index}]`;
     if (isRecord(item)) {
-      for (const key of Object.keys(item).filter((key) => !ENTRY_KEYS.includes(key)).sort()) {
+      for (const key of Object.keys(item).filter((key) => !ENTRY_KEYS.includes(key)).toSorted()) {
         errors.push(`${itemWhere}.${key}: unknown key (allowed: ${ENTRY_KEYS.join(", ")})`);
       }
-      if (typeof item.value !== "string" || !item.value.trim()) errors.push(`${itemWhere}.value: required text`);
+      if (typeof item.value !== "string" || !item.value.trim()) {
+        errors.push(`${itemWhere}.value: required text`);
+      }
       if ("seen" in item) {
         const reason = dateError(item.seen);
-        if (reason) errors.push(`${itemWhere}.seen: ${reason}`);
+        if (reason) {
+          errors.push(`${itemWhere}.seen: ${reason}`);
+        }
       }
-      if ("src" in item && typeof item.src !== "string") errors.push(`${itemWhere}.src: must be text`);
-      if (allowed) checkEnum(errors, itemWhere, item.value, allowed, label);
+      if ("src" in item && typeof item.src !== "string") {
+        errors.push(`${itemWhere}.src: must be text`);
+      }
+      if (allowed) {
+        checkEnum(errors, itemWhere, item.value, allowed, label);
+      }
       return;
     }
     if (typeof item !== "string" || !item.trim()) {
       errors.push(`${itemWhere}: must be text or a mapping with value (and seen, src)`);
       return;
     }
-    if (allowed) checkEnum(errors, itemWhere, item, allowed, label);
+    if (allowed) {
+      checkEnum(errors, itemWhere, item, allowed, label);
+    }
   });
 }
 
 /** Human-readable errors; an empty list means the dossier can be synced. */
 export function validateDossier(frontmatter: unknown): string[] {
-  if (!isRecord(frontmatter)) return ["frontmatter: not a mapping"];
+  if (!isRecord(frontmatter)) {
+    return ["frontmatter: not a mapping"];
+  }
   const fm = frontmatter;
   const errors: string[] = [];
-  for (const key of Object.keys(fm).filter((key) => !TOP_LEVEL_KEYS.includes(key)).sort()) {
+  for (const key of Object.keys(fm).filter((key) => !TOP_LEVEL_KEYS.includes(key)).toSorted()) {
     errors.push(`${key}: unknown top-level key (allowed: ${TOP_LEVEL_KEYS.join(", ")})`);
   }
 
@@ -273,7 +335,9 @@ export function validateDossier(frontmatter: unknown): string[] {
   checkEnum(errors, "decision_speed", fm.decision_speed, DECISION_SPEEDS, "decision_speed");
   if ("last_verified" in fm) {
     const reason = dateError(fm.last_verified);
-    if (reason) errors.push(`last_verified: ${reason}`);
+    if (reason) {
+      errors.push(`last_verified: ${reason}`);
+    }
   }
 
   const continuity = fm.needs_continuity;
@@ -285,7 +349,7 @@ export function validateDossier(frontmatter: unknown): string[] {
   if (timing !== null && timing !== undefined && !isRecord(timing)) {
     errors.push("timing: must be a mapping");
   } else if (isRecord(timing)) {
-    for (const key of Object.keys(timing).filter((key) => !TIMING_KEYS.includes(key)).sort()) {
+    for (const key of Object.keys(timing).filter((key) => !TIMING_KEYS.includes(key)).toSorted()) {
       errors.push(`timing.${key}: unknown key (allowed: ${TIMING_KEYS.join(", ")})`);
     }
     const lead = timing.max_lead_days;
@@ -358,7 +422,7 @@ export function validateDossier(frontmatter: unknown): string[] {
   if (!isRecord(rulesOut)) {
     errors.push("rules_out: must be a mapping");
   } else {
-    for (const key of Object.keys(rulesOut).filter((key) => !RULES_OUT_KEYS.includes(key)).sort()) {
+    for (const key of Object.keys(rulesOut).filter((key) => !RULES_OUT_KEYS.includes(key)).toSorted()) {
       errors.push(`rules_out.${key}: unknown key (allowed: ${RULES_OUT_KEYS.join(", ")})`);
     }
     checkEntryList(errors, "rules_out.chemistries", rulesOut.chemistries, CHEMISTRIES, "chemistry");
@@ -382,7 +446,7 @@ export function validateDossier(frontmatter: unknown): string[] {
         errors.push(`${where}: must be a mapping`);
         return;
       }
-      for (const key of Object.keys(product).filter((key) => !PRODUCT_KEYS.includes(key)).sort()) {
+      for (const key of Object.keys(product).filter((key) => !PRODUCT_KEYS.includes(key)).toSorted()) {
         errors.push(`${where}.${key}: unknown key (allowed: ${PRODUCT_KEYS.join(", ")})`);
       }
       if (!product.status) {
@@ -399,12 +463,16 @@ export function validateDossier(frontmatter: unknown): string[] {
       if (kwh !== null && kwh !== undefined) {
         const values = Array.isArray(kwh) ? kwh : [kwh];
         values.forEach((value, kwhIndex) => {
-          if (!isNumber(value)) errors.push(`${where}.kwh[${kwhIndex}]: must be a number, got ${pyRepr(value)}`);
+          if (!isNumber(value)) {
+            errors.push(`${where}.kwh[${kwhIndex}]: must be a number, got ${pyRepr(value)}`);
+          }
         });
       }
       if ("seen" in product) {
         const reason = dateError(product.seen);
-        if (reason) errors.push(`${where}.seen: ${reason}`);
+        if (reason) {
+          errors.push(`${where}.seen: ${reason}`);
+        }
       }
     });
   }
@@ -419,7 +487,7 @@ export function validateDossier(frontmatter: unknown): string[] {
         errors.push(`${where}: must be a mapping`);
         return;
       }
-      for (const key of Object.keys(price).filter((key) => !PRICE_KEYS.includes(key)).sort()) {
+      for (const key of Object.keys(price).filter((key) => !PRICE_KEYS.includes(key)).toSorted()) {
         errors.push(`${where}.${key}: unknown key (allowed: ${PRICE_KEYS.join(", ")})`);
       }
       for (const key of ["eur_per_kwh", "eur_per_unit"]) {
@@ -431,7 +499,9 @@ export function validateDossier(frontmatter: unknown): string[] {
       checkEnum(errors, `${where}.basis`, price.basis, PRICE_BASES, "basis");
       if ("seen" in price) {
         const reason = dateError(price.seen);
-        if (reason) errors.push(`${where}.seen: ${reason}`);
+        if (reason) {
+          errors.push(`${where}.seen: ${reason}`);
+        }
       }
     });
   }
@@ -447,14 +517,20 @@ export function validateDossier(frontmatter: unknown): string[] {
           errors.push(`${where}: must be a mapping`);
           return;
         }
-        for (const key of Object.keys(alert).filter((key) => !ALERT_KEYS.includes(key)).sort()) {
+        for (const key of Object.keys(alert).filter((key) => !ALERT_KEYS.includes(key)).toSorted()) {
           errors.push(`${where}.${key}: unknown key (allowed: ${ALERT_KEYS.join(", ")})`);
         }
-        if (!alert.label) errors.push(`${where}.label: required`);
-        if (!isRecord(alert.filters)) errors.push(`${where}.filters: required mapping of platform filters`);
+        if (!alert.label) {
+          errors.push(`${where}.label: required`);
+        }
+        if (!isRecord(alert.filters)) {
+          errors.push(`${where}.filters: required mapping of platform filters`);
+        }
         if ("seen" in alert) {
           const reason = dateError(alert.seen);
-          if (reason) errors.push(`${where}.seen: ${reason}`);
+          if (reason) {
+            errors.push(`${where}.seen: ${reason}`);
+          }
         }
       });
     }
@@ -464,7 +540,9 @@ export function validateDossier(frontmatter: unknown): string[] {
 
 // --- mapping to buyer_profile --------------------------------------------------------------------
 function canonical(value: unknown, allowed: string[]): string | null {
-  if (typeof value !== "string" || !value.trim()) return null;
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
   const lookup = new Map(allowed.map((item) => [item.toLowerCase(), item]));
   return lookup.get(value.trim().toLowerCase()) ?? null;
 }
@@ -490,7 +568,9 @@ for (const [group, words] of Object.entries({
   "JLR": ["jlr", "jaguar", "land rover", "range rover"],
   "Toyota or Lexus": ["toyota", "lexus"],
 })) {
-  for (const word of words) MAKE_ALIASES.set(word, group);
+  for (const word of words) {
+    MAKE_ALIASES.set(word, group);
+  }
 }
 
 const CELL_MAKER_ALIASES = new Map<string, string>();
@@ -511,7 +591,9 @@ for (const [maker, words] of Object.entries({
   "Farasis": ["farasis"],
   "Lishen": ["lishen"],
 })) {
-  for (const word of words) CELL_MAKER_ALIASES.set(word, maker);
+  for (const word of words) {
+    CELL_MAKER_ALIASES.set(word, maker);
+  }
 }
 
 /**
@@ -524,24 +606,33 @@ for (const [maker, words] of Object.entries({
 function makeGroups(make: unknown): { groups: string[]; cells: string[] } {
   const groups: string[] = [];
   const cells: string[] = [];
-  for (const raw of String(make ?? "").split(SPLIT_RE)) {
+  const makeText = typeof make === "string" ? make : "";
+  for (const raw of makeText.split(SPLIT_RE)) {
     const token = raw.trim();
-    if (!token) continue;
+    if (!token) {
+      continue;
+    }
     const key = token.toLowerCase().split(/\s+/).join(" ");
     const group = MAKE_ALIASES.get(key);
     if (group) {
-      if (!groups.includes(group)) groups.push(group);
+      if (!groups.includes(group)) {
+        groups.push(group);
+      }
       continue;
     }
     const maker = CELL_MAKER_ALIASES.get(key);
-    if (maker && !cells.includes(maker)) cells.push(maker);
+    if (maker && !cells.includes(maker)) {
+      cells.push(maker);
+    }
   }
   return { groups, cells };
 }
 
 function kwhValues(product: Json): number[] {
   const kwh = product.kwh;
-  if (kwh === null || kwh === undefined) return [];
+  if (kwh === null || kwh === undefined) {
+    return [];
+  }
   const values = Array.isArray(kwh) ? kwh : [kwh];
   return values.filter(isNumber);
 }
@@ -551,7 +642,9 @@ function productLabel(product: Json): string {
     const value = product[key];
     if (typeof value === "string" && value.trim()) {
       const text = value.trim().split(/\s+/).join(" ");
-      if (["other", "mixed"].includes(text.toLowerCase())) continue;
+      if (["other", "mixed"].includes(text.toLowerCase())) {
+        continue;
+      }
       return text.length <= 60 ? text : `${text.slice(0, 57).replace(/[ ,;]+$/, "")}...`;
     }
   }
@@ -561,13 +654,18 @@ function productLabel(product: Json): string {
 function wantsLine(product: Json): string {
   const kwh = kwhValues(product);
   let capacity = "";
-  if (kwh.length === 1) capacity = `${pyGeneral(kwh[0])} kWh`;
-  else if (kwh.length > 1) capacity = `${pyGeneral(Math.min(...kwh))}-${pyGeneral(Math.max(...kwh))} kWh`;
+  if (kwh.length === 1) {
+    capacity = `${pyGeneral(kwh[0])} kWh`;
+  } else if (kwh.length > 1) {
+    capacity = `${pyGeneral(Math.min(...kwh))}-${pyGeneral(Math.max(...kwh))} kWh`;
+  }
   const format = canonical(product.format, FORMATS);
   const formatWord = format ? format.toLowerCase() : "";
   const seen = product.seen;
-  const status = String(product.status ?? "").replaceAll("_", " ");
-  const suffix = [status, seen ? String(seen) : ""].filter(Boolean).join(" ");
+  const status = typeof product.status === "string" ? product.status.replaceAll("_", " ") : "";
+  const suffix = [status, typeof seen === "string" || typeof seen === "number" ? String(seen) : ""]
+    .filter(Boolean)
+    .join(" ");
   const line = [productLabel(product), capacity, formatWord].filter(Boolean).join(" ") || "Batteries";
   return suffix ? `${line} (${suffix})` : line;
 }
@@ -584,7 +682,7 @@ function wantsLine(product: Json): string {
 export function deriveProfile(frontmatter: unknown): Json {
   const fm = asDict(jsonable(frontmatter ?? {}));
   const products = (Array.isArray(fm.products) ? fm.products : []).filter(isRecord);
-  const active = products.filter((product) => ACTIVE_STATUSES.includes(String(product.status)));
+  const active = products.filter((product) => ACTIVE_STATUSES.has(String(product.status)));
 
   const rulesOut = asDict(fm.rules_out);
   const blockedChems = new Set(
@@ -608,19 +706,31 @@ export function deriveProfile(frontmatter: unknown): Json {
 
   for (const product of active) {
     const chemistry = canonical(product.chemistry, CHEMISTRIES);
-    if (chemistry && !blockedChems.has(chemistry) && !chemistries.includes(chemistry)) chemistries.push(chemistry);
+    if (chemistry && !blockedChems.has(chemistry) && !chemistries.includes(chemistry)) {
+      chemistries.push(chemistry);
+    }
     const format = canonical(product.format, FORMATS);
-    if (format && !blockedFormats.has(format) && !formats.includes(format)) formats.push(format);
+    if (format && !blockedFormats.has(format) && !formats.includes(format)) {
+      formats.push(format);
+    }
     const groups = makeGroups(product.make);
-    for (const group of groups.groups) if (!makes.includes(group)) makes.push(group);
-    for (const maker of groups.cells) if (!cellMakers.includes(maker)) cellMakers.push(maker);
+    for (const group of groups.groups) {
+      if (!makes.includes(group)) {
+        makes.push(group);
+      }
+    }
+    for (const maker of groups.cells) {
+      if (!cellMakers.includes(maker)) {
+        cellMakers.push(maker);
+      }
+    }
     const partNumber = product.part_number;
     if (typeof partNumber === "string" && partNumber.trim() && !partNumbers.includes(partNumber.trim())) {
       partNumbers.push(partNumber.trim());
     }
     kwh.push(...kwhValues(product));
     const line = wantsLine(product);
-    if (!wants.includes(line)) wants.push(line);
+    if (!wants.includes(line)) {wants.push(line);}
   }
 
   const makeOrder = new Map(MAKES.map((value, index) => [value, index]));
@@ -651,11 +761,11 @@ export function deriveProfile(frontmatter: unknown): Json {
   const origins: string[] = [];
   for (const origin of Array.isArray(fm.origins) ? fm.origins : []) {
     const code = typeof origin === "string" ? origin.trim().toUpperCase() : "";
-    if (/^[A-Z]{2}$/.test(code) && !origins.includes(code)) origins.push(code);
+    if (/^[A-Z]{2}$/.test(code) && !origins.includes(code)) {origins.push(code);}
   }
-  if (origins.length) profile.origins = origins;
+  if (origins.length) {profile.origins = origins;}
   const minSoh = fm.min_soh;
-  if (isNumber(minSoh)) profile.min_soh = Number.isInteger(minSoh) ? minSoh : minSoh;
+  if (isNumber(minSoh)) {profile.min_soh = Number.isInteger(minSoh) ? minSoh : minSoh;}
   return profile;
 }
 
@@ -681,21 +791,21 @@ export function mergeDerivedProfile(existing: unknown, frontmatter: unknown): De
   const passedThrough: string[] = [];
   const profile: Json = {};
   for (const [key, value] of Object.entries(current)) {
-    if ((DERIVED_KEYS as readonly string[]).includes(key)) continue;
+    if ((DERIVED_KEYS as readonly string[]).includes(key)) {continue;}
     profile[key] = value;
     passedThrough.push(key);
   }
-  for (const [key, value] of Object.entries(derivedProfile)) profile[key] = value;
+  for (const [key, value] of Object.entries(derivedProfile)) {profile[key] = value;}
   return { profile, derived: Object.keys(derivedProfile), passedThrough };
 }
 
 /** Key-order-independent JSON, for "did the derived profile actually change" checks. */
 export function stableStringify(value: unknown): string {
   const sort = (item: unknown): unknown => {
-    if (Array.isArray(item)) return item.map(sort);
+    if (Array.isArray(item)) {return item.map(sort);}
     if (isRecord(item)) {
       const out: Json = {};
-      for (const key of Object.keys(item).sort()) out[key] = sort(item[key]);
+      for (const key of Object.keys(item).toSorted()) {out[key] = sort(item[key]);}
       return out;
     }
     return item;

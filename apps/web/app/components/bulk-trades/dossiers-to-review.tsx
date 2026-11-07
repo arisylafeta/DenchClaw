@@ -25,12 +25,12 @@ export function DossiersToReview({ onOpenCompany }: { onOpenCompany?: (id: strin
     let live = true;
     fetch("/api/crm/buyer-dossiers")
       .then((res) => (res.ok ? res.json() : { dossiers: [] }))
-      .then((data: { dossiers?: DossierToReview[] }) => { if (live) setDossiers(data.dossiers ?? []); })
-      .catch(() => { if (live) setDossiers([]); });
+      .then((data: { dossiers?: DossierToReview[] }) => { if (live) {setDossiers(data.dossiers ?? []);} })
+      .catch(() => { if (live) {setDossiers([]);} });
     return () => { live = false; };
   }, []);
 
-  if (!dossiers?.length) return null;
+  if (!dossiers?.length) {return null;}
   const shown = dossiers.slice(0, SHOWN);
 
   return (

@@ -32,19 +32,23 @@ const muted = { color: "var(--color-text-muted)" };
 const TEXTAREA = "w-full rounded-md border px-2 py-1.5 font-mono text-[12px] leading-5";
 const inputStyle = { borderColor: "var(--color-border)", background: "var(--color-background)", color: "var(--color-text)" };
 
-const TEMPLATE = `---
-company_id: "${"${companyId}"}"
-company: "Company name"
-products: []
-last_verified: "${"${today}"}"
----
-## What they buy
-
-## Notes
-`;
+const TEMPLATE = [
+  "---",
+  'company_id: "__COMPANY__"',
+  'company: "Company name"',
+  "products: []",
+  'last_verified: "__TODAY__"',
+  "---",
+  "## What they buy",
+  "",
+  "## Notes",
+  "",
+].join("\n");
 
 function template(companyId: string): string {
-  return TEMPLATE.replaceAll("${companyId}", companyId).replaceAll("${today}", new Date().toISOString().slice(0, 10));
+  return TEMPLATE
+    .replaceAll("__COMPANY__", companyId)
+    .replaceAll("__TODAY__", new Date().toISOString().slice(0, 10));
 }
 
 /**
@@ -64,7 +68,7 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/crm/companies/${encodeURIComponent(companyId)}/buyer-dossier`);
-      if (!res.ok) throw new Error(res.status === 404 ? "Company not found." : `Could not load the dossier (HTTP ${res.status}).`);
+      if (!res.ok) {throw new Error(res.status === 404 ? "Company not found." : `Could not load the dossier (HTTP ${res.status}).`);}
       const data = (await res.json()) as CompanyDossier;
       setDossier(data);
       setLoadError(null);
@@ -134,7 +138,7 @@ export function DossierPanel({ companyId, onSaved }: { companyId: string; onSave
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "mark_reviewed" }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {throw new Error(`HTTP ${res.status}`);}
       setMessage("Marked reviewed.");
       await load();
     } catch {
