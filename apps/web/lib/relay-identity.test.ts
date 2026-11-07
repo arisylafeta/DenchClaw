@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dealSummaryText, ownsDeal, replyIdentity } from "./relay-identity";
+import { dealSummaryText, ownsDeal, replyIdentity, suggestDealAction, threadInbox } from "./relay-identity";
 
 const inbound = (to: string[], cc: string[] = [], identity_key: string | null = null) => ({ direction: "inbound", to_emails: to, cc_emails: cc, identity_key });
 const outbound = (identity_key: string | null) => ({ direction: "outbound", to_emails: ["x@seller.com"], cc_emails: [], identity_key });
@@ -73,5 +73,25 @@ describe("dealSummaryText", () => {
 describe("ownsDeal with personal and ISP mail", () => {
   it("never matches two people on the same personal or ISP domain", () => {
     for (const d of ["btinternet.com", "sky.com", "wp.pl", "gmail.com"]) expect(ownsDeal(`buyer@${d}`, `seller@${d}`)).toBe(false);
+  });
+});
+
+describe("threadInbox and suggestDealAction", () => {
+  it("picks the inbox on the thread, and the contact's side when both are", () => {
+    expect(threadInbox(true, false)).toBe("supply");
+    expect(threadInbox(false, true)).toBe("buy");
+    expect(threadInbox(true, true, "buyer")).toBe("buy");
+    expect(threadInbox(true, true, "supplier")).toBe("supply");
+    expect(threadInbox(false, false)).toBeNull();
+  });
+  const email = (bulk_listing_id: string | null, contact_type: string | null, direction: string | null) => ({ bulk_listing_id, contact_type, last_message: { direction } });
+  it("offers Create deal on a seller or buyer email with no deal", () => {
+    expect(suggestDealAction(email(null, null, "inbound"), "supply")).toBe("create");
+    expect(suggestDealAction(email(null, "buyer", "inbound"), null)).toBe("create");
+    expect(suggestDealAction(email(null, "logistics", "inbound"), null)).toBeNull();
+  });
+  it("offers Update deal only when their reply is the newest message", () => {
+    expect(suggestDealAction(email("btd_1", "supplier", "inbound"), "supply")).toBe("update");
+    expect(suggestDealAction(email("btd_1", "supplier", "outbound"), "supply")).toBeNull();
   });
 });

@@ -11,7 +11,7 @@ import type { DraftAttachment } from "./mail-types";
 import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
-import { dealSummaryText, replyIdentity, type ReplyIdentity } from "./relay-identity";
+import { dealSummaryText, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -46,6 +46,12 @@ export type RelayItem = {
   updated_at: string;
   /** The kind of email (buyer_price, chase, ...), from the scan; picks the voice card and examples. */
   situation: string | null;
+  /** The shared inbox on the thread: supply@ for sellers, buy@ for buyers. Set on list views only. */
+  inbox?: "supply" | "buy" | null;
+  /** What Relay suggests for the deal: create one, or update it from their newest reply. */
+  deal_action?: "create" | "update" | null;
+  /** The latest Create deal or Update deal job on this email. */
+  deal_job?: RelayDealJob | null;
 };
 
 export type RelayDraftView = {
@@ -81,10 +87,11 @@ const PRIORITY_ORDER = `case i.priority when 'urgent' then 0 when 'overdue' then
 
 /** Items waiting on the owner, by tab, most important first. Snoozed items stay hidden until their time comes. */
 export async function listRelayItems(ownerId: string, tab: RelayTab): Promise<RelayItem[]> {
-  return queryPg<RelayItem>(
+  await finaliseDealJobs(ownerId);
+  return withDealInfo(await queryPg<RelayItem>(
     `select ${ITEM_COLUMNS} from relay_item i
      where i.owner_id = $1::uuid and i.status = 'open' and i.tab = $2 and (i.snooze_until is null or i.snooze_until <= now())
-     order by ${PRIORITY_ORDER}, coalesce(i.waiting_since, i.updated_at) asc limit 200`, [ownerId, tab]);
+     order by ${PRIORITY_ORDER}, coalesce(i.waiting_since, i.updated_at) asc limit 200`, [ownerId, tab]));
 }
 
 export type RelayCounts = { action: number; follow: number; other: number; review: number; todos: number; sent_today: number; done_today: number; scheduled: number };
@@ -319,10 +326,116 @@ async function draftContext(item: RelayItem, ownerId: string, note: string) {
   const deal = await dealSummary(item.bulk_listing_id, lastInbound?.from_email ?? item.counterpart_email);
   const voice = await voiceFor(ownerId, item, stripQuoted(lastInbound?.body_text ?? item.last_message?.text ?? ""));
   const transcript = [...messages].reverse().map((m) => `--- ${m.direction === "inbound" ? `From ${m.from_email}` : `From Alex (${m.from_email})`} · ${m.at}\nTo: ${m.to_emails.join(", ")}${m.cc_emails.length ? `\nCc: ${m.cc_emails.join(", ")}` : ""}\nSubject: ${m.subject ?? ""}\n${stripQuoted(m.body_text ?? "").slice(0, 3000)}`).join("\n\n");
-  const prompt = `${voice ? voiceExamplesBlock(voice.card, voice.examples) : ""}Alex's note (what he wants to say):\n${note}\n\n${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
   const to = (lastInbound?.from_email ?? item.counterpart_email ?? "").trim();
+  const identity = replyIdentity(messages, item.contact_type);
+  const bulk = identity !== "alex" || !!item.bulk_listing_id || item.contact_type === "buyer" || item.contact_type === "supplier";
+  const intake = bulk ? intakeGuide() : "";
+  // The deal's own label stays out: it can name the buyer, and the reply may go to a supplier.
+  const where = `Sending as: ${identity === "supply" ? "supply@rebattery.io, ReBattery's seller inbox" : identity === "buy" ? "buy@rebattery.io, ReBattery's buyer inbox" : "Alex's own address"}. Writing to: ${to || "unknown"}.\n`
+    + (item.bulk_listing_id ? "This email is linked to a deal (record below).\n" : bulk ? "This email is not linked to a deal yet. If they are offering or asking for batteries, write the first reply the intake guide describes.\n" : "");
+  const prompt = `${voice ? voiceExamplesBlock(voice.card, voice.examples) : ""}${where}\n${intake ? `ReBattery's intake guide (follow it for what to ask, and for what never to share):\n${intake}\n\n` : ""}Alex's note (what he wants to say):\n${note}\n\n${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
   if (!to) throw new RelayError(400, "Relay couldn't find who to reply to on this thread.");
-  return { messages, rules, prompt, to, identity: replyIdentity(messages, item.contact_type), guide: voice?.guide ?? null };
+  return { messages, rules, prompt, to, identity, guide: voice?.guide ?? null };
+}
+
+// ---------- bulk deals ----------
+
+const MATCHA_RECIPE = "/root/.hermes/profiles/matcha/RECIPE.md";
+const INTAKE_GUIDE = "/root/.hermes/profiles/matcha/skills/bulk-trade-development/references/intake.md";
+let intakeCache: { mtime: number; text: string } | null = null;
+
+/** Matcha's intake reference (the bulk deal playbook, steps 1 to 6), without the section only Matcha's jobs need. Empty if missing. */
+function intakeGuide(): string {
+  try {
+    const { mtimeMs } = statSync(INTAKE_GUIDE);
+    if (intakeCache?.mtime !== mtimeMs) intakeCache = { mtime: mtimeMs, text: readFileSync(INTAKE_GUIDE, "utf8").split(/\n## Relay buttons/)[0].trim().slice(0, 16_000) };
+    return intakeCache.text;
+  } catch { return ""; }
+}
+
+const DEAL_NOTE = "[deal:";
+export type RelayDealResult = { action?: string; listing_id?: string | null; title?: string; stage?: string; size?: string; gaps?: string[]; owner?: string; next?: string };
+export type RelayDealJob = { id: string; item_id: string; status: RelayJob["status"]; action: "create" | "update"; error: string | null; result: RelayDealResult | null; steps: string[]; created_at: string };
+
+/** Which shared inbox each email's thread involves, and the latest Create or Update deal job, plus what Relay suggests next. */
+async function withDealInfo(items: RelayItem[]): Promise<RelayItem[]> {
+  if (!items.length) return items;
+  const threads = items.map((i) => i.mail_thread_id).filter((t): t is string => !!t);
+  const inboxes = threads.length ? await queryPg<{ thread_id: string; supply: boolean; buy: boolean }>(
+    `select m.thread_id::text as thread_id,
+       bool_or(m.identity_key = 'supply' or exists (select 1 from unnest(coalesce(m.to_emails,'{}') || coalesce(m.cc_emails,'{}')) a where lower(a) = 'supply@rebattery.io')) as supply,
+       bool_or(m.identity_key = 'buy' or exists (select 1 from unnest(coalesce(m.to_emails,'{}') || coalesce(m.cc_emails,'{}')) a where lower(a) = 'buy@rebattery.io')) as buy
+     from mail_message m where m.thread_id::text = any($1) group by 1`, [threads]).catch(() => []) : [];
+  const byThread = new Map(inboxes.map((r) => [r.thread_id, r]));
+  const jobs = await dealJobsFor(items.map((i) => i.id));
+  return items.map((i) => {
+    const box = i.mail_thread_id ? byThread.get(i.mail_thread_id) : undefined;
+    const inbox = threadInbox(!!box?.supply, !!box?.buy, i.contact_type);
+    return { ...i, inbox, deal_action: suggestDealAction(i, inbox), deal_job: jobs.get(i.id) ?? null };
+  });
+}
+
+/** Latest deal job per email. Jobs stuck past the time limit are marked failed. */
+async function dealJobsFor(itemIds: string[]): Promise<Map<string, RelayDealJob>> {
+  if (!itemIds.length) return new Map();
+  await queryPg(`update relay_job set status = 'failed', error = 'Timed out', finished_at = now()
+    where item_id = any($1) and status in ('queued','running','finalising') and created_at < now() - ($2 || ' minutes')::interval`, [itemIds, String(JOB_STALE_MINUTES)]);
+  const rows = await queryPg<Omit<RelayDealJob, "action"> & { note: string }>(`select distinct on (item_id) id, item_id, status, steps, error, result, created_at::text, note
+    from relay_job where item_id = any($1) and left(note, 6) = $2 order by item_id, created_at desc`, [itemIds, DEAL_NOTE]);
+  return new Map(rows.map(({ note, ...r }) => [r.item_id, { ...r, action: note.startsWith("[deal:update]") ? "update" : "create" }]));
+}
+
+/** "Create deal" or "Update deal from this reply": Matcha does the CRM work in a one-off job (relay_job.py). Nothing is sent. */
+export async function startDealJob(itemId: string, ownerId: string, action: "create" | "update"): Promise<void> {
+  const item = await readRelayItem(itemId, ownerId);
+  if (!item) throw new RelayError(404, "Not found");
+  if (action === "update" && !item.bulk_listing_id) throw new RelayError(409, "This email isn't linked to a deal yet. Create the deal first.");
+  const [busy] = await queryPg<{ id: string }>(`select id from relay_job where item_id = $1 and left(note, 6) = $2 and status in ('queued','running','ready','finalising')
+    and created_at > now() - ($3 || ' minutes')::interval limit 1`, [item.id, DEAL_NOTE, String(JOB_STALE_MINUTES)]);
+  if (busy) throw new RelayError(409, "Matcha is already working on this deal.");
+  const messages = await threadMessages(item.mail_thread_id);
+  const inbox = replyIdentity(messages, item.contact_type);
+  const latest = messages.find((m) => m.direction === "inbound");
+  const label = action === "create" ? "Create deal" : "Update deal from this reply";
+  const prompt = [
+    `Relay button: ${label}.`,
+    `Follow ${MATCHA_RECIPE} and ${INTAKE_GUIDE}, section "Relay buttons". Finish with only the JSON that section describes.`,
+    `Mail thread: ${item.mail_thread_id ?? "not in the mail log"}; Gmail thread ${item.gmail_thread_id}. Read it with rebattery-mail thread.`,
+    `Inbox: ${inbox === "supply" ? "supply@rebattery.io (a seller)" : inbox === "buy" ? "buy@rebattery.io (a buyer)" : "Alex's own address, no shared inbox on the thread"}.`,
+    `From: ${item.counterpart_name ?? ""} <${item.counterpart_email ?? ""}>${item.company ? `, ${item.company}` : ""}. Contact type from Relay: ${item.contact_type ?? "unknown"}.`,
+    `Linked deal: ${item.bulk_listing_id ?? "none"}.`,
+    `Subject: ${latest?.subject ?? item.headline}`,
+    `Their latest message (${latest?.at ?? item.last_message?.at ?? ""}):\n${stripQuoted(latest?.body_text ?? item.last_message?.text ?? "").slice(0, 4000)}`,
+  ].join("\n");
+  const [job] = await queryPg<{ id: string }>("insert into relay_job (item_id, owner_id, note, steps) values ($1, $2::uuid, $3, $4::jsonb) returning id",
+    [item.id, ownerId, `[deal:${action}] ${label}`, JSON.stringify(["Queued for Matcha"])]);
+  const dir = join(JOB_ROOT, job.id);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(dir, "prompt.txt"), prompt, { mode: 0o600 });
+  const child = spawn("/usr/bin/python3", [JOB_RUNNER, job.id], { detached: true, stdio: "ignore" });
+  child.unref();
+}
+
+/** Applies finished deal jobs: links the email to the deal Matcha made or updated, and records what it found. */
+async function finaliseDealJobs(ownerId: string): Promise<void> {
+  const claimed = await queryPg<{ id: string; item_id: string; result: RelayDealResult }>(
+    `update relay_job set status = 'finalising' where owner_id = $1::uuid and status = 'ready' and left(note, 6) = $2 returning id, item_id, result`, [ownerId, DEAL_NOTE]);
+  for (const job of claimed) {
+    try {
+      const r = job.result ?? {};
+      if (r.listing_id && (r.action === "created" || r.action === "updated")) {
+        const [listing] = await queryPg<{ id: string; title: string | null }>("select id, coalesce(context->>'listing_title', summary) as title from crm_bulk_listings where id = $1", [r.listing_id]);
+        if (!listing) throw new Error("Matcha named a deal that isn't in the CRM");
+        await queryPg("update relay_item set bulk_listing_id = $2, deal_label = $3, updated_at = now() where id = $1 and owner_id = $4::uuid",
+          [job.item_id, listing.id, (listing.title ?? "").slice(0, 120), ownerId]);
+      }
+      const gaps = Array.isArray(r.gaps) && r.gaps.length ? `missing ${r.gaps.join(", ")}` : "card full";
+      const step = r.action === "none" ? `No deal: ${r.next ?? "too small for Bulk Trades"}` : `${r.action === "created" ? "Deal created" : "Deal updated"}: ${gaps}`;
+      await queryPg("update relay_job set status = 'done', finished_at = now(), steps = steps || $2::jsonb where id = $1", [job.id, JSON.stringify([step])]);
+    } catch (error) {
+      await queryPg("update relay_job set status = 'failed', error = $2, finished_at = now() where id = $1", [job.id, (error instanceof Error ? error.message : "Couldn't apply Matcha's result").slice(0, 300)]);
+    }
+  }
 }
 
 /** Turns the owner's note into draft v1 (plus follow-ons and to-dos) and moves the item to Review. Notes that need work start an agent job instead. */
@@ -440,7 +553,7 @@ async function startJob(item: RelayItem, ownerId: string, note: string): Promise
 export async function retryJob(itemId: string, ownerId: string): Promise<void> {
   const item = await readRelayItem(itemId, ownerId);
   if (!item) throw new RelayError(404, "Not found");
-  const [last] = await queryPg<{ note: string; status: string }>("select note, status from relay_job where item_id = $1 order by created_at desc limit 1", [itemId]);
+  const [last] = await queryPg<{ note: string; status: string }>("select note, status from relay_job where item_id = $1 and left(note, 6) <> $2 order by created_at desc limit 1", [itemId, DEAL_NOTE]);
   if (!last) throw new RelayError(404, "Nothing to retry.");
   if (["queued", "running", "finalising"].includes(last.status)) throw new RelayError(409, "Relay is still working on this.");
   await startJob(item, ownerId, last.note);
@@ -452,14 +565,14 @@ export async function jobsFor(itemIds: string[]): Promise<Map<string, RelayJob>>
   await queryPg(`update relay_job set status = 'failed', error = 'Timed out', finished_at = now()
     where item_id = any($1) and status in ('queued','running','finalising') and created_at < now() - ($2 || ' minutes')::interval`, [itemIds, String(JOB_STALE_MINUTES)]);
   const rows = await queryPg<RelayJob>(`select distinct on (item_id) id, item_id, status, steps, error, created_at, started_at, finished_at, note
-    from relay_job where item_id = any($1) order by item_id, created_at desc`, [itemIds]);
+    from relay_job where item_id = any($1) and left(note, 6) <> $2 order by item_id, created_at desc`, [itemIds, DEAL_NOTE]);
   return new Map(rows.map((r) => [r.item_id, r]));
 }
 
 /** Turns finished agent results into drafts. Runs when Relay loads; each job is claimed once. */
 export async function finaliseJobs(ownerId: string): Promise<void> {
   const claimed = await queryPg<{ id: string; item_id: string; note: string; result: Record<string, unknown> }>(
-    `update relay_job set status = 'finalising' where owner_id = $1::uuid and status = 'ready' returning id, item_id, note, result`, [ownerId]);
+    `update relay_job set status = 'finalising' where owner_id = $1::uuid and status = 'ready' and left(note, 6) <> $2 returning id, item_id, note, result`, [ownerId, DEAL_NOTE]);
   for (const job of claimed) {
     try {
       const item = await readRelayItem(job.item_id, ownerId);

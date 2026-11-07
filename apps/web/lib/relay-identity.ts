@@ -66,3 +66,18 @@ export function dealSummaryText(row: DealRow, counterpartEmail: string | null | 
   ];
   return lines.filter(Boolean).join("\n");
 }
+
+/** The shared inbox a thread involves. A thread copied to both goes by the contact's side. */
+export function threadInbox(supply: boolean, buy: boolean, contactType?: string | null): "supply" | "buy" | null {
+  if (supply && buy) return contactType === "buyer" ? "buy" : "supply";
+  return supply ? "supply" : buy ? "buy" : null;
+}
+
+/** What Relay offers for the deal: create one for a seller or buyer email with none, or update it when their reply is newest. */
+export function suggestDealAction(
+  item: { bulk_listing_id: string | null; contact_type: string | null; last_message: { direction: string | null } | null },
+  inbox: "supply" | "buy" | null,
+): "create" | "update" | null {
+  if (item.bulk_listing_id) return item.last_message?.direction === "inbound" ? "update" : null;
+  return inbox || item.contact_type === "buyer" || item.contact_type === "supplier" ? "create" : null;
+}

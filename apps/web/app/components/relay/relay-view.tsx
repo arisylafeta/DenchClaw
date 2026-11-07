@@ -93,6 +93,13 @@ export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?
       return false;
     }
   }, [say, load, tab]);
+  // While Matcha creates or updates a deal, check every few seconds so its result shows on the email.
+  const dealBusy = !!data?.items.some(dealWorking);
+  useEffect(() => {
+    if (!dealBusy) return;
+    const t = setInterval(() => void load(tab), 6000);
+    return () => clearInterval(t);
+  }, [dealBusy, load, tab]);
   // While sends are pending, check every few seconds and report each outcome once.
   useEffect(() => {
     if (!Object.keys(sending).length) return;
@@ -197,6 +204,18 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
     const note = notes[i.id];
     if (note === undefined || note === i.note) return;
     void api(`/api/relay/items/${i.id}`, { method: "PATCH", body: { note } }).catch(() => undefined);
+  };
+  const dealJob = async (i: RelayItem, action: "create" | "update") => {
+    setBusy((b) => ({ ...b, [i.id]: true }));
+    try {
+      await api(`/api/relay/items/${i.id}/deal`, { method: "POST", body: { action } });
+      say(action === "create" ? `Matcha is creating the deal for ${firstName(i.counterpart_name)} (a minute or two)` : `Matcha is updating the deal from ${firstName(i.counterpart_name)}'s reply`);
+      await reload();
+    } catch (err) {
+      say(err instanceof Error ? err.message : "Couldn't start Matcha. Try again.");
+    } finally {
+      setBusy((b) => ({ ...b, [i.id]: false }));
+    }
   };
   const draft = async (i: RelayItem) => {
     const note = noteOf(i).trim();
@@ -310,7 +329,10 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
                       ? <button type="button" className={s.deal} title={`Open deal: ${i.deal_label ?? ""}`} onClick={(e) => { e.stopPropagation(); onOpenListing?.(i.bulk_listing_id!, i.deal_label ?? undefined); }}>
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M20 12l-8 8-9-9V3h8z" /><circle cx="7.5" cy="7.5" r="1.5" /></svg><span>{i.deal_label || "Deal"}</span>
                         </button>
-                      : <span className={s.nodeal}>No deal</span>}
+                      : dealWorking(i) ? <span className={s.nodeal}>Matcha working…</span>
+                      : i.deal_action === "create"
+                        ? <button type="button" className={s.mkdeal} disabled={busy[i.id]} title={`Matcha creates the deal from this ${i.inbox === "buy" ? "buyer" : i.inbox === "supply" ? "seller" : ""} email and fills the card`} onClick={(e) => { e.stopPropagation(); void dealJob(i, "create"); }}>+ Create deal</button>
+                        : <span className={s.nodeal}>No deal</span>}
                   </div>
                   <div className={cx(s.wait, s.num, i.priority === "overdue" && s.late)}>{ago(i.waiting_since ?? i.last_message?.at)}</div>
                   {tab === "other"
@@ -326,6 +348,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
                       </div>
                     )}
                     {i.earlier.length > 0 && <div className={s.earlier}>{i.earlier.map((e, k) => <span key={k}><b>{e.who}</b> · {e.when}: {e.summary}</span>)}</div>}
+                    <DealBar item={i} busy={!!busy[i.id]} onRun={(action) => void dealJob(i, action)} onOpenListing={onOpenListing} />
                   </div>
                 )}
                 {tab !== "other" && (
@@ -1124,3 +1147,31 @@ Todos.Suggested = function Suggested({ item, draft, reload, say }: { item: Relay
     </div>
   );
 };
+
+const dealWorking = (i: RelayItem) => !!i.deal_job && ["queued", "running", "ready", "finalising"].includes(i.deal_job.status);
+
+/** The deal under an open email: which inbox it came to, Matcha's latest result, and Create deal or Update deal from this reply. */
+function DealBar({ item: i, busy, onRun, onOpenListing }: { item: RelayItem; busy: boolean; onRun: (action: "create" | "update") => void; onOpenListing?: (id: string, label?: string) => void }) {
+  const job = i.deal_job;
+  if (!i.inbox && !i.deal_action && !job && !i.bulk_listing_id) return null;
+  const working = dealWorking(i);
+  const result = job?.status === "done" ? job.result : null;
+  return (
+    <div className={s.dealbar}>
+      <div className={s.dealtext}>
+        {i.inbox && <span className={s.inbox}>{i.inbox === "buy" ? "buy@ · buyer" : "supply@ · seller"}</span>}
+        {working ? <span>Matcha is {job?.action === "update" ? "updating the deal from this reply" : "creating the deal"}…</span>
+          : job?.status === "failed" ? <span className={s.dealerr}>Matcha couldn&apos;t finish: {job.error ?? "unknown error"}</span>
+          : result ? <span>{result.action === "none" ? `No deal: ${result.next ?? "too small for Bulk Trades"}` : <>{result.action === "created" ? "Deal created" : "Deal updated"}{result.gaps?.length ? <> · missing <b>{result.gaps.join(", ")}</b></> : " · card full"}{result.owner === "Sean" ? " · now Sean's" : ""}{result.next ? <> · next: {result.next}</> : null}</>}</span>
+          : i.bulk_listing_id ? <span>Linked to {i.deal_label || "a deal"}</span>
+          : <span>Not linked to a deal yet</span>}
+      </div>
+      <div className={s.dealbtns}>
+        {i.bulk_listing_id && <button type="button" className={s.btn} onClick={() => onOpenListing?.(i.bulk_listing_id!, i.deal_label ?? undefined)}>Open deal</button>}
+        {!working && i.deal_action === "update" && <button type="button" className={cx(s.btn, s.pri)} disabled={busy} onClick={() => onRun("update")}>Update deal from this reply</button>}
+        {!working && i.deal_action === "create" && <button type="button" className={cx(s.btn, s.pri)} disabled={busy} onClick={() => onRun("create")}>Create deal</button>}
+        {!working && job?.status === "failed" && <button type="button" className={s.btn} disabled={busy} onClick={() => onRun(job.action)}>Try again</button>}
+      </div>
+    </div>
+  );
+}

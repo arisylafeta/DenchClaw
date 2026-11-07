@@ -13,3 +13,9 @@ def test_last_json_object_none_without_a_body():
 
 def test_rejects_bad_job_ids():
     assert rj.main("../../etc") == 2
+
+
+def test_last_json_object_finds_matchas_deal_result():
+    out = 'Reading thread...\n{"body": "not this"}\n{"action": "created", "listing_id": "btd_1", "gaps": ["price"]}\nsession_id: x'
+    assert rj.last_json_object(out, "action")["listing_id"] == "btd_1"
+    assert rj.last_json_object('{"body": "a draft"}', "action") is None
