@@ -13,6 +13,7 @@ metrics file plus a report. No Postgres writes, no email, no WhatsApp.
 | A1 | The same rules layer plus product keywords from dated body lines and dated `past_asks`. Top 30. |
 | B0 | One caseworker call over A1's top 30, using `buyer_profile` JSON, stage, tier and basis only. |
 | B1 | The same call over the same top 30, with strict as-of dossiers for the ten pilot buyers. |
+| TS | The production rules layer: the real `apps/web/lib/match/rules.ts` run over the same fixtures. The phase 4 gate. |
 
 ## Inputs
 
@@ -32,6 +33,21 @@ All data stays outside git. Pass paths explicitly:
   --cache-dir /path/to/replay/cache-v2 \
   --arms A0,A1S,A1,B0,B1
 ```
+
+The phase 4 gate runs the TypeScript rules instead of the Python A1 arm and
+fails when they differ from it, when fewer than 11 of the 12 positive cases
+put the real buyer in the top 5, or when any ranked company is one the rules
+rule out:
+
+```bash
+/usr/bin/python3 scripts/rebattery/match_replay/run_replay.py \
+  --cases /path/to/replay/cases.verified.json --pool /path/to/replay/pool-v2.json \
+  --dossiers /path/to/buyer-dossiers-pilot --replay-dir /path/to/replay --arms A1,TS --gate
+```
+
+`a1_parity.ts` imports the rules module; `run_replay.py` bundles it with the
+repo's own esbuild (no extra install) and runs it once through node. The gate
+outcome is written to `<outputs-dir>/gate.json` and `metrics.json.ts_gate`.
 
 `build_pool.py` reads `crm_companies` (buyer_profile not empty, no exclusion
 reason) and the last `mail_message` touch through `crm_people.person_id`. It

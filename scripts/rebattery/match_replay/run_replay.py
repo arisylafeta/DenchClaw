@@ -28,6 +28,11 @@ import rules
 
 POSITIVE_OUTCOMES = {"won", "bid", "asked"}
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+# The real TypeScript rules layer, bundled with the repo's own esbuild so one node run can import it.
+TS_SCRIPT = Path(__file__).with_name("a1_parity.ts")
+TS_ESBUILD = REPO_ROOT / "node_modules" / ".bin" / "esbuild"
+
 
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -106,6 +111,57 @@ def run_a0(cases: list[dict[str, Any]], buyers: list[dict[str, Any]], script: Pa
     return out
 
 
+def buyer_views(case: dict[str, Any], buyers: list[dict[str, Any]], dossiers: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every buyer as one case sees them: the strict as-of dossier view, or none."""
+    views = []
+    for buyer in buyers:
+        view = dossier_mod.load_dossier(dossiers[buyer["id"]]["path"], case["as_of"]) if buyer["id"] in dossiers else None
+        views.append(buyer_view(buyer, view))
+    return views
+
+
+def run_ts(
+    cases: list[dict[str, Any]],
+    buyers: list[dict[str, Any]],
+    dossiers: dict[str, dict[str, Any]],
+    out_dir: Path,
+    arm: str = "TS",
+) -> dict[str, Any]:
+    """The TypeScript rules layer on the same fixtures: the gate against the A1 arm it was ported from."""
+    payload = {
+        "cases": [{"id": case["id"], "as_of": case["as_of"], "listing": case["listing"]} for case in cases],
+        "buyers": [
+            {"id": buyer["id"], "name": buyer["name"], "profile": buyer.get("profile") or {},
+             "stage": buyer.get("stage"), "tier": buyer.get("tier"), "basis": buyer.get("basis"),
+             "last_touch": buyer.get("last_touch")}
+            for buyer in buyers
+        ],
+        "dossiers": {
+            case["id"]: {view["id"]: view["dossier"] for view in buyer_views(case, buyers, dossiers) if view.get("dossier")}
+            for case in cases
+        },
+    }
+    input_path = out_dir / "ts_input.json"
+    dump_json(input_path, payload)
+    result = subprocess.run(
+        [str(TS_ESBUILD), str(TS_SCRIPT), "--bundle", "--format=esm", "--platform=node",
+         f"--outfile={out_dir / 'a1_parity.mjs'}", "--log-level=error"],
+        check=True, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"esbuild failed: {result.stderr}")
+    run = subprocess.run(["node", str(out_dir / "a1_parity.mjs"), str(input_path)], check=True, capture_output=True, text=True)
+    ts = json.loads(run.stdout)["cases"]
+    out: dict[str, Any] = {}
+    for case in cases:
+        rows = ts[case["id"]]["ranked"]
+        for index, row in enumerate(rows):
+            row["rank"] = index + 1
+        out[case["id"]] = {"ranked": rows, "ts_violations": ts[case["id"]]["violations"]}
+    dump_json(out_dir / f"{arm.lower()}.json", {"cases": out})
+    return out
+
+
 def run_a1(
     cases: list[dict[str, Any]],
     buyers: list[dict[str, Any]],
@@ -117,12 +173,7 @@ def run_a1(
     out: dict[str, Any] = {}
     for case in cases:
         as_of = case["as_of"]
-        views = []
-        for buyer in buyers:
-            view = None
-            if buyer["id"] in dossiers:
-                view = dossier_mod.load_dossier(dossiers[buyer["id"]]["path"], as_of)
-            views.append(buyer_view(buyer, view))
+        views = buyer_views(case, buyers, dossiers)
         rows = rules.rank_a1(case["listing"], views, as_of, top=30, body_fallback=body_fallback)
         for index, row in enumerate(rows):
             row["rank"] = index + 1
@@ -315,7 +366,51 @@ def compute_metrics(
     return metrics
 
 
+def evaluate_gate(cases: list[dict[str, Any]], arms: dict[str, Any], expected: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    """The phase 4 gate: 11 of 12 positives in the top 5, no rule violations, and identical to A1."""
+    ts = arms.get("TS", {})
+    a1 = arms.get("A1")
+    per_case: dict[str, Any] = {}
+    hits = 0
+    positive_cases = 0
+    violations: list[dict[str, Any]] = []
+    parity_ok = True
+    for case in cases:
+        case_id = case["id"]
+        rows = ts.get(case_id, {}).get("ranked", [])
+        positives = [item for item in expected[case_id] if item["outcome"] in POSITIVE_OUTCOMES]
+        ranks = {item["company_id"]: rank_of(rows, item["company_id"]) for item in positives}
+        top5 = [rank for rank in ranks.values() if rank and rank <= 5]
+        if positives:
+            positive_cases += 1
+            if top5:
+                hits += 1
+        same = None
+        if a1:
+            same = [row["company_id"] for row in rows] == [row["company_id"] for row in a1.get(case_id, {}).get("ranked", [])]
+            parity_ok = parity_ok and same
+        violations.extend({"case": case_id, **item} for item in ts.get(case_id, {}).get("ts_violations", []))
+        per_case[case_id] = {
+            "expected_ranks": {company_id: rank for company_id, rank in ranks.items()},
+            "hit_at_5": bool(top5),
+            "same_as_a1": same,
+            "violations": len(ts.get(case_id, {}).get("ts_violations", [])),
+        }
+    return {
+        "ok": hits >= 11 and not violations and parity_ok,
+        "positive_cases": positive_cases,
+        "recall_at_5_hits": hits,
+        "recall_at_5": round(hits / positive_cases, 3) if positive_cases else None,
+        "target_hits": 11,
+        "violation_count": len(violations),
+        "violations": violations,
+        "same_as_a1": parity_ok if a1 else None,
+        "per_case": per_case,
+    }
+
+
 def main() -> None:
+    global TS_SCRIPT, TS_ESBUILD
     parser = argparse.ArgumentParser()
     parser.add_argument("--cases", required=True)
     parser.add_argument("--pool", required=True)
@@ -324,9 +419,15 @@ def main() -> None:
     parser.add_argument("--outputs-dir", default=None)
     parser.add_argument("--cache-dir", default=None)
     parser.add_argument("--ts-script", default=str(Path(__file__).with_name("a0_parity.ts")))
+    parser.add_argument("--ts-rules-script", default=str(TS_SCRIPT))
+    parser.add_argument("--esbuild", default=str(TS_ESBUILD))
     parser.add_argument("--arms", default="A0,A1S,A1,B0,B1")
+    parser.add_argument("--gate", action="store_true", help="fail when the TypeScript rules miss the phase 4 gate")
     parser.add_argument("--judgements", default=None)
     args = parser.parse_args()
+
+    TS_SCRIPT = Path(args.ts_rules_script)
+    TS_ESBUILD = Path(args.esbuild)
 
     replay_dir = Path(args.replay_dir)
     out_dir = Path(args.outputs_dir) if args.outputs_dir else replay_dir / "outputs"
@@ -351,6 +452,8 @@ def main() -> None:
         if "A1" not in arms:
             arms["A1"] = load_json(out_dir / "a1.json")["cases"]
         arms.update(run_b(cases, pool, dossiers, arms["A1"], out_dir, cache_dir, b_arms))
+    if "TS" in arms_wanted:
+        arms["TS"] = run_ts(cases, pool, dossiers, out_dir)
 
     judgements = {}
     if args.judgements:
@@ -364,6 +467,16 @@ def main() -> None:
     }
     metrics["caseworker_shortfalls"] = shortfalls
     dump_json(out_dir / "metrics.json", metrics)
+    gate = None
+    if "TS" in arms:
+        gate = evaluate_gate(cases, arms, expected)
+        dump_json(out_dir / "gate.json", gate)
+        metrics["ts_gate"] = gate
+        dump_json(out_dir / "metrics.json", metrics)
+        print(json.dumps({"gate": {key: gate[key] for key in ("ok", "recall_at_5_hits", "positive_cases", "violation_count", "same_as_a1")}}))
+        if args.gate and not gate["ok"]:
+            print(json.dumps(gate["violations"][:10]), file=sys.stderr)
+            raise SystemExit("Phase 4 replay gate failed")
     print(json.dumps({"metrics": str(out_dir / "metrics.json"), "arms": list(arms)}))
 
 
