@@ -544,6 +544,20 @@ def load_deals(cur, thread_ids: list[str]) -> dict[str, set[str]]:
     return out
 
 
+def load_relay_links(cur, thread_ids: list[str]) -> dict[str, dict]:
+    """Deals Alex linked a thread to by hand with Relay's "Link to deal". They win over choose_deal, so a supplier's quote
+    for a buyer's request stays on it. Only Relay's own links count: the October bulk labels stay advisory."""
+    if not thread_ids or not table_exists(cur, "crm_bulk_thread_links"):
+        return {}
+    cur.execute(
+        """select distinct on (l.thread_id) l.thread_id, b.id, b.summary, b.quantity
+             from crm_bulk_thread_links l join crm_bulk_listings b on b.id = l.bulk_listing_id
+            where l.channel = 'mail' and l.thread_id = any(%s) and l.state = 'confirmed' and l.labelled_by = 'relay'
+            order by l.thread_id, l.confirmed_at desc nulls last""",
+        (thread_ids,))
+    return {r["thread_id"]: {"bulk_listing_id": r["id"], "summary": r["summary"], "quantity": r["quantity"]} for r in cur.fetchall()}
+
+
 def load_owned_listings(cur) -> dict[str, list[dict]]:
     """Bulk Trades listings keyed by the owner's email and by their company domain ("@domain")."""
     if not table_exists(cur, "crm_bulk_listings"):
@@ -874,7 +888,8 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
         contact_type = ((brief or {}).get("contact_type") if (brief or {}).get("contact_type") in CONTACT_TYPES else None) \
             or purpose_type(person.get("purpose")) or purpose_type(company_row.get("purpose")) \
             or STREAM_TYPE.get(tri.get("automated_stream") or "") or (item or {}).get("contact_type")
-        deal = choose_deal(counterpart, contact_type, ctx_global["deals"].get(tid, set()), thread_text, ctx_global.get("owned", {}))
+        deal = ctx_global.get("relay_links", {}).get(tid) \
+            or choose_deal(counterpart, contact_type, ctx_global["deals"].get(tid, set()), thread_text, ctx_global.get("owned", {}))
         deal_linked = bool(deal) or counterpart in ctx_global.get("open_deal_emails", set())
         # "Owner wrote to them since" counts only a new email from him, not a reply in another conversation.
         ctx = {"triage": tri, "contact_type": contact_type, "deal_linked": deal_linked,
@@ -1073,6 +1088,7 @@ def main(argv: list[str] | None = None) -> int:
             "people": load_people(cur, sorted(counterparts)),
             "companies": load_companies_by_domain(cur, sorted({domain_of(e) for e in counterparts} - FREEMAIL - {""})),
             "deals": load_deals(cur, list(threads)),
+            "relay_links": load_relay_links(cur, list(threads)),
             "open_deal_emails": load_open_deal_emails(cur),
             "owned": load_owned_listings(cur),
             "sender_rules": load_sender_rules(cur, owner_id),

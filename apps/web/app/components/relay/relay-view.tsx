@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HermesConversation } from "@/lib/hermes-conversations";
 import { describeWhen, parseWhen } from "@/lib/relay-when";
-import type { RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayRule, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
+import type { RelayDealOption, RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayRule, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
 import { missingInstruction, type ChecklistItem, type DealChecklist } from "@/lib/relay-checklist";
 import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
 import s from "./relay.module.css";
@@ -54,7 +54,7 @@ async function api<T>(url: string, init?: { method?: string; body?: unknown }): 
 const Arrow = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M5 12h14M13 6l6 6-6 6" /></svg>;
 const Logo = () => <span className={s.logo}><i /></span>;
 
-export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?: (id: string, title?: string) => void; onOpenMailMessage?: (id: string, title?: string) => void }) {
+export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: { onOpenListing?: (id: string, title?: string) => void; onOpenMailMessage?: (id: string, title?: string) => void; onOpenCompany?: (id: string) => void }) {
   const [page, setPage] = useState<Page>("inbox");
   const [tab, setTab] = useState<RelayTab>("action");
   const [data, setData] = useState<Summary | null>(null);
@@ -169,7 +169,7 @@ export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?
 
         {error && <p className={s.error} role="alert">{error}</p>}
         {!data && !error && <p className={s.muted} role="status">Loading Relay…</p>}
-        {data && page === "inbox" && <Inbox data={data} tab={tab} setTab={setTab} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onDrafted={() => setPage("review")} />}
+        {data && page === "inbox" && <Inbox data={data} tab={tab} setTab={setTab} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenCompany={onOpenCompany} onDrafted={() => setPage("review")} />}
         {data && page === "review" && <Review data={data} reload={() => load(tab)} say={say} onBack={() => setPage("inbox")} sending={sending} startSend={startSend} />}
         {data && page === "rules" && <Rules data={data} reload={() => load(tab)} say={say} />}
         {data && page === "todos" && <Tasks tasks={data.todos} scheduled={data.scheduled ?? []} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenMailMessage={onOpenMailMessage} onDrafted={() => setPage("review")} />}
@@ -185,9 +185,9 @@ export function RelayView({ onOpenListing, onOpenMailMessage }: { onOpenListing?
 
 // ---------------------------------------------------------------- Inbox
 
-function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
+function Inbox({ data, tab, setTab, reload, say, onOpenListing, onOpenCompany, onDrafted }: {
   data: Summary; tab: RelayTab; setTab: (t: RelayTab) => void; reload: () => Promise<void>; say: Say;
-  onOpenListing?: (id: string, title?: string) => void; onDrafted: () => void;
+  onOpenListing?: (id: string, title?: string) => void; onOpenCompany?: (id: string) => void; onDrafted: () => void;
 }) {
   const [q, setQ] = useState("");
   const [type, setType] = useState("");
@@ -218,16 +218,14 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
       setBusy((b) => ({ ...b, [i.id]: false }));
     }
   };
-  const listReply = async (i: RelayItem) => {
+  const linkDeal = async (i: RelayItem, listingId: string | null) => {
     setBusy((b) => ({ ...b, [i.id]: true }));
-    say(`Drafting the reply for ${firstName(i.counterpart_name)}…`);
     try {
-      await api(`/api/relay/items/${i.id}/list-reply`, { method: "POST" });
-      setGone((g) => ({ ...g, [i.id]: true }));
+      await api(`/api/relay/items/${i.id}/link`, { method: "POST", body: { listing_id: listingId } });
+      say(listingId ? `Linked ${firstName(i.counterpart_name)}'s thread to the deal` : `Unlinked ${firstName(i.counterpart_name)}'s thread`);
       await reload();
-      say(`Drafted · ${firstName(i.counterpart_name)} is in Review`, onDrafted);
     } catch (err) {
-      say(err instanceof Error ? err.message : "Couldn't draft the reply. Try again.");
+      say(err instanceof Error ? err.message : "Couldn't link the deal. Try again.");
     } finally {
       setBusy((b) => ({ ...b, [i.id]: false }));
     }
@@ -359,7 +357,8 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M20 12l-8 8-9-9V3h8z" /><circle cx="7.5" cy="7.5" r="1.5" /></svg><span>{i.deal_label || "Deal"}</span>
                         </button>
                       : dealWorking(i) ? <span className={s.nodeal}>Matcha working…</span>
-                      : i.dismantler ? <span className={s.dism} title="A dismantler: one or a few packs go to the marketplace, not a bulk deal">Dismantler</span>
+                      : i.dismantler
+                        ? <button type="button" className={s.dism} title={`Open ${i.dismantler.name} in the CRM. A dismantler: one or a few packs go to the marketplace, not a bulk deal`} onClick={(e) => { e.stopPropagation(); onOpenCompany?.(i.dismantler!.company_id); }}>Dismantler · {i.dismantler.name}</button>
                       : i.deal_action === "create"
                         ? <button type="button" className={s.mkdeal} disabled={busy[i.id]} title={`Matcha creates the deal from this ${i.inbox === "buy" ? "buyer" : i.inbox === "supply" ? "seller" : ""} email and fills the card`} onClick={(e) => { e.stopPropagation(); void dealJob(i, "create"); }}>+ Create deal</button>
                         : <span className={s.nodeal}>No deal</span>}
@@ -378,7 +377,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onDrafted }: {
                       </div>
                     )}
                     {i.earlier.length > 0 && <div className={s.earlier}>{i.earlier.map((e, k) => <span key={k}><b>{e.who}</b> · {e.when}: {e.summary}</span>)}</div>}
-                    <DealBar item={i} busy={!!busy[i.id]} onRun={(action) => void dealJob(i, action)} onAsk={tab === "action" && i.can_ask ? () => void draftAsk(i) : undefined} onListReply={tab === "action" ? () => void listReply(i) : undefined} />
+                    <DealBar item={i} busy={!!busy[i.id]} onRun={(action) => void dealJob(i, action)} onAsk={tab === "action" && i.can_ask ? () => void draftAsk(i) : undefined} onLink={(id) => void linkDeal(i, id)} onOpenCompany={onOpenCompany} />
                   </div>
                 )}
                 {tab !== "other" && (
@@ -1183,15 +1182,18 @@ Todos.Suggested = function Suggested({ item, draft, reload, say }: { item: Relay
 
 const dealWorking = (i: RelayItem) => !!i.deal_job && ["queued", "running", "ready", "finalising"].includes(i.deal_job.status);
 
-/** The deal under an open email: which inbox it came to, Matcha's latest result, and Create deal or Update deal from this reply. */
-function DealBar({ item: i, busy, onRun, onAsk, onListReply }: { item: RelayItem; busy: boolean; onRun: (action: "create" | "update") => void; onAsk?: () => void; onListReply?: () => void }) {
+/** The deal under an open email: which inbox it came to, Matcha's latest result, Create deal or Update deal from this reply,
+ * and "Link to deal" for a thread Relay won't link by itself, like a supplier quoting for a buyer's request. */
+function DealBar({ item: i, busy, onRun, onAsk, onLink, onOpenCompany }: { item: RelayItem; busy: boolean; onRun: (action: "create" | "update") => void; onAsk?: () => void; onLink: (listingId: string | null) => void; onOpenCompany?: (id: string) => void }) {
+  const [picking, setPicking] = useState(false);
   const job = i.deal_job;
-  // Shown only when it adds something: a deal to update or ask about, Matcha's run, or a dismantler to point to the marketplace.
+  // Shown for trade emails only: a deal, Matcha's run, a dismantler, a shared inbox, or a known seller or buyer.
   // "+ Create deal" and opening the deal live in the row.
-  if (!i.bulk_listing_id && !job && !i.dismantler) return null;
+  if (!i.bulk_listing_id && !job && !i.dismantler && !i.inbox && i.contact_type !== "buyer" && i.contact_type !== "supplier") return null;
   const dismantlerOnly = !i.bulk_listing_id && !!i.dismantler;
   const working = dealWorking(i);
   const result = job?.status === "done" ? job.result : null;
+  const d = i.dismantler;
   return (
     <div className={s.dealbar}>
       <div className={s.dealtext}>
@@ -1200,16 +1202,46 @@ function DealBar({ item: i, busy, onRun, onAsk, onListReply }: { item: RelayItem
           : job?.status === "failed" ? <span className={s.dealerr}>Matcha couldn&apos;t finish: {job.error ?? "unknown error"}</span>
           : result ? <span>{result.action === "none" ? `No deal: ${result.next ?? "too small for Bulk Trades"}` : <>{result.action === "created" ? "Deal created" : "Deal updated"}{result.gaps?.length ? <> · missing <b>{result.gaps.join(", ")}</b></> : " · card full"}{result.owner === "Sean" ? " · now Sean's" : ""}{result.next ? <> · next: {result.next}</> : null}</>}</span>
           : i.bulk_listing_id ? <span>Linked to {i.deal_label || "a deal"}</span>
-          : dismantlerOnly ? <span>A dismantler{i.dismantler === "marketplace" ? " on the marketplace" : i.dismantler === "stock_only" ? " that sends us stock lists" : ""}. One or a few packs go to the marketplace, not a bulk deal.</span>
+          : dismantlerOnly && d ? <span><button type="button" className={s.linkish} onClick={() => onOpenCompany?.(d.company_id)}>{d.name}</button> is a dismantler{d.phase === "marketplace" ? " on the marketplace" : d.phase === "stock_only" ? " that sends us stock lists" : ""}. One or a few packs go to the marketplace. If they&apos;re quoting for one of our deals, link it.</span>
           : <span>Not linked to a deal yet</span>}
       </div>
       <div className={s.dealbtns}>
         {!working && onAsk && <button type="button" className={s.btn} disabled={busy} title="Drafts the playbook's ask for what the deal is still missing, from the inbox this thread uses. You read it in Review and send." onClick={onAsk}>Draft the ask</button>}
-        {!working && dismantlerOnly && onListReply && <button type="button" className={cx(s.btn, s.pri)} disabled={busy} title="Thanks them, says we don't quote blind, and points them to the marketplace or their stock list" onClick={onListReply}>Reply: list it</button>}
         {!working && i.deal_action === "update" && <button type="button" className={cx(s.btn, s.pri)} disabled={busy} onClick={() => onRun("update")}>
           {job?.status === "failed" && job.action === "update" ? "Try again" : "Update deal from this reply"}</button>}
         {!working && dismantlerOnly && i.deal_action === "create" && <button type="button" className={s.btn} disabled={busy} title="Only for a real lot, about 10 packs or €20k and up" onClick={() => onRun("create")}>{job?.status === "failed" && job.action === "create" ? "Try again: create deal" : "+ Create deal"}</button>}
+        {!working && !picking && <button type="button" className={s.btn} disabled={busy} title="Tie this thread to one of our open deals. Relay keeps the link; it never guesses one for a supplier." onClick={() => setPicking(true)}>{i.bulk_listing_id ? "Change deal" : "Link to deal"}</button>}
       </div>
+      {picking && <DealPicker current={i.bulk_listing_id} busy={busy} onPick={(id) => { setPicking(false); onLink(id); }} onCancel={() => setPicking(false)} />}
+    </div>
+  );
+}
+
+/** Pick one of our open deals for this thread, or unlink it. */
+function DealPicker({ current, busy, onPick, onCancel }: { current: string | null; busy: boolean; onPick: (listingId: string | null) => void; onCancel: () => void }) {
+  const [deals, setDeals] = useState<RelayDealOption[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [choice, setChoice] = useState("");
+  useEffect(() => {
+    let live = true;
+    api<{ deals: RelayDealOption[] }>("/api/relay/deals").then((r) => { if (live) setDeals(r.deals); }).catch(() => { if (live) setFailed(true); });
+    return () => { live = false; };
+  }, []);
+  const label = (d: RelayDealOption) => `${d.kind === "demand" ? "Buying" : "Selling"} · ${d.title}${d.who ? ` · ${d.who}` : ""}`;
+  return (
+    <div className={s.dealpick}>
+      {failed ? <span className={s.dealerr}>Couldn&apos;t load the deals. Try again.</span>
+        : <select aria-label="Deal to link this thread to" value={choice} disabled={!deals || busy} onChange={(e) => setChoice(e.target.value)}>
+            <option value="">{deals ? "Choose an open deal…" : "Loading deals…"}</option>
+            {(["demand", "supply"] as const).map((k) => (
+              <optgroup key={k} label={k === "demand" ? "Buyers' requests" : "Supply"}>
+                {(deals ?? []).filter((d) => d.kind === k && d.id !== current).map((d) => <option key={d.id} value={d.id}>{label(d)}</option>)}
+              </optgroup>
+            ))}
+          </select>}
+      <button type="button" className={cx(s.btn, s.pri)} disabled={!choice || busy} onClick={() => onPick(choice)}>Link</button>
+      {current && <button type="button" className={s.btn} disabled={busy} title="Removes the link you made here. The next scan puts back the sender's own deal, if they have one." onClick={() => onPick(null)}>Unlink</button>}
+      <button type="button" className={cx(s.btn, s.ghost)} onClick={onCancel}>Cancel</button>
     </div>
   );
 }
