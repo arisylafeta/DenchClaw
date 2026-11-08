@@ -25,6 +25,8 @@ export type OfferEmailInput = {
   /** Where the goods are, as written on the listing. Only the town and country survive. */
   location?: string | null;
   buyer?: BuyerFacts | null;
+  /** Which side we are writing for, so a chase asks the right question. */
+  side?: "supply" | "demand";
   /** The subject of the last email on this offer, for a chase. */
   previousSubject?: string | null;
   /** Names, contacts and addresses that must never appear in the copy. */
@@ -36,7 +38,7 @@ export type OfferEmail = { kind: OfferEmailKind; subject: string; body: string }
 /** Thrown instead of returning copy that would identify the other party or an exact address. */
 export class OfferEmailRefused extends Error {
   constructor(readonly leaked: string) {
-    super(`The email would name ${leaked}, so it was not written.`);
+    super(`The email would include ${leaked}, so it was not written.`);
     this.name = "OfferEmailRefused";
   }
 }
@@ -135,6 +137,16 @@ export function testStatusLine(fields: FieldFact[]): string {
     return "No test data recorded.";
   }
   return `Test data: ${value.replace(/[.\s]+$/, "")}.`;
+}
+
+/** On a request, the state of health the buyer has asked for. */
+export function requirementLine(fields: FieldFact[]): string | null {
+  const row = fieldOf(fields, "soh");
+  const value = clean(row?.value);
+  if (!value || row?.status === "conflict") {
+    return null;
+  }
+  return `The buyer is asking for ${value.replace(/[.\s]+$/, "")} state of health.`;
 }
 
 /** State of health, only when the listing records it as a single figure. */
@@ -320,7 +332,7 @@ export function buildOfferEmail(input: OfferEmailInput): OfferEmail {
   } else if (input.kind === "request_stock") {
     const short = productPhrase(input.key);
     subject = short ? `Stock enquiry: ${short}` : "Stock enquiry";
-    const facts = [sohLine(fields)].filter(Boolean).join(" ");
+    const facts = [requirementLine(fields)].filter(Boolean).join(" ");
     body = `${greeting(input.recipientFirstName)}\n\nWe're looking for ${product}${where}.${facts ? ` ${facts}` : ""}\n\nDo you have anything that fits?\n\n${SIGN_OFF}`;
   } else {
     const short = productPhrase(input.key);
@@ -328,7 +340,8 @@ export function buildOfferEmail(input: OfferEmailInput): OfferEmail {
     subject = previous
       ? (previous.toLowerCase().startsWith("re:") ? previous : `Re: ${previous}`)
       : short ? `Following up: ${short}` : "Following up";
-    body = `${greeting(input.recipientFirstName)}\n\nFollowing up on the note I sent about ${product}.\n\nIs it still of interest?\n\n${SIGN_OFF}`;
+    const ask = input.side === "demand" ? "Do you have anything that fits?" : "Is it still of interest?";
+    body = `${greeting(input.recipientFirstName)}\n\nFollowing up on the note I sent about ${product}.\n\n${ask}\n\n${SIGN_OFF}`;
   }
 
   const leaked = firstLeak(`${subject}\n${body}`, input.privateValues ?? []);

@@ -75,6 +75,6 @@ export async function POST(req: Request, { params }: Context) {
     threadLinked,
     moved: marked?.moved ?? false,
     stage: marked?.stage ?? null,
-    warning: threadLinked ? null : "Sent, but the mail thread is not linked yet. The hourly index will link it.",
+    warning: threadLinked ? null : "Sent, but the mail thread is not known yet. It is linked when the mail sync supplies it.",
   });
 }

@@ -72,6 +72,13 @@ describe("the request stock ask", () => {
     expect(email.body).not.toMatch(/EUR|GBP|price|per kWh/i);
     expect((email.body.match(/\?/g) ?? []).length).toBe(1);
   });
+
+  it("states the state of health the buyer asked for, and drops a disputed one", () => {
+    const email = buildOfferEmail({ kind: "request_stock", key: lot, fields: fields({ soh: "80%" }), buyer: null });
+    expect(email.body).toContain("The buyer is asking for 80% state of health.");
+    const disputed = buildOfferEmail({ kind: "request_stock", key: lot, fields: fields({ soh: "80%" }, { soh: "conflict" }), buyer: null });
+    expect(disputed.body).not.toContain("state of health");
+  });
 });
 
 describe("the chase", () => {
@@ -82,6 +89,12 @@ describe("the chase", () => {
     expect(email.body).toContain("Is it still of interest?");
     expect(email.body.split("\n\n")).toHaveLength(4);
     expect(email.body).not.toMatch(/EUR|price/i);
+  });
+
+  it("asks the stock question again on a request", () => {
+    const email = buildOfferEmail({ kind: "chase", key: lot, fields: [], side: "demand", previousSubject: "Stock enquiry: 40 x 50 kWh NMC packs" });
+    expect(email.body).toContain("Do you have anything that fits?");
+    expect(email.body).not.toContain("still of interest");
   });
 });
 
