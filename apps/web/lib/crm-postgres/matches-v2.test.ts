@@ -146,6 +146,18 @@ describe.skipIf(!TEST_URL)("matches v2", () => {
       expect(row.offer).toMatchObject({ id: offer.id, stage: "candidate" });
     });
 
+    // An offer made from the buyer's own request points back at this listing. The row is paired, so it reads
+    // "In offers" here instead of offering Add to offers a second time.
+    it("finds an offer that was paired from the opposite listing", async () => {
+      const paired = await offers.addOffer("p4_dem_1", {
+        name: "Synthetic Make Buyer Ltd", companyId: "p4_co_make", counterpartId: "p4_sup_1",
+      });
+      expect(paired.counterpart_id).toBe("p4_sup_1");
+      const result = await supplyV2.supplyMatchesV2("p4_sup_1");
+      const row = result!.rows.find((item) => item.companyId === "p4_co_make")!;
+      expect(row.offer).toMatchObject({ id: paired.id });
+    });
+
     it("drops a row once it is marked not a fit, and keeps the reason", async () => {
       await pg.queryPg(
         `insert into crm_bulk_listing_activity (bulk_listing_id, kind, title, data)

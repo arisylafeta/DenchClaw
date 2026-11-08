@@ -19,14 +19,15 @@ export type OfferLookup = {
 const NOTHING: OfferLookup = { find: () => null };
 
 /**
- * Offers on this listing only. A linked offer made on the opposite listing belongs to that side's counterparty, so it
- * is not this listing's answer to "Add to offers"; the pair guard already stops the same pairing twice.
+ * Offers that pair this listing with a counterparty: the ones made here, and the ones made from the other side that
+ * point back at this listing (`counterpart_id`). Without the second kind a paired buyer showed "Add to offers" again
+ * on the side that did not hold the row.
  */
 export async function offersForListing(listingId: string): Promise<OfferLookup> {
   const rows = await queryPg<OfferRow>(
     `select id, stage, coalesce(last_touch_on, updated_at::date)::text as date, company_id, person_id, lower(coalesce(name, '')) as name
      from crm_bulk_offers
-     where bulk_listing_id = $1 and role = 'counterparty'
+     where role = 'counterparty' and (bulk_listing_id = $1 or counterpart_id = $1)
      order by updated_at desc`, [listingId]);
   if (!rows.length) {
     return NOTHING;
