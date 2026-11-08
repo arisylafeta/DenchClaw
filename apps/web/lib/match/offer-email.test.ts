@@ -219,6 +219,21 @@ describe("privacy", () => {
     const email = supply({ fields: [], buyer: null, privateValues: ["Rotterdam Battery Recycling BV"] });
     expect(email.body).toContain("packs");
   });
+
+  // A company name of three letters was skipped entirely, so a dossier line that named it went out. It is matched as
+  // a whole word now, and words that the copy itself uses stay ordinary copy.
+  it("refuses a three-letter company name on its own or inside a longer name", () => {
+    expect(() => supply({ fields: [], buyer: { wants: "ABZ packs" }, privateValues: ["ABZ"] })).toThrow(/\bABZ\b/);
+    expect(() => supply({ fields: [], buyer: { wants: "abz packs" }, privateValues: ["ABZ Metals"] })).toThrow(/\bABZ\b/);
+  });
+
+  it("matches a short name as a whole word, not inside a longer one", () => {
+    expect(() => supply({ fields: [], buyer: { wants: "ABZCO packs" }, privateValues: ["ABZ"] })).not.toThrow();
+  });
+
+  it("keeps ordinary words out of the short-name check", () => {
+    expect(() => supply({ fields: [], buyer: null, privateValues: ["the", "you", "our", "per"] })).not.toThrow();
+  });
 });
 
 describe("the merge inputs", () => {

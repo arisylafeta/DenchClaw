@@ -311,21 +311,38 @@ const GENERIC = new Set([
   "services", "automotive", "industrial", "holding", "holdings", "international", "partners", "supply", "supplies",
 ]);
 
+// Ordinary words the copy itself uses. A three-letter company token (ABZ, AEC) must be refused, but the same match on
+// one of these says nothing about who the other party is, so they never count as a leak.
+const COMMON = new Set([
+  "the", "and", "for", "are", "was", "has", "had", "not", "but", "any", "all", "our", "you", "your", "its", "who",
+  "what", "when", "how", "why", "new", "used", "lot", "per", "one", "two", "six", "ten", "off", "out", "can", "may",
+  "will", "get", "see", "say", "ask", "now", "day", "way", "more", "than", "with", "from", "this", "that", "there",
+]);
+
 const normalise = (value: string) => ` ${value.toLowerCase().replace(/[^a-z0-9&]+/g, " ").trim()} `;
 
-/** The first private value that appears in the copy, as written, or null. Words of four letters or more count. */
-export function firstLeak(text: string, values: (string | null | undefined)[]): string | null {
+/**
+ * The first private value that appears in the copy, as written, or null. A value of four letters or more is matched
+ * as written. With `shortWords`, each of its words is also matched whole and case-insensitively, so a three-letter
+ * company name still refuses the email; words shorter than three letters, trade words and ordinary words are skipped
+ * because they cannot be told apart from normal copy. Prices pass `shortWords: false`: their units ("kWh") belong in
+ * the copy and only the figures and the written amount are private.
+ */
+export function firstLeak(
+  text: string, values: (string | null | undefined)[], { shortWords = true }: { shortWords?: boolean } = {},
+): string | null {
   const haystack = normalise(text);
+  const shortest = shortWords ? 3 : 4;
   for (const raw of values) {
     const value = clean(raw);
-    if (value.length < 4) {
-      continue;
-    }
-    const whole = normalise(value);
-    if (whole.length > 4 && haystack.includes(whole)) {
+    if (value.length >= 4 && haystack.includes(normalise(value))) {
       return value;
     }
-    for (const word of value.split(/[^A-Za-z0-9&]+/).filter((part) => part.length >= 4 && !GENERIC.has(part.toLowerCase()))) {
+    for (const word of value.split(/[^A-Za-z0-9&]+/)) {
+      const lower = word.toLowerCase();
+      if (word.length < shortest || GENERIC.has(lower) || COMMON.has(lower)) {
+        continue;
+      }
       if (haystack.includes(normalise(word))) {
         return word;
       }
@@ -389,7 +406,8 @@ export function buildOfferEmail(input: OfferEmailInput): OfferEmail {
     body = `${greeting(input.recipientFirstName)}\n\nFollowing up on the note I sent about ${product}.\n\n${ask}\n\n${SIGN_OFF}`;
   }
 
-  const leaked = firstLeak(`${subject}\n${body}`, [...(input.privateValues ?? []), ...priceValues(fields)]);
+  const leaked = firstLeak(`${subject}\n${body}`, input.privateValues ?? [])
+    ?? firstLeak(`${subject}\n${body}`, priceValues(fields), { shortWords: false });
   if (leaked) {
     throw new OfferEmailRefused(leaked);
   }

@@ -102,12 +102,13 @@ export async function offerContactReason(row: OutreachRow): Promise<{ email: str
 function privateValuesFor(row: OutreachRow): string[] {
   // The other party is the listing's own side, never the recipient. The town and country may be named; the street,
   // unit and postcode may not. The whole location string must not go in the list: firstLeak matches word by word,
-  // so it would forbid the town the template is allowed to print.
+  // so it would forbid the town the template is allowed to print. A short company name is kept: firstLeak matches it
+  // as a whole word.
   const values = [
     row.listing_party, row.listing_contact, row.listing_email, row.listing_person_name,
     ...addressParts(row.listing_location),
   ];
-  return values.map((value) => (value ?? "").trim()).filter((value) => value.length >= 4);
+  return values.map((value) => (value ?? "").trim()).filter(Boolean);
 }
 
 /**
