@@ -3360,7 +3360,7 @@ function ContentRenderer({
       return <HomeView />;
 
     case "crm-relay":
-      return <RelayView onOpenListing={onOpenListing} onOpenMailMessage={onOpenMailMessage} />;
+      return <RelayView onOpenListing={onOpenListing} onOpenMailMessage={onOpenMailMessage} onOpenCompany={(id) => onOpenEntry("company", id)} />;
     case "crm-leaderboard":
       return <LeaderboardView onOpenPerson={(id) => onOpenEntry("people", id)} />;
 

@@ -13,7 +13,7 @@ import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
 import { dealResultFits, dealSummaryText, isPersonalDomain, ownsDeal, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
-import { askInstruction, askLabel, buildChecklist, dismantlerInstruction, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
+import { askInstruction, askLabel, buildChecklist, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -56,9 +56,13 @@ export type RelayItem = {
   deal_job?: RelayDealJob | null;
   /** The email is from the linked deal's own seller or buyer, so "Draft the ask" can write the playbook's ask. */
   can_ask?: boolean;
-  /** The sender is a dismantler we know: their listing permission. One or a few packs go to the marketplace, not a bulk deal. */
-  dismantler?: DismantlerPhase | null;
+  /** The sender's dismantler company in the CRM and its listing permission. One or a few packs go to the marketplace, not a bulk deal. */
+  dismantler?: RelayDismantler | null;
 };
+
+export type RelayDismantler = { phase: DismantlerPhase; company_id: string; name: string };
+/** An open deal "Link to deal" can pick. */
+export type RelayDealOption = { id: string; kind: "supply" | "demand"; title: string; who: string | null };
 
 export type RelayDraftView = {
   id: string;
@@ -378,7 +382,7 @@ async function withDealInfo(items: RelayItem[]): Promise<RelayItem[]> {
     "select b.id, lower(coalesce(b.email, p.email)) as owner_email from crm_bulk_listings b left join crm_people p on p.id = b.person_id where b.id = any($1)", [listingIds]).catch(() => []) : [];
   const ownerOf = new Map(owners.map((o) => [o.id, o.owner_email]));
   const jobs = await dealJobsFor(items.map((i) => i.id));
-  const dismantlers = await dismantlerPhases(items.map((i) => i.counterpart_email ?? "").filter(Boolean)).catch(() => new Map<string, DismantlerPhase>());
+  const dismantlers = await dismantlersOf(items.map((i) => i.counterpart_email ?? "").filter(Boolean)).catch(() => new Map<string, RelayDismantler>());
   return items.map((i) => {
     const box = i.mail_thread_id ? byThread.get(i.mail_thread_id) : undefined;
     const inbox = threadInbox(!!box?.supply, !!box?.buy, i.contact_type);
@@ -391,18 +395,59 @@ async function withDealInfo(items: RelayItem[]): Promise<RelayItem[]> {
 }
 
 /** Dismantlers among these senders, by the person's company or their company's email domain (never a personal domain). */
-async function dismantlerPhases(emails: string[]): Promise<Map<string, DismantlerPhase>> {
+async function dismantlersOf(emails: string[]): Promise<Map<string, RelayDismantler>> {
   const list = [...new Set(emails.map((e) => e.toLowerCase().trim()))];
   if (!list.length) return new Map();
   const domains = list.map((e) => e.split("@")[1] ?? "").filter((d) => d && !isPersonalDomain(d));
-  const rows = await queryPg<{ email: string; phase: DismantlerPhase }>(
-    `select distinct on (x.email) x.email, dm.stock_phase as phase
+  const rows = await queryPg<{ email: string } & RelayDismantler>(
+    `select distinct on (x.email) x.email, dm.stock_phase as phase, c.id as company_id, c.name
        from unnest($1::text[]) as x(email)
        join crm_dismantlers dm on dm.company_id in (
          select p.company_id from crm_people p where lower(p.email) = x.email and p.company_id is not null
          union select c.id from crm_companies c where lower(c.domain) = split_part(x.email, '@', 2) and split_part(x.email, '@', 2) = any($2::text[]))
+       join crm_companies c on c.id = dm.company_id
       order by x.email, case dm.stock_phase when 'marketplace' then 0 when 'stock_only' then 1 else 2 end`, [list, domains]);
-  return new Map(rows.map((r) => [r.email, r.phase]));
+  return new Map(rows.map(({ email, ...d }) => [email, d]));
+}
+
+const RELAY_LINK = "relay";
+
+/** Open deals for "Link to deal", newest first. */
+export async function dealOptions(): Promise<RelayDealOption[]> {
+  return queryPg<RelayDealOption>(
+    `select b.id, b.kind, coalesce(b.context->>'listing_title', b.summary, b.id) as title, coalesce(c.name, p.full_name, b.email) as who
+       from crm_bulk_listings b left join crm_people p on p.id = b.person_id left join crm_companies c on c.id = p.company_id
+      where b.status in ('open', 'qualifying') order by b.updated_at desc nulls last limit 200`);
+}
+
+/** "Link to deal": Alex ties this thread to a deal by hand, saved as a confirmed thread link the scan keeps.
+ * Picking another deal replaces it; null removes it and the scan goes back to the sender's own deal. Nothing is sent. */
+export async function linkDeal(itemId: string, ownerId: string, listingId: string | null, by: string): Promise<RelayItem> {
+  const item = await readRelayItem(itemId, ownerId);
+  if (!item) throw new RelayError(404, "Not found");
+  if (!item.mail_thread_id) throw new RelayError(409, "This email has no thread to link.");
+  const thread = item.mail_thread_id;
+  await withPgTransaction(async (client) => {
+    let title: string | null = null;
+    if (listingId) {
+      const { rows: [listing] } = await client.query<{ id: string; title: string }>(
+        "select id, coalesce(context->>'listing_title', summary, id) as title from crm_bulk_listings where id = $1 for share", [listingId]);
+      if (!listing) throw new RelayError(404, "That deal isn't in the CRM.");
+      title = listing.title;
+    }
+    await client.query("delete from crm_bulk_thread_links where channel = 'mail' and thread_id = $1 and labelled_by = $2 and bulk_listing_id is distinct from $3",
+      [thread, RELAY_LINK, listingId]);
+    if (listingId) await client.query(
+      `insert into crm_bulk_thread_links (channel, thread_id, bulk_listing_id, confidence, state, reason, labelled_by, confirmed_by, confirmed_at)
+       values ('mail', $1, $2, 'high', 'confirmed', 'Linked in Relay', $3, $4, now())
+       on conflict (channel, thread_id, bulk_listing_id, (coalesce(offer_id, ''))) do update
+         set state = 'confirmed', labelled_by = $3, confirmed_by = excluded.confirmed_by, confirmed_at = now()`,
+      [thread, listingId, RELAY_LINK, by]);
+    // Unlinking clears the email too; the next scan puts back the sender's own deal, if they have one.
+    await client.query("update relay_item set bulk_listing_id = $2, deal_label = $3, updated_at = now() where id = $1 and owner_id = $4::uuid",
+      [itemId, listingId, title?.slice(0, 120) ?? null, ownerId]);
+  });
+  return (await readRelayItem(itemId, ownerId))!;
 }
 
 /** Latest deal job per email. Jobs stuck past the time limit are marked failed. */
@@ -511,21 +556,6 @@ export async function draftAsk(itemId: string, ownerId: string): Promise<RelayIt
   const ctx = await draftContext(item, ownerId, instruction);
   const parsed = parseJson(await askAgent(DRAFT_SYSTEM(ctx.rules, ctx.guide), ctx.prompt));
   await saveDraftOutputs(item, ownerId, askLabel(view.checklist), ctx, parsed, []);
-  return (await readRelayItem(itemId, ownerId))!;
-}
-
-/** "Reply: list it": a dismantler with one or a few packs is pointed to the marketplace or their stock list, never a quote. */
-export async function dismantlerReply(itemId: string, ownerId: string): Promise<RelayItem> {
-  const item = await readRelayItem(itemId, ownerId);
-  if (!item) throw new RelayError(404, "Not found");
-  if (item.bulk_listing_id) throw new RelayError(409, "This email is on a deal. Use Update deal from this reply.");
-  const messages = await threadMessages(item.mail_thread_id);
-  if (item.contact_type === "buyer" || replyIdentity(messages, item.contact_type) === "buy") throw new RelayError(409, "This sender is writing as a buyer, so there are no packs to list.");
-  const phase = (await dismantlerPhases([item.counterpart_email ?? ""])).get((item.counterpart_email ?? "").toLowerCase());
-  if (!phase) throw new RelayError(409, "This sender isn't a dismantler in the CRM.");
-  const ctx = await draftContext(item, ownerId, dismantlerInstruction(phase));
-  const parsed = parseJson(await askAgent(DRAFT_SYSTEM(ctx.rules, ctx.guide), ctx.prompt));
-  await saveDraftOutputs(item, ownerId, "Reply: list it (dismantler, marketplace not bulk)", ctx, parsed, []);
   return (await readRelayItem(itemId, ownerId))!;
 }
 

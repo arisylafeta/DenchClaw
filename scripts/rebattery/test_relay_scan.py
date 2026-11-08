@@ -443,7 +443,9 @@ def test_db_write_path(scratch, monkeypatch, tmp_path, capsys):
     insert into crm_bulk_listings (id, kind, party, summary, quantity, status, email) values ('bl1', 'demand', 'Cells buyer', 'Kokam cells', '13,104 units', 'open', 'buyer@cells.example'),
       ('bl2', 'supply', 'us', 'Kokam cells from Firstground', '85,000 cells', 'open', 'helmuth@firstground.example');
     insert into crm_bulk_thread_links (channel, thread_id, bulk_listing_id, confidence, state, labelled_by, confirmed_by)
-      values ('mail', 'gmail_thread_f', 'bl2', 'high', 'confirmed', 'test', 'test');
+      values ('mail', 'gmail_thread_f', 'bl2', 'high', 'confirmed', 'test', 'test'),
+      -- Alex linked Tom's quote to the cells buyer's request with "Link to deal": it stays, though Tom doesn't own that deal.
+             ('mail', 'gmail_thread_a', 'bl1', 'high', 'confirmed', 'relay', 'alex@rebattery.io');
     """
     res = psql(TEST_DB, fixtures)
     assert res.returncode == 0, res.stderr[-2000:]
@@ -464,7 +466,7 @@ def test_db_write_path(scratch, monkeypatch, tmp_path, capsys):
     rows = subprocess.run(["psql", "-X", "-At", "-d", TEST_DB, "-c",
                            f"select gmail_thread_id, tab, priority, status, headline, deal_label, last_message->>'text', last_seen_message_id from {SCHEMA}.relay_item order by 1"],
                           text=True, capture_output=True, check=True).stdout.strip().splitlines()
-    assert rows[0].split("|")[:6] == ["a", "action", "medium", "open", "Wants a price for 20 packs", ""]
+    assert rows[0].split("|")[:6] == ["a", "action", "high", "open", "Wants a price for 20 packs", "Kokam cells · 13,104 units"]
     assert rows[0].split("|")[6] == "What price can you do for 20 packs?"
     assert subprocess.run(["psql", "-X", "-At", "-d", TEST_DB, "-c", f"select situation from {SCHEMA}.relay_item where gmail_thread_id = 'a'"],
                           text=True, capture_output=True, check=True).stdout.strip() == "supplier_price"
