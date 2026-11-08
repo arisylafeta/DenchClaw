@@ -120,13 +120,15 @@
 .why { border-radius: 8px; background: #f7f7f5; padding: 10px 12px; font-size: 12.5px; color: #3f3f3a; }
 .gUnits .blockTitle span { font-weight: 500; }
 .ubox { border: 1px solid rgba(0, 0, 0, 0.08); border-radius: 10px; overflow: auto; }
-.ut { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 760px; }
+.ut { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 600px; }
 .ut th {
   position: sticky; top: 0; background: #fafaf9; z-index: 1; font-weight: 600; color: #6f6f68; font-size: 11.5px; text-align: left;
   padding: 8px; border-bottom: 1px solid rgba(0, 0, 0, 0.08); white-space: nowrap;
 }
 .ut td { padding: 7px 8px; border-top: 1px solid rgba(0, 0, 0, 0.05); white-space: nowrap; vertical-align: middle; }
 .ut .num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Long cells wrap so the table fits beside the why-note at desktop width; only phones scroll the box. */
+.ut td.wrap { white-space: normal; }
 .sohSrc { font-size: 11.5px; }
 .linkbtn { background: none; border: 0; padding: 6px 0; color: #4d5300; font-weight: 600; font-size: 12.5px; text-decoration: underline; align-self: flex-start; }
 

@@ -171,11 +171,11 @@ function GroupRow({ row, isOpen, onToggle, actions, notAFit }: GroupRowProps) {
               <tbody>
                 {visible.map((unit) => (
                   <tr key={unit.key}>
-                    <td>{unit.vehicle}</td>
+                    <td className={css.wrap}>{unit.vehicle}</td>
                     <td>{unit.year ?? ""}</td>
                     <td className={css.muted}>{unit.ref ?? "not stated"}</td>
                     <td><SohCell soh={unit.soh} /></td>
-                    <td>{unit.location ?? ""}</td>
+                    <td className={css.wrap}>{unit.location ?? ""}</td>
                     <td className={css.num}>{unit.price ?? ""}</td>
                     <td className={css.muted}>{unit.seen ?? ""}</td>
                     <td>{unit.link && <a href={unit.link.href} target="_blank" rel="noreferrer">{unit.link.label}</a>}</td>
