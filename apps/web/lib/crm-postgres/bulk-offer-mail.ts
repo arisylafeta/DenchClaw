@@ -100,11 +100,12 @@ export async function offerContactReason(row: OutreachRow): Promise<{ email: str
 }
 
 function privateValuesFor(row: OutreachRow): string[] {
-  // The other party is the listing's own side, never the recipient. The town and country may be named;
-  // the street, unit and postcode may not.
+  // The other party is the listing's own side, never the recipient. The town and country may be named; the street,
+  // unit and postcode may not. The whole location string must not go in the list: firstLeak matches word by word,
+  // so it would forbid the town the template is allowed to print.
   const values = [
     row.listing_party, row.listing_contact, row.listing_email, row.listing_person_name,
-    row.listing_location, ...addressParts(row.listing_location),
+    ...addressParts(row.listing_location),
   ];
   return values.map((value) => (value ?? "").trim()).filter((value) => value.length >= 4);
 }
@@ -120,7 +121,7 @@ export async function offerOutreach(listingId: string, offerId: string, now: Dat
   }
   const [fields, contact, lastSent, buyer] = await Promise.all([
     queryPg<FieldFact>(
-      `select field_key, value, status, coalesce(alternatives, '[]'::jsonb) as alternatives
+      `select field_key, value, status, visibility, coalesce(alternatives, '[]'::jsonb) as alternatives
        from crm_bulk_listing_fields where bulk_listing_id = $1`, [row.listing_id]),
     offerContactReason(row),
     queryPg<{ sent_at: string; subject: string | null }>(

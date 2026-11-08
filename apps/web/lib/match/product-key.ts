@@ -17,6 +17,8 @@ export type FieldFact = {
   value: string | null;
   status: FieldStatus | null;
   alternatives?: unknown;
+  /** Who may see the value: `teaser` is buyer-facing, everything else is not. Absent means not cleared for a buyer. */
+  visibility?: string | null;
 };
 
 export type ProductLine = {

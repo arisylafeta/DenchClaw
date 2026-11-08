@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { buildOfferEmail } from "../match/offer-email";
 
 // Runs only against a disposable database: scripts/rebattery/crm-test-db.sh up prints the URL.
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
@@ -38,7 +39,7 @@ describe.skipIf(!TEST_URL)("offer outreach (matches v3, slice 2)", () => {
     pg = await import("../postgres");
     mail = await import("./bulk-offer-mail");
     for (const c of ["buyerco", "supplierco"]) await pg.queryPg(`insert into crm_companies (id, name) values ($1, $1)`, [id(c)]);
-    for (const p of ["buyer1", "buyer2", "buyer3", "supplier1", "seller_person"]) {
+    for (const p of ["buyer1", "buyer2", "buyer3", "buyer4", "buyer5", "buyer6", "buyer7", "buyer8", "buyer9", "buyer10", "buyer11", "buyer12", "supplier1", "supplier2", "seller_person"]) {
       await pg.queryPg(`insert into crm_people (id, full_name, email) values ($1, $2, $3)`, [id(p), `${p} Person`, `${p}_${run}@buyer.test`]);
     }
     await pg.queryPg(`update crm_people set email_opted_out = true where id = $1`, [id("buyer3")]);
@@ -47,8 +48,9 @@ describe.skipIf(!TEST_URL)("offer outreach (matches v3, slice 2)", () => {
     await pg.queryPg(
       `insert into crm_bulk_listing_fields (bulk_listing_id, field_key, value, status, visibility) values
         ($1, 'capacity', '50 kWh per pack', 'confirmed', 'teaser'), ($1, 'format', 'Packs', 'confirmed', 'teaser'),
-        ($1, 'quantity', '40 packs', 'confirmed', 'teaser'), ($1, 'seller_price', 'EUR 40 per kWh', 'confirmed', 'teaser'),
-        ($1, 'test_data', 'BMS report supplied', 'confirmed', 'teaser')`, [id("sup")]);
+        ($1, 'quantity', '40 packs', 'confirmed', 'teaser'), ($1, 'test_data', 'BMS report supplied', 'confirmed', 'teaser'),
+        ($1, 'soh', '88%', 'confirmed', 'after_nda'), ($1, 'location', 'Rotterdam, Netherlands', 'confirmed', 'after_loi'),
+        ($1, 'seller_price', 'EUR 40 per kWh', 'confirmed', 'never')`, [id("sup")]);
   });
 
   afterAll(async () => {
@@ -79,14 +81,45 @@ describe.skipIf(!TEST_URL)("offer outreach (matches v3, slice 2)", () => {
     expect(facts?.recipientFirstName).toBe("buyer1");
     expect(facts?.product.key.sellerPrice?.eurPerKwh).toBe(40);
     expect(facts?.product.fields.find((field) => field.field_key === "test_data")?.value).toBe("BMS report supplied");
+    // Visibility reaches the template, which is what keeps a non-teaser value out of the email.
+    expect(facts?.product.fields.find((field) => field.field_key === "seller_price")?.visibility).toBe("never");
+    expect(facts?.product.fields.find((field) => field.field_key === "soh")?.visibility).toBe("after_nda");
+    expect(facts?.product.fields.find((field) => field.field_key === "location")?.visibility).toBe("after_loi");
     expect(facts?.chaseDue).toBe(false);
     // The exact address is forbidden, the town is not.
     expect(facts?.privateValues).toContain("Unit 4");
     expect(facts?.privateValues).not.toContain("Rotterdam");
   });
 
+  it("writes the buyer email from those facts: no price, no after_nda value, and the town only when teaser", async () => {
+    await offer(id("o_email"), id("sup"), "candidate", {}, id("buyer12"));
+    const build = async () => {
+      const facts = (await mail.offerOutreach(id("sup"), id("o_email")))!;
+      return buildOfferEmail({
+        kind: "supply_offer", key: facts.product.key, fields: facts.product.fields,
+        location: facts.location, privateValues: facts.privateValues,
+      });
+    };
+    const hidden = await build();
+    expect(hidden.body).toContain("Price on request.");
+    expect(hidden.body).not.toMatch(/EUR|per kWh/i);
+    expect(hidden.body).not.toContain("State of health");
+    expect(hidden.body).not.toContain("Rotterdam");
+
+    // Cleared for buyers, the town and country may be named; the street and unit still may not.
+    await pg.queryPg(`update crm_bulk_listing_fields set visibility = 'teaser' where bulk_listing_id = $1 and field_key = 'location'`, [id("sup")]);
+    try {
+      const shown = await build();
+      expect(shown.body).toContain("in Rotterdam, Netherlands.");
+      expect(shown.body).not.toContain("Foo Street");
+      expect(shown.body).not.toContain("Unit 4");
+    } finally {
+      await pg.queryPg(`update crm_bulk_listing_fields set visibility = 'after_loi' where bulk_listing_id = $1 and field_key = 'location'`, [id("sup")]);
+    }
+  });
+
   it("moves candidate to offered once, stamps the touch, clears the open draft and never moves backwards", async () => {
-    await offer(id("o_send"), id("sup"), "candidate", { open_draft_id: id("draft") }, id("buyer1"));
+    await offer(id("o_send"), id("sup"), "candidate", { open_draft_id: id("draft") }, id("buyer2"));
     const first = await mail.markOfferSent(id("o_send"), null);
     expect(first).toEqual({ moved: true, stage: "offered" });
     const [row] = await pg.queryPg<{ stage: string; last_touch_via: string; open: string | null }>(
@@ -100,14 +133,30 @@ describe.skipIf(!TEST_URL)("offer outreach (matches v3, slice 2)", () => {
       `select count(*)::int from crm_bulk_listing_activity where offer_id = $1 and data->>'stage' = 'offered'`, [id("o_send")]);
     expect(count).toBe(1);
 
-    await offer(id("o_negotiating"), id("sup"), "negotiating", { open_draft_id: id("draft2") }, id("buyer1"));
+    await offer(id("o_negotiating"), id("sup"), "negotiating", { open_draft_id: id("draft2") }, id("buyer4"));
     expect(await mail.markOfferSent(id("o_negotiating"), null)).toEqual({ moved: false, stage: "negotiating" });
     const [kept] = await pg.queryPg<{ stage: string }>(`select stage from crm_bulk_offers where id = $1`, [id("o_negotiating")]);
     expect(kept.stage).toBe("negotiating");
   });
 
+  it("keeps the match and the stock link when the open draft is stored and cleared", async () => {
+    // The Matches tab writes data.match and data.stock_opportunity_id; outreach adds and removes open_draft_id.
+    const data = { match: { reason: "Exact part: 50 kWh Packs NMC", rank: 1 }, stock_opportunity_id: id("sto_one") };
+    await offer(id("o_data"), id("sup"), "candidate", data, id("buyer5"));
+    await mail.setOpenDraft(id("o_data"), id("draft_data"));
+    let [row] = await pg.queryPg<{ data: Record<string, unknown> }>(`select data from crm_bulk_offers where id = $1`, [id("o_data")]);
+    expect(row.data.open_draft_id).toBe(id("draft_data"));
+    expect(row.data.match).toEqual(data.match);
+    expect(row.data.stock_opportunity_id).toBe(id("sto_one"));
+    await mail.setOpenDraft(id("o_data"), null);
+    [row] = await pg.queryPg<{ data: Record<string, unknown> }>(`select data from crm_bulk_offers where id = $1`, [id("o_data")]);
+    expect(row.data.open_draft_id).toBeUndefined();
+    expect(row.data.match).toEqual(data.match);
+    expect(row.data.stock_opportunity_id).toBe(id("sto_one"));
+  });
+
   it("links the sent thread as confirmed, and confirms a proposed link that already exists", async () => {
-    await offer(id("o_link"), id("sup"), "offered", {}, id("buyer1"));
+    await offer(id("o_link"), id("sup"), "offered", {}, id("buyer6"));
     await pg.queryPg(
       `insert into crm_bulk_thread_links (channel, thread_id, bulk_listing_id, offer_id, confidence, state, labelled_by)
        values ('mail', $1, $2, $3, 'high', 'proposed', 'test')`, [id("th_link"), id("sup"), id("o_link")]);
@@ -121,13 +170,13 @@ describe.skipIf(!TEST_URL)("offer outreach (matches v3, slice 2)", () => {
   it("chases an offered offer whose only email is unanswered and more than three working days old", async () => {
     const longAgo = "2026-10-05T09:00:00Z";   // a Monday
     const recent = "2026-11-02T09:00:00Z";     // the Monday of the test week
-    await offer(id("o_chase"), id("sup"), "offered", {}, id("buyer1"));
+    await offer(id("o_chase"), id("sup"), "offered", {}, id("buyer7"));
     await sentMail(id(`m_chase_${run}`), id("o_chase"), id("sup"), longAgo);
-    await offer(id("o_fresh"), id("sup"), "offered", {}, id("buyer1"));
+    await offer(id("o_fresh"), id("sup"), "offered", {}, id("buyer8"));
     await sentMail(id(`m_fresh_${run}`), id("o_fresh"), id("sup"), recent);
-    await offer(id("o_replied"), id("sup"), "offered", {}, id("buyer1"));
+    await offer(id("o_replied"), id("sup"), "offered", {}, id("buyer9"));
     await sentMail(id(`m_replied_${run}`), id("o_replied"), id("sup"), longAgo, "2026-10-06T09:00:00Z");
-    await offer(id("o_candidate"), id("sup"), "candidate", {}, id("buyer1"));
+    await offer(id("o_candidate"), id("sup"), "candidate", {}, id("buyer10"));
     await sentMail(id(`m_cand_${run}`), id("o_candidate"), id("sup"), longAgo);
 
     const now = new Date("2026-11-04T12:00:00Z");
@@ -145,8 +194,8 @@ describe.skipIf(!TEST_URL)("offer outreach (matches v3, slice 2)", () => {
         ($1, $2, $3, 'opportunity', 'Linked line'), ($4, $2, $3, 'opportunity', 'Other line')`,
       [id("sto_one"), id("supplier1"), id("supplierco"), id("sto_two")]);
     await offer(id("o_stock"), id("dem"), "declined", { stock_opportunity_id: id("sto_one") }, id("supplier1"));
-    await offer(id("o_nolink"), id("dem"), "declined", {}, id("supplier1"));
-    await offer(id("o_supply_side"), id("sup"), "declined", { stock_opportunity_id: id("sto_one") }, id("buyer1"));
+    await offer(id("o_nolink"), id("dem"), "declined", {}, id("supplier2"));
+    await offer(id("o_supply_side"), id("sup"), "declined", { stock_opportunity_id: id("sto_one") }, id("buyer11"));
 
     expect(await mail.markNoStock(id("dem"), id("o_stock"), "demand", null)).toEqual({ marked: id("sto_one"), suggestion: null });
     // A stale row leaves the live table for the archive in the same statement (migration 102).

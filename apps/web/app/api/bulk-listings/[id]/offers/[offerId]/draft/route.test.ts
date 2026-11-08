@@ -19,12 +19,15 @@ import { POST } from "./route";
 process.env.CRM_DB_BACKEND = "postgres";
 
 const fields: FieldFact[] = [
-  { field_key: "capacity", value: "50 kWh per pack", status: "confirmed" },
-  { field_key: "format", value: "Packs", status: "confirmed" },
-  { field_key: "chemistry", value: "NMC", status: "confirmed" },
-  { field_key: "quantity", value: "40 packs", status: "confirmed" },
-  { field_key: "seller_price", value: "EUR 40 per kWh", status: "confirmed" },
-  { field_key: "test_data", value: "BMS report supplied", status: "confirmed" },
+  { field_key: "capacity", value: "50 kWh per pack", status: "confirmed", visibility: "teaser" },
+  { field_key: "format", value: "Packs", status: "confirmed", visibility: "teaser" },
+  { field_key: "chemistry", value: "NMC", status: "confirmed", visibility: "teaser" },
+  { field_key: "quantity", value: "40 packs", status: "confirmed", visibility: "teaser" },
+  { field_key: "location", value: "Rotterdam, Netherlands", status: "confirmed", visibility: "teaser" },
+  { field_key: "test_data", value: "BMS report supplied", status: "confirmed", visibility: "teaser" },
+  // Visible to nobody, and after_nda: neither may reach a buyer.
+  { field_key: "seller_price", value: "EUR 40 per kWh", status: "confirmed", visibility: "never" },
+  { field_key: "soh", value: "88%", status: "confirmed", visibility: "after_nda" },
 ];
 
 const outreach = (over: Record<string, unknown> = {}) => ({
@@ -63,6 +66,16 @@ describe("POST offer draft", () => {
     expect(body.body).not.toContain("Battery Partners");
     expect(m.createOfferEmailDraft).toHaveBeenCalledWith(expect.objectContaining({ to: ["sam@buyer.test"] }));
     expect(m.setOpenDraft).toHaveBeenCalledWith("bof_1", "draft_1");
+  });
+
+  it("passes the field visibility through: no seller price, no after_nda value, the teaser place kept", async () => {
+    const res = await call();
+    const body = await res.json() as { body: string };
+    expect(body.body).toContain("Price on request.");
+    expect(body.body).not.toMatch(/EUR|per kWh/i);
+    expect(body.body).not.toContain("State of health");
+    expect(body.body).not.toContain("88%");
+    expect(body.body).toContain("available in Rotterdam, Netherlands.");
   });
 
   it("refuses a contact who opted out or has no address, and writes no draft", async () => {

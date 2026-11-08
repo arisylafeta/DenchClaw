@@ -1,9 +1,11 @@
 // The offer emails, built from facts only: deterministic text, no model, no stored copy.
 //
-// A supply offer goes to a buyer: what we have, where it is (town and country only), the test data exactly
-// as the listing records it, and the price only when it is firm. A request stock ask goes to a supplier: what
-// we need and one question about their stock, never a price (we ask for theirs). A chase is short and asks
-// the same question again. Nothing here invents a fact, names the other party or writes an address.
+// A supply offer goes to a buyer. A buyer may see only the listing fields whose visibility on
+// `crm_bulk_listing_fields` is `teaser`; `after_nda`, `after_loi` and `never` rows are left out, which is why the
+// price is always "price on request" here: ReBattery buys at the seller's price and sells on at its own. A request
+// stock ask goes to a supplier: what we need and one question about their stock, never the buyer's name, company,
+// price ceiling or anything finer than the country. A chase asks the same question again. Nothing here invents a
+// fact, names the other party or writes an address.
 import { keyLine, type FieldFact, type ProductKey } from "./product-key";
 
 export type OfferEmailKind = "supply_offer" | "request_stock" | "chase";
@@ -116,6 +118,22 @@ export function publicPlace(location: string | null | undefined): string | null 
   return `${parts[parts.length - 2]}, ${parts[parts.length - 1]}`;
 }
 
+/** The country alone: a stock ask to a seller never says more about where the buyer is than that. */
+export function publicCountry(location: string | null | undefined): string | null {
+  const parts = clean(location).split(",").map((part) => part.trim()).filter(Boolean);
+  const country = parts[parts.length - 1];
+  return country && isPlaceWord(country) ? country : null;
+}
+
+/** The place a buyer may see: town and country, and only when the listing clears its location for a buyer. */
+export function buyerPlace(fields: FieldFact[], location: string | null | undefined): string | null {
+  const row = buyerField(fields, "location");
+  if (!row) {
+    return null;
+  }
+  return publicPlace(clean(row.value) || location);
+}
+
 /** The unsafe pieces of a location: a street, a unit number or a postcode. Town and country are not here. */
 export function addressParts(location: string | null | undefined): string[] {
   return clean(location).split(",").map((part) => part.trim()).filter((part) => part.length >= 4 && !isPlaceWord(part));
@@ -123,14 +141,30 @@ export function addressParts(location: string | null | undefined): string[] {
 
 const fieldOf = (fields: FieldFact[], key: string) => fields.find((field) => field.field_key === key) ?? null;
 
+/** The only visibility a buyer is allowed to see. Every other value keeps the value out of a buyer email. */
+export const BUYER_VISIBLE = "teaser";
+
+/** The row a buyer may see, or null: no row, a missing visibility and every non-teaser value all mean "leave it out". */
+export function buyerField(fields: FieldFact[], key: string): FieldFact | null {
+  const row = fieldOf(fields, key);
+  return row?.visibility === BUYER_VISIBLE ? row : null;
+}
+
 /**
- * The test status exactly as recorded. A disputed row shows no value, because picking one would be a guess;
- * nothing recorded says so plainly and never becomes "tested".
+ * The test status exactly as recorded, when the buyer may see it. A disputed row shows no value, because picking
+ * one would be a guess; nothing recorded says so plainly and never becomes "tested". A row the buyer may not see
+ * produces no line at all rather than a false "no test data".
  */
-export function testStatusLine(fields: FieldFact[]): string {
+export function testStatusLine(fields: FieldFact[]): string | null {
   const row = fieldOf(fields, "test_data");
-  const value = clean(row?.value);
-  if (row?.status === "conflict") {
+  if (!row) {
+    return "No test data recorded.";
+  }
+  if (row.visibility !== BUYER_VISIBLE) {
+    return null;
+  }
+  const value = clean(row.value);
+  if (row.status === "conflict") {
     return "The test data on this lot is disputed.";
   }
   if (!value) {
@@ -139,7 +173,7 @@ export function testStatusLine(fields: FieldFact[]): string {
   return `Test data: ${value.replace(/[.\s]+$/, "")}.`;
 }
 
-/** On a request, the state of health the buyer has asked for. */
+/** On a request, the state of health the buyer has asked for. A requirement, never a fact about the seller's stock. */
 export function requirementLine(fields: FieldFact[]): string | null {
   const row = fieldOf(fields, "soh");
   const value = clean(row?.value);
@@ -149,24 +183,22 @@ export function requirementLine(fields: FieldFact[]): string | null {
   return `The buyer is asking for ${value.replace(/[.\s]+$/, "")} state of health.`;
 }
 
-/** State of health, only when the listing records it as a single figure. */
+/** State of health, only when the listing records it as a single figure the buyer may see. */
 export function sohLine(fields: FieldFact[]): string | null {
-  const row = fieldOf(fields, "soh");
+  const row = buyerField(fields, "soh");
   const value = clean(row?.value);
-  if (!value || row?.status === "conflict") {
+  if (!row || !value || row.status === "conflict") {
     return null;
   }
   return `State of health: ${value.replace(/[.\s]+$/, "")}.`;
 }
 
-/** The seller price only when it is firm: a single confirmed amount with a unit. Otherwise "price on request". */
-export function priceLine(key: ProductKey): string {
-  const price = key.sellerPrice;
-  if (!price) {
-    return "Price on request.";
-  }
-  const per = price.per === "kwh" ? "kWh" : price.per === "mwh" ? "MWh" : "unit";
-  return `The price is ${price.currency} ${round(price.amount)} per ${per}.`;
+/**
+ * The buyer-facing price line. Never the seller's price: ReBattery brokers with a margin, and
+ * `seller_price` is `never` visible on every row. The price is quoted on request, full stop.
+ */
+export function priceLine(): string {
+  return "Price on request.";
 }
 
 const ACTIVE_STATUS = new Set(["bought", "asked", "said_interested", "interested"]);
@@ -308,13 +340,26 @@ function greeting(name: string | null | undefined): string {
 }
 
 /**
- * One email, ready to review. Deterministic for the same facts, and it refuses rather than leaking a name or
- * an address: everything private is checked against the finished copy before it is returned.
+ * Commercial values that must never reach either side: our cost on a supply offer, and the buyer's ceiling on a
+ * stock ask. The template never writes them; this is the check that proves it.
+ */
+const PRICE_KEYS = new Set(["seller_price", "max_price", "min_price", "target_price", "buyer_price"]);
+
+function priceValues(fields: FieldFact[]): string[] {
+  return fields.filter((field) => PRICE_KEYS.has(field.field_key)).map((field) => field.value ?? "");
+}
+
+/**
+ * One email, ready to review. Deterministic for the same facts, and it refuses rather than leaking a name, an
+ * address or a price: everything private is checked against the finished copy before it is returned.
  */
 export function buildOfferEmail(input: OfferEmailInput): OfferEmail {
   const fields = input.fields ?? [];
   const product = productLine(input.key);
-  const place = publicPlace(input.location);
+  // Buyer-facing: town and country, only from a teaser row. Request side: the country alone.
+  const place = input.kind === "supply_offer"
+    ? buyerPlace(fields, input.location)
+    : input.kind === "request_stock" ? publicCountry(input.location) : null;
   const want = buyerWant(input.buyer, input.key);
   const where = place ? ` in ${place}` : "";
   let subject: string;
@@ -326,7 +371,7 @@ export function buildOfferEmail(input: OfferEmailInput): OfferEmail {
     const opening = want
       ? `You were looking for ${want}. We have ${product} available${where}.`
       : `We have ${product} available${where}.`;
-    const facts = [testStatusLine(fields), sohLine(fields), priceLine(input.key)].filter(Boolean).join(" ");
+    const facts = [testStatusLine(fields), sohLine(fields), priceLine()].filter(Boolean).join(" ");
     const ask = want ? "Is it still of interest?" : "Would you like the full spec sheet?";
     body = `${greeting(input.recipientFirstName)}\n\n${opening}\n\n${facts}\n\n${ask}\n\n${SIGN_OFF}`;
   } else if (input.kind === "request_stock") {
@@ -344,7 +389,7 @@ export function buildOfferEmail(input: OfferEmailInput): OfferEmail {
     body = `${greeting(input.recipientFirstName)}\n\nFollowing up on the note I sent about ${product}.\n\n${ask}\n\n${SIGN_OFF}`;
   }
 
-  const leaked = firstLeak(`${subject}\n${body}`, input.privateValues ?? []);
+  const leaked = firstLeak(`${subject}\n${body}`, [...(input.privateValues ?? []), ...priceValues(fields)]);
   if (leaked) {
     throw new OfferEmailRefused(leaked);
   }
