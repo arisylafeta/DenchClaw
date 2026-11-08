@@ -2,121 +2,156 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { DemandMatchesTab } from "./demand-matches-tab";
 import { SupplyMatchesTab } from "./supply-matches-tab";
 import { forgetShared } from "./trade-ui";
+import type { MatchesResult } from "@/lib/matches-types";
 
-const row = { demandId: "btd_1", buyer: "ELG Battery", title: "100k cells", quantity: "100,000 cells", location: "PL", verdict: "check" as const,
-  gap: "Quantity not stated", checks: [], marginPct: null, saved: null, userVerdict: null };
-
-const noBuyers = { ranked: [], leads: [], supply: { chemistry: null, format: null, text: "", country: null } };
-const buyer = (o: object) => ({ companyId: "c1", name: "Exigo", stage: "Bidding", tier: "A", basis: "stated", wants: "NMC cells", evidenceUrl: null, nextStep: null,
-  lastTouch: "2026-10-08T09:00:00Z", fit: { matched: ["Chemistry NMC", "Format Cells"], gaps: [], score: 4 },
-  contacts: [{ id: "p1", name: "Asha", email: "a@x.test", jobTitle: "Buyer", main: true, optedOut: false }], ...o });
-
-describe("Matches tab on a supply listing", () => {
-  beforeEach(() => forgetShared());
-  afterEach(() => vi.unstubAllGlobals());
-
-  it("lists the demand that fits with its deciding gap, and posts Shortlist and open", async () => {
-    const calls: string[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      calls.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
-      if (url.endsWith("/buyers")) return new Response(JSON.stringify(noBuyers), { status: 200 });
-      return new Response(JSON.stringify({ matches: [row], notAFit: 2, blocked: null }), { status: 200 });
-    }));
-    const open = vi.fn();
-    render(<SupplyMatchesTab listingId="bts_1" active onOpenListing={open} />);
-    expect(await screen.findByText("ELG Battery")).toBeTruthy();
-    expect(screen.getByText(/1 open demand fits this supply/)).toBeTruthy();
-    expect(screen.getByText(/2 marked not a fit/)).toBeTruthy();
-    expect(screen.getByText(/Check: Quantity not stated/)).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("Shortlist"));
-    await waitFor(() => expect(calls.some((c) => c.startsWith("POST") && c.includes('"verdict":"shortlist"') && c.includes("btd_1"))).toBe(true));
-    fireEvent.click(screen.getByLabelText("Open demand"));
-    expect(open).toHaveBeenCalledWith("btd_1");
-  });
-
-  it("shows an empty state, and does not fetch while the tab is hidden", async () => {
-    const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/buyers") ? noBuyers : { matches: [], notAFit: 0, notAFitReasons: [], blocked: null }), { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-    const { rerender } = render(<SupplyMatchesTab listingId="bts_1" active={false} onOpenListing={() => {}} />);
-    expect(fetchMock).not.toHaveBeenCalled();
-    rerender(<SupplyMatchesTab listingId="bts_1" active onOpenListing={() => {}} />);
-    expect(await screen.findByText("No open demand fits this supply yet.")).toBeTruthy();
-  });
-
-  it("asks for a short reason before Not a fit and posts it with the verdict", async () => {
-    const calls: string[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      calls.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
-      if (url.endsWith("/buyers")) return new Response(JSON.stringify(noBuyers), { status: 200 });
-      return new Response(JSON.stringify({ matches: [row], notAFit: 0, notAFitReasons: [], blocked: null }), { status: 200 });
-    }));
-    render(<SupplyMatchesTab listingId="bts_1" active onOpenListing={() => {}} />);
-    fireEvent.click(await screen.findByLabelText("Not a fit"));
-    const input = screen.getByLabelText("Not a fit reason") as HTMLInputElement;
-    const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
-    expect(save.disabled).toBe(true);
-    expect(calls.some((c) => c.startsWith("POST"))).toBe(false);
-    fireEvent.change(input, { target: { value: "Wrong chemistry" } });
-    expect(save.disabled).toBe(false);
-    fireEvent.submit(save.closest("form")!);
-    await waitFor(() => expect(calls.some((c) => c.startsWith("POST")
-      && c.includes('"verdict":"not_a_fit"') && c.includes('"reason":"Wrong chemistry"'))).toBe(true));
-  });
-
-  it("lists why hidden demands were marked not a fit", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/buyers") ? noBuyers
-      : { matches: [], notAFit: 2, notAFitReasons: [{ buyer: "ELG Battery", reason: "Takes packs only" }, { buyer: "Old Co", reason: null }], blocked: null }), { status: 200 })));
-    render(<SupplyMatchesTab listingId="bts_1" active onOpenListing={() => {}} />);
-    expect(await screen.findByText("Why they are not a fit")).toBeTruthy();
-    expect(screen.getByText(/Takes packs only/)).toBeTruthy();
-    expect(screen.getByText(/no reason recorded/)).toBeTruthy();
-  });
+const row = (o: Partial<MatchesResult["rows"][number]> = {}) => ({
+  key: "company:c1", rank: 1, name: "Exigo", detail: "Last contact 2026-10-08",
+  tags: [] as MatchesResult["rows"][number]["tags"], reason: "Same part number: 50 kWh Packs NMC",
+  checks: ["No firm seller price"], price: "40/kWh against their 60/kWh (+50%)",
+  offer: null, companyId: "c1", personId: "p1", contact: "buyer@exigo.test", stockId: null, ...o,
 });
 
-describe("Buyers from the CRM (REB-564)", () => {
+const result = (rows: MatchesResult["rows"], o: Partial<MatchesResult> = {}): MatchesResult => ({
+  id: "bts_1", kind: "supply",
+  lotKey: { line: "40 units · Toyota Proace · 50 kWh · Packs · NMC", full: ["40 units · Toyota Proace · 50 kWh · Packs · NMC", "Seller price EUR 40 per kWh"], open: false },
+  rows, considered: 34, blocked: null, errors: [], ...o,
+});
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+
+describe("Matches tab", () => {
   beforeEach(() => forgetShared());
   afterEach(() => vi.unstubAllGlobals());
 
-  it("shows ranked buyers, keeps researched leads in a closed accordion, and saves a candidate with the chosen contact", async () => {
-    const calls: string[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      calls.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
-      if (url.endsWith("/buyers")) return new Response(JSON.stringify({ ...noBuyers, ranked: [buyer({})], leads: [buyer({ companyId: "c2", name: "Lead Co", stage: "Identified", basis: "researched" })] }), { status: 200 });
-      return new Response(JSON.stringify({ matches: [], notAFit: 0, blocked: null }), { status: 200 });
-    }));
-    render(<SupplyMatchesTab listingId="bts_1" active onOpenListing={() => {}} />);
-    expect(await screen.findByText("Exigo")).toBeTruthy();
-    expect(screen.getByText(/Matches: Chemistry NMC, Format Cells/)).toBeTruthy();
-    expect(screen.getByText(/stated by the buyer/)).toBeTruthy();
-    expect(screen.queryByText("Lead Co")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Researched leads \(1\)/ }));
-    expect(await screen.findByText("Lead Co")).toBeTruthy();
-    expect(screen.getByText(/researched, not yet contacted/)).toBeTruthy();
-    fireEvent.click(screen.getAllByRole("button", { name: "Save as candidate" })[0]);
-    await waitFor(() => expect(calls.some((c) => c.startsWith("POST") && c.endsWith('{"companyId":"c1","personId":"p1"}'))).toBe(true));
+  it("leads with the key, one ranked list, the reason, the check and the firm price", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(result([
+      row({ key: "demand:btd_1", name: "ELG Battery", tags: ["live ask"], reason: "Wants 100k cells", checks: [], price: "EUR 20/kWh" }),
+      row({ tags: ["lead"], personId: "p1" }),
+    ]))));
+    render(<SupplyMatchesTab listingId="bts_1" active />);
+    expect(await screen.findByText("Matched on")).toBeTruthy();
+    expect(screen.getByText(/40 units · Toyota Proace/)).toBeTruthy();
+    expect(screen.getByText("live ask")).toBeTruthy();
+    expect(screen.getByText("lead")).toBeTruthy();
+    expect(screen.getByText("Same part number: 50 kWh Packs NMC")).toBeTruthy();
+    expect(screen.getByText(/Check: No firm seller price/)).toBeTruthy();
+    expect(screen.getByText("40/kWh against their 60/kWh (+50%)")).toBeTruthy();
+    expect(screen.getByText(/2 matches · 34 checked/)).toBeTruthy();
+    // One primary action per row, and the quiet Not a fit beside it.
+    expect(screen.getAllByRole("button", { name: "Add to offers" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Not a fit" })).toHaveLength(2);
   });
 
-  it("shortlists a company in one click and asks why before Not a fit", async () => {
+  it("expands the full key only when asked, or by itself for a disputed or mixed lot", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(result([row()]))));
+    const { unmount } = render(<SupplyMatchesTab listingId="bts_1" active />);
+    expect(await screen.findByText("Matched on")).toBeTruthy();
+    expect(screen.queryByText("Seller price EUR 40 per kWh")).toBeNull();
+    fireEvent.click(screen.getByText("Matched on"));
+    expect(screen.getByText("Seller price EUR 40 per kWh")).toBeTruthy();
+    unmount();
+    vi.stubGlobal("fetch", vi.fn(async () => json(result([row()], {
+      lotKey: { line: "2 products", full: ["Product 1", "Product 2"], open: true },
+    }))));
+    render(<SupplyMatchesTab listingId="bts_2" active />);
+    expect(await screen.findByText("Product 1")).toBeTruthy();
+  });
+
+  it("adds the offer with the match in data and shows the stage and date it became", async () => {
     const calls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       calls.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
-      if (url.endsWith("/buyers")) return new Response(JSON.stringify({ ...noBuyers, notAFit: 1, notAFitReasons: [{ company: "Hidden Co", reason: "Takes packs only" }], ranked: [buyer({})] }), { status: 200 });
-      return new Response(JSON.stringify({ matches: [], notAFit: 0, notAFitReasons: [], blocked: null }), { status: 200 });
+      if (url.endsWith("/offers")) {
+        return json({ offer: { id: "bof_1", stage: "candidate", updated_at: "2026-11-08T09:00:00.000Z" } }, 201);
+      }
+      return json(result([row()]));
     }));
-    render(<SupplyMatchesTab listingId="bts_1" active onOpenListing={() => {}} />);
-    expect(await screen.findByText(/1 marked not a fit/)).toBeTruthy();
-    expect(screen.getByText(/Takes packs only/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Shortlist Exigo" }));
-    await waitFor(() => expect(calls.some((c) => c.startsWith("POST") && c.endsWith('{"companyId":"c1","verdict":"shortlist"}'))).toBe(true));
-    fireEvent.click(screen.getByRole("button", { name: "Not a fit: Exigo" }));
-    const input = screen.getByLabelText("Not a fit reason for Exigo") as HTMLInputElement;
+    render(<SupplyMatchesTab listingId="bts_1" active />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add to offers" }));
+    await waitFor(() => expect(calls.some((call) => call.startsWith("POST /api/bulk-listings/bts_1/offers"))).toBe(true));
+    const body = JSON.parse(calls.find((call) => call.startsWith("POST"))!.split(" ").slice(2).join(" "));
+    expect(body).toMatchObject({
+      name: "Exigo", companyId: "c1", personId: "p1", contact: "buyer@exigo.test", stage: "candidate",
+      data: { match: { reason: "Same part number: 50 kWh Packs NMC", rank: 1 } },
+    });
+    expect(typeof body.data.match.at).toBe("string");
+    expect(body.data.stock_opportunity_id).toBeUndefined();
+    expect(await screen.findByText(/In offers · Candidate 8 Nov/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add to offers" })).toBeNull();
+  });
+
+  it("links an existing offer to the Offers tab instead of offering again", async () => {
+    const open = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async () => json(result([
+      row({ offer: { id: "bof_2", stage: "offered", date: "2026-11-05" } }),
+    ]))));
+    render(<SupplyMatchesTab listingId="bts_1" active onOpenOffers={open} />);
+    fireEvent.click(await screen.findByText(/In offers · Offered 5 Nov/));
+    expect(open).toHaveBeenCalled();
+  });
+
+  it("asks for a quick reason before Not a fit and hides the row once saved", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
+      if (init?.method === "POST") return json({ activity: { id: "a1" } }, 201);
+      return json(result([row()]));
+    }));
+    render(<SupplyMatchesTab listingId="bts_1" active />);
+    fireEvent.click(await screen.findByRole("button", { name: "Not a fit" }));
     const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    fireEvent.change(input, { target: { value: "Only buys packs" } });
-    fireEvent.submit(save.closest("form")!);
-    await waitFor(() => expect(calls.some((c) => c.startsWith("POST")
-      && c.endsWith('{"companyId":"c1","verdict":"not_a_fit","reason":"Only buys packs"}'))).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Wrong chemistry" }));
+    fireEvent.change(screen.getByLabelText("Anything else"), { target: { value: "NMC only" } });
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    await waitFor(() => expect(calls.some((call) => call.startsWith("POST /api/bulk-listings/bts_1/matches/v2")
+      && call.includes('"reason":"Wrong chemistry — NMC only"'))).toBe(true));
+    await waitFor(() => expect(screen.queryByText("Exigo")).toBeNull());
+  });
+
+  it("shows ten rows and then the rest", async () => {
+    const many = Array.from({ length: 14 }, (_, i) => row({ key: `company:c${i}`, name: `Buyer ${i}`, rank: i + 1 }));
+    vi.stubGlobal("fetch", vi.fn(async () => json(result(many))));
+    render(<SupplyMatchesTab listingId="bts_1" active />);
+    expect(await screen.findByText("Buyer 9")).toBeTruthy();
+    expect(screen.queryByText("Buyer 10")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Show 4 more of 4/ }));
+    expect(await screen.findByText("Buyer 13")).toBeTruthy();
+  });
+
+  it("shows the empty state, and an error with a retry", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(result([], { blocked: "Nothing fits yet. Add a dossier or a listing field to widen the match." }))));
+    const { unmount } = render(<SupplyMatchesTab listingId="bts_1" active />);
+    expect(await screen.findByText(/Nothing fits yet/)).toBeTruthy();
+    unmount();
+    vi.stubGlobal("fetch", vi.fn(async () => json({ error: "Could not load matches." }, 500)));
+    render(<SupplyMatchesTab listingId="bts_2" active />);
+    expect(await screen.findByText("Could not load matches.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("does not fetch while the tab is hidden", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SupplyMatchesTab listingId="bts_1" active={false} />);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("offers an unlisted stock row on the request side and records the stock line on the offer", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
+      if (url.includes("/offers")) return json({ offer: { id: "bof_9", stage: "candidate", updated_at: "2026-11-08T09:00:00.000Z" } }, 201);
+      return json(result([row({ key: "stock:sto_1", name: "Synthetic Supplier", tags: ["unlisted stock"], companyId: "c9", personId: "p9", stockId: "sto_1", price: null })], { id: "btd_1", kind: "demand" }));
+    }));
+    render(<DemandMatchesTab demandId="btd_1" active />);
+    fireEvent.click(await screen.findByRole("button", { name: "Add to offers" }));
+    await waitFor(() => expect(calls.some((call) => call.startsWith("POST /api/bulk-trades/demand/btd_1/offers"))).toBe(true));
+    const body = JSON.parse(calls.find((call) => call.startsWith("POST"))!.split(" ").slice(2).join(" "));
+    expect(body.data.stock_opportunity_id).toBe("sto_1");
   });
 });

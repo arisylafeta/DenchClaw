@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Demand } from "@/lib/bulk-demand";
 import type { Check } from "@/lib/demand-match";
 import type { BestMatchLine, DemandSupply, SupplyUnitView } from "@/lib/demand-supply-types";
+import type { MatchesResult } from "@/lib/matches-types";
 import { DemandPage } from "./demand-page";
 import { forgetShared } from "./trade-ui";
 vi.mock("./use-registry", async () => {
@@ -93,9 +94,20 @@ const sampleSupply: DemandSupply = {
 };
 
 afterEach(() => vi.unstubAllGlobals());
+const sampleMatches: MatchesResult = {
+  id: "btd_1", kind: "demand",
+  lotKey: { line: "MEB · Packs", full: ["Needs 10 units", "Evidence: label photos"], open: false },
+  rows: [{
+    key: "listing:l1", rank: 1, name: "Example Breakers", detail: "1 units · Yorkshire, United Kingdom",
+    tags: ["marketplace"], reason: "Product matches: Volkswagen ID.3", checks: ["Ask for label photos"],
+    price: "GBP 2,400", offer: null, companyId: null, personId: null, contact: null, stockId: null,
+  }],
+  considered: 920, blocked: null, errors: [],
+};
 function respond(url: string, rows: Demand[], matches: Record<string, BestMatchLine> = {}) {
   if (url.endsWith("/activity")) return { activity: [] };
   if (url.endsWith("/demand/matches")) return { matches };
+  if (url.includes("/matches/v2")) return sampleMatches;
   if (url.endsWith("/supply")) return sampleSupply;
   if (url.endsWith("/context")) return { buyer: null, mail: [] };
   return { demand: rows };
@@ -276,9 +288,9 @@ describe("Demand visualization", () => {
       within(sheet).getByRole("button", { name: "Edit demand" }),
     ).toBeInTheDocument();
     expect(within(sheet).getByRole("button", { name: "Status: Demand" })).toBeInTheDocument();
-    await userEvent.click(await within(sheet).findByRole("button", { name: "Supply matching · 1" }));
-    expect(within(sheet).getAllByText("Volkswagen ID.3 · 58 kWh").length).toBeGreaterThan(0);
-    expect(within(sheet).getByText("3 / 10")).toBeInTheDocument();
+    await userEvent.click(await within(sheet).findByRole("button", { name: "Supply matching" }));
+    expect(await within(sheet).findByText("Example Breakers")).toBeInTheDocument();
+    expect(within(sheet).getByText("Product matches: Volkswagen ID.3")).toBeInTheDocument();
     expect(
       within(sheet).getByRole("button", { name: "Copy ID" }),
     ).toBeInTheDocument();
@@ -295,21 +307,23 @@ describe("Demand visualization", () => {
       within(sheet).getByRole("textbox", { name: "Activity title" }),
     ).toBeInTheDocument();
   });
-  it("shows the best inventory match in the list and shortlists a unit from the supply tab", async () => {
+  it("shows the ranked inventory match and marks a unit not a fit from the Matches tab", async () => {
     const fetchMock = setup([row({})], { btd_1: { verdict: "exact", text: "Volkswagen ID.3 · 58 kWh · 3/10", groups: 1, shortlisted: 0 } });
     expect(await screen.findByText("Volkswagen ID.3 · 58 kWh · 3/10")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Green Voltage/ }));
     const sheet = screen.getByRole("region", { name: "Demand detail" });
-    expect(await within(sheet).findAllByLabelText("Exact")).not.toHaveLength(0);
-    await userEvent.click(await within(sheet).findByRole("button", { name: "Shortlist" }));
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/bulk-trades/demand/btd_1/supply",
+    expect(await within(sheet).findByText("Example Breakers")).toBeInTheDocument();
+    expect(within(sheet).getByText("GBP 2,400")).toBeInTheDocument();
+    await userEvent.click(within(sheet).getByRole("button", { name: "Not a fit" }));
+    await userEvent.click(within(sheet).getByRole("button", { name: "Already sourced" }));
+    await userEvent.click(within(sheet).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/bulk-trades/demand/btd_1/matches/v2",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ key: "listing:l1", verdict: "shortlist", title: "Volkswagen ID.3", seller: "Example Breakers",
-          eurPerKwh: 48, href: "https://www.rebattery.io/marketplace/example" }),
+        body: JSON.stringify({ key: "listing:l1", label: "Example Breakers", reason: "Already sourced" }),
       }),
-    );
+    ));
   });
   it("shows failed status actions visibly next to the ask", async () => {
     vi.stubGlobal(

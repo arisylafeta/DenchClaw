@@ -12,7 +12,7 @@ import { Card, ErrorText, peekShared, request, sharedGet } from "./trade-ui";
 import styles from "./bulk-detail.module.css";
 import { DemandDialog } from "./demand-editor";
 import { DemandPanel } from "./demand-panel";
-import { FitBadge } from "./demand-supply-tab";
+import { FitBadge } from "./match-badge";
 
 const MISSING_ORDER = [
   "no supply match",

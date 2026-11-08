@@ -1,5 +1,8 @@
 // Which CRM buyer companies might want one supply listing, judged from their buyer profile (the buy box).
 // Pure and deterministic. A stated, different chemistry or format rules a company out; a missing fact is a gap, not a no.
+//
+// The Matches tab no longer scores buyers this way: it uses the product key and `lib/match/rules.ts`. This module
+// stays as the A0 baseline for the replay harness (`scripts/rebattery/match_replay`), which compares arms against it.
 
 export type SupplyProfile = {
   /** "LFP", "NMC", ... or null when the supply does not say. */

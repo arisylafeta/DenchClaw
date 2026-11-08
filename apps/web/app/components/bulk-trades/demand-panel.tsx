@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Demand } from "@/lib/bulk-demand";
 import { KIND_LABEL, BASIS_LABEL } from "@/lib/bulk-demand";
 import { useRegistry } from "./use-registry";
@@ -9,15 +9,14 @@ import { demandFacts } from "@/lib/listing-facts";
 import { formatFee } from "@/lib/bulk-demand-score";
 import { shortDate } from "@/lib/bulk-trade-details";
 import type { BuyerProfile, BuyerEngagement } from "@/lib/buyer-profile";
-import type { DemandSupply, MarketLead, SupplyUnitView } from "@/lib/demand-supply-types";
 import { buildEntryLink } from "@/lib/workspace-links";
-import { ErrorText, request } from "./trade-ui";
+import { request } from "./trade-ui";
 import { ChatHint, ScorePill, SheetTabs, rowFocus } from "./demand-page";
 import { DemandActions } from "./demand-actions";
 import { DemandDialog } from "./demand-editor";
 import { CompanyContext } from "./company-context";
 import { BuyerContext } from "./buyer-context";
-import { SupplyTab } from "./demand-supply-tab";
+import { DemandMatchesTab } from "./demand-matches-tab";
 import styles from "./bulk-detail.module.css";
 import css from "./demand-panel.module.css";
 
@@ -33,12 +32,12 @@ const ago = (iso: string) => {
 };
 
 /** The ask, field by field: what is filled, plus the gaps that block a deal. Then the buyer's own words. */
-function TheAsk({ demand, supply }: { demand: Demand; supply: DemandSupply | null }) {
+function TheAsk({ demand }: { demand: Demand }) {
   const registry = useRegistry();
   if (!registry) return null;
   return (
     <div className="flex flex-col gap-4">
-      <ListingDetails facts={demandFacts(registry, demand, { pinned: supply?.requirement.pinned })} />
+      <ListingDetails facts={demandFacts(registry, demand)} />
       {demand.qualify_question && (
         <p className="text-[13px]"><span style={{ color: "var(--bt-muted)" }}>Question to ask: </span>{demand.qualify_question}
           {demand.qualify_asked_on && <span className={css.note}> · sent {shortDate(demand.qualify_asked_on)}</span>}</p>
@@ -116,49 +115,13 @@ export function DemandPanel({ demand, today, onChanged, onClose, onOpenTrade, on
   // Opens on the matches: that is why you click into a demand. Details is reference.
   const [tab, setTab] = useState("Supply matching");
   const [editing, setEditing] = useState(false);
-  const [supply, setSupply] = useState<DemandSupply | null>(null);
-  const [supplyError, setSupplyError] = useState<string | null>(null);
-  const [loadingSupply, setLoadingSupply] = useState(true);
   const [context, setContext] = useState<BuyerContext | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const endpoint = `/api/bulk-trades/demand/${encodeURIComponent(demand.id)}`;
-  const loadSupply = useCallback(async () => {
-    setLoadingSupply(true);
-    try {
-      const result = await request<DemandSupply>(`${endpoint}/supply`);
-      if (!Array.isArray(result?.groups)) throw new Error("Could not check inventory.");
-      setSupply(result);
-      setSupplyError(null);
-    } catch (err) {
-      setSupplyError(err instanceof Error ? err.message : "Could not check inventory.");
-    } finally {
-      setLoadingSupply(false);
-    }
-  }, [endpoint]);
-  useEffect(() => { void loadSupply(); }, [loadSupply, demand.updated_at]);
   useEffect(() => {
     let cancelled = false;
     void request<BuyerContext>(`${endpoint}/context`).then((c) => { if (!cancelled) setContext({ buyer: c?.buyer ?? null, mail: Array.isArray(c?.mail) ? c.mail : [] }); }).catch(() => { if (!cancelled) setContext({ buyer: null, mail: [] }); });
     return () => { cancelled = true; };
   }, [endpoint]);
-  const leads: MarketLead[] = [];
-  async function verdict(unit: SupplyUnitView, value: "shortlist" | "not_a_fit" | "clear") {
-    setBusy(true);
-    setError(null);
-    try {
-      await request(`${endpoint}/supply`, { method: "POST", body: JSON.stringify({
-        key: unit.key, verdict: value, title: [unit.make, unit.model].filter(Boolean).join(" ") || unit.title, seller: unit.seller,
-        eurPerKwh: unit.eurPerKwh, href: unit.href,
-      }) });
-      await loadSupply();
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save.");
-    } finally {
-      setBusy(false);
-    }
-  }
   const top = useRef<HTMLDivElement>(null);
   useEffect(() => { top.current?.scrollIntoView?.({ block: "start" }); }, [demand.id]);
   const actions = (section: string) => (
@@ -198,25 +161,20 @@ export function DemandPanel({ demand, today, onChanged, onClose, onOpenTrade, on
       </header>
       <SheetTabs
         tabs={TABS}
-        labels={{ "Supply matching": supply ? `Supply matching · ${supply.totalGroups}` : "Supply matching",
-          Activity: demand.activity_count ? `Activity · ${demand.activity_count}` : "Activity" }}
+        labels={{ Activity: demand.activity_count ? `Activity · ${demand.activity_count}` : "Activity" }}
         value={tab}
         onChange={setTab}
       />
-      <ErrorText error={error} />
       {tab === "Details" && (
         <div className={css.details}>
           <div className="flex flex-col gap-6">
-            <TheAsk demand={demand} supply={supply} />
+            <TheAsk demand={demand} />
             <BuyerContext context={demand.context} />
           </div>
           <TheBuyer demand={demand} context={context} onOpenDemand={onOpenDemand} />
         </div>
       )}
-      {tab === "Supply matching" && (
-        <SupplyTab supply={supply} loading={loadingSupply} error={supplyError} onVerdict={verdict} busy={busy}
-          onEdit={() => setEditing(true)} leads={leads} />
-      )}
+      <DemandMatchesTab demandId={demand.id} active={tab === "Supply matching"} onOpenOffers={() => onOpenTrade(demand.id)} />
       {tab === "Activity" && (
         <div className="flex max-w-[760px] flex-col gap-6">
           <MailList mail={context?.mail ?? []} />

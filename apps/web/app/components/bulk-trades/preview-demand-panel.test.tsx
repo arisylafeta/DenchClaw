@@ -19,14 +19,11 @@ it("shimmers header and buyer values in their real shell until async reads finis
   render(<PreviewDemandPanel demand={demand} today="2026-10-20" onChanged={() => {}} onClose={() => {}} onOpenTrade={() => {}} />);
   expect(screen.getByRole("heading", { name: "12 × Ioniq packs" })).toBeInTheDocument();
   expect(screen.getByText("Supplier")).toBeInTheDocument();
-  expect(screen.getByText("Capacity per unit").parentElement!.querySelector('[aria-hidden="true"]')).not.toBeNull();
   expect(screen.getByText("Stage")).toBeInTheDocument();
   expect(screen.getByText("Loading demand details")).toBeInTheDocument();
   const card = document.querySelector('[aria-label="Buyer card"]')!;
   expect(card.querySelectorAll('[aria-hidden="true"]').length).toBeGreaterThan(3);
-  releases["/api/bulk-trades/demand/d1/supply"](new Response(JSON.stringify({ groups: [], shortlisted: [{ seller: "Example supplier" }], requirement: { pinned: [] } })));
   releases["/api/bulk-listings/d1/context"](new Response(JSON.stringify({ buyer: { profile: { tier: "A", owner: "Alex" }, demand: [] }, mail: [], person: { name: "Example buyer", email: "buyer@example.test", company_name: "Example company" } })));
-  expect(await screen.findByText("Example supplier")).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: "Example buyer" })).toBeInTheDocument();
   expect(screen.getByText("buyer@example.test")).toBeInTheDocument();
   expect(screen.getByText("Alex")).toBeInTheDocument();
@@ -111,25 +108,20 @@ it("shows several pack types as a table under Product, one row each, with prices
   expect(screen.queryByText("Capacity per unit")).not.toBeInTheDocument();
 });
 
-it("has a Matches tab, the Bulk Trades supply matching list, with the group count and the same verdict actions", async () => {
-  const unit = {
-    key: "mp:1", source: "marketplace", seller: "Example Breakers", title: "Volkswagen ID.3", make: "Volkswagen", model: "ID.3", format: "Packs",
-    chemistry: "NMC", location: "Yorkshire, United Kingdom", country: "GB", kwh: 58, kwhEstimated: false, units: 1, price: 2400, currency: "GBP",
-    currencyAssumed: false, eurPerKwh: 48, eurPerUnit: 2784, marginPct: null, spreadEur: null, cheapestRank: 0, peers: 3, verdict: "exact",
-    checks: [], photos: 0, soh: null, year: 2021, partNumber: null, href: "https://www.rebattery.io/marketplace/example", seen: null, ai: null, userVerdict: null,
-  };
-  const supply = {
-    requirement: { pinned: [], unitsNeeded: 10, kwhNeeded: null, buyerEurPerKwh: null, buyerEurPerUnit: null, country: "GB" },
-    groups: [{ key: "vw|id.3|58|Packs", label: "Volkswagen ID.3 · 58 kWh", verdict: "exact", units: 3, sellers: ["Example Breakers"], sources: ["marketplace"],
-      eurPerKwh: { min: 48, max: 52 }, bestMarginPct: null, covers: { have: 3, need: 10 }, small: false, checks: [], items: [unit], more: 0,
-      bySeller: [{ key: "example", name: "Example Breakers", country: "GB", location: "Yorkshire", sources: ["marketplace"], units: 3, kwh: { min: 58, max: 58 },
-        eurPerKwh: { min: 48, max: 52 }, totalEur: 8350, pricedUnits: 3, verdict: "exact", withPhotos: 0, items: [unit], more: 0 }],
-      fill: { sellers: [{ name: "Example Breakers", units: 3 }], units: 3, need: 10, eurPerKwh: 48 } }],
-    totalGroups: 1, smallGroups: 0, totalUnits: 3, considered: { marketplace: 900, trades: 20 }, hiddenCount: 0,
-    shortlisted: [], shortlistGone: [], targetBuyEurPerKwh: null, blocked: null, errors: [], fxNote: "Approximate FX",
-  };
+it("has a Matches tab: the shared ranked list, with Add to offers and Not a fit", async () => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(
-    url.endsWith("/supply") ? supply : url.endsWith("/context") ? { buyer: null, mail: [] } : url.endsWith("/conversation") ? { conversation: null } : {},
+    url.includes("/matches/v2")
+      ? {
+          id: "d9", kind: "demand",
+          lotKey: { line: "10 ID.3 packs", full: ["Needs 10 units"], open: false },
+          rows: [{
+            key: "listing:l1", rank: 1, name: "Example Breakers", detail: "3 units · Yorkshire",
+            tags: ["marketplace"], reason: "Product matches: Volkswagen ID.3", checks: [],
+            price: "GBP 2,400", offer: null, companyId: null, personId: null, contact: null, stockId: null,
+          }],
+          considered: 920, blocked: null, errors: [],
+        }
+      : url.endsWith("/context") ? { buyer: null, mail: [] } : url.endsWith("/conversation") ? { conversation: null } : {},
   ))));
   const demand = {
     id: "d9", buyer: "Example company", wants: "10 ID.3 packs", kind: "request", spec: {}, context: {}, context_notes: [],
@@ -138,8 +130,10 @@ it("has a Matches tab, the Bulk Trades supply matching list, with the group coun
   } as unknown as Demand;
   render(<PreviewDemandPanel demand={demand} today="2026-10-20" onChanged={() => {}} onClose={() => {}} onOpenTrade={() => {}} />);
   const tabs = screen.getByRole("navigation", { name: "Detail sections" });
-  await waitFor(() => expect(Array.from(tabs.querySelectorAll("button")).map((t) => t.textContent)).toEqual(["Details", "Matches · 1", "Matcha", "Offers", "Documents", "History"]));
-  fireEvent.click(screen.getByRole("button", { name: "Matches · 1" }));
-  expect(await screen.findByText("Volkswagen ID.3 · 58 kWh")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Marketplace" })).toBeInTheDocument();
+  await waitFor(() => expect(Array.from(tabs.querySelectorAll("button")).map((t) => t.textContent)).toEqual(["Details", "Matches", "Matcha", "Offers", "Documents", "History"]));
+  fireEvent.click(screen.getByRole("button", { name: "Matches" }));
+  expect(await screen.findByText("Example Breakers")).toBeInTheDocument();
+  expect(screen.getByText("Product matches: Volkswagen ID.3")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add to offers" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Not a fit" })).toBeInTheDocument();
 });
