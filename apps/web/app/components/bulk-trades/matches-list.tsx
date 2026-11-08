@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import type { MatchOffer, MatchRow, MatchTag, MatchesResult } from "@/lib/matches-types";
+import type { FitMark, FitState, MatchOffer, MatchRow, MatchTag, MatchesResult } from "@/lib/matches-types";
 import type { OfferStage } from "@/lib/crm-postgres/bulk-offers";
 import { Button, Chip, LinkButton, StatusDot, type ChipTone } from "@/components/ui/board";
 import { ErrorText, request } from "./trade-ui";
@@ -26,6 +26,40 @@ const TAG_TONE: Record<MatchTag, ChipTone> = {
   "unlisted stock": "neutral",
   lead: "blue",
 };
+
+/** The four fit marks: always a glyph and a word, so colour is never the only signal. */
+const FIT: Record<FitState, { glyph: string; word: string; tone: ChipTone }> = {
+  fits: { glyph: "✓", word: "fits", tone: "green" },
+  close: { glyph: "≈", word: "close", tone: "amber" },
+  unstated: { glyph: "?", word: "not stated", tone: "neutral" },
+  misses: { glyph: "✗", word: "misses", tone: "red" },
+};
+
+function FitMarks({ marks }: { marks: FitMark[] }) {
+  return (
+    <ul className="mt-1 flex flex-wrap gap-1.5" aria-label="How it fits">
+      {marks.map((mark) => (
+        <li key={`${mark.key}:${mark.label}`}>
+          <Chip tone={FIT[mark.state].tone} variant="subtle" title={`${mark.label}: ${FIT[mark.state].word}`}>
+            <span aria-hidden className="font-bold">{FIT[mark.state].glyph}</span>
+            <span className="sr-only">{FIT[mark.state].word}:</span>
+            {mark.label}
+          </Chip>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function FitLegend() {
+  return (
+    <span className="inline-flex flex-wrap gap-x-2" aria-label="Fit marks">
+      {(Object.keys(FIT) as FitState[]).map((state) => (
+        <span key={state}><span aria-hidden className="font-bold">{FIT[state].glyph}</span> {FIT[state].word}</span>
+      ))}
+    </span>
+  );
+}
 
 /** "8 Nov", or "8 Nov 2025" once the date is not this year. */
 const offerDate = (iso: string | null) => {
@@ -92,6 +126,8 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
 
   const rows = showAll ? result.rows : result.rows.slice(0, 10);
   const hidden = result.rows.length - rows.length;
+  const withMarks = result.rows.some((row) => row.fit);
+  const coverage = result.coverage;
 
   async function add(row: MatchRow) {
     setAdding(row.key);
@@ -161,7 +197,15 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
         {result.rows.length > 0 && (
           <p className="mt-1 px-1 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
             {result.rows.length} {result.rows.length === 1 ? "match" : "matches"} · {result.considered.toLocaleString("en-GB")} checked
+            {coverage && (
+              <> · Stated stock {coverage.stated.toLocaleString("en-GB")} of {coverage.need.toLocaleString("en-GB")}
+                {coverage.unstated > 0 && <> · {coverage.unstated} {coverage.unstated === 1 ? "source hasn't" : "sources haven't"} said how many</>}
+              </>
+            )}
           </p>
+        )}
+        {withMarks && result.rows.length > 0 && (
+          <p className="mt-0.5 px-1 text-[12px]" style={{ color: "var(--color-text-muted)" }}><FitLegend /></p>
         )}
       </div>
 
@@ -181,8 +225,18 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
                     {row.tags.map((tag) => <Chip key={tag} tone={TAG_TONE[tag]}>{tag}</Chip>)}
                     {row.price && <span className="ml-auto shrink-0 text-[12px] font-medium tabular-nums">{row.price}</span>}
                   </div>
-                  <p className="mt-0.5 text-[13px]">{row.reason}</p>
-                  {row.detail && <p className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>{row.detail}</p>}
+                  {row.fit ? (
+                    <>
+                      <p className="mt-0.5 text-[13px]">{row.holds ?? row.reason}</p>
+                      {row.source && <p className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>{row.source}</p>}
+                      {row.fit.length > 0 && <FitMarks marks={row.fit} />}
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-0.5 text-[13px]">{row.reason}</p>
+                      {row.detail && <p className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>{row.detail}</p>}
+                    </>
+                  )}
                   {row.checks.length > 0 && (
                     <p className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>Check: {row.checks.join(" · ")}</p>
                   )}

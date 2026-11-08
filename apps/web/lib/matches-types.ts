@@ -28,7 +28,27 @@ export type MatchRow = {
   contact: string | null;
   /** The unlisted stock row behind this match, recorded on the offer it becomes. */
   stockId: string | null;
+  /** Request rows only: what they hold, from the source ("Lishen LR21700LH cells · quantity not stated"). */
+  holds?: string;
+  /** Request rows only: where that comes from, and when ("Catalogue, 8 Oct"). */
+  source?: string | null;
+  /** Request rows only: one mark per requirement the request states. */
+  fit?: FitMark[];
 };
+
+/** How one requirement fits: ✓ fits, ≈ close, ? not stated, ✗ misses. Always shown as glyph and word, never colour alone. */
+export type FitState = "fits" | "close" | "unstated" | "misses";
+
+export type FitMark = {
+  /** The requirement: model, size, format, capacity, chemistry, quantity, price, condition, location. */
+  key: string;
+  /** What the row has against it, short: "Samsung 50E", "12,400 of 500,000", "Quantity". */
+  label: string;
+  state: FitState;
+};
+
+/** Stated stock against the request's need. Only stated quantities count. */
+export type MatchCoverage = { stated: number; need: number; unstated: number };
 
 /** The one-line "Matched on …" header, and the full key behind it. */
 export type MatchKeyView = {
@@ -47,4 +67,6 @@ export type MatchesResult = {
   considered: number;
   blocked: string | null;
   errors: string[];
+  /** Requests with a unit count only. */
+  coverage?: MatchCoverage | null;
 };

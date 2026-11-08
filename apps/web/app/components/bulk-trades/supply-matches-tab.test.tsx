@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { DemandMatchesTab } from "./demand-matches-tab";
 import { SupplyMatchesTab } from "./supply-matches-tab";
 import { forgetShared } from "./trade-ui";
@@ -139,6 +139,43 @@ describe("Matches tab", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<SupplyMatchesTab listingId="bts_1" active={false} />);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows what a request row holds, its source and one fit mark per requirement, each as glyph and word", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(result([row({
+      key: "stock:sto_50e", name: "E-bike seller", tags: ["unlisted stock"], reason: "Cell model matches: Samsung 50E", checks: [],
+      detail: "Quantity not stated", price: null, stockId: "sto_50e",
+      holds: "Samsung INR21700-50E · quantity not stated", source: "Email, 27 Oct · Florida, USA",
+      fit: [
+        { key: "model", label: "Samsung 50E", state: "fits" },
+        { key: "format", label: "Format", state: "unstated" },
+        { key: "location", label: "US → PL", state: "close" },
+        { key: "price", label: "EUR 2, over max", state: "misses" },
+      ],
+    })], { id: "btd_1", kind: "demand", coverage: { stated: 0, need: 500_000, unstated: 1 } }))));
+    render(<DemandMatchesTab demandId="btd_1" active />);
+    expect(await screen.findByText("Samsung INR21700-50E · quantity not stated")).toBeTruthy();
+    expect(screen.getByText("Email, 27 Oct · Florida, USA")).toBeTruthy();
+    const marks = within(screen.getByRole("list", { name: "How it fits" })).getAllByRole("listitem");
+    expect(marks.map((mark) => mark.textContent)).toEqual([
+      "✓fits:Samsung 50E", "?not stated:Format", "≈close:US → PL", "✗misses:EUR 2, over max",
+    ]);
+    expect(screen.getByText(/Stated stock 0 of 500,000 · 1 source hasn't said how many/)).toBeTruthy();
+    expect(screen.getByLabelText("Fit marks").textContent).toContain("? not stated");
+    // The marks replace the reason and the quantity line on a request row.
+    expect(screen.queryByText("Cell model matches: Samsung 50E")).toBeNull();
+    expect(screen.queryByText("Quantity not stated")).toBeNull();
+  });
+
+  it("keeps the supply tab exactly as it was: reason, detail and checks, with no marks or legend", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(result([row()]))));
+    render(<SupplyMatchesTab listingId="bts_1" active />);
+    expect(await screen.findByText("Same part number: 50 kWh Packs NMC")).toBeTruthy();
+    expect(screen.getByText("Last contact 2026-10-08")).toBeTruthy();
+    expect(screen.getByText(/Check: No firm seller price/)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "How it fits" })).toBeNull();
+    expect(screen.queryByLabelText("Fit marks")).toBeNull();
+    expect(screen.queryByText(/Stated stock/)).toBeNull();
   });
 
   it("offers an unlisted stock row on the request side and records the stock line on the offer", async () => {

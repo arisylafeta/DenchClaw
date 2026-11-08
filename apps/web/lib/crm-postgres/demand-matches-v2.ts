@@ -4,11 +4,12 @@ import "server-only";
 // marketplace and unlisted supplier stock, with the same unit never counted twice. Reuses the product key and the
 // demand-side scorer, so one unit of stock is judged the same way everywhere.
 import { queryPg } from "../postgres";
-import { requirementFor, scoreCandidate, vocabulary, type Candidate, type Match, type Requirement } from "../demand-match";
+import { requestCodeHit, requirementFor, scoreCandidate, vocabulary, type Candidate, type Match, type Requirement } from "../demand-match";
+import { fitMarks, holdsLine, sourceLine, unitsPhrase } from "../match/fit-marks";
 import { inventoryFor } from "./demand-match-supply";
 import { getDemand } from "./bulk-demand";
 import { offersForListing } from "./match-offers";
-import type { MatchesResult, MatchRow, MatchTag } from "../matches-types";
+import type { FitMark, MatchesResult, MatchRow, MatchTag } from "../matches-types";
 
 type DemandSource = "ourListings" | "marketplace" | "unlistedStock";
 
@@ -54,22 +55,45 @@ export function evidenceMissing(evidence: string[], candidate: Candidate): strin
 const day = (value: string | null | undefined) => (value ? value.slice(0, 10) : null);
 
 /** Unlisted supplier stock: status `opportunity` only, and never a unit that is already on a listing. */
-type StockRow = {
+export type StockRow = {
   id: string; company_id: string | null; person_id: string; supplier: string | null;
   make: string | null; model: string | null; format: string | null; chemistry: string | null;
   capacity_kwh: number | null; quantity: number | null; price_eur: number | null;
   location: string | null; country: string | null; seen_on: string | null; title: string;
+  /** `details.quantity_available`, when the source states one. */
+  quantity_available: number | null;
+  /** `details.attributes.quantity_stated`: false means the quantity column is a placeholder. */
+  quantity_stated: boolean | null;
+  soh_percent: number | null; year: number | null; part_numbers: string[] | null;
+  supplier_ref: string | null; description: string | null;
+  /** `crm_stock_opportunities.source` ("supplier list", "supplier email", "website", "ebay", ...). */
+  source: string | null;
+  /** What the evidence says the source was, for telling a catalogue from a stock list. */
+  evidence_source: string | null;
+  observed_on: string | null;
 };
 
+const NUMBER = (path: string) => `case when jsonb_typeof(s.details->${path}) = 'number' then (s.details->${path})::text::numeric::float8
+                 when (s.details->${path}) #>> '{}' ~ '^[0-9]+(\\.[0-9]+)?$' then ((s.details->${path}) #>> '{}')::numeric::float8 end`;
+
+// Lines with no make are read too: a cell or part code from the request can still name them (the INR21700-50E line
+// keeps its code in supplier_ref). Which of them may be considered is decided per request, in demandMatchesV2.
 async function unlistedStock(): Promise<StockRow[]> {
   return queryPg<StockRow>(
     `select s.id, s.company_id, s.person_id, coalesce(c.name, p.full_name) as supplier, s.title,
-            s.details->>'make' as make, s.details->>'model' as model, s.details->>'format' as format,
+            nullif(trim(s.details->>'make'), '') as make, s.details->>'model' as model, s.details->>'format' as format,
             s.details->>'chemistry' as chemistry,
-            case when jsonb_typeof(s.details->'capacity_kwh') = 'number' then (s.details->'capacity_kwh')::text::numeric::float8
-                 when (s.details->'capacity_kwh') #>> '{}' ~ '^[0-9]+(\\.[0-9]+)?$' then ((s.details->'capacity_kwh') #>> '{}')::numeric::float8 end as capacity_kwh,
-            coalesce(s.quantity, 1)::float8 as quantity,
+            ${NUMBER("'capacity_kwh'")} as capacity_kwh,
+            s.quantity::float8 as quantity,
+            ${NUMBER("'quantity_available'")} as quantity_available,
+            case s.details->'attributes'->>'quantity_stated' when 'false' then false when 'true' then true end as quantity_stated,
             case when jsonb_typeof(s.details->'price_eur') = 'number' then (s.details->'price_eur')::text::numeric::float8 end as price_eur,
+            ${NUMBER("'soh_percent'")} as soh_percent,
+            case when (s.details->>'year') ~ '^(19|20)[0-9]{2}$' then (s.details->>'year')::int end as year,
+            case when jsonb_typeof(s.details->'part_numbers') = 'array'
+                 then array(select jsonb_array_elements_text(s.details->'part_numbers')) end as part_numbers,
+            s.supplier_ref, s.description, s.source, s.details->'evidence'->>'source' as evidence_source,
+            s.observed_on::text as observed_on,
             s.location, coalesce(nullif(c.country, ''), nullif(s.location, '')) as country,
             coalesce(s.details->'sync'->>'lastSeen', s.observed_on::text, s.updated_at::date::text) as seen_on
      from crm_stock_opportunities s
@@ -80,7 +104,6 @@ async function unlistedStock(): Promise<StockRow[]> {
        and s.bulk_listing_id is null
        and coalesce(s.details->>'deliver', 'true') <> 'false'
        and coalesce(s.details->'availability'->>'state', '') not in ('sold', 'not_found', 'gone')
-       and nullif(trim(s.details->>'make'), '') is not null
      order by s.updated_at desc`);
 }
 
@@ -89,14 +112,57 @@ const STOCK_FORMAT: Record<string, Candidate["format"]> = {
   cell: "Cells", cells: "Cells", system: "Systems", systems: "Systems",
 };
 
-function stockCandidate(row: StockRow): Candidate {
+/**
+ * The quantity a stock line states. `quantity_stated = false` is not stated; `quantity_available` wins when present;
+ * otherwise the column, where a lone 1 is marked bare (the scorer reads it as "not stated" on a cell or module ask).
+ */
+export function stockUnits(row: Pick<StockRow, "quantity" | "quantity_available" | "quantity_stated">): { units: number | null; bare: boolean } {
+  if (row.quantity_stated === false) {
+    return { units: null, bare: false };
+  }
+  if (row.quantity_available != null) {
+    return { units: row.quantity_available, bare: false };
+  }
+  if (row.quantity == null) {
+    return { units: null, bare: false };
+  }
+  return { units: row.quantity, bare: row.quantity === 1 && row.quantity_stated !== true };
+}
+
+/** Where a stock line came from, in words a trader uses. */
+export function stockSourceKind(row: Pick<StockRow, "source" | "evidence_source" | "title" | "description">): string | null {
+  const source = (row.source ?? "").toLowerCase();
+  const said = `${row.evidence_source ?? ""} ${row.title} ${row.description ?? ""}`;
+  if (source === "supplier list") {
+    return /catalog/i.test(row.evidence_source ?? "") ? "catalogue" : "stock list";
+  }
+  if (source === "supplier email" || /\b(seller|supplier) email\b/i.test(said)) {
+    return "email";
+  }
+  if (source === "ebay") {
+    return "eBay listing";
+  }
+  if (source === "website") {
+    return "salvage listing";
+  }
+  if (source === "web research") {
+    return "web research";
+  }
+  return source ? "stock list" : null;
+}
+
+export function stockCandidate(row: StockRow): Candidate {
   const format = STOCK_FORMAT[(row.format ?? "").toLowerCase()] ?? (/bess|container|system/i.test(row.format ?? "") ? "Systems" : null);
+  const { units, bare } = stockUnits(row);
+  const partNumbers = (row.part_numbers ?? []).filter((part) => !!part?.trim());
   return {
     key: `stock:${row.id}`, source: "trade", title: row.title, seller: row.supplier,
     make: row.make, model: row.model, format, chemistry: row.chemistry, cellFormat: null,
-    kwh: row.capacity_kwh, kwhEstimated: false, units: row.quantity,
+    kwh: row.capacity_kwh, kwhEstimated: false, units, unitsBare: bare,
     price: row.price_eur, currency: row.price_eur != null ? "EUR" : null, currencyAssumed: false,
-    country: row.country, location: row.location, soh: null, year: null, partNumber: null,
+    country: row.country, location: row.location, soh: row.soh_percent, year: row.year, partNumber: partNumbers[0] ?? null,
+    partNumbers, supplierRef: row.supplier_ref, description: row.description,
+    sourceKind: stockSourceKind(row), observedOn: row.observed_on,
     photos: 0, tested: false, verified: row.company_id != null, seen: row.seen_on,
     href: `/trades/stock/${row.id}`, ai: null, alsoIn: [],
   };
@@ -119,18 +185,25 @@ function firmPrice(candidate: Candidate): string | null {
 
 /** Why this unit fits, citing the product it matched on rather than the request's words. */
 function reasonFor(match: Match, candidate: Candidate): string {
-  const product = match.checks.find((check) => check.key === "product" && check.state === "pass");
+  const product = match.checks.find((check) => check.key === "model" && check.state === "pass")
+    ?? match.checks.find((check) => check.key === "product" && check.state === "pass");
   if (product) {
     return `${product.label} matches: ${product.detail}`;
   }
   return [candidate.make, candidate.model].filter(Boolean).join(" ") || candidate.title;
 }
 
-/** The gaps that would change the answer, in the scorer's own words. */
-function checksFor(match: Match, missing: string[]): string[] {
+// The checks each fit mark already shows, so the row does not say the same thing twice.
+const MARKED: Record<string, string[]> = {
+  model: ["product", "model"], size: ["product"], format: ["format"], capacity: ["capacity"], chemistry: ["chemistry"],
+  quantity: ["quantity"], price: ["price"],
+};
+
+/** What to check on a request row beyond its marks: an open gap no mark shows, then the evidence to ask for. */
+function requestChecks(match: Match, missing: string[], marks: FitMark[]): string[] {
+  const shown = new Set(marks.flatMap((mark) => MARKED[mark.key] ?? []));
   const gaps = match.checks
-    .filter((check) => check.state !== "pass" && !check.detail.startsWith("AI:"))
-    // The grouped supply tab said where the rest of the ask was; this list has no groups below.
+    .filter((check) => check.state !== "pass" && !shown.has(check.key) && !check.detail.startsWith("AI:"))
     .map((check) => check.detail.replace(/\s*\(group with others below\)/i, ""));
   return [...new Set([...gaps, missing.length ? `Ask for ${missing.join(", ")}` : null].filter((entry): entry is string => !!entry))].slice(0, 3);
 }
@@ -204,10 +277,12 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
     offersForListing(demandId),
   ]);
   const { candidates, hidden, verdicts, errors } = inventory;
-  const stockCandidates = stock.map(stockCandidate);
   // One requirement per request, from the same vocabulary the demand tab already uses: what a seller writes in a
   // make or model. Stock rows are then judged against it, never allowed to redefine the ask.
   const requirement = requirementFor(demand, vocabulary(candidates));
+  // A stock line with no make is considered only when a code from the request names it; otherwise hundreds of
+  // 12 V and AGM lines with no make would reach pack requests.
+  const stockCandidates = stock.map(stockCandidate).filter((candidate) => candidate.make || requestCodeHit(requirement, candidate));
   const evidence = Array.isArray(demand.spec?.evidence) ? (demand.spec.evidence as string[]) : [];
 
   type Scored = { candidate: Candidate; source: DemandSource; match: Match; missing: string[] };
@@ -221,7 +296,8 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
     if (!match) {
       return;
     }
-    scored.push({ candidate, source, match, missing: evidenceMissing(evidence, candidate) });
+    // The match's candidate carries the honest quantity ("not stated" for a placeholder 1).
+    scored.push({ candidate: match.candidate, source, match, missing: evidenceMissing(evidence, candidate) });
   };
   for (const candidate of candidates) {
     consider(candidate, candidate.source === "marketplace" ? "marketplace" : "ourListings");
@@ -239,26 +315,32 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
   const identity = await identities(scored.map((row) => row.candidate.key));
   const rows: MatchRow[] = scored.toSorted(order).map(({ candidate, source, match, missing }, index) => {
     const who = identity.get(candidate.key) ?? { companyId: null, personId: null, contact: null };
+    const price = firmPrice(candidate);
+    const marks = fitMarks(requirement, match, { price });
     return {
       key: candidate.key,
       rank: index + 1,
       name: candidate.seller ?? "Unknown seller",
       detail: [
-        candidate.units != null ? `${candidate.units.toLocaleString("en-GB")} units` : "Quantity not stated",
+        candidate.units != null ? unitsPhrase(candidate.units, candidate.format) : "Quantity not stated",
         candidate.location ?? candidate.country,
         candidate.seen ? `seen ${day(candidate.seen)}` : null,
       ].filter(Boolean).join(" · "),
       tags: [TAG_FOR[source]],
       reason: reasonFor(match, candidate),
-      checks: checksFor(match, missing),
-      price: firmPrice(candidate),
+      checks: requestChecks(match, missing, marks),
+      price,
       offer: offers.find(who.companyId, who.personId, candidate.seller ?? ""),
       companyId: who.companyId,
       personId: who.personId,
       contact: who.contact,
       stockId: candidate.key.startsWith("stock:") ? candidate.key.slice("stock:".length) : null,
+      holds: holdsLine(candidate),
+      source: [sourceLine(candidate), candidate.location ?? candidate.country].filter(Boolean).join(" · ") || null,
+      fit: marks,
     };
   });
+  const need = requirement.unitsNeeded;
 
   return {
     id: demandId,
@@ -268,5 +350,11 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
     considered: candidates.length + stockCandidates.length,
     blocked: rows.length ? null : "Nothing fits yet. Add a dossier or a listing field to widen the match.",
     errors,
+    // Only stated quantities count towards the need; a line that has not said is counted apart.
+    coverage: need ? {
+      stated: scored.reduce((sum, row) => sum + (row.candidate.units ?? 0), 0),
+      need,
+      unstated: scored.filter((row) => row.candidate.units == null).length,
+    } : null,
   };
 }
