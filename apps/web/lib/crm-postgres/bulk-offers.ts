@@ -88,7 +88,11 @@ export async function getOffer(listingId: string, offerId: string, userId: strin
   return (await queryPg<Offer>(`${selectOffers("$3")} where (o.bulk_listing_id = $1 or o.counterpart_id = $1) and o.id = $2`, [listingId, offerId, userId]))[0] ?? null;
 }
 
-export type OfferInput = { name: string; contact?: string | null; personId?: string | null; companyId?: string | null; wants?: string | null; stage?: OfferStage };
+export type OfferInput = {
+  name: string; contact?: string | null; personId?: string | null; companyId?: string | null; wants?: string | null; stage?: OfferStage;
+  /** Extra context stored on the offer, e.g. the match that suggested it (`match`) or the stock row it came from. */
+  data?: Record<string, unknown>;
+};
 
 export class OfferConflict extends Error {
   constructor(message: string, readonly existingOfferId?: string) { super(message); this.name = "OfferConflict"; }
@@ -115,8 +119,27 @@ async function pairOffer(a: string, b: string): Promise<string | null> {
   return row?.id ?? null;
 }
 
+/**
+ * The unlinked counterparty offer already on this listing for the same counterparty: the company when there is one
+ * (two contacts at a company are one counterparty), else the person, else the same written name. This is the key
+ * crm_bulk_offers_counterparty_uidx keeps unique; the name case is not indexed and is checked here.
+ */
+async function unlinkedCounterparty(listingId: string, input: { name: string; companyId?: string | null; personId?: string | null }): Promise<string | null> {
+  const companyId = input.companyId ?? null;
+  const personId = input.personId ?? null;
+  const [row] = await queryPg<{ id: string }>(
+    `select id from crm_bulk_offers
+     where bulk_listing_id = $1 and role = 'counterparty' and counterpart_id is null
+       and (($2::text is not null and company_id = $2)
+         or ($2::text is null and $3::text is not null and company_id is null and person_id = $3)
+         or ($2::text is null and $3::text is null and lower(name) = lower($4)))
+     order by created_at limit 1`, [listingId, companyId, personId, input.name.trim()]);
+  return row?.id ?? null;
+}
+
 /** Stores the offer once, on the listing it was made on. When the other party has exactly one live listing of the opposite
- *  kind the two are linked at once, so the offer shows on both sides; with several it stays unlinked and the caller can ask which. */
+ *  kind the two are linked at once, so the offer shows on both sides; with several it stays unlinked and the caller can ask which.
+ *  A repeat call for the same counterparty returns the offer that already exists instead of a second one. */
 export async function addOffer(listingId: string, input: OfferInput & { counterpartId?: string | null }): Promise<Offer> {
   const id = `bof_${randomUUID()}`;
   let counterpartId = input.counterpartId ?? null;
@@ -131,12 +154,22 @@ export async function addOffer(listingId: string, input: OfferInput & { counterp
   if (counterpartId) {
     const existing = await pairOffer(listingId, counterpartId);
     if (existing) throw new OfferConflict("This pairing already has an offer.", existing);
+  } else {
+    const existing = await unlinkedCounterparty(listingId, input);
+    if (existing) return (await getOffer(listingId, existing, null))!;
   }
-  await queryPg(
-    `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, contact, wants, stage, counterpart_id)
-     values ($1, $2, 'counterparty', $3, $4, $5, $6, $7, $8, $9)`,
-    [id, listingId, input.personId ?? null, input.companyId ?? null, input.name.trim(), input.contact ?? null, input.wants ?? null, input.stage ?? "candidate", counterpartId]);
-  return (await getOffer(listingId, id, null))!;
+  // The unique index alone is not enough for an unlinked offer with no CRM identity: return whatever won the race.
+  const [inserted] = await queryPg<{ id: string }>(
+    `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, contact, wants, stage, counterpart_id, data)
+     values ($1, $2, 'counterparty', $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+     on conflict (bulk_listing_id, coalesce(company_id, person_id))
+       where role = 'counterparty' and counterpart_id is null and coalesce(company_id, person_id) is not null
+     do nothing
+     returning id`,
+    [id, listingId, input.personId ?? null, input.companyId ?? null, input.name.trim(), input.contact ?? null, input.wants ?? null,
+      input.stage ?? "candidate", counterpartId, JSON.stringify(input.data ?? {})]);
+  const offerId = inserted?.id ?? await unlinkedCounterparty(listingId, input) ?? id;
+  return (await getOffer(listingId, offerId, null))!;
 }
 
 /** Links an unlinked offer to a live listing on the opposite side, or clears the link (null). */

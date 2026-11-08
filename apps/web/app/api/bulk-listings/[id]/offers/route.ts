@@ -22,13 +22,14 @@ export async function POST(req: Request, { params }: Context) {
   if (!body || typeof body.name !== "string" || !body.name.trim()) return badRequest("Who is this offer for?");
   for (const key of ["contact", "personId", "companyId", "wants", "counterpartId"]) if (body[key] != null && typeof body[key] !== "string") return badRequest(`${key} must be text.`);
   if (body.stage != null && !(OFFER_STAGES as readonly unknown[]).includes(body.stage)) return badRequest("Invalid stage.");
+  if (body.data != null && (typeof body.data !== "object" || Array.isArray(body.data))) return badRequest("data must be an object.");
   if (!await getListing(id)) return notFound("Listing");
   return linkedWrite(async () => {
     try {
       return Response.json({ offer: await addOffer(id, {
         name: body.name as string, contact: body.contact as string | undefined, personId: body.personId as string | undefined,
         companyId: body.companyId as string | undefined, wants: body.wants as string | undefined, stage: body.stage as OfferStage | undefined,
-        counterpartId: body.counterpartId as string | undefined,
+        counterpartId: body.counterpartId as string | undefined, data: body.data as Record<string, unknown> | undefined,
       }) }, { status: 201 });
     } catch (err) {
       if (err instanceof OfferConflict) return Response.json({ error: err.message, offerId: err.existingOfferId ?? null }, { status: 409 });
