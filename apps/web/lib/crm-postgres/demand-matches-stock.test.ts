@@ -53,6 +53,7 @@ describe("stock lines on a request", () => {
     expect(stockSourceKind(stockRow({ source: "supplier email" }))).toBe("email");
     expect(stockSourceKind(stockRow({ source: "pipeline", evidence_source: null, title: "Seller email 22 Oct 2026: loose cells" }))).toBe("email");
     expect(stockSourceKind(stockRow({ source: "ebay" }))).toBe("eBay listing");
+    expect(sourceLine(stockCandidate(stockRow({ source: "ebay", observed_on: "2026-10-27" })), NOW)).toBe("eBay listing, 27 Oct");
   });
 
   it("gives the Lishen line its evidence line: product, quantity not stated, catalogue and date", () => {

@@ -69,20 +69,18 @@ function shortDate(iso: string, now: Date): string | null {
 export function sourceLine(c: Candidate, now: Date = new Date()): string | null {
   const when = c.observedOn ?? c.seen;
   const date = when ? shortDate(when, now) : null;
-  const kind = c.sourceKind ? c.sourceKind[0].toUpperCase() + c.sourceKind.slice(1) : null;
+  // "eBay listing" keeps its own capital; every other kind starts with one.
+  const kind = c.sourceKind ? (/^e[A-Z]/.test(c.sourceKind) ? c.sourceKind : c.sourceKind[0].toUpperCase() + c.sourceKind.slice(1)) : null;
   if (kind && date) {
     return `${kind}, ${date}`;
   }
   return kind ?? (date ? `Seen ${date}` : null);
 }
 
-/** The candidate's country as a two-letter code, when it can be told. */
+/** Where the goods are, as a two-letter code: the line's own location first, else the seller's country. */
 function countryCode(c: Candidate): string | null {
   const raw = (c.country ?? "").trim();
-  if (/^[A-Za-z]{2}$/.test(raw)) {
-    return raw.toUpperCase();
-  }
-  return countryFromText(raw) ?? countryFromText(c.location);
+  return countryFromText(c.location) ?? (/^[A-Za-z]{2}$/.test(raw) ? raw.toUpperCase() : countryFromText(raw));
 }
 
 const find = (checks: Check[], key: Check["key"]) => checks.find((check) => check.key === key);
