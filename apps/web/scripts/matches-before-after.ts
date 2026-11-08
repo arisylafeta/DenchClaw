@@ -17,7 +17,7 @@ import type { MatchRow } from "../lib/matches-types";
 
 type GroupSnap = {
   pack: string; count: number; unsure: boolean; lots: boolean; sameLabel: string | null; vehicles: { name: string; n: number }[];
-  meta: string; why: string | null; units: { key: string; vehicle: string; ref: string | null; soh: string; price: string | null }[];
+  meta: string; why: string | null; priceVaries?: boolean; units: { key: string; vehicle: string; ref: string | null; soh: string; price: string | null }[];
 };
 type Row = Pick<MatchRow, "key" | "name" | "detail" | "reason" | "checks" | "tags"> & {
   holds?: string | null; source?: string | null; fit?: { label: string; state: string }[]; stockTitle?: string | null;
@@ -52,7 +52,8 @@ async function snapshot(): Promise<Snapshot> {
         ...(row.group ? {
           group: {
             pack: row.group.pack, count: row.group.count, unsure: row.group.unsure, lots: row.group.lots, sameLabel: row.group.sameLabel,
-            vehicles: row.group.vehicles, meta: row.group.meta, why: row.group.why ? `${row.group.why.title}: ${row.group.why.text}` : null,
+            vehicles: row.group.vehicles, meta: row.group.meta, priceVaries: row.group.priceVaries,
+            why: row.group.why ? `${row.group.why.title}: ${row.group.why.text}${row.group.why.source ? ` (${row.group.why.source})` : ""}` : null,
             units: row.group.units.map((unit) => ({ key: unit.key, vehicle: unit.vehicle, ref: unit.ref, soh: `${unit.soh.label}${unit.soh.source ? ` (${unit.soh.source})` : ""}`, price: unit.price })),
           },
         } : {}),
@@ -158,11 +159,12 @@ function suspicious(group: GroupSnap): string[] {
   const makes = new Set(group.vehicles.map((vehicle) => vehicle.name.split(" ")[0].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
   if (group.unsure && group.vehicles.length > 1) flags.push(`unconfirmed group holds ${group.vehicles.length} vehicles`);
   if (!group.lots && makes.size > 1) {
-    const how = group.why?.match(/(battery graph: [^.]*|every unit states part number [^,.]*)/i)?.[0] ?? "";
+    const how = group.why?.match(/(battery graph[^)]*|every unit states part number [^,.]*)/i)?.[0] ?? "";
     flags.push(`${makes.size} makes (${[...makes].join(", ")})${how ? `; ${how}` : ""}`);
   }
   const range = group.why?.match(/Listed capacity: (\d+(?:\.\d+)?)–(\d+(?:\.\d+)?) kWh/);
   if (range && Number(range[2]) > Number(range[1]) * 1.1) flags.push(`listed ${range[1]}–${range[2]} kWh under one part number`);
+  if (group.priceVaries) flags.push("prices vary a lot (top over 2.5× the lowest)");
   return flags;
 }
 
