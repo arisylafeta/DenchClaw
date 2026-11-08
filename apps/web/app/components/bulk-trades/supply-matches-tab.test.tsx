@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { DemandMatchesTab } from "./demand-matches-tab";
 import { SupplyMatchesTab } from "./supply-matches-tab";
 import { forgetShared } from "./trade-ui";
-import type { MatchesResult } from "@/lib/matches-types";
+import type { MatchGroupView, MatchesResult, MatchUnit } from "@/lib/matches-types";
 
 const row = (o: Partial<MatchesResult["rows"][number]> = {}) => ({
   key: "company:c1", rank: 1, name: "Exigo", detail: "Last contact 2026-10-08",
@@ -235,6 +235,143 @@ describe("Matches tab", () => {
     expect(screen.queryByRole("list", { name: "How it fits" })).toBeNull();
     expect(screen.queryByLabelText("Fit marks")).toBeNull();
     expect(screen.queryByText(/Stated stock/)).toBeNull();
+  });
+
+  describe("grouped stock on a request (slice 2)", () => {
+    const unit = (i: number, o: Partial<MatchUnit> = {}): MatchUnit => ({
+      key: `stock:sto_${i}`, stockId: `sto_${i}`, vehicle: i % 2 ? "Peugeot Rifter Allure" : "Vauxhall Vivaro-e 3100", year: 2022,
+      ref: `NW-${4400 + i}`, soh: i === 1 ? { state: "fits", label: "SoH 92%", source: "supplier test" } : { state: "unstated", label: "Not stated", source: null },
+      location: "Leeds", price: `EUR ${(2000 + i * 10).toLocaleString("en-GB")}`, seen: "7 Nov", link: { href: `https://northway.example/${i}`, label: "Listing" }, ...o,
+    });
+    const grouped = (units: MatchUnit[], o: Partial<MatchGroupView> = {}) => row({
+      key: "group:stock:sto_1", name: "Northway Parts", tags: ["unlisted stock"], reason: "Stellantis 46 kWh NMC pack × 11", checks: [],
+      detail: "11 packs", price: "EUR 2,010–2,110", stockId: "sto_1", companyId: "c_nw", personId: "p_nw", sourceKind: "salvage listing",
+      holds: "Stellantis 46 kWh NMC pack × 11", source: "EUR 2,010–2,110 per pack · Leeds, Warrington · salvage listings, seen 1–7 Nov",
+      fit: [
+        { key: "price", label: "EUR 2,010–2,110", state: "fits" },
+        { key: "condition", label: "SoH: 1 of 11 stated", state: "close" },
+        { key: "location", label: "In GB", state: "fits" },
+      ],
+      group: {
+        pack: "Stellantis 46 kWh NMC pack", count: units.length, countWord: null, unsure: false, sameLabel: "Same pack in",
+        vehicles: [{ name: "Vauxhall Vivaro-e", n: 6 }, { name: "Peugeot Rifter", n: 5 }],
+        meta: "EUR 2,010–2,110 per pack · Leeds, Warrington · salvage listings, seen 1–7 Nov",
+        why: { title: "Why these count as the same pack", text: "The Vauxhall Vivaro-e and Peugeot Rifter carry the Stellantis 50 kWh NMC pack. Battery graph: matched on part number, high confidence." },
+        lots: false, units, stockIds: units.map((u) => u.stockId!), ...o,
+      },
+    });
+    const summary = { chips: [{ label: "Complete EV packs", strong: true }], outreach: null, count: { suppliers: 2, units: 12, word: "packs" }, packTypes: { types: 2, unconfirmed: 1 }, grouped: true };
+
+    it("shows one row per supplier and pack type: the pack × N, Same pack in, the meta line and the group's marks", async () => {
+      const units = Array.from({ length: 11 }, (_, i) => unit(i + 1));
+      vi.stubGlobal("fetch", vi.fn(async () => json(result([
+        grouped(units),
+        row({ key: "stock:sto_99", name: "Fenwick Auto", tags: ["unlisted stock"], checks: [], price: null, stockId: "sto_99", holds: "Citroen e-Berlingo · 1 pack", source: "Salvage listing, 5 Nov", fit: [] }),
+      ], { id: "btd_stn", kind: "demand", summary }))));
+      render(<DemandMatchesTab demandId="btd_stn" active />);
+      expect(await screen.findByText("Stellantis 46 kWh NMC pack")).toBeTruthy();
+      expect(screen.getByText("× 11")).toBeTruthy();
+      expect(screen.getByLabelText("What we matched on").textContent).toContain("2 suppliers · 12 packs match");
+      expect(screen.getByLabelText("What we matched on").textContent).toContain("2 pack types, 1 not confirmed");
+      expect(screen.getByText("· one row per supplier and pack type")).toBeTruthy();
+      expect(screen.getByText("Click a row for each unit and why the packs count as the same")).toBeTruthy();
+      expect(screen.getByText("Same pack in")).toBeTruthy();
+      expect(screen.getByText("Vauxhall Vivaro-e").parentElement?.textContent).toContain("Vauxhall Vivaro-e 6");
+      expect(screen.getByText("EUR 2,010–2,110 per pack · Leeds, Warrington · salvage listings, seen 1–7 Nov")).toBeTruthy();
+      const marks = within(screen.getAllByRole("list", { name: "How it fits" })[0]).getAllByRole("listitem").map((mark) => mark.textContent);
+      expect(marks).toEqual(["✓fits:EUR 2,010–2,110", "≈close:SoH: 1 of 11 stated", "✓fits:In GB"]);
+      // The status column and Add to offers as slice 1; no checkboxes yet (slice 4).
+      expect(screen.getAllByText("Not contacted")).toHaveLength(2);
+      expect(screen.getByText("Listed for sale")).toBeTruthy();
+      expect(screen.queryByRole("checkbox")).toBeNull();
+      expect(screen.queryByText("Pack type not confirmed")).toBeNull();
+    });
+
+    it("opens to why the packs count as the same, then five units, and Show all opens a scrolling box with a fixed header", async () => {
+      const units = Array.from({ length: 11 }, (_, i) => unit(i + 1));
+      vi.stubGlobal("fetch", vi.fn(async () => json(result([grouped(units)], { id: "btd_stn", kind: "demand", summary }))));
+      render(<DemandMatchesTab demandId="btd_stn" active />);
+      const toggle = (await screen.findAllByRole("button", { expanded: false })).find((button) => button.textContent?.includes("Northway Parts"))!;
+      fireEvent.click(toggle);
+      expect(screen.getByText("Why these count as the same pack:").parentElement?.textContent).toContain("carry the Stellantis 50 kWh NMC pack");
+      expect(screen.getByText("Units")).toBeTruthy();
+      expect(screen.getByText("· 11, cheapest first")).toBeTruthy();
+      const table = screen.getByRole("table");
+      expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual(["Vehicle", "Year", "Stock ref", "SoH / condition", "Location", "Price", "Seen", "Link"]);
+      expect(within(table).getAllByRole("row")).toHaveLength(1 + 5);
+      expect(within(table).getAllByRole("row")[1].textContent).toBe("Peugeot Rifter Allure2022NW-4401✓fits:SoH 92% supplier testLeedsEUR 2,0107 NovListing");
+      expect(within(table).getAllByRole("row")[2].textContent).toContain("?not stated:Not stated");
+      const box = screen.getByRole("region", { name: "Northway Parts: units" });
+      expect(box.style.maxHeight).toBe("");
+      fireEvent.click(screen.getByRole("button", { name: "Show all 11 units (6 more)" }));
+      expect(within(table).getAllByRole("row")).toHaveLength(1 + 11);
+      expect(box.style.maxHeight).toBe("360px");
+      expect(box.className).toContain("ubox");
+      expect(within(table).getAllByRole("columnheader")[0].closest("table")?.className).toContain("ut");
+      fireEvent.click(screen.getByRole("button", { name: "Show fewer" }));
+      expect(within(table).getAllByRole("row")).toHaveLength(1 + 5);
+      // No "Show all" for five units or fewer.
+      fireEvent.click(toggle);
+      expect(screen.queryByRole("table")).toBeNull();
+    });
+
+    it("tags an unconfirmed pack type and says why it is kept apart", async () => {
+      const units = [unit(1), unit(2), unit(3)];
+      vi.stubGlobal("fetch", vi.fn(async () => json(result([grouped(units, {
+        pack: "Pack from Citroen e-Berlingo", unsure: true, sameLabel: "Listed as", vehicles: [{ name: "Citroen e-Berlingo", n: 3 }],
+        why: { title: "Why this is kept apart", text: "These listings name the Citroen e-Berlingo but give no part number." },
+      })], { id: "btd_stn", kind: "demand", summary }))));
+      render(<DemandMatchesTab demandId="btd_stn" active />);
+      expect(await screen.findByText("Pack type not confirmed")).toBeTruthy();
+      expect(screen.getByText("Listed as")).toBeTruthy();
+      fireEvent.click(screen.getAllByRole("button", { expanded: false }).find((button) => button.textContent?.includes("Northway Parts"))!);
+      expect(screen.getByText("Why this is kept apart:")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
+    });
+
+    it("keeps a group of one as slice 1's row", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => json(result([row({
+        key: "stock:sto_1", name: "Carden Breakers", tags: ["unlisted stock"], checks: [], price: "EUR 2,150", stockId: "sto_1",
+        holds: "Vauxhall Corsa-e · 1 pack · SoH 91%", source: "Stock list, 2 Nov", quote: "Corsa-e pack", sourceKind: "stock list",
+        fit: [{ key: "condition", label: "SoH 91%", state: "fits", name: "Condition", asked: "SoH 80%+", have: "SoH 91%" }],
+      })], { id: "btd_stn", kind: "demand", summary: { ...summary, grouped: false, packTypes: null } }))));
+      render(<DemandMatchesTab demandId="btd_stn" active />);
+      expect(await screen.findByText("Vauxhall Corsa-e · 1 pack · SoH 91%")).toBeTruthy();
+      expect(screen.getByText("· ranked by fit, then stated quantity")).toBeTruthy();
+      expect(screen.queryByText("Same pack in")).toBeNull();
+      expect(screen.getByRole("button", { name: "Not a fit" })).toBeTruthy();
+      fireEvent.click(screen.getAllByRole("button", { expanded: false }).find((button) => button.textContent?.includes("Carden"))!);
+      expect(screen.getByText("Where this comes from")).toBeTruthy();
+      expect(screen.getByText("How it fits")).toBeTruthy();
+      expect(screen.getByText("This deal with Carden")).toBeTruthy();
+    });
+
+    it("adds a group as one offer: the cheapest unit as its stock line, and every unit's stock line kept", async () => {
+      const calls: string[] = [];
+      const units = [unit(1), unit(2), unit(3)];
+      vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
+        if (url.includes("/offers")) return json({ offer: { id: "bof_9", stage: "candidate", updated_at: "2026-11-08T09:00:00.000Z" } }, 201);
+        return json(result([grouped(units)], { id: "btd_stn", kind: "demand", summary }));
+      }));
+      render(<DemandMatchesTab demandId="btd_stn" active />);
+      fireEvent.click(await screen.findByRole("button", { name: "Add to offers" }));
+      await waitFor(() => expect(calls.some((call) => call.startsWith("POST /api/bulk-trades/demand/btd_stn/offers"))).toBe(true));
+      const body = JSON.parse(calls.find((call) => call.startsWith("POST"))!.split(" ").slice(2).join(" "));
+      expect(body).toMatchObject({ name: "Northway Parts", companyId: "c_nw", personId: "p_nw", data: { stock_opportunity_id: "sto_1", stock_opportunity_ids: ["sto_1", "sto_2", "sto_3"] } });
+      expect(await screen.findByText(/In offers · Candidate 8 Nov/)).toBeTruthy();
+      expect(calls.filter((call) => call.startsWith("POST"))).toHaveLength(1);
+    });
+
+    it("leaves the supply tab as it was, even next to a grouped request", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => json(result([row()]))));
+      render(<SupplyMatchesTab listingId="bts_1" active />);
+      expect(await screen.findByText("Same part number: 50 kWh Packs NMC")).toBeTruthy();
+      expect(screen.getByText(/1 match · 34 checked/)).toBeTruthy();
+      expect(screen.queryByText(/suppliers ·/)).toBeNull();
+      expect(screen.queryByText("Same pack in")).toBeNull();
+      expect(screen.queryByRole("table")).toBeNull();
+    });
   });
 
   it("offers an unlisted stock row on the request side and records the stock line on the offer", async () => {
