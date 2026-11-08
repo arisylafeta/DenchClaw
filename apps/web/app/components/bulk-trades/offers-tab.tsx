@@ -104,6 +104,8 @@ function OfferList({ offers, error, base, request: requestSide, onUpdated }: {
 }) {
   // The open email draft, shown in the side panel over the list.
   const [draft, setDraft] = useState<{ offerId: string; draftId: string } | null>(null);
+  // A send moves the stage, so the open thread is rebuilt from fresh data once the mail is gone.
+  const [sentCount, setSentCount] = useState(0);
   const [openId, setOpenId] = useState<string | null>(null);
   const loading = offers === null && !error;
   const [adding, setAdding] = useState(false);
@@ -155,7 +157,7 @@ function OfferList({ offers, error, base, request: requestSide, onUpdated }: {
                   </span>
                   <span className="shrink-0 text-[11px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={2}>{o.messages > 0 ? `${o.messages} ${o.messages === 1 ? "message" : "messages"}${o.last_message_at ? ` · ${dateOf(o.last_message_at)}` : ""}` : "No messages"}</Sh></span>
                 </button>
-                {!loading && openId === o.id && <ThreadPanel base={base} offerId={o.id} request={requestSide} onUpdated={onUpdated} onDraft={(draftId) => setDraft({ offerId: o.id, draftId })} />}
+                {!loading && openId === o.id && <ThreadPanel key={`${o.id}-${sentCount}`} base={base} offerId={o.id} request={requestSide} onUpdated={onUpdated} onDraft={(draftId) => setDraft({ offerId: o.id, draftId })} />}
               </li>
             );
           })}
@@ -166,7 +168,8 @@ function OfferList({ offers, error, base, request: requestSide, onUpdated }: {
       )}
       {draft && (
         <DetailSheet title="Email draft" onClose={() => setDraft(null)}>
-          <MailDraftView draftId={draft.draftId} sendPath={`${base}/${encodeURIComponent(draft.offerId)}/send`} onSent={onUpdated} />
+          <MailDraftView draftId={draft.draftId} sendPath={`${base}/${encodeURIComponent(draft.offerId)}/send`}
+            onSent={() => { setSentCount((count) => count + 1); onUpdated(); }} />
         </DetailSheet>
       )}
     </BusyRegion>

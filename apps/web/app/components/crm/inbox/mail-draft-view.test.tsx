@@ -142,6 +142,22 @@ describe("MailDraftView", () => {
     expect(JSON.parse(String(post[1]!.body))).toEqual({ confirm: true, updated_at: "2026-10-20T10:00:00Z" });
     expect(screen.queryByRole("button", { name: /^send$/i })).toBeNull();
   });
+  it("sends through an owning route when one is given, and passes its warning on", async () => {
+    const onSent = vi.fn();
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(JSON.stringify(init?.method === "POST"
+      ? { sent: true, warning: "the mail thread is not known yet" }
+      : draft)));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MailDraftView draftId="d1" sendPath="/api/bulk-listings/sup_1/offers/bof_1/send" onSent={onSent} />);
+    fireEvent.click(await screen.findByRole("button", { name: /^send$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, send" }));
+    expect(await screen.findByText(/Sent, but the mail thread is not known yet/)).toBeInTheDocument();
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
+    expect(post[0]).toBe("/api/bulk-listings/sup_1/offers/bof_1/send");
+    expect(JSON.parse(String(post[1]!.body))).toEqual({ confirm: true, updated_at: "2026-10-20T10:00:00Z", draft_id: "d1" });
+    expect(onSent).toHaveBeenCalled();
+  });
+
   it("shows why a send was refused", async () => {
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => init?.method === "POST" ? new Response(JSON.stringify({ error: "recipient_suppressed" }), { status: 409 }) : new Response(JSON.stringify(draft))));
     render(<MailDraftView draftId="d1" />);
