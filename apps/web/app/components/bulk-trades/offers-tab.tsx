@@ -214,7 +214,7 @@ function ThreadPanel({ base, offerId, request: requestSide, onUpdated, onDraft }
         <p className="min-w-0 flex-1 truncate text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={30}>{[current.contact, current.wants].filter(Boolean).join(" · ") || "No contact details yet"}</Sh></p>
         {offer && (offer.stage === "candidate" || offer.stage === "offered") && (
           <button type="button" disabled={busy || drafting} onClick={() => void draftEmail()} className={`${rowFocus} ${buttonClass} inline-flex items-center gap-1.5`} style={buttonStyle}>
-            <Mail size={13} aria-hidden /> {drafting ? "Preparing…" : offer.chase_due ? "Chase email" : "Draft email"}
+            <Mail size={13} aria-hidden /> {drafting ? "Preparing…" : "Draft email"}
           </button>
         )}
         <select aria-label="Stage" value={outcomeStage ?? current.stage ?? "candidate"} disabled={busy || !offer}
