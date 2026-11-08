@@ -1,45 +1,22 @@
 import "server-only";
 
-// The Matches tab on a supply listing, built on the product key: what this lot is, the live demand it can fill
-// (matched on the key, not the listing title), and the ranked buyers the rules layer recommends.
-// Read only, except the verdicts other routes write; nothing here sends anything.
+// The Matches tab on a supply listing: the lot as a product key, then one ranked list of who could take it —
+// the open demand that fits it (a live ask) and the buyer companies whose dossiers fit it, researched leads last.
+// Read only, except the Not a fit verdicts the route records.
 import { queryPg } from "../postgres";
 import { buildProductKey, keyLine, type FieldFact, type ProductKey } from "../match/product-key";
-import { rankBuyers, supplyFactsFromKey, type RankedBuyerRow, type RuledOutRow } from "../match/rules";
-import { countryFromText, requirementFor, scoreCandidate, vocabulary, type Candidate, type Check, type Match } from "../demand-match";
+import { rankBuyers, supplyFactsFromKey, type RankedBuyerRow } from "../match/rules";
+import { countryFromText, requirementFor, scoreCandidate, vocabulary, type Candidate, type Check } from "../demand-match";
+import { priceLabel } from "../bulk-demand";
 import { matchVerdicts, verdictKey, type FeedRow } from "./demand-match-supply";
 import { listDemand } from "./bulk-demand";
 import { getListing } from "./bulk-listings";
+import { offersForListing } from "./match-offers";
+import type { MatchesResult, MatchRow } from "../matches-types";
 
-export type LiveDemandRow = {
-  demandId: string;
-  buyer: string;
-  title: string;
-  quantity: string | null;
-  location: string | null;
-  neededBy: string | null;
-  verdict: "exact" | "check";
-  /** The first thing that is not a clean pass, in plain words. */
-  gap: string | null;
-  checks: Check[];
-  marginPct: number | null;
-  userVerdict: "shortlist" | null;
-};
-
-export type SupplyMatchesV2Result = {
-  listingId: string;
-  key: ProductKey;
-  /** "40 units · 50 kWh · Packs · NMC · part SU001B5189" for the collapsed header. */
-  keyLine: string;
-  liveDemand: LiveDemandRow[];
-  /** Demands marked Not a fit on this listing, with the reason, so the count can expand. */
-  liveDemandHidden: { demandId: string; buyer: string; reason: string | null }[];
-  recommended: RankedBuyerRow[];
-  /** Researched-only companies nobody has contacted: shown collapsed. */
-  leads: RankedBuyerRow[];
-  ruledOut: RuledOutRow[];
-  counts: { demand: number; buyers: number; ruledOut: number };
-  blocked: string | null;
+type CompanyRow = {
+  id: string; name: string; stage: string | null; tier: string | null; basis: string | null;
+  profile: Record<string, unknown>; dossier: Record<string, unknown> | null; last_touch: string | null;
 };
 
 const gapOf = (checks: Check[]) => {
@@ -48,6 +25,8 @@ const gapOf = (checks: Check[]) => {
     ?? checks.find((check) => check.state === "partial");
   return bad ? bad.detail : null;
 };
+
+const day = (value: string | null | undefined) => (value ? value.slice(0, 10) : null);
 
 /** The listing's title as the trade wrote it, for the key's fallback text and for display. */
 function listingTitle(listing: { spec?: Record<string, unknown>; context?: Record<string, unknown>; summary: string }): string {
@@ -101,37 +80,63 @@ export function candidateFromKey(key: ProductKey, listing: { id: string; title: 
   };
 }
 
-type CompanyRow = {
-  id: string; name: string; stage: string | null; tier: string | null; basis: string | null;
-  profile: Record<string, unknown>; dossier: Record<string, unknown> | null; last_touch: string | null;
-};
+/** The one-line header and the full key behind it. A disputed value or a mixed lot opens itself. */
+export function keyView(key: ProductKey): MatchesResult["lotKey"] {
+  const lines = key.lines.map((line, index) => {
+    const size = line.kwhMin != null ? `${line.kwhMin}-${line.kwhMax} kWh` : line.kwh != null ? `${Math.round(line.kwh * 100) / 100} kWh` : "kWh unknown";
+    return [
+      key.lines.length > 1 ? `Product ${index + 1}` : null,
+      line.units != null ? `${line.units} units` : null,
+      [line.make, line.model].filter(Boolean).join(" ") || null,
+      size,
+      line.format,
+      line.chemistry,
+      line.partNumber ? `part ${line.partNumber}` : null,
+    ].filter(Boolean).join(" · ");
+  });
+  const price = key.sellerPrice
+    ? `Seller price ${key.sellerPrice.currency} ${key.sellerPrice.amount.toLocaleString("en-GB")} per ${key.sellerPrice.per === "kwh" ? "kWh" : key.sellerPrice.per === "mwh" ? "MWh" : "unit"}`
+    : key.priceNote;
+  return {
+    line: keyLine(key),
+    full: [
+      ...lines,
+      price ?? null,
+      ...key.conflicts.map((conflict) => `Disputed ${conflict.field}: ${conflict.values.join(" / ")}`),
+      ...key.notes,
+    ].filter((entry): entry is string => !!entry),
+    open: key.mixed || key.conflicts.length > 0,
+  };
+}
+
+/** The buyer's own price, only when they stated it. An estimate is not a price. */
+const demandPrice = (demand: { max_price: number | null; price_currency: string | null; price_unit: string | null; price_basis: string | null }) =>
+  demand.price_basis === "buyer" ? priceLabel(demand) : null;
 
 /**
- * Everything the Matches tab shows for one supply listing, in one read.
- * `blocked` is set when the listing is not live supply, since then there is nothing to match against.
+ * Everything the Matches tab shows for one supply listing, in one read: the key, and one ranked list of live asks
+ * and buyer companies. Nothing is sent, and no offer is created here.
  */
-export async function supplyMatchesV2(listingId: string): Promise<SupplyMatchesV2Result | null> {
+export async function supplyMatchesV2(listingId: string): Promise<MatchesResult | null> {
   const listing = await getListing(listingId);
-  if (!listing) {
-    return null;
-  }
-  if (listing.kind !== "supply") {
+  if (!listing || listing.kind !== "supply") {
     return null;
   }
   const title = listingTitle(listing);
-  const [feedRow, fields] = await Promise.all([
+  const [feedRow, fields, offers] = await Promise.all([
     queryPg<FeedRow>(
       `select id, kind, title, seller, size, location, seen, href, null::text as strength, null::text as reason
        from crm_bulk_listing_supply_feed where id = $1`, [listingId]),
     listingFields(listingId),
+    offersForListing(listingId),
   ]);
   const key = buildProductKey({ fields, title });
-  const summary = keyLine(key);
+  const lotKey = keyView(key);
   if (!feedRow[0]) {
     return {
-      listingId, key, keyLine: summary, liveDemand: [], liveDemandHidden: [], recommended: [], leads: [], ruledOut: [],
-      counts: { demand: 0, buyers: 0, ruledOut: 0 },
+      id: listingId, kind: "supply", lotKey, rows: [], considered: 0,
       blocked: "This listing is not in the live supply feed (closed, or not an open supply or trade), so there is nothing to match.",
+      errors: [],
     };
   }
   const feed = feedRow[0];
@@ -168,8 +173,9 @@ export async function supplyMatchesV2(listingId: string): Promise<SupplyMatchesV
   );
   const touch = new Map(touches.map((row) => [row.company_id, row.last]));
 
-  const liveDemand: LiveDemandRow[] = [];
-  const liveDemandHidden: { demandId: string; buyer: string; reason: string | null }[] = [];
+  const rows: MatchRow[] = [];
+  const liveDemandCompanies = new Set<string>();
+  const liveDemandNames = new Set<string>();
   for (const row of demand) {
     if (row.status === "closed") {
       continue;
@@ -181,32 +187,36 @@ export async function supplyMatchesV2(listingId: string): Promise<SupplyMatchesV
     if (sameParty) {
       continue;
     }
-    const verdict = verdicts.get(verdictKey.demand(row.id));
-    if (verdict?.verdict === "not_a_fit") {
-      liveDemandHidden.push({ demandId: row.id, buyer: row.buyer, reason: verdict.reason ?? null });
+    if (verdicts.get(verdictKey.demand(row.id))?.verdict === "not_a_fit") {
       continue;
     }
     const requirement = requirementFor(row, vocabulary([candidate]));
-    const match: Match | null = scoreCandidate(requirement, candidate);
+    const match = scoreCandidate(requirement, candidate);
     if (!match) {
       continue;
     }
-    liveDemand.push({
-      demandId: row.id, buyer: row.buyer, title: row.product_family || row.wants || row.id,
-      quantity: row.quantity, location: row.location, neededBy: row.needed_by,
-      verdict: match.verdict, gap: gapOf(match.checks), checks: match.checks,
-      marginPct: match.economics.marginPct, userVerdict: verdict?.verdict === "shortlist" ? "shortlist" : null,
+    if (row.company_id) {
+      liveDemandCompanies.add(row.company_id);
+    }
+    liveDemandNames.add(row.buyer.trim().toLowerCase());
+    const gap = gapOf(match.checks);
+    rows.push({
+      key: verdictKey.demand(row.id),
+      rank: 0,
+      name: row.buyer,
+      detail: [row.quantity, row.location, row.needed_by ? `by ${day(row.needed_by)}` : null].filter(Boolean).join(" · ") || null,
+      tags: ["live ask"],
+      reason: `Wants ${row.product_family || row.wants || "this product"}`,
+      checks: gap ? [gap] : [],
+      price: demandPrice(row),
+      offer: offers.find(row.company_id, row.person_id, row.buyer),
+      companyId: row.company_id,
+      personId: row.person_id,
+      contact: row.email ?? row.contact ?? null,
+      stockId: null,
     });
   }
-  liveDemand.sort((a, b) => Number(b.userVerdict === "shortlist") - Number(a.userVerdict === "shortlist")
-    || (a.verdict === b.verdict ? 0 : a.verdict === "exact" ? -1 : 1)
-    || (b.marginPct ?? -9) - (a.marginPct ?? -9)
-    || a.buyer.localeCompare(b.buyer));
 
-  // A company already matched to this lot through an open demand is shown there, not again as a buyer.
-  const demandCompanies = new Set(demand.filter((row) => liveDemand.some((shown) => shown.demandId === row.id))
-    .map((row) => row.company_id).filter((id): id is string => !!id));
-  const demandNames = new Set(liveDemand.map((row) => row.buyer.trim().toLowerCase()));
   const companyVerdicts = new Map<string, "shortlist" | "not_a_fit">();
   for (const company of companies) {
     const verdict = verdicts.get(verdictKey.company(company.id));
@@ -215,7 +225,7 @@ export async function supplyMatchesV2(listingId: string): Promise<SupplyMatchesV
     }
   }
   const buyers = companies
-    .filter((company) => !demandCompanies.has(company.id) && !demandNames.has(company.name.trim().toLowerCase()))
+    .filter((company) => !liveDemandCompanies.has(company.id) && !liveDemandNames.has(company.name.trim().toLowerCase()))
     .map((company) => ({
       id: company.id, name: company.name, profile: company.profile ?? {},
       stage: company.stage, tier: company.tier, basis: company.basis,
@@ -229,12 +239,49 @@ export async function supplyMatchesV2(listingId: string): Promise<SupplyMatchesV
   const ranked = rankBuyers(supplies, buyers, {
     asOf: new Date().toISOString().slice(0, 10), top: 30, verdicts: companyVerdicts, key,
   });
+
+  // The main contact we can actually write to, so the offer carries a real address.
+  const contacts = await queryPg<{ company_id: string; person_id: string; email: string | null }>(
+    `select distinct on (p.company_id) p.company_id, p.id as person_id, p.email
+     from crm_people p join crm_companies c on c.id = p.company_id
+     where p.company_id = any($1::text[])
+     order by p.company_id,
+       (p.email is not null and not coalesce(p.email_opted_out, false)) desc,
+       (p.id = c.buyer_main_contact_id) desc, p.full_name`,
+    [ranked.ranked.map((row) => row.companyId)],
+  );
+  const contactOf = new Map(contacts.map((row) => [row.company_id, row]));
+
+  for (const buyer of ranked.ranked) {
+    rows.push(buyerRow(buyer, contactOf.get(buyer.companyId) ?? null, touch.get(buyer.companyId) ?? null, offers));
+  }
+  const listed = rows.map((row, index) => ({ ...row, rank: index + 1 }));
+
   return {
-    listingId, key, keyLine: summary, liveDemand, liveDemandHidden,
-    recommended: ranked.ranked.filter((row) => !row.isLead),
-    leads: ranked.ranked.filter((row) => row.isLead),
-    ruledOut: ranked.ruledOut,
-    counts: { demand: liveDemand.length, buyers: ranked.evaluated, ruledOut: ranked.ruledOut.length },
-    blocked: null,
+    id: listingId,
+    kind: "supply",
+    lotKey,
+    rows: listed,
+    considered: demand.length + ranked.evaluated,
+    blocked: listed.length ? null : "Nothing fits yet. Add a dossier or a listing field to widen the match.",
+    errors: [],
+  };
+}
+
+function buyerRow(buyer: RankedBuyerRow, contact: { person_id: string; email: string | null } | null, lastTouch: string | null, offers: Awaited<ReturnType<typeof offersForListing>>): MatchRow {
+  return {
+    key: verdictKey.company(buyer.companyId),
+    rank: 0,
+    name: buyer.name,
+    detail: lastTouch ? `Last contact ${day(lastTouch)}` : "No contact yet",
+    tags: buyer.isLead ? ["lead"] : [],
+    reason: buyer.fits,
+    checks: buyer.checks,
+    price: buyer.priceBand,
+    offer: offers.find(buyer.companyId, contact?.person_id ?? null, buyer.name),
+    companyId: buyer.companyId,
+    personId: contact?.person_id ?? null,
+    contact: contact?.email ?? null,
+    stockId: null,
   };
 }

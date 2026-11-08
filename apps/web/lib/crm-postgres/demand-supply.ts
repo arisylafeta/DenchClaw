@@ -73,13 +73,13 @@ export async function demandSupply(demand: Demand): Promise<DemandSupply> {
 
 /** Shortlist, Not a fit or Clear for one unit, logged as Supply activity on the demand. */
 export async function recordMatchVerdict(demandId: string, input: { key: string; verdict: "shortlist" | "not_a_fit" | "clear"; title: string;
-  seller?: string | null; note?: string | null; eurPerKwh?: number | null; href?: string | null }, userId: string | null) {
+  seller?: string | null; note?: string | null; reason?: string | null; eurPerKwh?: number | null; href?: string | null }, userId: string | null) {
   const verb = input.verdict === "shortlist" ? "Shortlisted" : input.verdict === "not_a_fit" ? "Not a fit" : "Cleared";
   return addDemandActivity({
     demandId, kind: "supply", title: `${verb}: ${input.title}${input.seller ? ` (${input.seller})` : ""}`,
     body: input.note ?? null, refKind: input.href?.startsWith("http") ? "url" : null,
     refId: input.href?.startsWith("http") ? input.href : null,
-    data: { match: { key: input.key, verdict: input.verdict, eur_per_kwh: input.eurPerKwh ?? null } }, actorUserId: userId,
+    data: { match: { key: input.key, verdict: input.verdict, reason: input.reason ?? null, eur_per_kwh: input.eurPerKwh ?? null } }, actorUserId: userId,
   });
 }
 

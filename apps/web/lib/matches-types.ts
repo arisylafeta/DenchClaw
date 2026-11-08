@@ -1,0 +1,50 @@
+// The shape both Matches tabs read: a supply listing's ranked buyers and a request's ranked supply are the same
+// rows, so the client has one list, one header and one set of actions. Shared by the server functions and the tab.
+
+/** Why a row is here. `live ask` is an open request for this product; the rest name where the stock sits. */
+export type MatchTag = "live ask" | "our listing" | "marketplace" | "unlisted stock" | "lead";
+
+/** The offer this row already became, if any. */
+export type MatchOffer = { id: string; stage: string; date: string | null };
+
+export type MatchRow = {
+  /** Stable per listing: `demand:<id>`, `company:<id>`, `listing:<id>`, `trade:<id>`, `supply:<id>` or `stock:<id>`. */
+  key: string;
+  rank: number;
+  name: string;
+  /** The supporting line: what they asked for, where, or when we last spoke. */
+  detail: string | null;
+  tags: MatchTag[];
+  /** Why it fits, in one line that cites what matched. */
+  reason: string;
+  /** What to check before offering; the first is the one that would change the answer. */
+  checks: string[];
+  /** The counterparty's own price, firm only. Never an estimate or a "from". */
+  price: string | null;
+  offer: MatchOffer | null;
+  companyId: string | null;
+  personId: string | null;
+  /** The contact email an offer should carry, when we hold one. */
+  contact: string | null;
+  /** The unlisted stock row behind this match, recorded on the offer it becomes. */
+  stockId: string | null;
+};
+
+/** The one-line "Matched on …" header, and the full key behind it. */
+export type MatchKeyView = {
+  line: string;
+  full: string[];
+  /** True for a disputed value or a mixed lot: the header opens itself so the reader sees the detail. */
+  open: boolean;
+};
+
+export type MatchesResult = {
+  id: string;
+  kind: "supply" | "demand";
+  lotKey: MatchKeyView;
+  rows: MatchRow[];
+  /** How many candidates were scored, for the quiet line under the header. */
+  considered: number;
+  blocked: string | null;
+  errors: string[];
+};

@@ -1,75 +1,16 @@
 import "server-only";
 
-// The Matches tab on a request, answering "where can we get this": ranked supply from every source we hold,
-// grouped so the same stock is never counted twice, plus the sellers most likely to have it.
-// Reuses the product key and the demand-side scorer, so one unit of stock is judged the same way everywhere.
+// The Matches tab on a request, answering "where can we get this": one ranked list across our live listings, the
+// marketplace and unlisted supplier stock, with the same unit never counted twice. Reuses the product key and the
+// demand-side scorer, so one unit of stock is judged the same way everywhere.
 import { queryPg } from "../postgres";
-import { requirementFor, scoreCandidate, vocabulary, type Candidate, type Check, type Match, type Requirement } from "../demand-match";
+import { requirementFor, scoreCandidate, vocabulary, type Candidate, type Match, type Requirement } from "../demand-match";
 import { inventoryFor } from "./demand-match-supply";
 import { getDemand } from "./bulk-demand";
+import { offersForListing } from "./match-offers";
+import type { MatchesResult, MatchRow, MatchTag } from "../matches-types";
 
-export type DemandSource = "ourListings" | "marketplace" | "unlistedStock";
-
-export type DemandMatchRow = {
-  key: string;
-  source: DemandSource;
-  title: string;
-  seller: string | null;
-  make: string | null;
-  model: string | null;
-  format: string | null;
-  chemistry: string | null;
-  kwh: number | null;
-  units: number | null;
-  price: number | null;
-  currency: string | null;
-  eurPerKwh: number | null;
-  marginPct: number | null;
-  verdict: "exact" | "check";
-  /** The first thing that is not a clean pass, in plain words. */
-  gap: string | null;
-  checks: Check[];
-  /** What the request asked to see that this row cannot prove yet. */
-  evidenceMissing: string[];
-  location: string | null;
-  country: string | null;
-  seen: string | null;
-  href: string | null;
-  userVerdict: "shortlist" | "not_a_fit" | null;
-};
-
-export type GoFindRow = {
-  companyId: string | null;
-  personId: string | null;
-  name: string;
-  /** "Has offered MG ZS packs before (2 stock rows, last seen 2026-10-02)". */
-  why: string;
-  lastSeen: string | null;
-  matches: number;
-  sources: ("stock" | "supply")[];
-};
-
-export type DemandMatchesV2Result = {
-  demandId: string;
-  requirement: {
-    pinned: string[];
-    unitsNeeded: number | null;
-    kwhNeeded: number | null;
-    buyerEurPerKwh: number | null;
-    buyerEurPerUnit: number | null;
-    country: string | null;
-    evidence: string[];
-  };
-  sources: { ourListings: DemandMatchRow[]; marketplace: DemandMatchRow[]; unlistedStock: DemandMatchRow[]; goFind: GoFindRow[] };
-  /** The single row to lead with: the first row of the same order the lists use. */
-  bestSource: { key: string; source: DemandSource; title: string; verdict: "exact" | "check"; why: string } | null;
-  counts: { rows: number; exact: number; /** Rows that fit before the per-source cap. */ matched: number; hidden: number; considered: number };
-  blocked: string | null;
-  errors: string[];
-};
-
-const ROWS_PER_SOURCE = 25;
-const GOFIND_SHOWN = 12;
+type DemandSource = "ourListings" | "marketplace" | "unlistedStock";
 
 const EVIDENCE_LABEL: Record<string, string> = {
   tested_soh: "a tested SoH reading",
@@ -110,12 +51,7 @@ export function evidenceMissing(evidence: string[], candidate: Candidate): strin
   return missing;
 }
 
-const gapOf = (checks: Check[]) => {
-  const bad = checks.find((check) => check.state === "fail")
-    ?? checks.find((check) => check.state === "unknown")
-    ?? checks.find((check) => check.state === "partial");
-  return bad ? bad.detail : null;
-};
+const day = (value: string | null | undefined) => (value ? value.slice(0, 10) : null);
 
 /** Unlisted supplier stock: status `opportunity` only, and never a unit that is already on a listing. */
 type StockRow = {
@@ -166,169 +102,170 @@ function stockCandidate(row: StockRow): Candidate {
   };
 }
 
-/** One candidate as the tab's row, with the request's evidence bar applied to the verdict. */
-function rowOf(candidate: Candidate, source: DemandSource, match: Match, evidence: string[], userVerdict: DemandMatchRow["userVerdict"]): DemandMatchRow {
-  const missing = evidenceMissing(evidence, candidate);
-  const checks = missing.length
-    ? [...match.checks, { key: "product" as const, label: "Evidence", state: "unknown" as const, detail: `Ask for ${missing.join(", ")}` }]
-    : match.checks;
-  return {
-    key: candidate.key, source, title: candidate.title, seller: candidate.seller,
-    make: candidate.make, model: candidate.model, format: candidate.format ?? null,
-    chemistry: candidate.chemistry, kwh: candidate.kwh, units: candidate.units,
-    price: candidate.price, currency: candidate.currency,
-    eurPerKwh: match.economics.sellerEurPerKwh, marginPct: match.economics.marginPct,
-    verdict: missing.length ? "check" : match.verdict,
-    gap: missing.length ? `Ask for ${missing[0]}` : gapOf(match.checks),
-    checks, evidenceMissing: missing,
-    location: candidate.location, country: candidate.country, seen: candidate.seen,
-    href: candidate.href, userVerdict,
-  };
+const TAG_FOR: Record<DemandSource, MatchTag> = {
+  ourListings: "our listing",
+  marketplace: "marketplace",
+  unlistedStock: "unlisted stock",
+};
+
+/** The counterparty's own price, only when the row states one. A derived €/kWh is not a firm price. */
+function firmPrice(candidate: Candidate): string | null {
+  if (candidate.price == null || !candidate.currency || candidate.currencyAssumed) {
+    return null;
+  }
+  const amount = candidate.price.toLocaleString("en-GB", { maximumFractionDigits: candidate.price < 10 ? 2 : 0 });
+  return `${candidate.currency} ${amount}`;
 }
 
-const sourceRank = (row: DemandMatchRow) => (row.userVerdict === "shortlist" ? 0 : row.verdict === "exact" ? 1 : 2);
-const rowOrder = (a: DemandMatchRow, b: DemandMatchRow) => sourceRank(a) - sourceRank(b)
-  || (b.marginPct ?? -9) - (a.marginPct ?? -9)
-  || (b.units ?? 0) - (a.units ?? 0)
-  || a.title.localeCompare(b.title);
-
-/** A seller who has offered this make or product before: where to ask first. */
-async function goFind(requirement: Requirement): Promise<GoFindRow[]> {
-  const terms = [...new Set([...requirement.makeWords, ...requirement.products.flatMap((product) => product.anyOf)])]
-    .map((term) => term.trim().toLowerCase()).filter((term) => term.length > 1);
-  if (!terms.length) {
-    return [];
+/** Why this unit fits, citing the product it matched on rather than the request's words. */
+function reasonFor(match: Match, candidate: Candidate): string {
+  const product = match.checks.find((check) => check.key === "product" && check.state === "pass");
+  if (product) {
+    return `${product.label} matches: ${product.detail}`;
   }
-  const [stock, supply] = await Promise.all([
-    queryPg<{ company_id: string | null; person_id: string; name: string; make: string | null; model: string | null; last_seen: string | null }>(
-      `select s.company_id, s.person_id, coalesce(c.name, p.full_name, 'Unknown') as name,
-              s.details->>'make' as make, s.details->>'model' as model,
-              coalesce(s.details->'sync'->>'lastSeen', s.observed_on::text, s.updated_at::date::text) as last_seen
-       from crm_stock_opportunities s
-       left join crm_companies c on c.id = s.company_id
-       left join crm_people p on p.id = s.person_id
-       where s.status <> 'rejected' and nullif(trim(s.details->>'make'), '') is not null`),
-    queryPg<{ company_id: string | null; person_id: string | null; name: string; make: string | null; model: string | null; last_seen: string | null }>(
-      `select l.company_id, l.person_id, coalesce(c.name, p.full_name, l.party) as name,
-              max(case when f.field_key = 'model' then f.value end) as model,
-              l.observed_on::text as last_seen
-       from crm_bulk_listings l
-       left join crm_companies c on c.id = l.company_id
-       left join crm_people p on p.id = l.person_id
-       left join crm_bulk_listing_fields f on f.bulk_listing_id = l.id and f.field_key = 'model'
-       where l.kind = 'supply'
-       group by l.id, l.company_id, l.person_id, c.name, p.full_name, l.party, l.observed_on`),
+  return [candidate.make, candidate.model].filter(Boolean).join(" ") || candidate.title;
+}
+
+/** The gaps that would change the answer, in the scorer's own words. */
+function checksFor(match: Match, missing: string[]): string[] {
+  const gaps = match.checks
+    .filter((check) => check.state !== "pass" && !check.detail.startsWith("AI:"))
+    .map((check) => check.detail);
+  return [...new Set([...gaps, missing.length ? `Ask for ${missing.join(", ")}` : null].filter((entry): entry is string => !!entry))].slice(0, 3);
+}
+
+type Identity = { companyId: string | null; personId: string | null; contact: string | null };
+
+/** Who to write to for a `trade:` / `supply:` row, a `stock:` row or a `listing:` row (no CRM identity). */
+async function identities(keys: string[]): Promise<Map<string, Identity>> {
+  const listings = keys.filter((key) => /^(trade|supply):/.test(key)).map((key) => key.slice(key.indexOf(":") + 1));
+  const stock = keys.filter((key) => key.startsWith("stock:")).map((key) => key.slice("stock:".length));
+  const [listingRows, stockRows] = await Promise.all([
+    listings.length ? queryPg<{ id: string; company_id: string | null; person_id: string | null; contact: string | null; email: string | null }>(
+      `select id, company_id, person_id, contact, email from crm_bulk_listings where id = any($1::text[])`, [listings]) : [],
+    stock.length ? queryPg<{ id: string; company_id: string | null; person_id: string }>(
+      `select id, company_id, person_id from crm_stock_opportunities where id = any($1::text[])`, [stock]) : [],
   ]);
-  const found = new Map<string, GoFindRow & { labels: Set<string> }>();
-  const consider = (row: { company_id: string | null; person_id: string | null; name: string; make: string | null; model: string | null; last_seen: string | null }, kind: "stock" | "supply") => {
-    const text = ` ${[row.make, row.model].filter(Boolean).join(" ").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
-    const hit = terms.find((term) => text.includes(` ${term} `) || (term.includes(" ") && text.includes(term)));
-    if (!hit) {
-      return;
+  const byListing = new Map(listingRows.map((row) => [row.id, row]));
+  const byStock = new Map(stockRows.map((row) => [row.id, row]));
+  const personIds = [...listingRows.map((row) => row.person_id), ...stockRows.map((row) => row.person_id)].filter((id): id is string => !!id);
+  const people = personIds.length
+    ? await queryPg<{ id: string; email: string | null }>(`select id, email from crm_people where id = any($1::text[])`, [personIds])
+    : [];
+  const emailOf = new Map(people.map((row) => [row.id, row.email]));
+
+  const out = new Map<string, Identity>();
+  for (const key of keys) {
+    const id = key.slice(key.indexOf(":") + 1);
+    if (key.startsWith("stock:")) {
+      const row = byStock.get(id);
+      out.set(key, { companyId: row?.company_id ?? null, personId: row?.person_id ?? null, contact: row ? emailOf.get(row.person_id) ?? null : null });
+    } else if (byListing.has(id)) {
+      const row = byListing.get(id)!;
+      out.set(key, { companyId: row.company_id, personId: row.person_id, contact: row.email ?? row.contact ?? (row.person_id ? emailOf.get(row.person_id) ?? null : null) });
     }
-    const id = row.company_id ?? `person:${row.person_id}`;
-    const seen = row.last_seen ? row.last_seen.slice(0, 10) : null;
-    // What they offered, in their own words, so the reason reads like a fact rather than a search term.
-    const label = [row.make, row.model].filter(Boolean).join(" ").trim() || hit;
-    const existing = found.get(id);
-    if (!existing) {
-      found.set(id, {
-        companyId: row.company_id, personId: row.person_id, name: row.name, why: "", lastSeen: seen,
-        matches: 1, sources: [kind], labels: new Set([label]),
-      });
-      return;
-    }
-    existing.matches += 1;
-    existing.labels.add(label);
-    if (!existing.sources.includes(kind)) {
-      existing.sources.push(kind);
-    }
-    if (seen && (!existing.lastSeen || seen > existing.lastSeen)) {
-      existing.lastSeen = seen;
-    }
-  };
-  for (const row of stock) {
-    consider(row, "stock");
   }
-  for (const row of supply) {
-    consider(row, "supply");
-  }
-  return [...found.values()]
-    .map(({ labels, ...row }) => {
-      const shown = [...labels].slice(0, 2);
-      const more = labels.size - shown.length;
-      const what = `${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
-      const where = row.sources.includes("supply") ? "past lots" : "stock rows";
-      return {
-        ...row,
-        why: `Has offered ${what} before (${row.matches} ${where}${row.lastSeen ? `, last seen ${row.lastSeen}` : ""})`,
-      };
-    })
-    .toSorted((a, b) => b.matches - a.matches || (b.lastSeen ?? "").localeCompare(a.lastSeen ?? ""))
-    .slice(0, GOFIND_SHOWN);
+  return out;
 }
 
-export async function demandMatchesV2(demandId: string): Promise<DemandMatchesV2Result | null> {
+/** The one-line "Matched on" header for a request, and the full requirement behind it. */
+function requirementView(requirement: Requirement, evidence: string[], demand: { spec?: Record<string, unknown>; quantity?: string | null; location?: string | null; product_family?: string | null; wants: string }): MatchesResult["lotKey"] {
+  const size = requirement.kwhNeeded != null ? `${requirement.kwhNeeded} kWh` : null;
+  const price = requirement.buyerEurPerKwh != null ? `buys up to €${requirement.buyerEurPerKwh}/kWh`
+    : requirement.buyerEurPerUnit != null ? `buys up to €${requirement.buyerEurPerUnit}/unit` : null;
+  // The ask in its own words reads better than lower-case match tokens ("mg", "kona"); the full key carries the fields.
+  const asked = (demand.product_family || demand.wants).replace(/\s+/g, " ").trim();
+  const capacity = requirement.kwh && "options" in requirement.kwh
+    ? requirement.kwh.options.map((option) => `${option} kWh`).join(" / ")
+    : size;
+  return {
+    line: asked.length > 90 ? `${asked.slice(0, 89).trimEnd()}…` : asked,
+    full: [
+      requirement.pinned.length ? `Matched on ${requirement.pinned.join(" · ")}` : null,
+      requirement.unitsNeeded != null ? `Needs ${requirement.unitsNeeded.toLocaleString("en-GB")} units` : demand.quantity ?? null,
+      capacity ? `Capacity ${capacity}` : null,
+      price,
+      requirement.country ? `Delivered to ${requirement.country}` : demand.location,
+      evidence.length ? `Evidence: ${evidence.map((item) => EVIDENCE_LABEL[item] ?? item).join(", ")}` : null,
+    ].filter((entry): entry is string => !!entry),
+    open: demand.spec?.mixed_ok === true,
+  };
+}
+
+export async function demandMatchesV2(demandId: string): Promise<MatchesResult | null> {
   const demand = await getDemand(demandId);
   if (!demand) {
     return null;
   }
-  const { candidates, hidden, verdicts, errors } = await inventoryFor(demandId);
-  const stock = await unlistedStock();
+  const [inventory, stock, offers] = await Promise.all([
+    inventoryFor(demandId),
+    unlistedStock(),
+    offersForListing(demandId),
+  ]);
+  const { candidates, hidden, verdicts, errors } = inventory;
   const stockCandidates = stock.map(stockCandidate);
   // One requirement per request, from the same vocabulary the demand tab already uses: what a seller writes in a
   // make or model. Stock rows are then judged against it, never allowed to redefine the ask.
   const requirement = requirementFor(demand, vocabulary(candidates));
   const evidence = Array.isArray(demand.spec?.evidence) ? (demand.spec.evidence as string[]) : [];
 
-  let rows: DemandMatchRow[] = [];
+  type Scored = { candidate: Candidate; source: DemandSource; match: Match; missing: string[] };
+  const scored: Scored[] = [];
   const consider = (candidate: Candidate, source: DemandSource) => {
     const verdict = verdicts.get(candidate.key);
-    if (verdict?.verdict === "not_a_fit") {
+    if (verdict?.verdict === "not_a_fit" || hidden.has(candidate.key)) {
       return;
     }
     const match = scoreCandidate(requirement, candidate);
     if (!match) {
       return;
     }
-    rows.push(rowOf(candidate, source, match, evidence, verdict?.verdict === "shortlist" ? "shortlist" : null));
+    scored.push({ candidate, source, match, missing: evidenceMissing(evidence, candidate) });
   };
   for (const candidate of candidates) {
-    if (hidden.has(candidate.key)) {
-      continue;
-    }
     consider(candidate, candidate.source === "marketplace" ? "marketplace" : "ourListings");
   }
   for (const candidate of stockCandidates) {
     consider(candidate, "unlistedStock");
   }
-  rows = rows.toSorted(rowOrder);
 
-  const best = rows[0] ?? null;
-  const shown = {
-    ourListings: rows.filter((row) => row.source === "ourListings").slice(0, ROWS_PER_SOURCE),
-    marketplace: rows.filter((row) => row.source === "marketplace").slice(0, ROWS_PER_SOURCE),
-    unlistedStock: rows.filter((row) => row.source === "unlistedStock").slice(0, ROWS_PER_SOURCE),
-  };
+  const rank = (row: Scored) => (row.missing.length ? 1 : row.match.verdict === "exact" ? 0 : 2);
+  const order = (a: Scored, b: Scored) => rank(a) - rank(b)
+    || (b.match.economics.marginPct ?? -9) - (a.match.economics.marginPct ?? -9)
+    || (b.candidate.units ?? 0) - (a.candidate.units ?? 0)
+    || a.candidate.title.localeCompare(b.candidate.title);
+
+  const identity = await identities(scored.map((row) => row.candidate.key));
+  const rows: MatchRow[] = scored.toSorted(order).map(({ candidate, source, match, missing }, index) => {
+    const who = identity.get(candidate.key) ?? { companyId: null, personId: null, contact: null };
+    return {
+      key: candidate.key,
+      rank: index + 1,
+      name: candidate.seller ?? "Unknown seller",
+      detail: [
+        candidate.units != null ? `${candidate.units.toLocaleString("en-GB")} units` : "Quantity not stated",
+        candidate.location ?? candidate.country,
+        candidate.seen ? `seen ${day(candidate.seen)}` : null,
+      ].filter(Boolean).join(" · "),
+      tags: [TAG_FOR[source]],
+      reason: reasonFor(match, candidate),
+      checks: checksFor(match, missing),
+      price: firmPrice(candidate),
+      offer: offers.find(who.companyId, who.personId, candidate.seller ?? ""),
+      companyId: who.companyId,
+      personId: who.personId,
+      contact: who.contact,
+      stockId: candidate.key.startsWith("stock:") ? candidate.key.slice("stock:".length) : null,
+    };
+  });
+
   return {
-    demandId,
-    requirement: {
-      pinned: requirement.pinned, unitsNeeded: requirement.unitsNeeded, kwhNeeded: requirement.kwhNeeded,
-      buyerEurPerKwh: requirement.buyerEurPerKwh, buyerEurPerUnit: requirement.buyerEurPerUnit,
-      country: requirement.country, evidence,
-    },
-    sources: { ...shown, goFind: await goFind(requirement) },
-    bestSource: best
-      ? { key: best.key, source: best.source, title: best.title, verdict: best.verdict, why: best.gap ? `${best.title}: ${best.gap}` : best.title }
-      : null,
-    counts: {
-      rows: shown.ourListings.length + shown.marketplace.length + shown.unlistedStock.length,
-      exact: [...shown.ourListings, ...shown.marketplace, ...shown.unlistedStock].filter((row) => row.verdict === "exact").length,
-      matched: rows.length,
-      hidden: hidden.size,
-      considered: candidates.length + stockCandidates.length,
-    },
-    blocked: rows.length ? null : "Nothing we hold fits this ask yet: no listing, marketplace unit or stock row matches the ask.",
+    id: demandId,
+    kind: "demand",
+    lotKey: requirementView(requirement, evidence, demand),
+    rows,
+    considered: candidates.length + stockCandidates.length,
+    blocked: rows.length ? null : "Nothing fits yet. Add a dossier or a listing field to widen the match.",
     errors,
   };
 }
