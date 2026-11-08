@@ -69,8 +69,8 @@ TOP_LEVEL_KEYS = [
     "needs_continuity", "timing", "origins", "source_countries", "min_soh",
 ]
 PRODUCT_KEYS = [
-    "part_number", "platform", "make", "model", "format", "chemistry", "kwh", "module_series",
-    "cell_format", "status", "seen", "src",
+    "part_number", "platform", "make", "model", "format", "chemistry", "kwh", "kwh_min", "kwh_max",
+    "module_series", "cell_format", "status", "seen", "src",
 ]
 PRICE_KEYS = ["eur_per_kwh", "eur_per_unit", "currency_original", "basis", "incoterm", "seen", "src"]
 RULES_OUT_KEYS = ["chemistries", "formats", "damaged", "bess_systems", "other"]
@@ -347,6 +347,14 @@ def validate(frontmatter):
             for j, value in enumerate(values):
                 if not _is_number(value):
                     errors.append(f"{where}.kwh[{j}]: must be a number, got {value!r}")
+        # An open range ("30 kWh or more") for a buyer with no single capacity.
+        for key in ("kwh_min", "kwh_max"):
+            value = product.get(key)
+            if value is not None and not _is_number(value):
+                errors.append(f"{where}.{key}: must be a number, got {value!r}")
+        if _is_number(product.get("kwh_min")) and _is_number(product.get("kwh_max")) \
+                and product["kwh_min"] > product["kwh_max"]:
+            errors.append(f"{where}.kwh_max: must not be below kwh_min")
         if "seen" in product:
             reason = _date_error(product["seen"])
             if reason:

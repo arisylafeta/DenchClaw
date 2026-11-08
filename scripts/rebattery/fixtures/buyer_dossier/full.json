@@ -69,6 +69,16 @@
         "status": "declined",
         "seen": "2026-01-10",
         "src": "gmail_msg_fixture3"
+      },
+      {
+        "make": "Stellantis",
+        "format": "packs",
+        "chemistry": "NMC",
+        "kwh_min": 30,
+        "module_series": "e-CMP",
+        "status": "asked",
+        "seen": "2026-08-02",
+        "src": "gmail_msg_fixture6"
       }
     ],
     "rules_out": {
@@ -186,7 +196,7 @@
     ],
     "kwh_min": 2.6,
     "kwh_max": 60,
-    "wants": "MEB 82 kWh packs (bought 2026-06-15)\nMG, Stellantis, Tesla 40-60 kWh packs (asked 2026-07-01)\nStellantis / FPT / Kokam 2.6 kWh modules (said interested)",
+    "wants": "MEB 82 kWh packs (bought 2026-06-15)\nMG, Stellantis, Tesla 40-60 kWh packs (asked 2026-07-01)\nStellantis / FPT / Kokam 2.6 kWh modules (said interested)\nStellantis packs (asked 2026-08-02)",
     "dossier": {
       "company_id": "company-synthetic-1",
       "company": "Synthetic Modules Ltd",
@@ -257,6 +267,16 @@
           "status": "declined",
           "seen": "2026-01-10",
           "src": "gmail_msg_fixture3"
+        },
+        {
+          "make": "Stellantis",
+          "format": "packs",
+          "chemistry": "NMC",
+          "kwh_min": 30,
+          "module_series": "e-CMP",
+          "status": "asked",
+          "seen": "2026-08-02",
+          "src": "gmail_msg_fixture6"
         }
       ],
       "rules_out": {

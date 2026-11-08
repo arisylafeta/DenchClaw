@@ -57,8 +57,8 @@ export const TOP_LEVEL_KEYS = [
   "needs_continuity", "timing", "origins", "source_countries", "min_soh",
 ];
 const PRODUCT_KEYS = [
-  "part_number", "platform", "make", "model", "format", "chemistry", "kwh", "module_series",
-  "cell_format", "status", "seen", "src",
+  "part_number", "platform", "make", "model", "format", "chemistry", "kwh", "kwh_min", "kwh_max",
+  "module_series", "cell_format", "status", "seen", "src",
 ];
 const PRICE_KEYS = ["eur_per_kwh", "eur_per_unit", "currency_original", "basis", "incoterm", "seen", "src"];
 const RULES_OUT_KEYS = ["chemistries", "formats", "damaged", "bess_systems", "other"];
@@ -481,6 +481,16 @@ export function validateDossier(frontmatter: unknown): string[] {
             errors.push(`${where}.kwh[${kwhIndex}]: must be a number, got ${pyRepr(value)}`);
           }
         });
+      }
+      // An open range ("30 kWh or more") for a buyer with no single capacity.
+      for (const key of ["kwh_min", "kwh_max"]) {
+        const value = product[key];
+        if (value !== null && value !== undefined && !isNumber(value)) {
+          errors.push(`${where}.${key}: must be a number, got ${pyRepr(value)}`);
+        }
+      }
+      if (isNumber(product.kwh_min) && isNumber(product.kwh_max) && product.kwh_min > product.kwh_max) {
+        errors.push(`${where}.kwh_max: must not be below kwh_min`);
       }
       if ("seen" in product) {
         const reason = dateError(product.seen);

@@ -39,6 +39,14 @@ products:
     status: declined
     seen: "2026-01-10"
     src: "gmail_msg_fixture3"
+  - make: Stellantis
+    format: packs
+    chemistry: NMC
+    kwh_min: 30
+    module_series: "e-CMP"
+    status: asked
+    seen: "2026-08-02"
+    src: "gmail_msg_fixture6"
 rules_out:
   chemistries:
     - LTO
