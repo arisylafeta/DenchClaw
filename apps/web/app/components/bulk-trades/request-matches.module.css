@@ -13,9 +13,10 @@
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
 }
-.wrap a { color: #4d5300; }
-.wrap a:hover { color: #2f3300; }
-.wrap button { font: inherit; color: inherit; cursor: pointer; }
+/* As the mock's element rules: no extra specificity, so .btn's 13px / 600 still wins over `font: inherit`. */
+:where(.wrap) a { color: #4d5300; }
+:where(.wrap) a:hover { color: #2f3300; }
+:where(.wrap) button { font: inherit; color: inherit; cursor: pointer; }
 .wrap button:focus-visible,
 .wrap a:focus-visible { outline: 2px solid #687000; outline-offset: 2px; }
 
