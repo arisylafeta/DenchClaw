@@ -180,6 +180,13 @@ describe("the request stock ask, from the request's own facts", () => {
     expect(email.body).toContain("Do you have anything that fits? If so, how many do you have, and when could they ship?");
   });
 
+  it("puts an energy volume in brackets, never 'N x' (btd_8f67e71e: 1,000 kWh of cells or packs)", () => {
+    const email = ask({ recipientFirstName: null, request: { productFamily: "LFP prismatic 100Ah cells / 50kWh packs", volume: 1000, volumeUnit: "kWh", neededBy: null, spec: {} } });
+    expect(email.subject).toBe("Stock enquiry: LFP prismatic 100Ah cells / 50kWh packs (1,000 kWh)");
+    expect(email.body).toContain("We're looking for LFP prismatic 100Ah cells / 50kWh packs (1,000 kWh) in Poland.");
+    expect(email.subject).not.toContain(" x ");
+  });
+
   it("asks when they could ship when the request has no date, and falls back to the spec without a product family", () => {
     const email = ask({ request: { ...request, productFamily: null, neededBy: null, spec: { formats: ["Cells"], cell_makers: ["Samsung SDI"] } } });
     expect(email.body).toContain("We're looking for 500,000 x Samsung SDI cells in Poland.");

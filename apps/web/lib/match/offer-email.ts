@@ -412,7 +412,8 @@ export function requestProduct(request: RequestFacts | null | undefined): string
 /** "500,000 cells", from the volume, else the quantity as written when it is short and has a figure. */
 export function requestQuantity(request: RequestFacts | null | undefined): string | null {
   if (request?.volume != null && request.volume > 0) {
-    const unit = clean(request.volumeUnit).toLowerCase();
+    const lower = clean(request.volumeUnit).toLowerCase();
+    const unit = ({ kwh: "kWh", mwh: "MWh", gwh: "GWh" } as Record<string, string>)[lower] ?? lower;
     return `${request.volume.toLocaleString("en-GB")}${unit ? ` ${unit}` : ""}`;
   }
   const written = clean(request?.quantity);
@@ -428,6 +429,8 @@ export function requestTiming(request: RequestFacts | null | undefined): string 
     : null;
 }
 
+const COUNT_UNITS = new Set(["cell", "pack", "module", "system", "unit"]);
+
 /** "500,000 x Samsung 50E-equivalent 21700 cells", or the product with its quantity in brackets. */
 function requestPhrase(request: RequestFacts, product: string): string {
   const quantity = requestQuantity(request);
@@ -436,7 +439,8 @@ function requestPhrase(request: RequestFacts, product: string): string {
   }
   const unit = clean(request.volumeUnit).toLowerCase().replace(/s$/, "");
   const amount = request.volume != null && request.volume > 0 ? request.volume.toLocaleString("en-GB") : null;
-  if (amount && unit && product.toLowerCase().includes(unit)) {
+  // "500,000 x … cells" only for a count; an energy volume ("1,000 kWh") goes in brackets after the product.
+  if (amount && COUNT_UNITS.has(unit) && product.toLowerCase().includes(unit)) {
     return `${amount} x ${product}`;
   }
   return `${product} (${quantity})`;
