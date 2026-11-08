@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { queryPg, withPgTransaction } from "./postgres";
+import { queryPg, withPgTransaction, type PgTransaction } from "./postgres";
 import { draftAttachments, readMailDraft } from "./crm-postgres/mail";
 import { editDraft, editableCopy, identitySignatures, sameVersion, textToHtml, splitCopy } from "./mail-draft-actions";
 import type { DraftAttachment } from "./mail-types";
@@ -56,6 +56,8 @@ export type RelayItem = {
   deal_job?: RelayDealJob | null;
   /** The email is from the linked deal's own seller or buyer, so "Draft the ask" can write the playbook's ask. */
   can_ask?: boolean;
+  /** The linked deal was picked by hand with "Link to deal", so Unlink can take it back. Set on list views only. */
+  relay_link?: boolean;
   /** The sender's dismantler company in the CRM and its listing permission. One or a few packs go to the marketplace, not a bulk deal. */
   dismantler?: RelayDismantler | null;
 };
@@ -382,6 +384,10 @@ async function withDealInfo(items: RelayItem[]): Promise<RelayItem[]> {
     "select b.id, lower(coalesce(b.email, p.email)) as owner_email from crm_bulk_listings b left join crm_people p on p.id = b.person_id where b.id = any($1)", [listingIds]).catch(() => []) : [];
   const ownerOf = new Map(owners.map((o) => [o.id, o.owner_email]));
   const jobs = await dealJobsFor(items.map((i) => i.id));
+  const relayLinks = threads.length ? await queryPg<{ thread_id: string; bulk_listing_id: string }>(
+    "select thread_id, bulk_listing_id from crm_bulk_thread_links where channel = 'mail' and thread_id = any($1) and labelled_by = $2 and state = 'confirmed'",
+    [threads, RELAY_LINK]).catch(() => []) : [];
+  const handLinked = new Set(relayLinks.map((r) => `${r.thread_id} ${r.bulk_listing_id}`));
   const dismantlers = await dismantlersOf(items.map((i) => i.counterpart_email ?? "").filter(Boolean)).catch(() => new Map<string, RelayDismantler>());
   return items.map((i) => {
     const box = i.mail_thread_id ? byThread.get(i.mail_thread_id) : undefined;
@@ -390,7 +396,8 @@ async function withDealInfo(items: RelayItem[]): Promise<RelayItem[]> {
     const can_ask = !!i.bulk_listing_id && ownsDeal(ownerOf.get(i.bulk_listing_id), i.counterpart_email);
     // A dismantler writing as a buyer is a buyer: the dismantler channel is for their packs, not their purchases.
     const dismantler = i.contact_type === "buyer" || inbox === "buy" ? null : dismantlers.get((i.counterpart_email ?? "").toLowerCase()) ?? null;
-    return { ...i, inbox, deal_action: suggestDealAction(i, inbox, job), deal_job: job, can_ask, dismantler };
+    const relay_link = !!i.bulk_listing_id && handLinked.has(`${i.mail_thread_id} ${i.bulk_listing_id}`);
+    return { ...i, inbox, deal_action: suggestDealAction(i, inbox, job), deal_job: job, can_ask, dismantler, relay_link };
   });
 }
 
@@ -411,6 +418,17 @@ async function dismantlersOf(emails: string[]): Promise<Map<string, RelayDismant
 }
 
 const RELAY_LINK = "relay";
+/** A Relay link that took over an older row for the same deal keeps that row's previous values after this prefix, so Unlink can put them back. */
+const TAKEN_OVER = "Linked in Relay; before: ";
+
+/** Relay's own deal label, as the scan writes it: the summary's first clause and the quantity. */
+function dealLabel(summary: string | null, quantity: string | null): string | null {
+  if (!summary) return null;
+  let head = summary.trim().split(/[;:]|,\s|\.\s|\s[–—-]\s/)[0].trim();
+  if (head.length > 48) head = `${head.slice(0, 48).replace(/\s+\S*$/, "")}…`;
+  const q = (quantity ?? "").trim();
+  return q && q.length <= 30 && !summary.toLowerCase().includes(q.toLowerCase()) ? `${head} · ${q}` : head;
+}
 
 /** Open deals for "Link to deal", newest first. */
 export async function dealOptions(): Promise<RelayDealOption[]> {
@@ -418,6 +436,18 @@ export async function dealOptions(): Promise<RelayDealOption[]> {
     `select b.id, b.kind, coalesce(b.context->>'listing_title', b.summary, b.id) as title, coalesce(c.name, p.full_name, b.email) as who
        from crm_bulk_listings b left join crm_people p on p.id = b.person_id left join crm_companies c on c.id = p.company_id
       where b.status in ('open', 'qualifying') order by b.updated_at desc nulls last limit 200`);
+}
+
+/** Takes back this thread's Relay links (except to `keep`): rows Relay created are deleted, older rows it took over get their values back. */
+async function releaseRelayLinks(client: PgTransaction, thread: string, keep: string | null): Promise<number> {
+  const where = "channel = 'mail' and thread_id = $1 and labelled_by = $2 and bulk_listing_id is distinct from $3";
+  const restored = await client.query(
+    `update crm_bulk_thread_links l set state = b->>'state', labelled_by = b->>'labelled_by', confirmed_by = b->>'confirmed_by',
+       confirmed_at = (b->>'confirmed_at')::timestamptz, reason = b->>'reason'
+       from (select id, substr(reason, length($4) + 1)::jsonb as b from crm_bulk_thread_links where ${where} and starts_with(reason, $4)) x
+      where l.id = x.id`, [thread, RELAY_LINK, keep, TAKEN_OVER]);
+  const deleted = await client.query(`delete from crm_bulk_thread_links where ${where} and not starts_with(coalesce(reason, ''), $4)`, [thread, RELAY_LINK, keep, TAKEN_OVER]);
+  return (restored.rowCount ?? 0) + (deleted.rowCount ?? 0);
 }
 
 /** "Link to deal": Alex ties this thread to a deal by hand, saved as a confirmed thread link the scan keeps.
@@ -428,24 +458,29 @@ export async function linkDeal(itemId: string, ownerId: string, listingId: strin
   if (!item.mail_thread_id) throw new RelayError(409, "This email has no thread to link.");
   const thread = item.mail_thread_id;
   await withPgTransaction(async (client) => {
-    let title: string | null = null;
+    // One link change per thread at a time, even with two tabs or a double click.
+    await client.query("select pg_advisory_xact_lock(hashtext($1))", [`relay-link:${thread}`]);
+    let label: string | null = null;
     if (listingId) {
-      const { rows: [listing] } = await client.query<{ id: string; title: string }>(
-        "select id, coalesce(context->>'listing_title', summary, id) as title from crm_bulk_listings where id = $1 for share", [listingId]);
+      const { rows: [listing] } = await client.query<{ summary: string | null; quantity: string | null }>(
+        "select summary, quantity from crm_bulk_listings where id = $1 for share", [listingId]);
       if (!listing) throw new RelayError(404, "That deal isn't in the CRM.");
-      title = listing.title;
+      label = dealLabel(listing.summary, listing.quantity);
     }
-    await client.query("delete from crm_bulk_thread_links where channel = 'mail' and thread_id = $1 and labelled_by = $2 and bulk_listing_id is distinct from $3",
-      [thread, RELAY_LINK, listingId]);
+    const released = await releaseRelayLinks(client, thread, listingId);
+    if (!listingId && !released) throw new RelayError(409, "This deal wasn't linked in Relay, so there's nothing to unlink here.");
     if (listingId) await client.query(
       `insert into crm_bulk_thread_links (channel, thread_id, bulk_listing_id, confidence, state, reason, labelled_by, confirmed_by, confirmed_at)
        values ('mail', $1, $2, 'high', 'confirmed', 'Linked in Relay', $3, $4, now())
        on conflict (channel, thread_id, bulk_listing_id, (coalesce(offer_id, ''))) do update
-         set state = 'confirmed', labelled_by = $3, confirmed_by = excluded.confirmed_by, confirmed_at = now()`,
-      [thread, listingId, RELAY_LINK, by]);
+         set state = 'confirmed', labelled_by = $3, confirmed_by = excluded.confirmed_by, confirmed_at = now(),
+             reason = case when crm_bulk_thread_links.labelled_by = $3 then crm_bulk_thread_links.reason
+               else $5 || json_build_object('state', crm_bulk_thread_links.state, 'labelled_by', crm_bulk_thread_links.labelled_by,
+                 'confirmed_by', crm_bulk_thread_links.confirmed_by, 'confirmed_at', crm_bulk_thread_links.confirmed_at, 'reason', crm_bulk_thread_links.reason)::text end`,
+      [thread, listingId, RELAY_LINK, by, TAKEN_OVER]);
     // Unlinking clears the email too; the next scan puts back the sender's own deal, if they have one.
     await client.query("update relay_item set bulk_listing_id = $2, deal_label = $3, updated_at = now() where id = $1 and owner_id = $4::uuid",
-      [itemId, listingId, title?.slice(0, 120) ?? null, ownerId]);
+      [itemId, listingId, label?.slice(0, 120) ?? null, ownerId]);
   });
   return (await readRelayItem(itemId, ownerId))!;
 }
@@ -478,7 +513,7 @@ export async function startDealJob(itemId: string, ownerId: string, action: "cre
     `Relay button: ${label}.`,
     `Follow ${MATCHA_RECIPE} and ${INTAKE_GUIDE}, section "Relay buttons". Finish with only the JSON that section describes.`,
     `Write only to ${item.bulk_listing_id ? `listing ${item.bulk_listing_id}` : "the one listing you create for this email"} and its child rows. Never change another listing, never create a company or person, never send or draft email.`,
-    counterparty ? "The sender is not this listing's own party: they are answering it (a supplier on a buyer's request). Record what they offer on their offer in crm_bulk_offers and a Story row; never change the listing's own card." : "",
+    counterparty ? "The sender is not this listing's own party: they are answering it (a supplier on a buyer's request). Record what they offer on their offer in crm_bulk_offers and a Story row. Never change the listing's own card, next_action, next_due, waiting_on or context.owner, and report as gaps only what their offer still lacks." : "",
     `Mail thread: ${item.mail_thread_id ?? "not in the mail log"}; Gmail thread ${item.gmail_thread_id}. Read it with rebattery-mail thread.`,
     `Inbox: ${inbox === "supply" ? "supply@rebattery.io (a seller)" : inbox === "buy" ? "buy@rebattery.io (a buyer)" : "Alex's own address, no shared inbox on the thread"}.`,
     `Sender: ${item.counterpart_name ?? ""} <${sender ?? ""}>${item.company ? `, ${item.company}` : ""}. Contact type from Relay: ${item.contact_type ?? "unknown"}.`,
