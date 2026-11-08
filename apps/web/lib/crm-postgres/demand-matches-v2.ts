@@ -224,6 +224,19 @@ function sourceLink(candidate: Candidate): MatchRow["link"] {
 }
 
 const CURRENCY: Record<string, string> = { EUR: "€", GBP: "£", USD: "$" };
+
+/** The buyer's ceiling in the request's own currency and unit ("£30/kWh"), never a converted figure. */
+export function ceilingText(demand: Pick<Demand, "max_price" | "price_currency" | "price_unit">): string | null {
+  if (demand.max_price == null) {
+    return null;
+  }
+  const value = Number(demand.max_price);
+  const currency = (demand.price_currency ?? "EUR").toUpperCase();
+  const amount = value.toLocaleString("en-GB", { minimumFractionDigits: value < 10 ? 2 : 0, maximumFractionDigits: 2 });
+  const unit = (demand.price_unit ?? "").toLowerCase();
+  const per = unit === "kwh" ? "kWh" : unit === "mwh" ? "MWh" : demand.price_unit;
+  return `${CURRENCY[currency] ? `${CURRENCY[currency]}${amount}` : `${currency} ${amount}`}${per ? `/${per}` : ""}`;
+}
 const shortDay = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00Z`)
   .toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
@@ -263,11 +276,9 @@ export function requestChips(requirement: Requirement, demand: Pick<Demand, "pro
   if (demand.needed_by) {
     chips.push({ label: `By ${shortDay(demand.needed_by)}` });
   }
-  if (demand.max_price != null) {
-    const currency = (demand.price_currency ?? "EUR").toUpperCase();
-    const amount = Number(demand.max_price).toLocaleString("en-GB", { minimumFractionDigits: Number(demand.max_price) < 10 ? 2 : 0, maximumFractionDigits: 2 });
-    const money = CURRENCY[currency] ? `${CURRENCY[currency]}${amount}` : `${currency} ${amount}`;
-    chips.push({ label: `Ceiling ${money}${demand.price_unit ? `/${demand.price_unit}` : ""} · internal` });
+  const ceiling = ceilingText(demand);
+  if (ceiling) {
+    chips.push({ label: `Ceiling ${ceiling} · internal` });
   }
   return chips;
 }
@@ -322,10 +333,11 @@ async function identities(keys: string[]): Promise<Map<string, Identity>> {
 }
 
 /** The one-line "Matched on" header for a request, and the full requirement behind it. */
-function requirementView(requirement: Requirement, evidence: string[], demand: { spec?: Record<string, unknown>; quantity?: string | null; location?: string | null; product_family?: string | null; wants: string }): MatchesResult["lotKey"] {
+function requirementView(requirement: Requirement, evidence: string[], demand: { spec?: Record<string, unknown>; quantity?: string | null; location?: string | null; product_family?: string | null; wants: string } & Pick<Demand, "max_price" | "price_currency" | "price_unit">): MatchesResult["lotKey"] {
   const size = requirement.kwhNeeded != null ? `${requirement.kwhNeeded} kWh` : null;
-  const price = requirement.buyerEurPerKwh != null ? `buys up to €${requirement.buyerEurPerKwh}/kWh`
-    : requirement.buyerEurPerUnit != null ? `buys up to €${requirement.buyerEurPerUnit}/unit` : null;
+  // In the request's own currency, as the "Matched on" chip says it; the EUR figure is only for ranking.
+  const ceiling = ceilingText(demand);
+  const price = ceiling ? `buys up to ${ceiling}` : null;
   // The ask in its own words reads better than lower-case match tokens ("mg", "kona"); the full key carries the fields.
   const asked = (demand.product_family || demand.wants).replace(/\s+/g, " ").trim();
   const capacity = requirement.kwh && "options" in requirement.kwh
@@ -426,6 +438,7 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
       quote: (candidate.description ?? candidate.title).trim() || null,
       link: sourceLink(candidate),
       // A seller with no price is asked for one even when the buyer set no ceiling (so there is no price mark).
+      sourceKind: candidate.sourceKind ?? null,
       askFor: [...new Set([...askFor(marks), ...(price || marks.some((mark) => mark.key === "price") ? [] : ["price per unit"]), ...missing])],
     };
   });

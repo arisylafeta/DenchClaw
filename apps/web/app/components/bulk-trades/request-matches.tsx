@@ -51,10 +51,20 @@ function Mark({ mark }: { mark: FitMark }) {
   );
 }
 
+/** The second status line for a row nobody has contacted, from where the line comes from (as the mock words it). */
+const SOURCE_NOTE: Record<string, string> = {
+  "marketplace listing": "Listed by the seller, ready to offer",
+  email: "Mentioned in an email, never asked",
+  "stock list": "From their stock list",
+  catalogue: "From their catalogue",
+  "eBay listing": "Listed for sale",
+  "salvage listing": "Listed for sale",
+};
+
 /** "Where this deal stands", from the offer the row already became. */
-function standing(offer: MatchOffer | null): { stage: string; note: string | null; due: boolean } {
+function standing(offer: MatchOffer | null, sourceKind?: string | null): { stage: string; note: string | null; due: boolean } {
   if (!offer) {
-    return { stage: "Not contacted", note: null, due: false };
+    return { stage: "Not contacted", note: (sourceKind && SOURCE_NOTE[sourceKind]) || null, due: false };
   }
   const stage = STAGE_LABEL[offer.stage as OfferStage] ?? offer.stage;
   return { stage: `In offers · ${stage} ${offerDate(offer.date)}`.trim(), note: offer.chaseDue ? "No reply · chase due" : null, due: !!offer.chaseDue };
@@ -161,7 +171,7 @@ export function RequestMatches({
         {!count && <p className={css.empty}>{result.blocked ?? "Nothing fits yet. Add a dossier or a listing field to widen the match."}</p>}
         {rows.map((row) => {
           const isOpen = open === row.key;
-          const where = standing(row.offer);
+          const where = standing(row.offer, row.sourceKind);
           const marks = row.fit ?? [];
           const detailId = `match-detail-${row.rank}`;
           return (

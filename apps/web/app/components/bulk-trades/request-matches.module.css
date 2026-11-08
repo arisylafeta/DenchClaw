@@ -73,6 +73,8 @@
   box-sizing: border-box; text-align: left; background: none; border: 0; flex: 1 1 auto;
 }
 .rowmain:hover { background: rgba(231, 229, 228, 0.4); }
+/* An opened row is one tone, header and detail, as the mock's rowStyle: the hover tint does not split it. */
+.rowOpen .rowmain:hover { background: transparent; }
 .left { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .nameLine { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .name { font-weight: 650; font-size: 14px; }

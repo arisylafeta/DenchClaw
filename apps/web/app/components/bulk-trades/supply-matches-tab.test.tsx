@@ -184,7 +184,7 @@ describe("Matches tab", () => {
       key: "stock:sto_50e", name: "AATGNR (US cell seller)", tags: ["unlisted stock"], reason: "Cell model matches: Samsung 50E", checks: [],
       detail: "Quantity not stated", price: null, stockId: "sto_50e", country: "United States",
       holds: "Samsung INR21700-50E · quantity not stated", source: "Email, 27 Oct",
-      quote: "Seller email 22 Oct 2026: loose cells from e-bike packs", link: null, askFor: ["quantity", "price per unit"],
+      quote: "Seller email 22 Oct 2026: loose cells from e-bike packs", link: null, askFor: ["quantity", "price per unit"], sourceKind: "email",
       fit: [
         { key: "model", label: "Samsung 50E", state: "fits", name: "Cell model", asked: "Samsung 50E", have: "Samsung INR21700-50E" },
         { key: "quantity", label: "Quantity", state: "unstated", name: "Quantity", asked: "500,000", have: "Not stated" },
@@ -203,6 +203,8 @@ describe("Matches tab", () => {
     expect(screen.getByText("Matches")).toBeTruthy();
     expect(screen.getByText("· ranked by fit, then stated quantity")).toBeTruthy();
     expect(screen.getByText("Not contacted")).toBeTruthy();
+    // The mock's second status line, from where the line comes from.
+    expect(screen.getByText("Mentioned in an email, never asked")).toBeTruthy();
     expect(screen.getByText("Unlisted stock")).toBeTruthy();
     // The row opens on click: the source, "How it fits" and "This deal with …".
     const toggle = screen.getAllByRole("button", { expanded: false }).find((button) => button.textContent?.includes("AATGNR"))!;

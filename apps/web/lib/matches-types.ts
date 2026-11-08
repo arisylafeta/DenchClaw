@@ -44,6 +44,8 @@ export type MatchRow = {
   quote?: string | null;
   /** Request rows: the source itself, when it has a page. */
   link?: { href: string; label: string } | null;
+  /** Request rows: where the line comes from, in words ("marketplace listing", "email", "catalogue"). */
+  sourceKind?: string | null;
   /** Request rows: what to ask this seller for. */
   askFor?: string[];
 };

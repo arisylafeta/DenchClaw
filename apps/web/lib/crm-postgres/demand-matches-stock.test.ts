@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stockCandidate, stockSourceKind, stockUnits, type StockRow } from "./demand-matches-v2";
+import { ceilingText, requestChips, stockCandidate, stockSourceKind, stockUnits, type StockRow } from "./demand-matches-v2";
 import { listingCandidate, type ListingRow, type SpecRow } from "./demand-match-supply";
 import { requirementFor, scoreCandidate } from "../demand-match";
 import { fitMarks, holdsLine, sourceLine } from "../match/fit-marks";
@@ -131,5 +131,16 @@ describe("marketplace listings on a request", () => {
     expect(scoreCandidate(cells, cellListing)!.candidate.units).toBeNull();
     // A stated available count is always used.
     expect(scoreCandidate(cells, listingCandidate(listing({ format: "cell", manufacturer: "Samsung", model: "INR21700-50E", pack_kwh: null, quantity_available: 12_400 })))!.candidate.units).toBe(12_400);
+  });
+});
+
+describe("the ceiling, in the request's own currency", () => {
+  it("reads '£30/kWh' on both the chip and the criteria, never the converted EUR figure", () => {
+    const stn = { max_price: 30, price_currency: "GBP", price_unit: "kWh" };
+    expect(ceilingText(stn)).toBe("£30/kWh");
+    const chips = requestChips(requirementFor(demand({ wants: "Toyota Proace 50 kWh packs", ...stn })), demand({ wants: "Toyota Proace 50 kWh packs", ...stn }));
+    expect(chips.map((chip) => chip.label)).toContain("Ceiling £30/kWh · internal");
+    expect(ceilingText({ max_price: 1, price_currency: "EUR", price_unit: "cell" })).toBe("€1.00/cell");
+    expect(ceilingText({ max_price: null, price_currency: null, price_unit: null })).toBeNull();
   });
 });
