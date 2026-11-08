@@ -137,9 +137,14 @@ async function unlinkedCounterparty(listingId: string, input: { name: string; co
   return row?.id ?? null;
 }
 
-/** Stores the offer once, on the listing it was made on. When the other party has exactly one live listing of the opposite
- *  kind the two are linked at once, so the offer shows on both sides; with several it stays unlinked and the caller can ask which.
- *  A repeat call for the same counterparty returns the offer that already exists instead of a second one. */
+/**
+ * Stores the offer once, on the listing it was made on. When the other party has exactly one live listing of the opposite
+ * kind the two are linked at once, so the offer shows on both sides; with several it stays unlinked and the caller can ask which.
+ * A repeat call for the same counterparty returns the offer that already exists instead of a second one.
+ *
+ * Both paths insert the same way: `on conflict do nothing` covers the pairing index and the counterparty index, so a
+ * second click that loses the race writes nothing and is told what it lost to instead of raising a raw 23505.
+ */
 export async function addOffer(listingId: string, input: OfferInput & { counterpartId?: string | null }): Promise<Offer> {
   const id = `bof_${randomUUID()}`;
   let counterpartId = input.counterpartId ?? null;
@@ -158,18 +163,29 @@ export async function addOffer(listingId: string, input: OfferInput & { counterp
     const existing = await unlinkedCounterparty(listingId, input);
     if (existing) return (await getOffer(listingId, existing, null))!;
   }
-  // The unique index alone is not enough for an unlinked offer with no CRM identity: return whatever won the race.
   const [inserted] = await queryPg<{ id: string }>(
     `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, contact, wants, stage, counterpart_id, data)
      values ($1, $2, 'counterparty', $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
-     on conflict (bulk_listing_id, coalesce(company_id, person_id))
-       where role = 'counterparty' and counterpart_id is null and coalesce(company_id, person_id) is not null
-     do nothing
+     on conflict do nothing
      returning id`,
     [id, listingId, input.personId ?? null, input.companyId ?? null, input.name.trim(), input.contact ?? null, input.wants ?? null,
       input.stage ?? "candidate", counterpartId, JSON.stringify(input.data ?? {})]);
-  const offerId = inserted?.id ?? await unlinkedCounterparty(listingId, input) ?? id;
-  return (await getOffer(listingId, offerId, null))!;
+  if (inserted?.id) {
+    return (await getOffer(listingId, inserted.id, null))!;
+  }
+  // Nothing was written: another click got there first. Name the offer that won, or say plainly that this one exists.
+  if (counterpartId) {
+    throw new OfferConflict("This pairing already has an offer.", await pairOffer(listingId, counterpartId) ?? undefined);
+  }
+  const raced = await unlinkedCounterparty(listingId, input);
+  if (raced) {
+    return (await getOffer(listingId, raced, null))!;
+  }
+  const stored = await getOffer(listingId, id, null);
+  if (stored) {
+    return stored;
+  }
+  throw new OfferConflict("This offer is already being added. Reload the list and try again.");
 }
 
 /** Links an unlinked offer to a live listing on the opposite side, or clears the link (null). */

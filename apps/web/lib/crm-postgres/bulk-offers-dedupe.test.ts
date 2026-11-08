@@ -89,9 +89,30 @@ describe.skipIf(!TEST_URL)("addOffer duplicate guard", () => {
     const linked = await offers.addOffer(id("sup"), { name: "Linked Buyer", companyId: id("other"), counterpartId: id("dem") });
     expect(linked.counterpart_id).toBe(id("dem"));
     await expect(offers.addOffer(id("sup"), { name: "Linked Buyer", companyId: id("other"), counterpartId: id("dem") }))
-      .rejects.toThrow(/already has an offer/);
+      .rejects.toMatchObject({ name: "OfferConflict", message: expect.stringMatching(/already has an offer/), existingOfferId: linked.id });
     const [again] = await offers.listOffers(id("sup"), null);
     expect(again.counterpart_id).toBe(id("dem"));
+  });
+
+  // Two clicks that both pass the pre-check race on the unique index. The loser must come back as the same named
+  // conflict the pre-check gives, never as a raw duplicate-key error.
+  it("resolves a lost race on the same pairing without a raw 23505", async () => {
+    await pg.queryPg(`insert into crm_companies (id, name) values ($1, 'Synthetic Race Co')`, [id("race")]);
+    await pg.queryPg(
+      `insert into crm_bulk_listings (id, kind, party, summary, status, spec) values ($1, 'demand', 'Synthetic Race Co', 'Synthetic ask', 'open', '{"intent": "request"}')`,
+      [id("dem2")]);
+    const results = await Promise.allSettled([
+      offers.addOffer(id("sup"), { name: "Synthetic Race Co", companyId: id("race"), counterpartId: id("dem2") }),
+      offers.addOffer(id("sup"), { name: "Synthetic Race Co", companyId: id("race"), counterpartId: id("dem2") }),
+    ]);
+    const won = results.filter((result) => result.status === "fulfilled");
+    const lost = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    expect(won).toHaveLength(1);
+    expect(lost).toHaveLength(1);
+    expect(lost[0].reason).toBeInstanceOf(offers.OfferConflict);
+    expect(lost[0].reason.message).toMatch(/already has an offer/);
+    expect(lost[0].reason.message).not.toMatch(/23505|duplicate key/);
+    expect(await countOffers(id("sup"), `counterpart_id = $2`, [id("dem2")])).toBe("1");
   });
 
   it("the migration's index refuses a raw duplicate counterparty row", async () => {
