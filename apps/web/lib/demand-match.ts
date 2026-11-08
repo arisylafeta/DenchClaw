@@ -176,6 +176,8 @@ export type Requirement = {
   products: { phrase: string; anyOf: string[]; not: string[] }[];
   kwh: { min: number; max: number } | { options: number[] } | null;
   unitsNeeded: number | null;
+  /** A ranged ask ("2-13 packs"): fit is judged against the range, and `unitsNeeded` is its minimum. */
+  unitsRange: { min: number; max: number } | null;
   kwhNeeded: number | null;
   buyerEurPerKwh: number | null;
   buyerEurPerUnit: number | null;
@@ -224,6 +226,16 @@ function unitCount(demand: Demand): number | null {
   if (all.length) return Math.max(...all);
   const lead = demand.wants.match(/^(?:approximately\s+|about\s+)?(\d+)\s+(?!kwh)/i);
   return lead ? Number(lead[1]) : null;
+}
+
+/** "2-13 packs", "2–13x", "2 to 13 units": a ranged count, never a kWh range. */
+export function unitRange(demand: Pick<Demand, "quantity" | "wants">): { min: number; max: number } | null {
+  for (const text of [demand.quantity, demand.wants]) {
+    const m = (text ?? "").replace(/,(\d{3})/g, "$1")
+      .match(/(?<![\d.])(\d+)\s*(?:–|-|to)\s*(\d+)(?![\d.])(?!\s*(?:k?wh|kw|ah|v|%|years?|yrs?))\s*(?:x\b|packs?\b|cells?\b|modules?\b|units?\b|systems?\b)/i);
+    if (m && Number(m[2]) > Number(m[1])) return { min: Number(m[1]), max: Number(m[2]) };
+  }
+  return null;
 }
 
 function kwhCount(demand: Demand): number | null {
@@ -399,7 +411,8 @@ export function requirementFor(demand: Demand, vocab?: Set<string>): Requirement
     makeWords,
     products: cellTokens.length ? [] : products,
     kwh,
-    unitsNeeded: unitCount(demand),
+    unitsNeeded: unitRange(demand)?.min ?? unitCount(demand),
+    unitsRange: unitRange(demand),
     kwhNeeded: kwhCount(demand),
     buyerEurPerKwh,
     buyerEurPerUnit,
@@ -627,6 +640,10 @@ export function scoreCandidate(req: Requirement, candidate: Candidate): Match | 
   // Quantity. A seller who has not stated one is "Check", never counted as one unit.
   if (c.units == null && (req.unitsNeeded || req.kwhNeeded)) {
     checks.push({ key: "quantity", label: "Quantity", state: "unknown", detail: "Quantity not stated" });
+  } else if (req.unitsRange && c.units != null) {
+    // A ranged ask fits from its minimum up: "40 available · need 2–13".
+    checks.push({ key: "quantity", label: "Quantity", state: c.units >= req.unitsRange.min ? "pass" : "partial",
+      detail: `${c.units} available · need ${req.unitsRange.min}–${req.unitsRange.max}` });
   } else if (req.unitsNeeded && c.units != null) {
     const have = c.units;
     checks.push({ key: "quantity", label: "Quantity", state: have >= req.unitsNeeded ? "pass" : "partial",

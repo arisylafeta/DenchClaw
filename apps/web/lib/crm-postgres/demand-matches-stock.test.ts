@@ -101,6 +101,14 @@ describe("stock lines on a request", () => {
   });
 });
 
+describe("ranged asks", () => {
+  it("marks quantity against the range: '40 available · need 2–13'", () => {
+    const ask = requirementFor(demand({ quantity: "2-13 packs across 2 lines", volume: 2, volume_unit: "packs", wants: "Toyota Proace 50 kWh packs" }), new Set(["toyota", "proace"]));
+    const c = stockCandidate(stockRow({ make: "Toyota", model: "Proace", format: "pack", capacity_kwh: 50, quantity: 40, quantity_stated: null, title: "40x Toyota Proace 50kWh Packs" }));
+    expect(fitMarks(ask, scoreCandidate(ask, c)!).find((mark) => mark.key === "quantity")).toEqual({ key: "quantity", label: "40 available · need 2–13", state: "fits" });
+  });
+});
+
 describe("marketplace listings on a request", () => {
   const listing = (spec: Partial<SpecRow>): ListingRow => ({
     id: "l1", title: "Hyundai Kona 64 kWh pack", seo_slug: null, buy_now_price: null, currency: null, updated_at: null, published_at: null,

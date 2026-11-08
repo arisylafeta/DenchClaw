@@ -256,7 +256,8 @@ function requirementView(requirement: Requirement, evidence: string[], demand: {
     line: asked.length > 90 ? `${asked.slice(0, 89).trimEnd()}…` : asked,
     full: [
       requirement.pinned.length ? `Matched on ${requirement.pinned.join(" · ")}` : null,
-      requirement.unitsNeeded != null ? `Needs ${requirement.unitsNeeded.toLocaleString("en-GB")} units` : demand.quantity ?? null,
+      requirement.unitsRange ? `Needs ${requirement.unitsRange.min.toLocaleString("en-GB")}–${requirement.unitsRange.max.toLocaleString("en-GB")} units`
+        : requirement.unitsNeeded != null ? `Needs ${requirement.unitsNeeded.toLocaleString("en-GB")} units` : demand.quantity ?? null,
       capacity ? `Capacity ${capacity}` : null,
       price,
       requirement.country ? `Delivered to ${requirement.country}` : demand.location,
@@ -355,6 +356,7 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
       stated: scored.reduce((sum, row) => sum + (row.candidate.units ?? 0), 0),
       need,
       unstated: scored.filter((row) => row.candidate.units == null).length,
+      needMax: requirement.unitsRange?.max ?? null,
     } : null,
   };
 }

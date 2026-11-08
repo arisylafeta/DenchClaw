@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Demand } from "./bulk-demand";
-import { bestLine, bySeller, cellCodes, cellMiss, isPartCode, makeAndModel, makerWord, mergeSupplyDuplicates, fewestSellers, kwhFromText, matchDemand, requestCodeHit, requirementFor, scoreCandidate, sellerKey, statedUnits, type Candidate } from "./demand-match";
+import { bestLine, bySeller, cellCodes, cellMiss, isPartCode, unitRange, makeAndModel, makerWord, mergeSupplyDuplicates, fewestSellers, kwhFromText, matchDemand, requestCodeHit, requirementFor, scoreCandidate, sellerKey, statedUnits, type Candidate } from "./demand-match";
 
 vi.mock("server-only", () => ({}));
 
@@ -370,6 +370,18 @@ describe("review fixes (v4 slice 1)", () => {
     const r = requirementFor(demand({ wants: "Toyota Proace 50 kWh packs" }), new Set(["toyota", "proace"]));
     const m = scoreCandidate(r, unit({ make: "Toyota", model: "Toyota Proace (K0 van, EV)", title: "Toyota Proace", kwh: 50 }))!;
     expect(m.checks.find((c) => c.key === "product")?.detail).toBe("Toyota Proace (K0 van, EV)");
+  });
+
+  it("judges a ranged ask ('2-13 packs') against its range, never its lower bound alone", () => {
+    expect(unitRange({ quantity: "2-13 packs across 2 lines", wants: "" })).toEqual({ min: 2, max: 13 });
+    expect(unitRange({ quantity: null, wants: "2–13x Mixed Packs" })).toEqual({ min: 2, max: 13 });
+    expect(unitRange({ quantity: "41-52 kWh", wants: "" })).toBeNull();
+    const stn = requirementFor(demand({ quantity: "2-13 packs across 2 lines", volume: 2, volume_unit: "packs", wants: "1 Toyota Proace 50 kWh NMC trial pack" }), new Set(["toyota", "proace"]));
+    expect(stn.unitsRange).toEqual({ min: 2, max: 13 });
+    const many = scoreCandidate(stn, unit({ make: "Toyota", model: "Proace", title: "Toyota Proace", kwh: 50, units: 40 }))!;
+    expect(many.checks.find((c) => c.key === "quantity")).toMatchObject({ state: "pass", detail: "40 available · need 2–13" });
+    const one = scoreCandidate(stn, unit({ make: "Toyota", model: "Proace", title: "Toyota Proace", kwh: 50, units: 1 }))!;
+    expect(one.checks.find((c) => c.key === "quantity")).toMatchObject({ state: "partial", detail: "1 available · need 2–13" });
   });
 
   it("reads one maker under its other names", () => {

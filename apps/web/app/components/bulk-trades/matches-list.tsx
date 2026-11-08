@@ -198,7 +198,10 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
           <p className="mt-1 px-1 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
             {result.rows.length} {result.rows.length === 1 ? "match" : "matches"} · {result.considered.toLocaleString("en-GB")} checked
             {coverage && (
-              <> · Stated stock {coverage.stated.toLocaleString("en-GB")} of {coverage.need.toLocaleString("en-GB")}
+              <> · Stated stock {coverage.stated.toLocaleString("en-GB")}
+                {coverage.needMax
+                  ? <> · need {coverage.need.toLocaleString("en-GB")}–{coverage.needMax.toLocaleString("en-GB")}</>
+                  : <> of {coverage.need.toLocaleString("en-GB")}</>}
                 {coverage.unstated > 0 && <> · {coverage.unstated} {coverage.unstated === 1 ? "source hasn't" : "sources haven't"} said how many</>}
               </>
             )}

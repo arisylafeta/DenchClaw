@@ -167,6 +167,17 @@ describe("Matches tab", () => {
     expect(screen.queryByText("Quantity not stated")).toBeNull();
   });
 
+  it("states stock against a ranged need without reading the range as its minimum", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(result([row({
+      key: "trade:t1", name: "Motorgreen", tags: ["our listing"], checks: [], price: null, holds: "40x Toyota Proace 50kWh Packs · 40 packs",
+      source: "Live trade, 7 Nov", fit: [{ key: "quantity", label: "40 available · need 2–13", state: "fits" }],
+    })], { id: "btd_stn", kind: "demand", coverage: { stated: 76, need: 2, needMax: 13, unstated: 0 } }))));
+    render(<DemandMatchesTab demandId="btd_stn" active />);
+    expect(await screen.findByText(/Stated stock 76 · need 2–13/)).toBeTruthy();
+    expect(screen.queryByText(/76 of 2/)).toBeNull();
+    expect(screen.getByRole("list", { name: "How it fits" }).textContent).toContain("40 available · need 2–13");
+  });
+
   it("keeps the supply tab exactly as it was: reason, detail and checks, with no marks or legend", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json(result([row()]))));
     render(<SupplyMatchesTab listingId="bts_1" active />);

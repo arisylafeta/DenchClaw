@@ -120,6 +120,7 @@ export function fitMarks(req: Requirement, match: Match, opts: { price?: string 
   const quantity = find(match.checks, "quantity");
   if (quantity) {
     const label = quantity.state === "unknown" || c.units == null ? "Quantity"
+      : req.unitsRange ? `${count(c.units)} available · need ${count(req.unitsRange.min)}–${count(req.unitsRange.max)}`
       : req.unitsNeeded ? `${count(c.units)} of ${count(req.unitsNeeded)}` : quantity.detail;
     add("quantity", label, STATE[quantity.state]);
   }

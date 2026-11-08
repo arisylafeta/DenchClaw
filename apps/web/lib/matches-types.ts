@@ -48,7 +48,11 @@ export type FitMark = {
 };
 
 /** Stated stock against the request's need. Only stated quantities count. */
-export type MatchCoverage = { stated: number; need: number; unstated: number };
+export type MatchCoverage = {
+  stated: number; need: number; unstated: number;
+  /** A ranged ask ("2-13 packs"): `need` is the minimum and this the maximum. */
+  needMax?: number | null;
+};
 
 /** The one-line "Matched on …" header, and the full key behind it. */
 export type MatchKeyView = {
