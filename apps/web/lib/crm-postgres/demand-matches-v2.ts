@@ -6,6 +6,7 @@ import "server-only";
 import { queryPg } from "../postgres";
 import { requestCodeHit, requirementFor, scoreCandidate, vocabulary, type Candidate, type Match, type Requirement } from "../demand-match";
 import { askFor, countryName, fitMarks, holdsLine, rowCountry, sourceLine, unitsPhrase } from "../match/fit-marks";
+import { groupStock, groupSummary, packIdentities, type GroupInput, type IdentityInput, type PackIdentity, type StockExtra } from "../match/stock-groups";
 import { chaseOffers } from "./bulk-offer-mail";
 import { inventoryFor } from "./demand-match-supply";
 import { getDemand } from "./bulk-demand";
@@ -75,10 +76,20 @@ export type StockRow = {
   observed_on: string | null;
   /** The source page, when the line has one (a dismantler or eBay listing). */
   source_url?: string | null;
+  /** `details.battery_graph` when the graph found a pack: identity, name, kWh, chemistry, voltage and how sure it is. */
+  graph_pack_key?: string | null; graph_confidence?: string | null; graph_pack?: string | null;
+  graph_usable_kwh?: number | null; graph_gross_kwh?: number | null; graph_chemistry?: string | null;
+  graph_voltage?: string | null; graph_kind?: string | null; graph_looked_up_on?: string | null; graph_input?: string | null;
+  /** Stated damage kinds (`details.damage`), or ["damaged"] when only `details.damaged` is true. */
+  damage?: string[] | null;
+  /** `details.extra.soh_basis` and `details.extra.soh_text`: where a SoH figure comes from, or the seller's words. */
+  soh_basis?: string | null; soh_text?: string | null;
 };
 
 const NUMBER = (path: string) => `case when jsonb_typeof(s.details->${path}) = 'number' then (s.details->${path})::text::numeric::float8
                  when (s.details->${path}) #>> '{}' ~ '^[0-9]+(\\.[0-9]+)?$' then ((s.details->${path}) #>> '{}')::numeric::float8 end`;
+
+const GRAPH = (key: string) => `case when s.details->'battery_graph'->>'found' = 'yes' then nullif(s.details->'battery_graph'->>${key}, '') end`;
 
 // Lines with no make are read too: a cell or part code from the request can still name them (the INR21700-50E line
 // keeps its code in supplier_ref). Which of them may be considered is decided per request, in demandMatchesV2.
@@ -98,6 +109,15 @@ async function unlistedStock(): Promise<StockRow[]> {
                  then array(select jsonb_array_elements_text(s.details->'part_numbers')) end as part_numbers,
             s.supplier_ref, s.description, s.source, s.details->'evidence'->>'source' as evidence_source,
             s.observed_on::text as observed_on, s.source_url,
+            ${GRAPH("'pack_key'")} as graph_pack_key, ${GRAPH("'confidence'")} as graph_confidence, ${GRAPH("'pack'")} as graph_pack,
+            case when s.details->'battery_graph'->>'found' = 'yes' then ${NUMBER("'battery_graph'->'usable_kwh'")} end as graph_usable_kwh,
+            case when s.details->'battery_graph'->>'found' = 'yes' then ${NUMBER("'battery_graph'->'gross_kwh'")} end as graph_gross_kwh,
+            ${GRAPH("'chemistry'")} as graph_chemistry, ${GRAPH("'voltage'")} as graph_voltage, ${GRAPH("'kind'")} as graph_kind,
+            ${GRAPH("'looked_up_on'")} as graph_looked_up_on, ${GRAPH("'input'")} as graph_input,
+            case when jsonb_typeof(s.details->'damage') = 'array' and jsonb_array_length(s.details->'damage') > 0
+                 then array(select jsonb_array_elements_text(s.details->'damage'))
+                 when lower(s.details->>'damaged') in ('true', 'yes') then array['damaged'] end as damage,
+            nullif(s.details->'extra'->>'soh_basis', '') as soh_basis, nullif(s.details->'extra'->>'soh_text', '') as soh_text,
             s.location, coalesce(nullif(c.country, ''), nullif(s.location, '')) as country,
             coalesce(s.details->'sync'->>'lastSeen', s.observed_on::text, s.updated_at::date::text) as seen_on
      from crm_stock_opportunities s
@@ -153,6 +173,29 @@ export function stockSourceKind(row: Pick<StockRow, "source" | "evidence_source"
     return "web research";
   }
   return source ? "stock list" : null;
+}
+
+/** What pack identity reads from a stock line: its spec, part numbers and the battery graph's answer. */
+export function identityInput(row: StockRow): IdentityInput {
+  return {
+    id: row.id, make: row.make, model: row.model, format: row.format, capacity_kwh: row.capacity_kwh,
+    quantity: stockUnits(row).units, part_numbers: row.part_numbers,
+    graph: row.graph_pack_key ? {
+      pack_key: row.graph_pack_key, confidence: row.graph_confidence ?? null, pack: row.graph_pack ?? null,
+      usable_kwh: row.graph_usable_kwh ?? null, gross_kwh: row.graph_gross_kwh ?? null, chemistry: row.graph_chemistry ?? null,
+      voltage: row.graph_voltage ?? null, kind: row.graph_kind ?? null, looked_up_on: row.graph_looked_up_on ?? null, input: row.graph_input ?? null,
+    } : null,
+  };
+}
+
+/** The units-table facts of a stock line: its pack identity, stated damage and where its SoH comes from. */
+export function stockExtra(row: StockRow, packs: Map<string, PackIdentity>): StockExtra {
+  return {
+    identity: packs.get(row.id) ?? null,
+    damage: (row.damage ?? []).map((kind) => kind.trim().toLowerCase()).filter(Boolean),
+    sohBasis: row.soh_basis ?? null,
+    sohText: row.soh_text ?? null,
+  };
 }
 
 export function stockCandidate(row: StockRow): Candidate {
@@ -408,7 +451,8 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
     || a.candidate.title.localeCompare(b.candidate.title);
 
   const identity = await identities(scored.map((row) => row.candidate.key));
-  const rows: MatchRow[] = scored.toSorted(order).map(({ candidate, source, match, missing }, index) => {
+  const ranked = scored.toSorted(order);
+  const unitRows: MatchRow[] = ranked.map(({ candidate, source, match, missing }, index) => {
     const who = identity.get(candidate.key) ?? { companyId: null, personId: null, contact: null };
     const price = firmPrice(candidate);
     const marks = fitMarks(requirement, match, { price });
@@ -442,6 +486,15 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
       askFor: [...new Set([...askFor(marks), ...(price || marks.some((mark) => mark.key === "price") ? [] : ["price per unit"]), ...missing])],
     };
   });
+  // Slice 2: identical stock from one seller is one row. Pack identity is learned over every live stock line, so a
+  // group never depends on what this request happened to match.
+  const packs = packIdentities(stock.map(identityInput));
+  const byId = new Map(stock.map((row) => [row.id, row]));
+  const inputs: GroupInput[] = ranked.map(({ match }, index) => {
+    const line = unitRows[index].stockId ? byId.get(unitRows[index].stockId!) : undefined;
+    return { row: unitRows[index], match, extra: line ? stockExtra(line, packs) : null };
+  });
+  const rows = groupStock(inputs, requirement);
   const need = requirement.unitsNeeded;
 
   return {
@@ -452,7 +505,10 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
     considered: candidates.length + stockCandidates.length,
     blocked: rows.length ? null : "Nothing fits yet. Add a dossier or a listing field to widen the match.",
     errors,
-    summary: { chips: requestChips(requirement, demand), outreach: outreach ? { ...outreach, chaseDue: chaseIds.size } : null },
+    summary: {
+      chips: requestChips(requirement, demand), outreach: outreach ? { ...outreach, chaseDue: chaseIds.size } : null,
+      ...groupSummary(rows, inputs, requirement),
+    },
     // Only stated quantities count towards the need; a line that has not said is counted apart.
     coverage: need ? {
       stated: scored.reduce((sum, row) => sum + (row.candidate.units ?? 0), 0),

@@ -371,7 +371,8 @@ function rowKwh(row: StockRow): number | null {
   return normalKwh(row.capacity_kwh) ?? normalKwh(row.usable_kwh ?? null);
 }
 
-function specKey(row: StockRow) {
+/** The group identity of a row: its curated pack key when it has one, else its listing text. Matches v4 groups on it too. */
+export function specKey(row: StockRow) {
   // One physical pack is one group, whatever the advert calls it (Ari, 28 Oct 2026: e-Niro "64", "67.5" and "VAN DE 64"
   // are the same pack). The battery graph's pack identity wins; listing text is only the fallback.
   // Only curated pack identities group; graph research keys can cover a whole OEM family of different packs.
@@ -414,7 +415,7 @@ export function withPackIdentity(rows: StockRow[]): StockRow[] {
 }
 
 /** Curated graph families and EV-database packs have usable names; other graph keys are research notes. */
-const NAMED_PACK = /^(fam|evdb):/;
+export const NAMED_PACK = /^(fam|evdb):/;
 
 /** "Kia e-Niro 67.5 kWh" with 64 usable -> "Kia e-Niro 64 kWh pack": no brackets or spec tail, the usable kWh, "pack" once. */
 export function packLabel(name: string | null | undefined, usableKwh: number | null): string | null {

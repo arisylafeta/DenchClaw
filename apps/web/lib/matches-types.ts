@@ -48,6 +48,52 @@ export type MatchRow = {
   sourceKind?: string | null;
   /** Request rows: what to ask this seller for. */
   askFor?: string[];
+  /**
+   * Request rows: the same pack (or cell/module model) from one seller, grouped into one row. Absent for a group of one,
+   * which stays a plain row. `stockId` is then the cheapest unit, and `group.stockIds` every unit, cheapest first.
+   */
+  group?: MatchGroupView | null;
+};
+
+/** One unit (a pack) or lot (cells, modules) in a grouped row's units table. */
+export type MatchUnit = {
+  key: string;
+  stockId: string | null;
+  /** "Vauxhall Vivaro-e 3100 Dynamic", or a lot's product and quantity. */
+  vehicle: string;
+  year: number | null;
+  /** The seller's stock ref, else the part number; null when neither is stated. */
+  ref: string | null;
+  /** SoH or condition against the request's minimum: ✓ at or above, ≈ within 5 points below, ✗ further or damaged, ? not stated. */
+  soh: { state: FitState; label: string; source: string | null };
+  location: string | null;
+  price: string | null;
+  seen: string | null;
+  link: { href: string; label: string } | null;
+};
+
+/** A grouped request row: one seller, one pack identity (or one cell/module model), several units. */
+export type MatchGroupView = {
+  /** "Stellantis 50 kWh pack", "Pack with part 9868397180", "EV pack from Citroen Berlingo", "Samsung INR21700-50E cells". */
+  pack: string;
+  /** Packs: the units (stated quantities summed, a line at least one). Lots: the number of lines. */
+  count: number;
+  /** "lots" for cells and modules; null for packs, which read "× 11". */
+  countWord: string | null;
+  /** The pack identity is not confirmed (no confident pack key, no part number): kept apart per vehicle. */
+  unsure: boolean;
+  /** "Same pack in" or "Listed as", with the vehicles and how many of each. Lots have none. */
+  sameLabel: string | null;
+  vehicles: { name: string; n: number }[];
+  /** "EUR 2,020–2,210 per pack · Leeds, Warrington · salvage listings, seen 1–7 Nov". */
+  meta: string;
+  /** "Why these count as the same pack" or "Why this is kept apart". */
+  why: { title: string; text: string } | null;
+  /** Cell or module lots rather than packs. */
+  lots: boolean;
+  /** Cheapest first. */
+  units: MatchUnit[];
+  stockIds: string[];
 };
 
 /** How one requirement fits: ✓ fits, ≈ close, ? not stated, ✗ misses. Always shown as glyph and word, never colour alone. */
@@ -102,4 +148,10 @@ export type RequestSummary = {
   chips: RequirementChip[];
   /** Offers on the request: asked (emailed or past candidate), replied, chase due. Null when there are none. */
   outreach: { asked: number; replied: number; chaseDue: number } | null;
+  /** "3 suppliers · 32 packs match": distinct suppliers, and units ("packs") or lines ("lots", "units") across the rows. */
+  count?: { suppliers: number; units: number; word: string } | null;
+  /** Pack requests: how many pack types the grouped rows hold, and how many of those are not confirmed. */
+  packTypes?: { types: number; unconfirmed: number } | null;
+  /** True once any row is a group: the card's subtitle reads "one row per supplier and pack type". */
+  grouped?: boolean;
 };
