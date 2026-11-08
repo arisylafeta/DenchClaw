@@ -88,7 +88,9 @@ export type MatchGroupView = {
   /** "EUR 2,020–2,210 per pack · Leeds, Warrington · salvage listings, seen 1–7 Nov". */
   meta: string;
   /** "Why these count as the same pack" or "Why this is kept apart". */
-  why: { title: string; text: string } | null;
+  why: { title: string; text: string; source: string | null } | null;
+  /** The top unit price is over 2.5× the lowest: kept together, with a "Prices vary a lot" line when opened. */
+  priceVaries: boolean;
   /** Cell or module lots rather than packs. */
   lots: boolean;
   /** Cheapest first. */

@@ -80,7 +80,8 @@ describe("grouping a request's stock by seller and pack identity", () => {
     expect(row.group!.meta).toBe("EUR 2,020–2,150 per pack · Leeds, Warrington · salvage listings, 7 Nov");
     expect(row.group!.why!.title).toBe("Why these count as the same pack");
     expect(row.group!.why!.text).toContain("carry the Stellantis 50 kWh NMC pack (CATL), e-CMP / EMP2: NMC, 46 kWh usable, 50 kWh gross, 400 V");
-    expect(row.group!.why!.text).toContain("Battery graph: matched on part number, high confidence, looked up 24 Oct.");
+    expect(row.group!.why!.source).toBe("Battery graph · matched on part number · high confidence · looked up 24 Oct");
+    expect(row.group!.priceVaries).toBe(false);
     // Cheapest first; the offer's stock line is the cheapest unit, and every unit's line is kept.
     expect(row.group!.units.map((unit) => unit.price)).toEqual(["EUR 2,020", "EUR 2,060", "EUR 2,075", "EUR 2,140", "EUR 2,150"]);
     expect(row.stockId).toBe(lines[0].id);
@@ -99,7 +100,7 @@ describe("grouping a request's stock by seller and pack identity", () => {
     const { rows } = build([teacher, pupil, unsure]);
     expect(rows).toHaveLength(2);
     expect(rows[0].group!.vehicles.map((v) => v.name)).toEqual(["Peugeot e-208 GT", "Vauxhall Vivaro-e"]);
-    expect(rows[0].group!.why!.text).toContain("1 of 2 matched through their part number (98328172-80)");
+    expect(rows[0].group!.why!.source).toContain("1 of 2 through their part number (98328172-80)");
     expect(rows[1].group).toBeUndefined();
   });
 
@@ -190,6 +191,39 @@ describe("grouping a request's stock by seller and pack identity", () => {
     const { rows } = build([mg(64), mg(64), mg(77), mg(77)], req);
     expect(rows.map((row) => row.group?.pack)).toEqual(["64 kWh pack, part 11578836", "77 kWh pack, part 11578836"]);
     expect(rows[0].group!.why!.text).toContain("Every unit states part number 11578836");
+  });
+});
+
+describe("merge safety", () => {
+  const MEDIUM: GraphMatch = { ...STELLANTIS, confidence: "medium" };
+  const vivaro = (o: Partial<StockRow> & { graph?: GraphMatch | null } = {}) => line(o);
+  const rifter = (o: Partial<StockRow> & { graph?: GraphMatch | null } = {}) => line({ make: "Peugeot", model: "Rifter", title: "Peugeot Rifter battery", ...o });
+
+  it("merges different makes only on a high-confidence key; a medium key merges within one make", () => {
+    const high = build([vivaro({ graph: STELLANTIS }), rifter({ graph: STELLANTIS })]).rows;
+    expect(high).toHaveLength(1);
+    const medium = build([vivaro({ graph: MEDIUM }), vivaro({ graph: MEDIUM }), rifter({ graph: MEDIUM })]).rows;
+    expect(medium.map((row) => row.group?.vehicles ?? null)).toEqual([[{ name: "Vauxhall Vivaro-e", n: 2 }], null]);
+  });
+
+  it("merges different makes on one identical listed part number", () => {
+    const { rows } = build([vivaro({ part_numbers: ["9868397180"] }), rifter({ part_numbers: ["9868397180"] })]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].group!.pack).toBe("50 kWh pack, part 9868397180");
+  });
+
+  it("splits any merge where stated kWh differ by more than 10%, or the format differs", () => {
+    const kwh = build([vivaro({ graph: STELLANTIS }), vivaro({ graph: STELLANTIS }), vivaro({ graph: STELLANTIS, capacity_kwh: 75, title: "Vauxhall Vivaro-e 75 kWh battery" })]).rows;
+    expect(kwh.map((row) => row.group?.count ?? 1)).toEqual([2, 1]);
+    const req = requirementFor(demand({ wants: "2-13 Vauxhall Vivaro-e packs or modules", quantity: "2-13", volume: 2, volume_unit: "units", spec: { formats: ["Packs", "Modules"] } }), new Set(["vauxhall", "vivaro-e"]));
+    const format = build([vivaro({ graph: STELLANTIS }), vivaro({ graph: STELLANTIS }), vivaro({ graph: STELLANTIS, format: "module", capacity_kwh: null })], req).rows;
+    expect(format.map((row) => row.group?.count ?? 1)).toEqual([2, 1]);
+  });
+
+  it("keeps a group whose prices spread over 2.5×, and flags it", () => {
+    const { rows } = build([vivaro({ graph: STELLANTIS, price_eur: 1439 }), vivaro({ graph: STELLANTIS, price_eur: 13698 })]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].group!.priceVaries).toBe(true);
   });
 });
 

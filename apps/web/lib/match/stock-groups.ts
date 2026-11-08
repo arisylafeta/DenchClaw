@@ -3,7 +3,7 @@
 // Ari 28 Oct 2026), else by a shared part number. A line with neither keeps to its own vehicle and is marked "Pack type
 // not confirmed". Cells and modules group by seller and cell or module model (lots). A group of one stays a plain row.
 // Pure: no database, so the tests and the before/after report see exactly what the tab sees.
-import { cleanModel, NAMED_PACK, packLabel, partKey, specKey, withPackIdentity, type StockRow as CommercialRow } from "../commercial-stock";
+import { cleanModel, NAMED_PACK, normalMake, packLabel, partKey, specKey, withPackIdentity, type StockRow as CommercialRow } from "../commercial-stock";
 import { bySeller, makeAndModel, toEur, type Candidate, type Match, type Requirement } from "../demand-match";
 import { productName, unitsPhrase } from "./fit-marks";
 import type { FitMark, FitState, MatchGroupView, MatchRow, MatchUnit, RequestSummary } from "../matches-types";
@@ -272,10 +272,16 @@ function identityKey(member: Member): string | null {
     return model ? `lot|${c.format}|${foldText(c.make)}|${foldText(model)}` : null;
   }
   // A line that names neither make nor model has no vehicle to keep it apart by: it never groups.
-  if (!c.make && !c.model) {
+  const identity = member.extra?.identity;
+  if ((!c.make && !c.model) || !identity) {
     return null;
   }
-  return member.extra?.identity?.key ?? null;
+  // A pack, a module and a cell never share a row, whatever the key says.
+  const format = c.format ?? "Packs";
+  // Different makes share a row only on a high-confidence graph key or one identical listed part number; a medium key
+  // (or a part number that inherits one) merges within one make.
+  const crossMake = identity.how === "listing part number" || (identity.confirmed && (identity.confidence ?? "").toLowerCase() === "high");
+  return `${identity.key}|${format}${crossMake ? "" : `|make:${normalMake(c.make) ?? foldText(c.make)}`}`;
 }
 
 /** How a member contributes to the "× N": a pack line counts its stated packs (at least one); a lot counts once. */
@@ -309,7 +315,7 @@ function describe(members: Member[], lots: boolean): Pick<MatchGroupView, "pack"
   const n = members.length;
   if (lots) {
     const name = productName(c);
-    return { pack: name, unsure: false, sameLabel: null, why: { title: "Why these are one row", text: `One seller and one ${c.format === "Modules" ? "module" : "cell"} model: ${name}. Each line is its own lot, with its own quantity and price.` } };
+    return { pack: name, unsure: false, sameLabel: null, why: { title: "Why these are one row", text: `One seller and one ${c.format === "Modules" ? "module" : "cell"} model: ${name}. Each line is its own lot, with its own quantity and price.`, source: null } };
   }
   const identity = first.extra?.identity;
   const vehicles = [...new Set(members.map((member) => vehicleName(member.match.candidate)))];
@@ -318,7 +324,7 @@ function describe(members: Member[], lots: boolean): Pick<MatchGroupView, "pack"
   if (!identity?.confirmed) {
     return {
       pack: `Pack from ${vehicles[0] ?? c.title}`, unsure: true, sameLabel: "Listed as",
-      why: { title: "Why this is kept apart", text: `These listings name the ${vehicleList} but give no part number, and the battery graph has no confident match, so they are not merged with other vehicles. Ask the seller for the pack label photo or part number.` },
+      why: { title: "Why this is kept apart", text: `These listings name the ${vehicleList} but give no part number, and the battery graph has no confident match, so they are not merged with other vehicles.`, source: "Ask the seller for the pack label photo or part number" },
     };
   }
   const kwhs = [...new Set(members.map((member) => member.match.candidate.kwh).filter((kwh): kwh is number => kwh != null).map((kwh) => Math.round(kwh * 10) / 10))].sort((a, b) => a - b);
@@ -327,7 +333,7 @@ function describe(members: Member[], lots: boolean): Pick<MatchGroupView, "pack"
     const stated = kwhs.length ? ` Listed capacity: ${kwhs.length === 1 ? `${kwhs[0]} kWh` : `${kwhs[0]}–${kwhs[kwhs.length - 1]} kWh`}.` : "";
     return {
       pack: `${kwh}pack, part ${identity.part}`.replace(/^p/, kwh ? "p" : "P"), unsure: false, sameLabel: "Same pack in",
-      why: { title: "Why these count as the same pack", text: `Every unit states part number ${identity.part}${vehicles.length > 1 ? `, across ${vehicles.length > 3 ? "" : "the "}${vehicleList}` : ""}. The battery graph has no record of this part yet, so kWh and chemistry are as the listings state them.${stated} Source: the seller's listings.` },
+      why: { title: "Why these count as the same pack", text: `Every unit states part number ${identity.part}${vehicles.length > 1 ? `, across ${vehicles.length > 3 ? "" : "the "}${vehicleList}` : ""}. The battery graph has no record of this part yet, so kWh and chemistry are as the listings state them.${stated}`, source: `Part number as listed by the seller · ${identity.part}` },
     };
   }
   const label = packLabel(identity.name, identity.usableKwh) ?? (identity.name ? identity.name.split(/[,(]/)[0].trim() : "Pack");
@@ -339,12 +345,12 @@ function describe(members: Member[], lots: boolean): Pick<MatchGroupView, "pack"
   ].filter(Boolean);
   const inherited = members.filter((member) => member.extra?.identity?.how === "part number");
   const source = [
-    `Battery graph: ${identity.kind ? `matched on ${identity.kind}` : "matched"}${identity.confidence ? `, ${identity.confidence} confidence` : ""}${identity.lookedUpOn ? `, looked up ${shortDate(identity.lookedUpOn, new Date()) ?? identity.lookedUpOn}` : ""}.`,
-    inherited.length ? `${inherited.length === n ? "All" : `${inherited.length} of ${n}`} matched through their part number${inherited.length > 1 ? "s" : ""} (${[...new Set(inherited.map((member) => member.extra!.identity!.part))].slice(0, 2).join(", ")}), which the graph links only to this pack.` : null,
-  ].filter(Boolean).join(" ");
+    `Battery graph · ${identity.kind ? `matched on ${identity.kind}` : "matched"}${identity.confidence ? ` · ${identity.confidence} confidence` : ""}${identity.lookedUpOn ? ` · looked up ${shortDate(identity.lookedUpOn, new Date()) ?? identity.lookedUpOn}` : ""}`,
+    inherited.length ? `${inherited.length === n ? "all" : `${inherited.length} of ${n}`} through their part number${inherited.length > 1 ? "s" : ""} (${[...new Set(inherited.map((member) => member.extra!.identity!.part))].slice(0, 2).join(", ")})` : null,
+  ].filter(Boolean).join(" · ");
   return {
     pack: label, unsure: false, sameLabel: "Same pack in",
-    why: { title: "Why these count as the same pack", text: `${vehicles.length > 3 ? `All ${vehicles.length} models listed carry` : vehicles.length > 1 ? `The ${vehicleList} carry` : `${n === 2 ? "Both" : `All ${n}`} carry`} the ${identity.name ?? label}${facts.length ? `: ${facts.join(", ")}` : ""}. ${source}` },
+    why: { title: "Why these count as the same pack", text: `${vehicles.length > 3 ? `All ${vehicles.length} models listed carry` : vehicles.length > 1 ? `The ${vehicleList} carry` : `${n === 2 ? "Both" : `All ${n}`} carry`} the ${identity.name ?? label}${facts.length ? `: ${facts.join(", ")}` : ""}.`, source },
   };
 }
 
@@ -377,10 +383,13 @@ function groupRow(members: Member[], req: Requirement, now: Date): MatchRow {
     kinds.length || when ? `${kinds.join(", ") || "seen"}${when ? `${kinds.length ? (days.length > 1 && when.includes("–") ? ", seen " : ", ") : " "}${when}` : ""}` : null,
   ].filter(Boolean).join(" · ");
   const marks = groupMarks(req, members.map((member) => ({ candidate: member.match.candidate, marks: member.row.fit ?? [] })), price);
+  const eurs = candidates.map(eur).filter((value): value is number => value != null && value > 0);
   const group: MatchGroupView = {
     pack, count, countWord: lots ? "lots" : null, unsure, sameLabel,
     vehicles: [...tally].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name)),
     meta, why, lots,
+    // Kept together, but flagged: a top price over 2.5× the lowest usually means one line is something else.
+    priceVaries: eurs.length > 1 && Math.max(...eurs) > Math.min(...eurs) * 2.5,
     units: units.map((member) => unitOf(member, req.minSoh, now)),
     stockIds: units.map((member) => member.row.stockId).filter((id): id is string => !!id),
   };
@@ -408,8 +417,8 @@ function groupRow(members: Member[], req: Requirement, now: Date): MatchRow {
 export type GroupInput = { row: MatchRow; match: Match; extra: StockExtra | null };
 
 /**
- * A part number stated in listings is not always the pack's own (MG4 64 and 77 kWh listed under one number), so lines
- * under one part number split where their stated kWh differ by more than 10%. A line with no kWh joins only when there
+ * A part number or graph key does not always pin one pack (MG4 64 and 77 kWh listed under one number), so a group
+ * splits where its lines' stated kWh differ by more than 10%. A line with no kWh joins only when there
  * is a single capacity to join; otherwise it stands alone.
  */
 export function splitByKwh(members: Member[]): Member[][] {
@@ -452,7 +461,8 @@ export function groupStock(given: GroupInput[], req: Requirement, now: Date = ne
   }
   const leader = new Map<string, MatchRow>();
   const absorbed = new Set<string>();
-  const sets = [...buckets].flatMap(([bucket, members]) => (bucket.includes("|pn|") ? splitByKwh(members) : [members]));
+  // Every pack merge, graph key or part number, splits where stated kWh differ by more than 10%.
+  const sets = [...buckets].flatMap(([bucket, members]) => (bucket.includes("lot|") ? [members] : splitByKwh(members)));
   for (const members of sets) {
     if (members.length < 2) {
       continue;
