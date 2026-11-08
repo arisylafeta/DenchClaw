@@ -377,3 +377,12 @@
 .dealpick { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .dealpick select { flex: 1 1 260px; min-width: 0; border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; font: inherit; font-size: 13px; background: var(--card); color: inherit; }
 .dealpick .btn { padding: 7px 12px; font-size: 13px; }
+
+/* Send later */
+.pill.sched { color: var(--blue-ink); }
+.pill.sched i, .st.sched { background: var(--blue); }
+.schedbox { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: var(--blue-soft); color: var(--blue-ink); }
+.schedbox .btn { padding: 7px 12px; font-size: 13px; }
+.later { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 18px 14px; }
+.later .btn { padding: 7px 12px; font-size: 13px; }
+.later input { border: 1px solid var(--line); border-radius: 11px; padding: 6px 10px; font: inherit; font-size: 13px; background: var(--card); color: inherit; }

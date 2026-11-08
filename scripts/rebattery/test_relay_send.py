@@ -14,3 +14,29 @@ def test_refusal_falls_back_to_the_last_line():
 def test_rejects_bad_arguments():
     assert rs.main("../x y", "alex@rebattery.io") == 2
     assert rs.main("abc", "not-an-email") == 2
+
+
+def _row(**kw):
+    from datetime import datetime, timezone
+    base = {"id": "m1", "by": "alex@rebattery.io", "at": datetime(2026, 11, 9, 8, 0, tzinfo=timezone.utc), "same_version": True, "to": "rob@x.com"}
+    return {**base, **kw}
+
+
+def test_due_sends_an_unchanged_draft_on_time():
+    from datetime import datetime, timezone
+    assert rs.decide(_row(), datetime(2026, 11, 9, 8, 1, tzinfo=timezone.utc)) is None
+
+
+def test_due_refuses_a_draft_edited_after_scheduling():
+    from datetime import datetime, timezone
+    assert rs.decide(_row(same_version=False), datetime(2026, 11, 9, 8, 1, tzinfo=timezone.utc))["reason"] == "schedule_changed"
+
+
+def test_due_refuses_a_long_missed_time():
+    from datetime import datetime, timezone
+    assert rs.decide(_row(), datetime(2026, 11, 9, 15, 0, tzinfo=timezone.utc))["reason"] == "schedule_missed"
+
+
+def test_due_refuses_a_schedule_without_an_approver():
+    from datetime import datetime, timezone
+    assert rs.decide(_row(by=None), datetime(2026, 11, 9, 8, 1, tzinfo=timezone.utc))["reason"] == "schedule_invalid"

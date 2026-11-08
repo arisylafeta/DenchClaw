@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HermesConversation } from "@/lib/hermes-conversations";
 import { describeWhen, parseWhen } from "@/lib/relay-when";
+import { londonInputValue, londonWallToUtc, sendAtProblem, sendLabel, sendSlots } from "@/lib/relay-send-time";
 import type { RelayDealOption, RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayRule, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
 import { missingInstruction, type ChecklistItem, type DealChecklist } from "@/lib/relay-checklist";
 import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
@@ -51,6 +52,7 @@ async function api<T>(url: string, init?: { method?: string; body?: unknown }): 
   return data as T;
 }
 
+const Clock = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>;
 const Arrow = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M5 12h14M13 6l6 6-6 6" /></svg>;
 const Logo = () => <span className={s.logo}><i /></span>;
 
@@ -441,7 +443,7 @@ function Review({ data, reload, say, onBack, sending, startSend }: {
   const ordered = [...item.drafts].sort((a, b) => a.position - b.position);
   const viewId = views[item.id] && ordered.some((d) => d.id === views[item.id]) ? views[item.id] : ordered[0]?.id;
   const draft = ordered.find((d) => d.id === viewId) ?? ordered[0];
-  const isSent = (d: RelayDraftView) => d.state === "sent" || d.id in sending;
+  const isSent = (d: RelayDraftView) => d.state === "sent" || d.id in sending || !!d.mail?.scheduled;
   const [finishing, setFinishing] = useState(false);
   const finish = async () => {
     setFinishing(true);
@@ -456,7 +458,7 @@ function Review({ data, reload, say, onBack, sending, startSend }: {
         {items.map((x, k) => {
           const name = x.counterpart_name || x.counterpart_email || "?";
           const busyJob = !x.drafts.length && x.job && ["queued", "running", "ready", "finalising"].includes(x.job.status);
-          return <button key={x.id} type="button" className={s.chip} aria-current={k === index} onClick={() => setCur(k)}><span className={s.av} style={{ background: colour(name) }}>{initials(name)}</span>{firstName(name)}<span className={cx(s.st, (busyJob || x.drafts.some((d) => d.id in sending)) && s.work, !busyJob && x.drafts.length > 0 && x.drafts.filter((d) => d.role === "primary").every((d) => d.state === "sent") && s.sent)} /></button>;
+          return <button key={x.id} type="button" className={s.chip} aria-current={k === index} onClick={() => setCur(k)}><span className={s.av} style={{ background: colour(name) }}>{initials(name)}</span>{firstName(name)}<span className={cx(s.st, (busyJob || x.drafts.some((d) => d.id in sending)) && s.work, !busyJob && x.drafts.length > 0 && x.drafts.filter((d) => d.role === "primary").every((d) => d.state === "sent") && s.sent, !busyJob && x.drafts.some((d) => d.role === "primary" && d.mail?.scheduled) && s.sched)} /></button>;
         })}
         <button className={s.navb} type="button" aria-label="Next" onClick={() => setCur((index + 1) % items.length)}>›</button>
         <span className={s.count}>{index + 1} of {items.length}</span>
@@ -481,7 +483,7 @@ function Review({ data, reload, say, onBack, sending, startSend }: {
               <div className={s.cards}>
                 {ordered.filter((d) => d.id !== draft?.id).map((d) => (
                   <button key={d.id} type="button" className={cx(s.card, s.fo, d.role === "primary" && s.primary)} onClick={() => { setViews((v) => ({ ...v, [item.id]: d.id })); }}>
-                    <div className={s.ft}><span className={s.step}>{d.role === "primary" ? "PRIMARY" : `FOLLOW-ON ${d.position}`}</span><span style={{ fontSize: 12.5, fontWeight: 500, color: isSent(d) ? "var(--green)" : "var(--muted)" }}>{isSent(d) ? "Sent" : d.mail ? "Draft" : "Needs a recipient"}</span></div>
+                    <div className={s.ft}><span className={s.step}>{d.role === "primary" ? "PRIMARY" : `FOLLOW-ON ${d.position}`}</span><span style={{ fontSize: 12.5, fontWeight: 500, color: d.mail?.scheduled ? "var(--blue-ink)" : isSent(d) ? "var(--green)" : "var(--muted)" }}>{d.mail?.scheduled ? sendLabel(d.mail.scheduled.at) : isSent(d) ? "Sent" : d.mail ? "Draft" : "Needs a recipient"}</span></div>
                     <b>{d.title}</b>
                     <span className={s.to}>{d.mail?.to_emails.length ? `To ${d.mail.to_emails.join(", ")}` : d.why}</span>
                     <span className={s.pv}>{d.mail?.main.split("\n").filter(Boolean).slice(1, 2).join(" ") || d.why}</span>
@@ -553,6 +555,9 @@ function failureText(failure: { reason: string; detail?: unknown } | null, state
     unknown: "Gmail didn't confirm. Use Check if it went.",
     failed: "Gmail refused it. Use Check if it went.",
     preflight_error: "a pre-send check failed. Try again.",
+    schedule_changed: "the draft changed after you scheduled it. Check it and send or schedule again.",
+    schedule_missed: "the scheduled time passed while Relay was down. Send it now or pick a new time.",
+    schedule_invalid: "the schedule was incomplete. Schedule it again.",
   };
   return words[reason] ?? `${reason.replace(/_/g, " ")}.`;
 }
@@ -566,6 +571,9 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
   const [saving, setSaving] = useState(false);
   const [arming, setArming] = useState(false);
   const [sending, setSending] = useState(false);
+  const [later, setLater] = useState(false);
+  const [custom, setCustom] = useState("");
+  const [scheduling, setScheduling] = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   // A rewrite from the AI panel saves server-side; pick up the new copy when the draft's version moves on.
   useEffect(() => { if (mail && local && mail.updated_at !== local.updated_at && !saving) setLocal({ subject: mail.subject ?? "", body: mail.main, to: mail.to_emails.join(", "), cc: mail.cc_emails.join(", "), bcc: mail.bcc_emails.join(", "), updated_at: mail.updated_at }); }, [mail?.updated_at]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -589,6 +597,8 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
   };
   const useTo = async (address: string) => { await save({ ...local, to: address }); };
   const sent = draft.state === "sent";
+  const scheduled = mail.scheduled;
+  const locked = sent || !!scheduled;
   const to = splitAddrs(local.to);
   const verdict = beforeYouSend({ to, body: local.body, attachments: mail.attachments.length }, item.facts);
   const blocked = verdict.state === "stop";
@@ -600,6 +610,36 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
       if (!version) return;
       if (await startSend(draft.id, version.updated_at, splitAddrs(version.to).join(", "))) onNext();
     } finally { setSending(false); }
+  };
+  // Send later: saves the copy, pins that version and the time; the server sends it then, unless they reply first.
+  const scheduleAt = async (at: string) => {
+    setScheduling(true);
+    try {
+      const version = await save();
+      if (!version) return;
+      await api(`/api/relay/drafts/${draft.id}/schedule`, { method: "POST", body: { confirm: true, updated_at: version.updated_at, send_at: at } });
+      say(`Scheduled for ${sendLabel(at)} to ${firstName(splitAddrs(version.to)[0])}`);
+      setLater(false);
+      await reload();
+      onNext();
+    } catch (err) { say(err instanceof Error ? err.message : "Couldn't schedule it."); } finally { setScheduling(false); }
+  };
+  const scheduleCustom = () => {
+    if (!custom) return;
+    const [date, time] = custom.split("T");
+    const at = londonWallToUtc(date, time);
+    const problem = sendAtProblem(at);
+    if (problem) { say(problem); return; }
+    void scheduleAt(at.toISOString());
+  };
+  const cancelSchedule = async () => {
+    setScheduling(true);
+    try { await api(`/api/relay/drafts/${draft.id}/schedule`, { method: "DELETE" }); say("Schedule cancelled. It's a draft again."); await reload(); }
+    catch (err) { say(err instanceof Error ? err.message : "Couldn't cancel."); } finally { setScheduling(false); }
+  };
+  const sendNow = async () => {
+    setScheduling(true);
+    try { if (await startSend(draft.id, mail.updated_at, mail.to_emails.join(", "))) onNext(); } finally { setScheduling(false); }
   };
   const [checking, setChecking] = useState(false);
   const checkSent = async () => {
@@ -638,15 +678,15 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
     <div className={cx(s.card, s.editor)}>
       <div className={s.ebar}>
         <div><div className={s.lab}>{draft.role === "primary" ? "Primary email" : "Follow-on email"} · {mail.identity_key === "supply" ? "supply@" : mail.identity_key === "buy" ? "buy@" : "alex@"}</div><h2>{draft.title}</h2></div>
-        <span className={cx(s.pill, sent ? s.ok : s.warn)}><i />{sent ? "Sent" : draft.state === "gmail" ? "In Gmail drafts" : saving ? "Saving…" : "Draft"}</span>
+        <span className={cx(s.pill, sent ? s.ok : scheduled ? s.sched : s.warn)}><i />{sent ? "Sent" : scheduled ? "Scheduled" : draft.state === "gmail" ? "In Gmail drafts" : saving ? "Saving…" : "Draft"}</span>
       </div>
       {draft.role === "primary" && draft.source_note && <div className={s.fromnote}>Drafted from your note: <b>&ldquo;{draft.source_note}&rdquo;</b></div>}
       {draft.agent_log.length > 0 && <div className={s.log}>{draft.agent_log.map((l, k) => <span key={k}>{l}</span>)}</div>}
       <div className={s.field} style={{ marginTop: 6 }}><span>From</span><div className={s.ro}>{mail.from_email}</div></div>
-      <div className={s.field}><label htmlFor={`to-${draft.id}`}>To</label><input id={`to-${draft.id}`} value={local.to} disabled={sent} placeholder="Add an address" onChange={(e) => setLocal({ ...local, to: e.target.value })} onBlur={() => void save()} /></div>
-      {(["cc", "bcc"] as const).map((k) => <div key={k} className={s.field}><label htmlFor={`${k}-${draft.id}`}>{k === "cc" ? "Cc" : "Bcc"}</label><input id={`${k}-${draft.id}`} value={local[k]} disabled={sent || mail.transport !== "gmail"} placeholder="Add addresses, separated by commas" onChange={(e) => setLocal({ ...local, [k]: e.target.value })} onBlur={() => void save()} /></div>)}
-      <div className={s.field}><label htmlFor={`sj-${draft.id}`}>Subject</label><input id={`sj-${draft.id}`} value={local.subject} disabled={sent} onChange={(e) => setLocal({ ...local, subject: e.target.value })} onBlur={() => void save()} /></div>
-      <textarea ref={bodyRef} className={s.body} value={local.body} disabled={sent} aria-label="Email body" onChange={(e) => setLocal({ ...local, body: e.target.value })} onBlur={() => void save()} />
+      <div className={s.field}><label htmlFor={`to-${draft.id}`}>To</label><input id={`to-${draft.id}`} value={local.to} disabled={locked} placeholder="Add an address" onChange={(e) => setLocal({ ...local, to: e.target.value })} onBlur={() => void save()} /></div>
+      {(["cc", "bcc"] as const).map((k) => <div key={k} className={s.field}><label htmlFor={`${k}-${draft.id}`}>{k === "cc" ? "Cc" : "Bcc"}</label><input id={`${k}-${draft.id}`} value={local[k]} disabled={locked || mail.transport !== "gmail"} placeholder="Add addresses, separated by commas" onChange={(e) => setLocal({ ...local, [k]: e.target.value })} onBlur={() => void save()} /></div>)}
+      <div className={s.field}><label htmlFor={`sj-${draft.id}`}>Subject</label><input id={`sj-${draft.id}`} value={local.subject} disabled={locked} onChange={(e) => setLocal({ ...local, subject: e.target.value })} onBlur={() => void save()} /></div>
+      <textarea ref={bodyRef} className={s.body} value={local.body} disabled={locked} aria-label="Email body" onChange={(e) => setLocal({ ...local, body: e.target.value })} onBlur={() => void save()} />
       {mail.attachments.length > 0 && (
         <div className={s.atts}>
           {mail.attachments.map((a) => (
@@ -655,7 +695,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
                 <span className={cx(s.ic, /xlsx?$/i.test(a.filename) && s.xl)}>{(a.filename.split(".").pop() ?? "").toUpperCase().slice(0, 4)}</span>
                 <div><b>{a.filename}</b><span>{a.sizeBytes ? `${Math.max(1, Math.round(a.sizeBytes / 1024))} KB · open` : "open"}</span></div>
               </a>
-              {!sent && <button type="button" className={s.attx} aria-label={`Remove ${a.filename}`} onClick={() => void detach(a.sha256, a.filename)}>×</button>}
+              {!locked && <button type="button" className={s.attx} aria-label={`Remove ${a.filename}`} onClick={() => void detach(a.sha256, a.filename)}>×</button>}
             </div>
           ))}
         </div>
@@ -674,14 +714,32 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
             <b>Not sent{mail.state === "unknown" ? " (unconfirmed)" : ""}:</b> {failureText(mail.failure, mail.state)}{" "}
             <button type="button" className={s.fixl} disabled={checking} onClick={() => void checkSent()}>{checking ? "Checking Gmail…" : "Check if it went"}</button>
           </div>)
-        : sent ? <div className={s.sentbox}>✓ Sent. Relay brings this back to Follow up if there&apos;s no reply.</div> : (
+        : sent ? <div className={s.sentbox}>✓ Sent. Relay brings this back to Follow up if there&apos;s no reply.</div>
+        : scheduled ? (
+          <div className={cx(s.sentbox, s.schedbox)}>
+            <span>Sends <b>{sendLabel(scheduled.at)}</b> to {mail.to_emails.join(", ")}. If they reply before then, it waits for you.</span>
+            <span className={s.sp} />
+            <button type="button" className={s.btn} disabled={scheduling} onClick={() => void sendNow()}>Send now</button>
+            <button type="button" className={cx(s.btn, s.ghost)} disabled={scheduling} onClick={() => void cancelSchedule()}>Cancel</button>
+          </div>
+        ) : (
+        <>
         <div className={s.eact}>
-          <button className={cx(s.btn, arming ? s.confirm : s.pri)} type="button" disabled={blocked || sending || saving} onClick={() => void send()}>{sending ? "Sending…" : arming ? `Confirm send to ${firstName(to[0])}` : "Send"} <Arrow /></button>
+          <button className={cx(s.btn, arming ? s.confirm : s.pri)} type="button" disabled={blocked || sending || saving || scheduling} onClick={() => void send()}>{sending ? "Sending…" : arming ? `Confirm send to ${firstName(to[0])}` : "Send"} <Arrow /></button>
+          <button className={s.btn} type="button" aria-expanded={later} disabled={blocked || sending || saving || scheduling} onClick={() => setLater((v) => !v)}><Clock /> Send later</button>
           <button className={s.btn} type="button" disabled={saving} onClick={() => void toGmail()}>{draft.state === "gmail" ? "✓ In Gmail drafts" : "Add to Gmail drafts"}</button>
           <span className={s.sp} />
           {draft.role === "primary" && <button className={cx(s.btn, s.ghost)} type="button" title="No reply needed after all: marks it read and labels it Sorted in Gmail; the draft is dropped" onClick={() => void markDone()}>Done, no reply</button>}
           <button className={cx(s.btn, s.ghost)} type="button" onClick={onBack}>Back to inbox</button>
         </div>
+        {later && (
+          <div className={s.later} role="group" aria-label="Send later">
+            {sendSlots().map((slot) => <button key={slot.at} type="button" className={s.btn} disabled={scheduling} onClick={() => void scheduleAt(slot.at)}>{slot.label}</button>)}
+            <input type="datetime-local" aria-label="Pick a time (London)" value={custom} min={londonInputValue(new Date())} onChange={(e) => setCustom(e.target.value)} />
+            {custom && <button type="button" className={cx(s.btn, s.pri)} disabled={scheduling} onClick={scheduleCustom}>Schedule</button>}
+          </div>
+        )}
+        </>
       )}
     </div>
   );
