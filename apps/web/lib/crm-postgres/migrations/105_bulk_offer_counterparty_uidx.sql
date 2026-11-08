@@ -7,6 +7,19 @@
 -- one company still count as one counterparty. Offers that are linked (counterpart_id set) and offers with no CRM
 -- identity are untouched here; addOffer handles the unlinked-by-name case in code.
 --
+-- The table holds about 170 rows, so the index is built without concurrently and the write lock is momentary.
+--
+-- Check for rows the index would refuse before applying:
+--
+--   select bulk_listing_id, coalesce(company_id, person_id) as counterparty, count(*) as offers
+--   from crm_bulk_offers
+--   where role = 'counterparty' and counterpart_id is null and coalesce(company_id, person_id) is not null
+--   group by 1, 2
+--   having count(*) > 1;
+--
+-- No rows: apply as is. Any row: merge or delete the extra offer first, since the index cannot be built while a
+-- duplicate exists.
+--
 -- Additive and idempotent. Rollback: drop index crm_bulk_offers_counterparty_uidx.
 begin;
 
