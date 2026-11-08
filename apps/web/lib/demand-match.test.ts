@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Demand } from "./bulk-demand";
-import { bestLine, bySeller, cellCodes, cellMiss, mergeSupplyDuplicates, fewestSellers, kwhFromText, matchDemand, requestCodeHit, requirementFor, scoreCandidate, sellerKey, statedUnits, type Candidate } from "./demand-match";
+import { bestLine, bySeller, cellCodes, cellMiss, isPartCode, makerWord, mergeSupplyDuplicates, fewestSellers, kwhFromText, matchDemand, requestCodeHit, requirementFor, scoreCandidate, sellerKey, statedUnits, type Candidate } from "./demand-match";
 
 vi.mock("server-only", () => ({}));
 
@@ -328,5 +328,49 @@ describe("honest matches on a cell request (v4)", () => {
     expect(statedUnits(packs, unit({ format: "Modules", units: 1, unitsBare: true }))).toBe(1);
     // A stated 1 (not bare) stays 1 everywhere.
     expect(statedUnits(ask(), unit({ format: "Cells", units: 1 }))).toBe(1);
+  });
+});
+
+describe("review fixes (v4 slice 1)", () => {
+  const ask50e = () => requirementFor(demand({
+    product_family: "Samsung 50E-equivalent 21700 cells", wants: "500,000 Samsung 50E (21700) cylindrical cells", volume: 500_000, volume_unit: "cells",
+    spec: { formats: ["Cells"], cell_makers: ["Samsung SDI"] },
+  }));
+
+  it("never reads a price as a cell model", () => {
+    expect(cellCodes(" lg 21700 cells 1.50e per cell ").models).toEqual([]);
+    expect(cellCodes(" 21700 cells at 50e per cell ").models).toEqual([]);
+    expect(cellCodes(" 21700 cells 50e each ").models).toEqual([]);
+    expect(cellCodes(" samsung 50e 21700 cells ").models).toEqual(["50e"]);
+    // "1,50e per cell" is not a Samsung 50E: the maker stays unstated, so no false ✓.
+    const priced = scoreCandidate(ask50e(), unit({ format: "Cells", title: "21700 cells", description: "Grade A, 1,50e per cell" }))!;
+    expect(priced.checks.find((c) => c.key === "model")).toMatchObject({ state: "unknown" });
+    // "2,35e" is not a 35E model, so a 21700 line priced that way is not dropped.
+    expect(scoreCandidate(ask50e(), unit({ format: "Cells", title: "21700 cells", description: "price 2,35e" }))).not.toBeNull();
+    // A request priced "1,50e per cell" asks for no model.
+    expect(requirementFor(demand({ wants: "21700 cells, up to 1,50e per cell", spec: { formats: ["Cells"] } })).cellModels).toEqual([]);
+  });
+
+  it("takes only real cell or part codes from an ask, never chemistry or size words", () => {
+    for (const word of ["41/52kwh", "lifepo4", "nmc811", "64kwh", "80-100ah", "3.6v", "1.50e", "lfp-100ah"]) expect(isPartCode(word)).toBe(false);
+    for (const word of ["su001b5189", "inr21700-50e", "cs40hn-p1260b1260-e-r1", "mb6vad"]) expect(isPartCode(word)).toBe(true);
+    const lfp = requirementFor(demand({ wants: "1MWh LiFePO4 100Ah cells or 41/52kWh packs, NMC811 ok", spec: { formats: ["Packs", "Cells"] } }));
+    expect(lfp.partCodes).toEqual([]);
+    const agm = unit({ source: "trade", make: null, model: null, format: null, title: "12V 100Ah LiFePO4 leisure battery", description: "LiFePO4 12.8V 100Ah" });
+    expect(requestCodeHit(lfp, agm)).toBeNull();
+  });
+
+  it("reads one maker under its other names", () => {
+    expect(makerWord("E-One Moli")).toBe("molicel");
+    expect(makerWord("Moli")).toBe("molicel");
+    expect(makerWord("Molicel")).toBe("molicel");
+    expect(makerWord("LGES")).toBe("lg");
+    expect(makerWord("LG Energy Solution")).toBe("lg");
+    expect(makerWord("LG Chem")).toBe("lg");
+    expect(makerWord("Sanyo")).toBe("panasonic");
+    expect(makerWord("Murata")).toBe("sony");
+    // A Murata line on a Sony request is the same maker, not a miss.
+    const sony = requirementFor(demand({ wants: "Sony VTC6 18650 cells", spec: { formats: ["Cells"], cell_makers: ["Sony"] } }));
+    expect(cellMiss(sony, unit({ format: "Cells", make: "Murata", title: "Murata 18650 cells" }))).toBeNull();
   });
 });

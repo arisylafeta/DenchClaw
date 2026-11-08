@@ -256,13 +256,15 @@ const CELL_MODEL_MAKER: Record<string, string> = {
 };
 const CELL_PREFIX_MAKER: Record<string, string> = { ncr: "panasonic", lr: "lishen" };
 /** Every word that names a cell maker, for reading the maker a stock line states. */
-const CELL_MAKER_WORDS = [...CELL_MAKERS, "molicel", "murata", "sony", "bak", "dmegc", "ampace", "hithium", "rept"];
+const CELL_MAKER_WORDS = [...CELL_MAKERS, "molicel", "moli", "lges", "murata", "sony", "sanyo", "bak", "dmegc", "ampace", "hithium", "rept"];
 const CODE_STOP = new Set(["cell", "cells", "pcs", "li", "ion", "lot", "lots", "pack", "packs", "type", "size", "mah", "ah", "wh", "v"]);
 const SIZE = "18650|21700|26650|32700|4680|2170";
 // "INR21700-50E", "LR21700LH", "NCR2170M-4", "26650FS3": an optional maker prefix, the size, then the model suffix.
 const FULL_CODE = new RegExp(`(?<![a-z0-9])([a-z]{2,4})?-?(?:${SIZE})-?([a-z]{1,3}\\d{0,2}[a-z]?|\\d{2}[a-z]{1,2})?(?![a-z0-9])`, "g");
-// A model written on its own: "Samsung 50E", "LG MJ1", "Molicel P42A".
-const LONE_MODEL = /(?<![a-z0-9])(\d{2}[eqtrgj]|mj1|hg2|he4|hb6|mh1|m50lt|m50t|m58t|m50|p42a|p45b|p28a|p26a|p50b)(?![a-z0-9])/g;
+// A model written on its own: "Samsung 50E", "LG MJ1", "Molicel P42A". A price is not a model: "1,50e per cell" and
+// "2.35e" follow a digit and a decimal separator, and "50e per cell", "50e each" or "50e/pc" are followed by price words.
+const PRICE_AFTER = "(?! ?(?:per|each|ea|pcs?|piece|ex|excl|incl|vat|net)\\b)(?!/ ?(?:cell|pcs?|piece|unit|kwh)\\b)";
+const LONE_MODEL = new RegExp(`(?<![a-z0-9])(?<!\\d[.,] ?)(\\d{2}[eqtrgj]|mj1|hg2|he4|hb6|mh1|m50lt|m50t|m58t|m50|p42a|p45b|p28a|p26a|p50b)(?![a-z0-9])${PRICE_AFTER}`, "g");
 
 /** Cell model codes in a text and the makers they name. The text should already be lower case. */
 export function cellCodes(text: string): { models: string[]; makes: string[] } {
@@ -279,9 +281,34 @@ export function cellCodes(text: string): { models: string[]; makes: string[] } {
   return { models: [...models], makes: [...makes] };
 }
 
+const CHEMISTRY_WORD = /^(lifepo4|lfp|lmfp|nmc\d*|ncm\d*|nca|lmo|lto|lco|li-?ion|li-?po|limn2o4)$/;
+/**
+ * A real cell or part code in an ask ("su001b5189", "inr21700-50e", "cs40hn-p1260b1260-e-r1"): letters and digits, and
+ * not a figure with its unit ("64kwh", "41/52kwh", "80-100ah", "3.6v"), a price ("1.50e") or a chemistry ("lifepo4", "nmc811").
+ */
+export function isPartCode(word: string): boolean {
+  if (word.length < 5 || !/[a-z]/.test(word) || !/\d/.test(word)) return false;
+  if (CHEMISTRY_WORD.test(word)) return false;
+  // Digits (with separators) then a unit or currency letter: a quantity, size or price, not a code.
+  if (/^[\d.,/-]+[a-z]{1,4}$/.test(word)) return false;
+  // Anything ending in a figure and its unit ("lfp-100ah", "ev-64kwh") is a size too.
+  return !/\d(kwh|mwh|gwh|kw|wh|mah|ah|v)$/.test(word);
+}
+
+// One maker under several names: the brand that bought or renamed it.
+const MAKER_ALIAS: [RegExp, string][] = [
+  [/^(molicel|e-? ?one moli|moli)\b/, "molicel"],
+  [/^(lges|lg energy solution|lg chem)\b/, "lg"],
+  [/^sanyo\b/, "panasonic"],
+  [/^murata\b/, "sony"],
+];
+
 /** One lower-case word for a maker as written: "Samsung SDI" and "SAMSUNG" are "samsung", "LG Energy Solution" is "lg". */
 export function makerWord(value: string | null | undefined): string | null {
-  const word = (value ?? "").toLowerCase().trim().split(/[\s,/()-]+/)[0];
+  const text = (value ?? "").toLowerCase().trim().replace(/\s+/g, " ");
+  const alias = MAKER_ALIAS.find(([re]) => re.test(text));
+  if (alias) return alias[1];
+  const word = text.split(/[\s,/()-]+/)[0];
   return word && !NO_MAKER.has(word) ? word : null;
 }
 const NO_MAKER = new Set(["unknown", "n", "na", "n.a", "none", "other", "various", "generic", "mixed", "unbranded", "oem"]);
@@ -293,7 +320,8 @@ export function requirementFor(demand: Demand, vocab?: Set<string>): Requirement
   const spec = demand.spec ?? {};
   const parts = [demand.product_family ?? "", demand.wants].filter(Boolean);
   const text = parts.join(" ; ");
-  const t = norm(text);
+  // Decimal commas first, so "1,50e per cell" stays one price and never yields a "50e" model.
+  const t = norm(decimals(text));
   const makeWords = (spec.makes ?? []).flatMap((make) => MAKE_WORDS[make] ?? [make.toLowerCase()]);
   // A make named in the words counts even without a structured make ("Hyundai Kona").
   for (const word of MAKE_WORDS_FLAT) if (t.includes(` ${word} `) && !makeWords.includes(word)) makeWords.push(word);
@@ -319,17 +347,15 @@ export function requirementFor(demand: Demand, vocab?: Set<string>): Requirement
       if (!products.some((p) => p.phrase === phrase || p.anyOf.includes(word))) products.push({ phrase, anyOf: [phrase], not: [] });
     }
   }
-  const cellTokens = [...new Set([...t.matchAll(/(?<![0-9])(18650|21700|26650|32700|4680|2170)(?![0-9])| (\d{2}e) /g)]
+  const cellTokens = [...new Set([...t.matchAll(new RegExp(`(?<![0-9])(18650|21700|26650|32700|4680|2170)(?![0-9])| (\\d{2}e)(?= )${PRICE_AFTER}`, "g"))]
     .map((m) => (m[1] === "2170" ? "21700" : m[1] ?? m[2])))];
   const askCodes = cellCodes(t);
   const cellMakers = [...new Set([
     ...(spec.cell_makers ?? []).map(makerWord),
-    ...CELL_MAKER_WORDS.filter((word) => t.includes(` ${word} `)),
+    ...CELL_MAKER_WORDS.filter((word) => t.includes(` ${word} `)).map(makerWord),
     ...askCodes.makes,
   ].filter((word): word is string => !!word))];
-  // A code has letters and digits and is not a figure with its unit ("64kwh", "80-100ah") or a year range.
-  const partCodes = [...new Set(t.trim().split(" ").filter((word) => word.length >= 5 && /[a-z]/.test(word) && /\d/.test(word)
-    && !/^[\d.]+(-[\d.]+)?(kwh|kw|ah|mah|wh|mwh|v|km|kg|x)$/.test(word)))];
+  const partCodes = [...new Set(t.trim().split(" ").filter(isPartCode))];
   const kwh = spec.kwh_min != null || spec.kwh_max != null
     ? { min: spec.kwh_min ?? 0, max: spec.kwh_max ?? 10_000 }
     : kwhFromText(text) ?? (platformKwh ? { options: platformKwh } : null);
@@ -393,7 +419,7 @@ const candidateText = (c: Candidate) => (c.description ? `${nameText(c)}${norm(d
 /** The maker a line states: its make, else a maker word in its text, else the maker its cell code names. */
 export function statedCellMaker(c: Candidate): string | null {
   const text = candidateText(c);
-  return makerWord(c.make) ?? CELL_MAKER_WORDS.find((word) => text.includes(` ${word} `)) ?? cellCodes(text).makes[0] ?? null;
+  return makerWord(c.make) ?? makerWord(CELL_MAKER_WORDS.find((word) => text.includes(` ${word} `))) ?? cellCodes(text).makes[0] ?? null;
 }
 
 /** True for an ask for cells or modules, where a lone stock quantity of 1 is a placeholder, never one cell. */
