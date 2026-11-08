@@ -75,7 +75,7 @@ describe("grouping a request's stock by seller and pack identity", () => {
     const { rows, inputs } = build(lines);
     expect(rows).toHaveLength(1);
     const [row] = rows;
-    expect(row.group).toMatchObject({ pack: "Stellantis 46 kWh NMC pack", count: 5, unsure: false, sameLabel: "Same pack in", lots: false });
+    expect(row.group).toMatchObject({ pack: "Stellantis 50 kWh NMC pack", count: 5, unsure: false, sameLabel: "Same pack in", lots: false });
     expect(row.group!.vehicles).toEqual([{ name: "Vauxhall Vivaro-e", n: 3 }, { name: "Peugeot Rifter Allure Premium EV", n: 2 }]);
     expect(row.group!.meta).toBe("EUR 2,020–2,150 per pack · Leeds, Warrington · salvage listings, 7 Nov");
     expect(row.group!.why!.title).toBe("Why these count as the same pack");
@@ -94,26 +94,30 @@ describe("grouping a request's stock by seller and pack identity", () => {
     const teacher = line({ graph: STELLANTIS, part_numbers: ["9832817280"] });
     const pupil = line({ make: "Peugeot", model: "e-208 GT", title: "Peugeot e-208 battery", part_numbers: ["98328172-80"] });
     const unsure = line({ make: "Peugeot", model: "e-208 GT", title: "Peugeot e-208 battery", graph: { ...STELLANTIS, confidence: "low" } });
-    const identities = packIdentities([teacher, pupil, unsure].map(identityInput));
+    const other = line({ make: "Citroen", model: "e-Berlingo", title: "Citroen e-Berlingo battery", graph: { ...STELLANTIS, confidence: "low" } });
+    const identities = packIdentities([teacher, pupil, unsure, other].map(identityInput));
     expect(identities.get(pupil.id)).toMatchObject({ key: "pack|fam:stellantis-50-nmc", confirmed: true, how: "part number", part: "98328172-80" });
     expect(identities.get(unsure.id)).toMatchObject({ confirmed: false });
-    const { rows } = build([teacher, pupil, unsure]);
+    const { rows } = build([teacher, pupil, unsure, other]);
+    // The unconfirmed e-208 joins the confirmed one as the same vehicle; the low-key Berlingo joins nothing.
     expect(rows).toHaveLength(2);
-    expect(rows[0].group!.vehicles.map((v) => v.name)).toEqual(["Peugeot e-208 GT", "Vauxhall Vivaro-e"]);
-    expect(rows[0].group!.why!.source).toContain("1 of 2 through their part number (98328172-80)");
+    expect(rows[0].group!.vehicles).toEqual([{ name: "Peugeot e-208 GT", n: 2 }, { name: "Vauxhall Vivaro-e", n: 1 }]);
+    expect(rows[0].group!.why!.source).toContain("1 of 3 through their part number (98328172-80)");
+    expect(rows[0].group!.why!.text).toContain("One line has no confirmed pack of its own and joins by vehicle and capacity as listed (50 kWh).");
+    expect(rows[1].key).toBe(`stock:${other.id}`);
     expect(rows[1].group).toBeUndefined();
   });
 
-  it("keeps lines with no confirmed pack apart per vehicle, tagged Pack type not confirmed", () => {
+  it("groups lines with no confirmed pack by vehicle only, tagged Pack type not confirmed", () => {
     const berlingo = [1950, 1950, 1990].map((price) => line({ make: "Citroen", model: "e-Berlingo Flair", capacity_kwh: null, title: "Citroen e-Berlingo battery", price_eur: price, location: "Bristol", company_id: "comp_fenwick", person_id: "p_fenwick", supplier: "Fenwick Auto" }));
     const rifter = line({ make: "Peugeot", model: "Rifter", capacity_kwh: null, title: "Peugeot Rifter battery", location: "Bristol", company_id: "comp_fenwick", person_id: "p_fenwick", supplier: "Fenwick Auto" });
     const { rows, inputs } = build([...berlingo, rifter]);
     expect(rows).toHaveLength(2);
     const [group, single] = rows;
-    expect(group.group).toMatchObject({ pack: "Pack from Citroen e-Berlingo Flair", count: 3, unsure: true, sameLabel: "Listed as" });
+    expect(group.group).toMatchObject({ pack: "Citroen e-Berlingo Flair · EV pack", count: 3, unsure: true, sameLabel: null });
     expect(group.group!.vehicles).toEqual([{ name: "Citroen e-Berlingo Flair", n: 3 }]);
-    expect(group.group!.why!.title).toBe("Why this is kept apart");
-    expect(group.group!.why!.text).toContain("give no part number, and the battery graph has no confident match");
+    expect(group.group!.why!.title).toBe("Why these are one row");
+    expect(group.group!.why!.text).toBe("Grouped by vehicle and capacity as listed (Citroen e-Berlingo Flair), not by a confirmed pack. No part number is listed, and the battery graph has no confident match.");
     expect(group.group!.meta).toBe("EUR 1,950–1,990 per pack · Bristol · salvage listings, 7 Nov");
     // A different vehicle with no confirmed pack never joins: it stays a plain row.
     expect(single.key).toBe(`stock:${rifter.id}`);
@@ -189,19 +193,21 @@ describe("grouping a request's stock by seller and pack identity", () => {
     const mg = (kwh: number) => line({ make: "MG", model: "MG4", capacity_kwh: kwh, title: `MG MG4 ${kwh} kWh battery pack`, part_numbers: ["11578836"] });
     const req = requirementFor(demand({ wants: "2-13 MG MG4 packs", quantity: "2-13 packs", volume: 2, volume_unit: "packs", spec: { formats: ["Packs"] } }), new Set(["mg", "mg4"]));
     const { rows } = build([mg(64), mg(64), mg(77), mg(77)], req);
-    expect(rows.map((row) => row.group?.pack)).toEqual(["64 kWh pack, part 11578836", "77 kWh pack, part 11578836"]);
+    expect(rows.map((row) => row.group?.pack)).toEqual(["MG4 · 64 kWh pack", "MG4 · 77 kWh pack"]);
+    expect(rows.map((row) => row.group?.unsure)).toEqual([false, false]);
     expect(rows[0].group!.why!.text).toContain("Every unit states part number 11578836");
   });
 });
 
 describe("marketplace listings", () => {
   /** A stock line re-keyed as a marketplace listing row, as demandMatchesV2 builds it (no stock id, no CRM identity). */
-  function listingInputs(lines: StockRow[], req: Requirement = ask()): GroupInput[] {
+  function listingInputs(lines: StockRow[], req: Requirement = ask(), stock: StockRow[] = []): GroupInput[] {
     const candidates = lines.map((row) => {
       const c = stockCandidate(row);
       return { ...c, key: `listing:${row.id}`, source: "marketplace" as const };
     });
-    const packs = packIdentities(candidates.map(listingIdentityInput));
+    // As demandMatchesV2: listings learn identity alongside every stock line, so a listed part number can inherit a pack.
+    const packs = packIdentities([...stock.map(identityInput), ...candidates.map(listingIdentityInput)]);
     return candidates.map((c, index) => {
       const match = scoreCandidate(req, c);
       if (!match) throw new Error(`${c.title} does not match`);
@@ -228,6 +234,67 @@ describe("marketplace listings", () => {
     expect(rows).toHaveLength(2);
     expect(rows.map((row) => row.group!.units[0].key.split(":")[0]).sort()).toEqual(["listing", "stock"]);
   });
+
+  describe("one seller's Audi Q4 packs (Ari, 8 Nov: Autohandel DIDIER showed four rows)", () => {
+    const MEB: GraphMatch = {
+      pack_key: "fam:audi-bev-eu-v1-07", confidence: "high", pack: "VW MEB 82 kWh gross / 77 kWh usable pack (ID.4, Q4 e-tron top battery)",
+      usable_kwh: 77, gross_kwh: 82, chemistry: "NMC", voltage: null, kind: "part number", input: "0Z1915910CE", looked_up_on: "2026-10-30",
+    };
+    const meb = (o: Partial<Demand> = {}) => requirementFor(demand({
+      wants: "VW MEB 82 kWh packs: Audi Q4, Skoda Enyaq, VW ID.4", quantity: "10-20 packs", volume: 10, volume_unit: "packs", spec: { formats: ["Packs"] }, ...o,
+    }), new Set(["audi", "q4", "skoda", "enyaq", "volkswagen", "id.4", "vw"]));
+    const didier = (o: Partial<StockRow>) => line({
+      make: "Audi", model: "Q4", capacity_kwh: 82, title: "Audi Q4 82kWh", company_id: null, person_id: "", supplier: "Autohandel DIDIER NV",
+      location: "Belgium", country: "BE", price_eur: 4200, supplier_ref: null, source: null, ...o,
+    });
+    // A stock line elsewhere teaches the graph's MEB pack to part number 0Z1915910CE.
+    const teacher = line({ make: "Audi", model: "Q4 e-tron 40", capacity_kwh: 82, graph: MEB, part_numbers: ["0Z1915910CE"], supplier: "LKQ", company_id: "comp_lkq" });
+    const listings = [
+      didier({ capacity_kwh: 77, title: "Audi Q4 77kWh", part_numbers: ["0Z1915910AJ"], price_eur: 4400 }),
+      ...[1, 2, 3].map(() => didier({ part_numbers: ["0Z1915910CD"] })),
+      didier({ capacity_kwh: 77, title: "Audi Q4 77kWh", part_numbers: ["0Z1915910CD"], price_eur: null }),
+      didier({ part_numbers: ["0Z1915910CE"], price_eur: 4100 }),
+      didier({ part_numbers: null }),
+    ];
+
+    it("are one row × N, titled by vehicle and the graph's pack, with the kWh the capacity mark shows", () => {
+      const rows = groupStock(listingInputs(listings, meb(), [teacher]), meb(), NOW);
+      expect(rows).toHaveLength(1);
+      const [row] = rows;
+      expect(row.group).toMatchObject({ pack: "Audi Q4 · VW MEB 77–82 kWh pack", count: 7, unsure: false, sameLabel: null });
+      expect(row.holds).toBe("Audi Q4 · VW MEB 77–82 kWh pack × 7");
+      expect(row.fit!.find((mark) => mark.key === "capacity")!.label).toBe("77–82 kWh");
+      expect(row.group!.pack).not.toMatch(/part/i);
+      expect(row.group!.why!.text).toContain("All 7 carry the VW MEB 82 kWh gross / 77 kWh usable pack");
+      expect(row.group!.why!.text).toContain("6 lines have no confirmed pack of their own and join by vehicle and capacity as listed (77–82 kWh).");
+      expect(row.group!.why!.text).toContain("Part numbers listed: 0Z1915910CD (4), 0Z1915910AJ, 0Z1915910CE.");
+      // Part numbers stay in the units table.
+      expect(row.group!.units.map((unit) => unit.ref).filter(Boolean)).toContain("0Z1915910AJ");
+    });
+
+    it("group by vehicle and capacity even with no confirmed pack, tagged and explained", () => {
+      const rows = groupStock(listingInputs(listings.filter((row) => !row.part_numbers?.includes("0Z1915910CE")), meb(), [teacher]), meb(), NOW);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].group).toMatchObject({ pack: "Audi Q4 · 77–82 kWh pack", count: 6, unsure: true, sameLabel: null });
+      expect(rows[0].group!.why).toEqual({
+        title: "Why these are one row",
+        text: "Grouped by vehicle and capacity as listed (Audi Q4, 77–82 kWh), not by a confirmed pack. Part numbers listed: 0Z1915910CD (4), 0Z1915910AJ; the battery graph has no confident match for them.",
+        source: "Ask the seller for the pack label photo or part number",
+      });
+    });
+
+    it("never join another vehicle from the same seller without a confident shared identity", () => {
+      const enyaq = didier({ make: "Skoda", model: "Enyaq IV", title: "Skoda Enyaq IV 82kWh", part_numbers: null });
+      const rows = groupStock(listingInputs([...listings, enyaq], meb(), [teacher]), meb(), NOW);
+      expect(rows.map((row) => row.group?.count ?? 1)).toEqual([7, 1]);
+      // A second Enyaq stating the taught part number joins the Q4s through the high-confidence key, as "Same pack in".
+      const taught = didier({ make: "Skoda", model: "Enyaq IV", title: "Skoda Enyaq IV 82kWh", part_numbers: ["0Z1915910CE"] });
+      const joined = groupStock(listingInputs([...listings, enyaq, taught], meb(), [teacher]), meb(), NOW);
+      expect(joined).toHaveLength(1);
+      expect(joined[0].group).toMatchObject({ pack: "VW MEB 77–82 kWh pack", count: 9, sameLabel: "Same pack in" });
+      expect(joined[0].group!.vehicles).toEqual([{ name: "Audi Q4", n: 7 }, { name: "Skoda Enyaq IV", n: 2 }]);
+    });
+  });
 });
 
 describe("merge safety", () => {
@@ -245,7 +312,8 @@ describe("merge safety", () => {
   it("merges different makes on one identical listed part number", () => {
     const { rows } = build([line({ part_numbers: ["9868397180"] }), rifter({ part_numbers: ["9868397180"] })]);
     expect(rows).toHaveLength(1);
-    expect(rows[0].group!.pack).toBe("50 kWh pack, part 9868397180");
+    expect(rows[0].group).toMatchObject({ pack: "50 kWh pack", sameLabel: "Same pack in", unsure: false });
+    expect(rows[0].group!.why!.text).toContain("Every unit states part number 9868397180, across the Peugeot Rifter and Vauxhall Vivaro-e");
   });
 
   it("splits any merge where stated kWh differ by more than 10%, or the format differs", () => {
@@ -254,6 +322,37 @@ describe("merge safety", () => {
     const req = requirementFor(demand({ wants: "2-13 Vauxhall Vivaro-e packs or modules", quantity: "2-13", volume: 2, volume_unit: "units", spec: { formats: ["Packs", "Modules"] } }), new Set(["vauxhall", "vivaro-e"]));
     const format = build([vivaro({ graph: STELLANTIS }), vivaro({ graph: STELLANTIS }), vivaro({ graph: STELLANTIS, format: "module", capacity_kwh: null })], req).rows;
     expect(format.map((row) => row.group?.count ?? 1)).toEqual([2, 1]);
+  });
+
+  it("never joins a Kona to a Niro without a high key; a medium key or no identity keeps them apart", () => {
+    const req = requirementFor(demand({ wants: "2-13 Hyundai Kona or Kia e-Niro 64 kWh packs", quantity: "2-13 packs", volume: 2, volume_unit: "packs", spec: { formats: ["Packs"] } }),
+      new Set(["hyundai", "kona", "kia", "e-niro", "niro"]));
+    const KONA_NIRO: GraphMatch = { ...STELLANTIS, pack_key: "fam:hmg-64-nmc", pack: "Hyundai/Kia 64 kWh pack", usable_kwh: 64, gross_kwh: 67.5, confidence: "medium" };
+    const kona = (o: Partial<StockRow> & { graph?: GraphMatch | null } = {}) => line({ make: "Hyundai", model: "Kona Electric", capacity_kwh: 64, title: "Hyundai Kona 64 kWh battery", ...o });
+    const niro = (o: Partial<StockRow> & { graph?: GraphMatch | null } = {}) => line({ make: "Kia", model: "e-Niro", capacity_kwh: 64, title: "Kia e-Niro 64 kWh battery", ...o });
+    const medium = build([kona({ graph: KONA_NIRO }), kona({ graph: KONA_NIRO }), niro({ graph: KONA_NIRO }), niro()], req).rows;
+    expect(medium.map((row) => row.group?.vehicles.map((v) => v.name) ?? null)).toEqual([["Hyundai Kona Electric"], ["Kia e-Niro"]]);
+    const none = build([kona(), kona(), niro(), niro()], req).rows;
+    expect(none.map((row) => [row.group?.pack, row.group?.unsure])).toEqual([["Hyundai Kona Electric · 64 kWh pack", true], ["Kia e-Niro · 64 kWh pack", true]]);
+    const high = build([kona({ graph: { ...KONA_NIRO, confidence: "high" } }), niro({ graph: { ...KONA_NIRO, confidence: "high" } }), niro()], req).rows;
+    expect(high).toHaveLength(1);
+    expect(high[0].group!.vehicles).toEqual([{ name: "Kia e-Niro", n: 2 }, { name: "Hyundai Kona Electric", n: 1 }]);
+  });
+
+  it("splits one vehicle's lines more than 12% apart: a 42 kWh and a 49 kWh 2008 are two rows", () => {
+    const req = requirementFor(demand({ wants: "2-13 Peugeot e-2008 packs", quantity: "2-13 packs", volume: 2, volume_unit: "packs", spec: { formats: ["Packs"] } }), new Set(["peugeot", "2008", "e-2008"]));
+    const p2008 = (kwh: number) => line({ make: "Peugeot", model: "e-2008", capacity_kwh: kwh, title: `Peugeot e-2008 ${kwh} kWh battery` });
+    const { rows } = build([p2008(42), p2008(42), p2008(49), p2008(49)], req);
+    expect(rows.map((row) => row.group?.pack)).toEqual(["Peugeot e-2008 · 42 kWh pack", "Peugeot e-2008 · 49 kWh pack"]);
+  });
+
+  it("does not title a group with a graph pack its stated kWh contradict", () => {
+    const req = requirementFor(demand({ wants: "2-13 Renault Zoe packs", quantity: "2-13 packs", volume: 2, volume_unit: "packs", spec: { formats: ["Packs"] } }), new Set(["renault", "zoe"]));
+    const ZE40: GraphMatch = { ...STELLANTIS, pack_key: "fam:renault-ze40", pack: "Renault Zoe ZE40 traction pack, 41 kWh", usable_kwh: 41, gross_kwh: 45.3 };
+    const zoe = (o: Partial<StockRow> & { graph?: GraphMatch | null } = {}) => line({ make: "Renault", model: "Zoe", capacity_kwh: 22, title: "Renault Zoe 22 kWh battery", ...o });
+    const { rows } = build([zoe({ graph: ZE40 }), zoe()], req);
+    expect(rows[0].group).toMatchObject({ pack: "Renault Zoe · 22 kWh pack", unsure: true });
+    expect(rows[0].group!.why!.text).toContain("as the Renault Zoe ZE40 traction pack, 41 kWh (41 / 45.3 kWh), which does not agree with the listed kWh.");
   });
 
   it("keeps a group whose prices spread over 2.5×, and flags it", () => {

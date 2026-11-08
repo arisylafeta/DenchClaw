@@ -1,9 +1,11 @@
-// Matches v4, slice 2: identical stock from one seller becomes one row. Packs group by seller and pack identity, from
-// the battery graph's curated pack key (high or medium confidence) or a part number that inherits it (withPackIdentity,
-// Ari 28 Oct 2026), else by a shared part number. A line with neither keeps to its own vehicle and is marked "Pack type
-// not confirmed". Cells and modules group by seller and cell or module model (lots). A group of one stays a plain row.
-// Pure: no database, so the tests and the before/after report see exactly what the tab sees.
-import { cleanModel, NAMED_PACK, normalMake, packLabel, partKey, specKey, withPackIdentity, type StockRow as CommercialRow } from "../commercial-stock";
+// Matches v4, slice 2: identical stock from one seller becomes one row. Packs group within one seller by vehicle (make
+// and model family), format and a kWh band; part numbers and graph keys never split one vehicle (Ari, 8 Nov). Different
+// vehicles join only on a confident shared identity: the battery graph's curated pack key, directly or through a part
+// number that inherits it (withPackIdentity, Ari 28 Oct 2026), or one identical listed part number. A group with no
+// confirmed pack is marked "Pack type not confirmed". Cells and modules group by seller and cell or module model
+// (lots). A group of one stays a plain row. Pure: no database, so the tests and the before/after report see exactly
+// what the tab sees.
+import { cleanModel, modelFamily, NAMED_PACK, normalMake, packLabel, partKey, specKey, withPackIdentity, type StockRow as CommercialRow } from "../commercial-stock";
 import { bySeller, makeAndModel, toEur, type Candidate, type Match, type Requirement } from "../demand-match";
 import { productName, unitsPhrase } from "./fit-marks";
 import type { FitMark, FitState, MatchGroupView, MatchRow, MatchUnit, RequestSummary } from "../matches-types";
@@ -264,25 +266,48 @@ const foldText = (text: string | null | undefined) => (text ?? "").normalize("NF
 const codeLike = (value: string | null | undefined) =>
   !!value && value.length >= 4 && value.length <= 32 && !/\s/.test(value) && /[a-z]/i.test(value) && /\d/.test(value) && !/^\d/.test(value);
 
-/** The identity a line groups on within one seller, or null when it cannot group with anything. */
-function identityKey(member: Member): string | null {
+/** A cell or module lot's key within one seller: its format, make and cell or module model. Null for packs. */
+function lotKey(member: Member): string | null {
   const c = member.match.candidate;
-  if (LOT_FORMATS.has(c.format)) {
-    const model = c.model ?? (codeLike(c.supplierRef) ? c.supplierRef : null) ?? c.partNumber;
-    return model ? `lot|${c.format}|${foldText(c.make)}|${foldText(model)}` : null;
-  }
-  // A line that names neither make nor model has no vehicle to keep it apart by: it never groups.
-  const identity = member.extra?.identity;
-  if ((!c.make && !c.model) || !identity) {
+  if (!LOT_FORMATS.has(c.format)) {
     return null;
   }
-  // A pack, a module and a cell never share a row, whatever the key says.
-  const format = c.format ?? "Packs";
-  // Different makes share a row only on a high-confidence graph key or one identical listed part number; a medium key
-  // (or a part number that inherits one) merges within one make.
-  const crossMake = identity.how === "listing part number" || (identity.confirmed && (identity.confidence ?? "").toLowerCase() === "high");
-  return `${identity.key}|${format}${crossMake ? "" : `|make:${normalMake(c.make) ?? foldText(c.make)}`}`;
+  const model = c.model ?? (codeLike(c.supplierRef) ? c.supplierRef : null) ?? c.partNumber;
+  return model ? `lot|${c.format}|${foldText(c.make)}|${foldText(model)}` : null;
 }
+
+/**
+ * The vehicle a pack line groups on within one seller: normalised make and model family (Ari, 8 Nov: one seller's Audi
+ * Q4 packs, 77 kWh usable and 82 kWh gross, under several part numbers, are one row). A line that does not name both a
+ * make and a model has no vehicle to group by: it never groups.
+ */
+function vehicleKey(member: Member): string | null {
+  const c = member.match.candidate;
+  if (LOT_FORMATS.has(c.format) || !c.make?.trim() || !c.model?.trim()) {
+    return null;
+  }
+  // Variant words ("e", "electric", "plus") are dropped as when a kWh pins the pack: the kWh band keeps packs apart.
+  const family = modelFamily({ make: c.make, model: c.model }, 0);
+  return family ? `${normalMake(c.make) ?? foldText(c.make)}|${family}` : null;
+}
+
+/**
+ * The identities that join different vehicles from one seller: a high-confidence graph key or one identical listed part
+ * number joins any make; a medium key (or a part number that inherits one) joins within one make. Unconfirmed lines
+ * have none, so they only ever group within their own vehicle.
+ */
+function joinKeys(member: Member): string[] {
+  const identity = member.extra?.identity;
+  if (!identity?.confirmed) {
+    return [];
+  }
+  const crossMake = identity.how === "listing part number" || (identity.confidence ?? "").toLowerCase() === "high";
+  const c = member.match.candidate;
+  return [`${identity.key}${crossMake ? "" : `|make:${normalMake(c.make) ?? foldText(c.make)}`}`];
+}
+
+/** A pack line's or lot's format; a pack, a module and a cell never share a row. */
+const formatOf = (member: Member) => member.match.candidate.format ?? "Packs";
 
 /** How a member contributes to the "× N": a pack line counts its stated packs (at least one); a lot counts once. */
 const unitCount = (c: Candidate) => (LOT_FORMATS.has(c.format) ? 1 : Math.max(1, Math.round(c.units ?? 1)));
@@ -308,50 +333,182 @@ function unitOf(member: Member, minSoh: number | null, now: Date): MatchUnit {
 
 const eur = (c: Candidate) => toEur(c.price, c.currency);
 
-/** The pack's name, "Why these count as the same pack" and the vehicles, from the members' shared identity. */
-function describe(members: Member[], lots: boolean): Pick<MatchGroupView, "pack" | "unsure" | "sameLabel" | "why"> {
+/** The vehicles in a group, one per make and model family, most units first, named as the first line names it. */
+function families(members: Member[]): { key: string; name: string; n: number }[] {
+  const out = new Map<string, { key: string; name: string; n: number }>();
+  for (const member of members) {
+    const c = member.match.candidate;
+    const key = vehicleKey(member) ?? vehicleName(c);
+    const known = out.get(key);
+    // The shortest name of a family is its plainest ("Hyundai IONIQ 5" over "Hyundai IONIQ 5 Premium BEV").
+    if (known) Object.assign(known, { n: known.n + unitCount(c), name: vehicleName(c).length < known.name.length ? vehicleName(c) : known.name });
+    else out.set(key, { key, name: vehicleName(c), n: unitCount(c) });
+  }
+  return [...out.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
+}
+
+/** "77–82 kWh" or "82 kWh" from the members' stated kWh, worded as each line's capacity mark is; null when none says. */
+function statedKwh(members: Member[]): string | null {
+  const kwhs = members.map((member) => member.match.candidate.kwh).filter((kwh): kwh is number => kwh != null).map((kwh) => Math.round(kwh * 10) / 10);
+  if (!kwhs.length) {
+    return null;
+  }
+  const low = Math.min(...kwhs);
+  const high = Math.max(...kwhs);
+  return low === high ? `${low} kWh` : `${low}–${high} kWh`;
+}
+
+/** "a, b and c", or "N models listed" past three. */
+const listOf = (names: string[]) => (names.length <= 1 ? names[0] ?? ""
+  : names.length > 3 ? `${names.length} models listed` : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
+
+/** The first usable part number each line states, as written. */
+const listedPart = (member: Member) => [member.match.candidate.partNumber, ...(member.match.candidate.partNumbers ?? [])]
+  .slice(0, 1).find((part): part is string => !!usablePart(part)) ?? null;
+
+/** Part numbers as a note: "0Z1915910CD (5), 0Z1915910AJ", most stated first, three at most. */
+function partsNote(members: Member[]): { parts: string[]; text: string | null } {
+  const counts = new Map<string, { part: string; n: number }>();
+  for (const member of members) {
+    const part = listedPart(member);
+    if (part) {
+      const key = usablePart(part)!;
+      counts.set(key, { part: counts.get(key)?.part ?? part, n: (counts.get(key)?.n ?? 0) + 1 });
+    }
+  }
+  const sorted = [...counts.values()].sort((a, b) => b.n - a.n || a.part.localeCompare(b.part));
+  const shown = sorted.slice(0, 3).map(({ part, n }) => (n > 1 ? `${part} (${n})` : part)).join(", ");
+  return { parts: sorted.map((entry) => entry.part), text: sorted.length ? `${shown}${sorted.length > 3 ? ` and ${sorted.length - 3} more` : ""}` : null };
+}
+
+/**
+ * The group's title, "Same pack in", and "Why these count as the same pack", from what its members share. Title:
+ * "<vehicle> · <pack> " for one vehicle, the pack alone for several (the vehicles show under it). The pack is the battery
+ * graph's name when a member is confirmed through it, else "<kWh> pack"; its kWh is always the members' stated range, so
+ * it agrees with the capacity mark. Part numbers go in the why-note and the units table, never the title.
+ */
+function describe(members: Member[], lots: boolean): Pick<MatchGroupView, "pack" | "unsure" | "sameLabel" | "why" | "vehicles"> & { typeKey: string } {
   const first = members[0];
   const c = first.match.candidate;
   const n = members.length;
   if (lots) {
     const name = productName(c);
-    return { pack: name, unsure: false, sameLabel: null, why: { title: "Why these are one row", text: `One seller and one ${c.format === "Modules" ? "module" : "cell"} model: ${name}. Each line is its own lot, with its own quantity and price.`, source: null } };
-  }
-  const identity = first.extra?.identity;
-  const vehicles = [...new Set(members.map((member) => vehicleName(member.match.candidate)))];
-  const vehicleList = vehicles.length <= 1 ? vehicles[0] ?? "this vehicle"
-    : vehicles.length > 3 ? `${vehicles.length} models listed` : `${vehicles.slice(0, -1).join(", ")} and ${vehicles[vehicles.length - 1]}`;
-  if (!identity?.confirmed) {
     return {
-      pack: `Pack from ${vehicles[0] ?? c.title}`, unsure: true, sameLabel: "Listed as",
-      why: { title: "Why this is kept apart", text: `These listings name the ${vehicleList} but give no part number, and the battery graph has no confident match, so they are not merged with other vehicles.`, source: "Ask the seller for the pack label photo or part number" },
+      pack: name, unsure: false, sameLabel: null, vehicles: [], typeKey: lotKey(first) ?? first.row.key,
+      why: { title: "Why these are one row", text: `One seller and one ${c.format === "Modules" ? "module" : "cell"} model: ${name}. Each line is its own lot, with its own quantity and price.`, source: null },
     };
   }
-  const kwhs = [...new Set(members.map((member) => member.match.candidate.kwh).filter((kwh): kwh is number => kwh != null).map((kwh) => Math.round(kwh * 10) / 10))].sort((a, b) => a - b);
-  if (identity.how === "listing part number") {
-    const kwh = kwhs.length === 1 ? `${kwhs[0]} kWh ` : "";
-    const stated = kwhs.length ? ` Listed capacity: ${kwhs.length === 1 ? `${kwhs[0]} kWh` : `${kwhs[0]}–${kwhs[kwhs.length - 1]} kWh`}.` : "";
+  const vehicles = families(members);
+  const multi = vehicles.length > 1;
+  const kwh = statedKwh(members);
+  const { parts, text: partsText } = partsNote(members);
+  // The pack the graph confirms for most members (directly, or through a stated part number).
+  const graphed = members.filter((member) => member.extra?.identity?.confirmed && member.extra.identity.key.startsWith("pack|"));
+  const tally = new Map<string, Member[]>();
+  graphed.forEach((member) => tally.set(member.extra!.identity!.key, [...(tally.get(member.extra!.identity!.key) ?? []), member]));
+  const best = [...tally.values()].sort((a, b) => b.length - a.length)[0]?.[0]?.extra?.identity ?? null;
+  // The graph's pack names the row only when the stated kWh agree with it (within 12% of its usable or gross figure):
+  // a Zoe listed at 22 kWh under a part number the graph files as the ZE40 (41 kWh) is not titled "ZE40".
+  const kwhs = members.map((member) => member.match.candidate.kwh).filter((value): value is number => value != null);
+  const packKwh = [best?.usableKwh, best?.grossKwh].filter((value): value is number => value != null);
+  const agrees = !kwhs.length || !packKwh.length
+    || kwhs.every((value) => value >= Math.min(...packKwh) / 1.12 && value <= Math.max(...packKwh) * 1.12);
+  const top = best && agrees ? best : null;
+  // Different vehicles only ever meet on a shared confident identity; within one vehicle, one shared part number is one.
+  const samePart = parts.length === 1 && members.every((member) => listedPart(member));
+  const unsure = !top && !multi && !samePart;
+
+  let pack: string;
+  if (top) {
+    const label = packLabel(top.name, top.usableKwh) ?? (top.name ? top.name.split(/[,(]/)[0].trim() : "EV pack");
+    pack = kwh ? label.replace(/\d+(?:\.\d+)?\s*kWh/i, kwh) : label;
+  } else {
+    pack = `${kwh ?? "EV"} pack`;
+  }
+  const vehicle = vehicles[0]?.name ?? c.title;
+  // A graph name that already starts with the vehicle ("Renault Zoe phase 2 ZE50 traction pack") is not repeated.
+  const lead = foldText(vehicle.split(/\s+/).slice(0, 2).join(" "));
+  const title = multi || (top && lead && foldText(pack).startsWith(lead)) ? pack : `${vehicle} · ${pack}`;
+  const names = listOf(vehicles.map((entry) => entry.name));
+  const asListed = members.filter((member) => !member.extra?.identity?.key.startsWith("pack|")).length;
+  const typeKey = top ? top.key : samePart ? `pn|${usablePart(parts[0])}` : multi ? `join|${first.row.key}` : `vehicle|${first.row.key}`;
+
+  if (unsure) {
     return {
-      pack: `${kwh}pack, part ${identity.part}`.replace(/^p/, kwh ? "p" : "P"), unsure: false, sameLabel: "Same pack in",
-      why: { title: "Why these count as the same pack", text: `Every unit states part number ${identity.part}${vehicles.length > 1 ? `, across ${vehicles.length > 3 ? "" : "the "}${vehicleList}` : ""}. The battery graph has no record of this part yet, so kWh and chemistry are as the listings state them.${stated}`, source: `Part number as listed by the seller · ${identity.part}` },
+      pack: title, unsure: true, sameLabel: null, vehicles, typeKey,
+      why: {
+        title: "Why these are one row",
+        text: `Grouped by vehicle and capacity as listed (${vehicle}${kwh ? `, ${kwh}` : ""}), not by a confirmed pack. ${best
+          ? `The battery graph files ${best.part ? `part ${best.part}` : "one line"} as the ${best.name ?? "a pack"}${packKwh.length ? ` (${packKwh.join(" / ")} kWh)` : ""}, which does not agree with the listed kWh.${partsText ? ` Part numbers listed: ${partsText}.` : ""}`
+          : partsText ? `Part numbers listed: ${partsText}; the battery graph has no confident match for them.`
+          : "No part number is listed, and the battery graph has no confident match."}`,
+        source: "Ask the seller for the pack label photo or part number",
+      },
     };
   }
-  const label = packLabel(identity.name, identity.usableKwh) ?? (identity.name ? identity.name.split(/[,(]/)[0].trim() : "Pack");
+  if (!top) {
+    // Joined on one identical listed part number (across vehicles), or one vehicle whose lines all state the same one.
+    const shared = samePart ? parts[0] : sharedPart(members);
+    if (!shared) {
+      // Joined on a graph key whose kWh the listings contradict: kept together, but said plainly.
+      return {
+        pack: title, unsure: false, sameLabel: multi ? "Same pack in" : null, vehicles, typeKey,
+        why: {
+          title: "Why these count as the same pack",
+          text: `The ${names} share the battery graph's ${best?.name ?? "pack"}${packKwh.length ? ` (${packKwh.join(" / ")} kWh)` : ""}, but the listed kWh (${kwh ?? "not stated"}) do not agree with it. Check the pack label before offering.${partsText ? ` Part numbers listed: ${partsText}.` : ""}`,
+          source: "Ask the seller for the pack label photo or part number",
+        },
+      };
+    }
+    return {
+      pack: title, unsure: false, sameLabel: multi ? "Same pack in" : null, vehicles, typeKey,
+      why: {
+        title: "Why these count as the same pack",
+        text: `${samePart ? "Every unit states" : `The ${names} share`} part number ${shared}${samePart && multi ? `, across the ${names}` : ""}.${!samePart && partsText ? ` Part numbers listed: ${partsText}.` : ""} The battery graph has no record of this part yet, so kWh and chemistry are as the listings state them.${!samePart && asListed ? " Lines of one vehicle join by vehicle and capacity as listed." : ""}`,
+        source: `Part number as listed by the seller · ${shared}`,
+      },
+    };
+  }
   const facts = [
-    identity.chemistry && !/^li-?ion$/i.test(identity.chemistry) ? identity.chemistry : null,
-    identity.usableKwh != null ? `${identity.usableKwh} kWh usable` : identity.grossKwh != null ? `${identity.grossKwh} kWh` : null,
-    identity.usableKwh != null && identity.grossKwh != null && identity.grossKwh !== identity.usableKwh ? `${identity.grossKwh} kWh gross` : null,
-    identity.voltage ? `${identity.voltage} V` : null,
+    top.chemistry && !/^(li-?ion|lithium[- ]ion)$/i.test(top.chemistry) ? top.chemistry : null,
+    top.usableKwh != null ? `${top.usableKwh} kWh usable` : top.grossKwh != null ? `${top.grossKwh} kWh` : null,
+    top.usableKwh != null && top.grossKwh != null && top.grossKwh !== top.usableKwh ? `${top.grossKwh} kWh gross` : null,
+    top.voltage ? `${top.voltage} V` : null,
   ].filter(Boolean);
-  const inherited = members.filter((member) => member.extra?.identity?.how === "part number");
+  const confirmed = tally.get(top.key)!;
+  const inherited = confirmed.filter((member) => member.extra?.identity?.how === "part number");
   const source = [
-    `Battery graph · ${identity.kind ? `matched on ${identity.kind}` : "matched"}${identity.confidence ? ` · ${identity.confidence} confidence` : ""}${identity.lookedUpOn ? ` · looked up ${shortDate(identity.lookedUpOn, new Date()) ?? identity.lookedUpOn}` : ""}`,
+    `Battery graph · ${top.kind ? `matched on ${top.kind}` : "matched"}${top.confidence ? ` · ${top.confidence} confidence` : ""}${top.lookedUpOn ? ` · looked up ${shortDate(top.lookedUpOn, new Date()) ?? top.lookedUpOn}` : ""}`,
     inherited.length ? `${inherited.length === n ? "all" : `${inherited.length} of ${n}`} through their part number${inherited.length > 1 ? "s" : ""} (${[...new Set(inherited.map((member) => member.extra!.identity!.part))].slice(0, 2).join(", ")})` : null,
   ].filter(Boolean).join(" · ");
+  const carriers = multi ? (vehicles.length > 3 ? `All ${vehicles.length} models listed carry` : `The ${names} carry`) : `${n === 2 ? "Both" : `All ${n}`} carry`;
+  const rest = n - confirmed.length;
   return {
-    pack: label, unsure: false, sameLabel: "Same pack in",
-    why: { title: "Why these count as the same pack", text: `${vehicles.length > 3 ? `All ${vehicles.length} models listed carry` : vehicles.length > 1 ? `The ${vehicleList} carry` : `${n === 2 ? "Both" : `All ${n}`} carry`} the ${identity.name ?? label}${facts.length ? `: ${facts.join(", ")}` : ""}.`, source },
+    pack: title, unsure: false, sameLabel: multi ? "Same pack in" : null, vehicles, typeKey,
+    why: {
+      title: "Why these count as the same pack",
+      text: [
+        `${carriers} the ${top.name ?? pack}${facts.length ? `: ${facts.join(", ")}` : ""}.`,
+        rest ? `${rest === 1 ? "One line has" : `${rest} lines have`} no confirmed pack of ${rest === 1 ? "its" : "their"} own and ${rest === 1 ? "joins" : "join"} by vehicle and capacity as listed${kwh ? ` (${kwh})` : ""}.` : null,
+        partsText ? `Part numbers listed: ${partsText}.` : null,
+      ].filter(Boolean).join(" "),
+      source,
+    },
   };
+}
+
+/** The listed part number that more than one vehicle states, when there is one. */
+function sharedPart(members: Member[]): string | null {
+  const seen = new Map<string, { part: string; vehicles: Set<string> }>();
+  for (const member of members) {
+    const part = listedPart(member);
+    if (part) {
+      const entry = seen.get(usablePart(part)!) ?? { part, vehicles: new Set<string>() };
+      entry.vehicles.add(vehicleKey(member) ?? member.row.key);
+      seen.set(usablePart(part)!, entry);
+    }
+  }
+  return [...seen.values()].sort((a, b) => b.vehicles.size - a.vehicles.size)[0]?.part ?? null;
 }
 
 /** One grouped row from a seller's members, ranked where its best member ranked. */
@@ -362,13 +519,7 @@ function groupRow(members: Member[], req: Requirement, now: Date): MatchRow {
   const cheapest = units[0];
   const candidates = members.map((member) => member.match.candidate);
   const count = lots ? members.length : candidates.reduce((sum, c) => sum + unitCount(c), 0);
-  const { pack, unsure, sameLabel, why } = describe(members, lots);
-  const tally = new Map<string, number>();
-  if (!lots) {
-    for (const c of candidates) {
-      tally.set(vehicleName(c), (tally.get(vehicleName(c)) ?? 0) + unitCount(c));
-    }
-  }
+  const { pack, unsure, sameLabel, why, vehicles, typeKey } = describe(members, lots);
   const price = priceRange(candidates);
   const per = lots ? (candidates[0].format === "Modules" ? "per module" : "per cell") : "per pack";
   const priced = candidates.filter((c) => c.price != null && !c.currencyAssumed);
@@ -386,8 +537,8 @@ function groupRow(members: Member[], req: Requirement, now: Date): MatchRow {
   const eurs = candidates.map(eur).filter((value): value is number => value != null && value > 0);
   const group: MatchGroupView = {
     pack, count, countWord: lots ? "lots" : null, unsure, sameLabel,
-    vehicles: [...tally].map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n || a.name.localeCompare(b.name)),
-    meta, why, lots,
+    vehicles: vehicles.map(({ name, n }) => ({ name, n })),
+    meta, why, lots, typeKey,
     // Kept together, but flagged: a top price over 2.5× the lowest usually means one line is something else.
     priceVaries: eurs.length > 1 && Math.max(...eurs) > Math.min(...eurs) * 2.5,
     units: units.map((member) => unitOf(member, req.minSoh, now)),
@@ -417,17 +568,18 @@ function groupRow(members: Member[], req: Requirement, now: Date): MatchRow {
 export type GroupInput = { row: MatchRow; match: Match; extra: StockExtra | null };
 
 /**
- * A part number or graph key does not always pin one pack (MG4 64 and 77 kWh listed under one number), so a group
- * splits where its lines' stated kWh differ by more than 10%. A line with no kWh joins only when there
- * is a single capacity to join; otherwise it stands alone.
+ * A group splits where its lines' stated kWh differ by more than `tolerance` (10% by default): a part number or graph
+ * key does not always pin one pack (MG4 64 and 77 kWh under one number). One vehicle's lines group within 12%, so
+ * usable and gross figures for one pack (Audi Q4: 77 and 82 kWh) stay together. A line with no kWh joins only when
+ * there is a single capacity to join; otherwise it stands alone.
  */
-export function splitByKwh(members: Member[]): Member[][] {
+export function splitByKwh(members: Member[], tolerance = 0.1): Member[][] {
   const kwh = (member: Member) => member.match.candidate.kwh;
   const stated = members.filter((member) => kwh(member) != null).sort((a, b) => kwh(a)! - kwh(b)!);
   const clusters: Member[][] = [];
   for (const member of stated) {
     const current = clusters[clusters.length - 1];
-    if (current && kwh(member)! <= kwh(current[0])! * 1.1) current.push(member);
+    if (current && kwh(member)! <= kwh(current[0])! * (1 + tolerance)) current.push(member);
     else clusters.push([member]);
   }
   const unknown = members.filter((member) => kwh(member) == null);
@@ -438,9 +590,38 @@ export function splitByKwh(members: Member[]): Member[][] {
 }
 
 /**
- * Groups a request's ranked rows: per seller (bySeller, and never across two CRM companies), then per pack identity or
- * cell/module model. Rows that are not unlisted stock, or have nothing to group on, stay as they are. A group sits where
- * its best-ranked unit sat; ranks are renumbered.
+ * One seller's pack lines of one kind and format, as row sets. First by vehicle (make and model family) and a 12% kWh
+ * band; part numbers and graph keys never split one vehicle. Then vehicle groups that share a confident identity (a
+ * high graph key, or one identical listed part number; a medium key within one make) merge, union-find style, and a
+ * merge of several vehicle groups splits again where stated kWh differ by more than 10%.
+ */
+export function packSets(members: Member[]): Member[][] {
+  const byVehicle = new Map<string, Member[]>();
+  members.forEach((member) => byVehicle.set(vehicleKey(member)!, [...(byVehicle.get(vehicleKey(member)!) ?? []), member]));
+  const vehicles = [...byVehicle.values()].flatMap((list) => splitByKwh(list, 0.12));
+  const parent = vehicles.map((_, index) => index);
+  const find = (index: number): number => (parent[index] === index ? index : (parent[index] = find(parent[index])));
+  const owner = new Map<string, number>();
+  vehicles.forEach((list, index) => {
+    for (const key of new Set(list.flatMap(joinKeys))) {
+      const other = owner.get(key);
+      if (other === undefined) owner.set(key, index);
+      else parent[find(index)] = find(other);
+    }
+  });
+  const merged = new Map<number, number[]>();
+  vehicles.forEach((_, index) => merged.set(find(index), [...(merged.get(find(index)) ?? []), index]));
+  return [...merged.values()].flatMap((indexes) => {
+    const all = indexes.flatMap((index) => vehicles[index]);
+    return indexes.length > 1 ? splitByKwh(all) : [all];
+  });
+}
+
+/**
+ * Groups a request's ranked rows: per seller (bySeller, and never across two CRM companies), kind (stock or listing)
+ * and format, then packs by vehicle (packSets) and cells or modules by model (lots). Rows that are not stock lines or
+ * marketplace listings, or have nothing to group on, stay as they are. A group sits where its best-ranked unit sat;
+ * ranks are renumbered.
  */
 export function groupStock(given: GroupInput[], req: Requirement, now: Date = new Date()): MatchRow[] {
   // On a cell or module request, a line that states no format is a lot of that kind (an emailed list of loose cells).
@@ -449,7 +630,7 @@ export function groupStock(given: GroupInput[], req: Requirement, now: Date = ne
     ? { ...input, match: { ...input.match, candidate: { ...input.match.candidate, format: lotKind } } } : input));
   const byKey = new Map(inputs.map((input) => [input.match.candidate.key, input]));
   // Stock lines and marketplace listings group alike (Ari, 8 Nov: one seller's identical marketplace packs were one row each).
-  const groupable = inputs.filter((input) => /^(stock|listing):/.test(input.row.key) && identityKey(input));
+  const groupable = inputs.filter((input) => /^(stock|listing):/.test(input.row.key) && (lotKey(input) || vehicleKey(input)));
   const buckets = new Map<string, Member[]>();
   for (const seller of bySeller(groupable.map((input) => input.match))) {
     for (const match of seller.matches) {
@@ -458,14 +639,13 @@ export function groupStock(given: GroupInput[], req: Requirement, now: Date = ne
       const who = member.row.companyId ?? member.row.personId ?? "";
       // A marketplace listing and an unlisted stock line never share a row: they are offered through different paths.
       const kind = member.row.key.slice(0, member.row.key.indexOf(":"));
-      const bucket = `${seller.key}|${who}|${kind}|${identityKey(member)}`;
+      const bucket = `${seller.key}|${who}|${kind}|${lotKey(member) ?? `packs|${formatOf(member)}`}`;
       buckets.set(bucket, [...(buckets.get(bucket) ?? []), member]);
     }
   }
   const leader = new Map<string, MatchRow>();
   const absorbed = new Set<string>();
-  // Every pack merge, graph key or part number, splits where stated kWh differ by more than 10%.
-  const sets = [...buckets].flatMap(([bucket, members]) => (bucket.includes("lot|") ? [members] : splitByKwh(members)));
+  const sets = [...buckets].flatMap(([bucket, members]) => (bucket.includes("|lot|") ? [members] : packSets(members)));
   for (const members of sets) {
     if (members.length < 2) {
       continue;
@@ -487,8 +667,17 @@ export function groupSummary(rows: MatchRow[], inputs: GroupInput[], req: Requir
   const suppliers = new Set(rows.map((row) => row.companyId ?? row.personId ?? row.name.toLowerCase())).size;
   const units = rows.reduce((sum, row) => sum + (row.group ? row.group.count : packs ? Math.max(1, Math.round(inputs.find((input) => input.row.key === row.key)?.match.candidate.units ?? 1)) : 1), 0);
   const grouped = rows.some((row) => row.group);
-  const identities = inputs.map((input) => input.extra?.identity).filter((identity): identity is PackIdentity => !!identity);
-  const types = new Map(identities.map((identity) => [identity.key, identity.confirmed]));
+  // Pack types as the rows show them: a group counts as its pack (or as itself when unconfirmed), a single line as its identity.
+  const identityOf = new Map(inputs.map((input) => [input.row.key, input.extra?.identity ?? null]));
+  const types = new Map<string, boolean>();
+  for (const row of rows) {
+    if (row.group) {
+      types.set(row.group.typeKey ?? row.key, !row.group.unsure);
+    } else if (identityOf.get(row.key)) {
+      const identity = identityOf.get(row.key)!;
+      types.set(identity.key, identity.confirmed);
+    }
+  }
   return {
     count: { suppliers, units, word: packs ? "packs" : lots ? "lots" : "units" },
     packTypes: packs && grouped ? { types: types.size, unconfirmed: [...types.values()].filter((confirmed) => !confirmed).length } : null,

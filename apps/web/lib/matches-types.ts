@@ -80,9 +80,9 @@ export type MatchGroupView = {
   count: number;
   /** "lots" for cells and modules; null for packs, which read "× 11". */
   countWord: string | null;
-  /** The pack identity is not confirmed (no confident pack key, no part number): kept apart per vehicle. */
+  /** The pack identity is not confirmed (no confident pack key, no shared part number): grouped by vehicle and kWh only. */
   unsure: boolean;
-  /** "Same pack in" or "Listed as", with the vehicles and how many of each. Lots have none. */
+  /** "Same pack in" when the group spans more than one vehicle, else null; with the vehicles and how many of each. */
   sameLabel: string | null;
   vehicles: { name: string; n: number }[];
   /** "EUR 2,020–2,210 per pack · Leeds, Warrington · salvage listings, seen 1–7 Nov". */
@@ -96,6 +96,8 @@ export type MatchGroupView = {
   /** Cheapest first. */
   units: MatchUnit[];
   stockIds: string[];
+  /** The pack type this row counts as in the header: a graph key, a shared part number, or the row itself when unconfirmed. */
+  typeKey?: string;
 };
 
 /** How one requirement fits: ✓ fits, ≈ close, ? not stated, ✗ misses. Always shown as glyph and word, never colour alone. */

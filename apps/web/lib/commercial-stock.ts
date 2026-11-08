@@ -358,7 +358,7 @@ const VARIANT_WORDS = new Set(["mk1", "mk2", "mk3", "mk4", "mki", "mkii", "mkiii
   "ne", "ev", "e", "electric", "bev", "ultimate", "premium", "gtline", "awd", "rwd", "4wd", "lr", "sr", "facelift", "fl", "lci", "plus", "long", "range", "standard", "performance"]);
 
 /** Grouping family from the row's own model text (graph pack names are too loose to group or label on). */
-function modelFamily(row: StockRow, kwh: number | null): string {
+export function modelFamily(row: Pick<StockRow, "make" | "model">, kwh: number | null): string {
   const source = cleanModel(row.make, row.model);
   if (!source) return "";
   if (kwh === null) return fold(source);
