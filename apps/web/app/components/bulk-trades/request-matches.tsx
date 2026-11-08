@@ -3,11 +3,12 @@
 // The request (demand) Matches tab, laid out as the approved mockup (Matches v4, direction A "Ledger"): a summary card
 // with the request's requirements as chips, then one card of ranked rows. Each row shows who, what they hold and from
 // where, one fit mark per requirement, where this deal stands and the actions; a click opens the source, "How it fits"
-// and "This deal with …". Slices 2–4 add checkboxes, grouping, near matches and the selection bar: each has a marked
-// seam below. The supply tab does not use this file.
+// and "This deal with …". Slice 2 groups one seller's identical stock into one row (A-mixed / A-zoe boards): who, the
+// pack, "Same pack in", and a units table when opened. Slices 3–4 add near matches, checkboxes and the selection bar:
+// each has a marked seam below. The supply tab does not use this file.
 import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import type { FitMark, FitState, MatchOffer, MatchRow, MatchTag, MatchesResult } from "@/lib/matches-types";
+import type { FitMark, FitState, MatchOffer, MatchRow, MatchTag, MatchUnit, MatchesResult } from "@/lib/matches-types";
 import type { OfferStage } from "@/lib/crm-postgres/bulk-offers";
 import css from "./request-matches.module.css";
 
@@ -70,6 +71,117 @@ function standing(offer: MatchOffer | null, sourceKind?: string | null): { stage
   return { stage: `In offers · ${stage} ${offerDate(offer.date)}`.trim(), note: offer.chaseDue ? "No reply · chase due" : null, due: !!offer.chaseDue };
 }
 
+/** A unit's SoH or condition: the mark (glyph, word for screen readers, label) and where the figure comes from. */
+function SohCell({ soh }: { soh: MatchUnit["soh"] }) {
+  const look = MARK[soh.state];
+  return (
+    <>
+      <span className={`${css.m} ${look.cls}`} title={`${soh.label}: ${look.word}`}>
+        <i aria-hidden>{look.glyph}</i>
+        <span className="sr-only">{look.word}:</span>
+        {soh.label}
+      </span>
+      {soh.source && <> <span className={`${css.muted} ${css.sohSrc}`}>{soh.source}</span></>}
+    </>
+  );
+}
+
+/** Units shown before "Show all", as the mock. */
+const FIRST_UNITS = 5;
+
+type GroupRowProps = {
+  row: MatchRow;
+  isOpen: boolean;
+  onToggle: () => void;
+  action: ReactNode;
+};
+
+/**
+ * One supplier and one pack type (A-mixed): who, the pack and how many, "Same pack in" with the vehicles, the price,
+ * places and sources, one mark per requirement for the whole group, where the deal stands, and Add to offers. Opened
+ * (A-zoe): why the packs count as the same, then the units, cheapest first: five, then all of them in a scrolling box
+ * with a fixed header.
+ */
+function GroupRow({ row, isOpen, onToggle, action }: GroupRowProps) {
+  const [all, setAll] = useState(false);
+  const group = row.group!;
+  const where = standing(row.offer, row.sourceKind);
+  const marks = row.fit ?? [];
+  const detailId = `match-detail-${row.rank}`;
+  const noun = group.lots ? "lots" : "units";
+  const visible = all ? group.units : group.units.slice(0, FIRST_UNITS);
+  return (
+    <div className={`${css.row} ${isOpen ? css.rowOpen : ""}`}>
+      <div className={css.rowLine}>
+        {/* Slice 4 seam: the group's pick checkbox goes here, before the row button. */}
+        <button type="button" className={css.rowmain} aria-expanded={isOpen} aria-controls={detailId} onClick={onToggle}>
+          <div className={css.gLeft}>
+            <div className={css.gTitle}>
+              <span className={css.name}>{row.name}</span>
+              <span className={css.gPack}>{group.pack}</span>
+              <span className={css.name}>× {group.count}{group.countWord ? ` ${group.countWord}` : ""}</span>
+              {group.unsure && <span className={`${css.tag} ${css.tagWarn}`}>Pack type not confirmed</span>}
+            </div>
+            {group.sameLabel && group.vehicles.length > 0 && (
+              <div className={css.same}>
+                <span className={css.muted}>{group.sameLabel}</span>
+                {group.vehicles.map((vehicle) => <span key={vehicle.name} className={css.veh}>{vehicle.name} <b>{vehicle.n}</b></span>)}
+              </div>
+            )}
+            <div className={`${css.muted} ${css.source}`}>{group.meta}</div>
+          </div>
+          <ul className={`${css.marks} ${css.gMarks}`} aria-label="How it fits">
+            {marks.map((mark) => <Mark key={`${mark.key}:${mark.label}`} mark={mark} />)}
+          </ul>
+          <div className={`${css.status} ${css.gStatus}`}>
+            <span><span className={`${css.dot} ${where.due ? css.dotDue : ""}`} aria-hidden /><b>{where.stage}</b></span>
+            {where.note && <span>{where.note}</span>}
+          </div>
+        </button>
+        <div className={css.actions}>{action}</div>
+      </div>
+      {isOpen && (
+        <div id={detailId} className={css.gDetail}>
+          {group.why && <div className={css.why}><b>{group.why.title}:</b> {group.why.text}</div>}
+          <div className={css.unitsHead}>
+            <span className={css.unitsTitle}>{group.lots ? "Lots" : "Units"} <span className={css.muted}>· {group.units.length}, cheapest first</span></span>
+          </div>
+          <div className={css.ubox} style={all ? { maxHeight: 360 } : undefined} role="region" aria-label={`${row.name}: ${noun}`} tabIndex={all ? 0 : undefined}>
+            <table className={css.ut}>
+              <thead>
+                <tr>
+                  {/* Slice 4 seam: the pick column (a 34px checkbox cell) goes first. */}
+                  <th>{group.lots ? "Lot" : "Vehicle"}</th><th>Year</th><th>Stock ref</th><th>{group.lots ? "Condition" : "SoH / condition"}</th>
+                  <th>Location</th><th className={css.num}>Price</th><th>Seen</th><th><span className="sr-only">Link</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((unit) => (
+                  <tr key={unit.key}>
+                    <td>{unit.vehicle}</td>
+                    <td>{unit.year ?? ""}</td>
+                    <td className={css.muted}>{unit.ref ?? "not stated"}</td>
+                    <td><SohCell soh={unit.soh} /></td>
+                    <td>{unit.location ?? ""}</td>
+                    <td className={css.num}>{unit.price ?? ""}</td>
+                    <td className={css.muted}>{unit.seen ?? ""}</td>
+                    <td>{unit.link && <a href={unit.link.href} target="_blank" rel="noreferrer">{unit.link.label}</a>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {group.units.length > FIRST_UNITS && (
+            <button type="button" className={css.linkbtn} aria-expanded={all} onClick={() => setAll(!all)}>
+              {all ? "Show fewer" : `Show all ${group.units.length} ${noun} (${group.units.length - FIRST_UNITS} more)`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The short name for "This deal with …": the first word of the company, without a bracketed aside. */
 const shortName = (name: string) => name.replace(/\s*\(.*\)\s*/g, " ").trim().split(/\s+/)[0] || name;
 
@@ -97,6 +209,9 @@ export function RequestMatches({
   const outreach = result.summary?.outreach ?? null;
   const chips = result.summary?.chips ?? [{ label: result.lotKey.line, strong: true }];
   const count = result.rows.length;
+  const tally = result.summary?.count ?? null;
+  const packTypes = result.summary?.packTypes ?? null;
+  const grouped = !!result.summary?.grouped;
   const share = coverage ? Math.min(100, Math.round((coverage.stated / Math.max(1, coverage.need)) * 100)) : 0;
 
   const action = (row: MatchRow, primary: boolean) => row.offer ? (
@@ -134,7 +249,20 @@ export function RequestMatches({
         )}
         {count > 0 && (
           <div className={css.stats}>
-            <span><b>{count}</b> {count === 1 ? "source matches" : "sources match"}</span>
+            {tally ? (
+              <span>
+                <b>{tally.suppliers}</b> {tally.suppliers === 1 ? "supplier" : "suppliers"} · <b>{tally.units.toLocaleString("en-GB")}</b>{" "}
+                {tally.units === 1 ? `${tally.word.replace(/s$/, "")} matches` : `${tally.word} match`}
+              </span>
+            ) : (
+              <span><b>{count}</b> {count === 1 ? "source matches" : "sources match"}</span>
+            )}
+            {packTypes && (
+              <span>
+                <b>{packTypes.types}</b> {packTypes.types === 1 ? "pack type" : "pack types"}
+                {packTypes.unconfirmed > 0 && <>, <b>{packTypes.unconfirmed}</b> not confirmed</>}
+              </span>
+            )}
             {coverage && (
               <span className={css.stock}>
                 Stated stock <b>{coverage.stated.toLocaleString("en-GB")}</b>
@@ -160,17 +288,27 @@ export function RequestMatches({
       {error}
 
       <section className={css.card} aria-label="Matches" style={{ overflow: "hidden" }}>
-        <div className={css.sec}>
-          <span className={css.secTitle}>Matches <span className={css.muted}>· ranked by fit, then stated quantity</span></span>
-          <span className={`${css.muted} ${css.legend}`} aria-label="Fit marks">
-            {(Object.keys(MARK) as FitState[]).map((state) => (
-              <span key={state} className={`${css.m} ${MARK[state].cls}`}><i aria-hidden>{MARK[state].glyph}</i> {MARK[state].word}</span>
-            ))}
-          </span>
-        </div>
+        {grouped ? (
+          <div className={css.sec}>
+            <span className={css.secTitle}>Matches <span className={css.muted}>· one row per supplier and {tally?.word === "packs" || !tally ? "pack type" : "product"}</span></span>
+            <span className={`${css.muted} ${css.legend}`}>Click a row for each unit and why the packs count as the same</span>
+          </div>
+        ) : (
+          <div className={css.sec}>
+            <span className={css.secTitle}>Matches <span className={css.muted}>· ranked by fit, then stated quantity</span></span>
+            <span className={`${css.muted} ${css.legend}`} aria-label="Fit marks">
+              {(Object.keys(MARK) as FitState[]).map((state) => (
+                <span key={state} className={`${css.m} ${MARK[state].cls}`}><i aria-hidden>{MARK[state].glyph}</i> {MARK[state].word}</span>
+              ))}
+            </span>
+          </div>
+        )}
         {!count && <p className={css.empty}>{result.blocked ?? "Nothing fits yet. Add a dossier or a listing field to widen the match."}</p>}
         {rows.map((row) => {
           const isOpen = open === row.key;
+          if (row.group) {
+            return <GroupRow key={row.key} row={row} isOpen={isOpen} onToggle={() => setOpen(isOpen ? null : row.key)} action={action(row, true)} />;
+          }
           const where = standing(row.offer, row.sourceKind);
           const marks = row.fit ?? [];
           const detailId = `match-detail-${row.rank}`;

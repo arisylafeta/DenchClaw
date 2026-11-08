@@ -91,7 +91,10 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
         source: "match",
         data: {
           match: { reason: row.reason, rank: row.rank, at: new Date().toISOString() },
+          // A grouped row is still one offer per supplier: the cheapest unit stays the offer's stock line (No stock marks it),
+          // and every unit's stock line is kept for the unit picking that comes next (slice 4).
           ...(row.stockId ? { stock_opportunity_id: row.stockId } : {}),
+          ...(row.group?.stockIds.length ? { stock_opportunity_ids: row.group.stockIds } : {}),
         },
       };
       const saved = await request<{ offer: { id: string; stage: string | null; updated_at: string } }>(offersEndpoint, {

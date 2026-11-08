@@ -105,10 +105,39 @@
 .empty { padding: 14px 18px; color: #6f6f68; border-top: 1px solid rgba(0, 0, 0, 0.06); }
 .more { align-self: flex-start; }
 
+/* Slice 2: a grouped row (one seller, one pack type), from A-mixed.dc.html; its opened units table from A-zoe.dc.html. */
+.tagWarn { background: #fdf5e9; color: #8a4908; }
+.gLeft { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.gTitle { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.gPack { font-size: 14px; }
+.gMarks { flex: 1 1 280px; }
+.gStatus { flex: 0 0 150px; }
+.same { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; }
+.veh { display: inline-flex; gap: 4px; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(0, 0, 0, 0.1); font-size: 12px; white-space: nowrap; }
+.veh b { font-weight: 600; }
+.gDetail { display: flex; flex-direction: column; gap: 10px; padding: 0 18px 18px 48px; min-width: 0; }
+.why { border-radius: 8px; background: #f7f7f5; padding: 10px 12px; font-size: 12.5px; color: #3f3f3a; }
+.why b { font-weight: 600; }
+.unitsHead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
+.unitsTitle { font-weight: 600; font-size: 12.5px; }
+.unitsTitle span { font-weight: 500; }
+.ubox { border: 1px solid rgba(0, 0, 0, 0.08); border-radius: 10px; overflow: auto; }
+.ut { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 760px; }
+.ut th {
+  position: sticky; top: 0; background: #fafaf9; z-index: 1; font-weight: 600; color: #6f6f68; font-size: 11.5px; text-align: left;
+  padding: 8px; border-bottom: 1px solid rgba(0, 0, 0, 0.08); white-space: nowrap;
+}
+.ut td { padding: 7px 8px; border-top: 1px solid rgba(0, 0, 0, 0.05); white-space: nowrap; vertical-align: middle; }
+.ut .num { text-align: right; font-variant-numeric: tabular-nums; }
+.sohSrc { font-size: 11.5px; }
+.linkbtn { background: none; border: 0; padding: 6px 0; color: #4d5300; font-weight: 600; font-size: 12.5px; text-decoration: underline; align-self: flex-start; }
+
 /* Phone width: the actions drop under the row instead of squeezing it, and the detail loses the checkbox indent. */
 @media (max-width: 640px) {
   .rowLine { flex-wrap: wrap; gap: 0; }
   .actions { padding: 0 18px 14px; width: 100%; box-sizing: border-box; }
   .detail { padding-left: 18px; }
+  .gDetail { padding-left: 18px; }
   .status { flex: 1 1 190px; }
+  .gStatus { flex: 1 1 150px; }
 }
