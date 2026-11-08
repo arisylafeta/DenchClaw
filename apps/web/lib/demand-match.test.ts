@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Demand } from "./bulk-demand";
-import { bestLine, bySeller, cellCodes, cellMiss, isPartCode, makerWord, mergeSupplyDuplicates, fewestSellers, kwhFromText, matchDemand, requestCodeHit, requirementFor, scoreCandidate, sellerKey, statedUnits, type Candidate } from "./demand-match";
+import { bestLine, bySeller, cellCodes, cellMiss, isPartCode, makeAndModel, makerWord, mergeSupplyDuplicates, fewestSellers, kwhFromText, matchDemand, requestCodeHit, requirementFor, scoreCandidate, sellerKey, statedUnits, type Candidate } from "./demand-match";
 
 vi.mock("server-only", () => ({}));
 
@@ -358,6 +358,18 @@ describe("review fixes (v4 slice 1)", () => {
     expect(lfp.partCodes).toEqual([]);
     const agm = unit({ source: "trade", make: null, model: null, format: null, title: "12V 100Ah LiFePO4 leisure battery", description: "LiFePO4 12.8V 100Ah" });
     expect(requestCodeHit(lfp, agm)).toBeNull();
+  });
+
+  it("never names the make twice when the model repeats it, whatever the case or accents", () => {
+    expect(makeAndModel("Citroen", "Citroen Berlingo Electric")).toBe("Citroen Berlingo Electric");
+    expect(makeAndModel("Toyota", "Toyota Proace (K0 van, EV)")).toBe("Toyota Proace (K0 van, EV)");
+    expect(makeAndModel("Citroen", "CITROEN C4 SPACETOURER")).toBe("Citroen C4 SPACETOURER");
+    expect(makeAndModel("Citroën", "Citroen Berlingo")).toBe("Citroën Berlingo");
+    expect(makeAndModel("VW", "VW e-Up!")).toBe("VW e-Up!");
+    expect(makeAndModel("MG", "MG4")).toBe("MG MG4");
+    const r = requirementFor(demand({ wants: "Toyota Proace 50 kWh packs" }), new Set(["toyota", "proace"]));
+    const m = scoreCandidate(r, unit({ make: "Toyota", model: "Toyota Proace (K0 van, EV)", title: "Toyota Proace", kwh: 50 }))!;
+    expect(m.checks.find((c) => c.key === "product")?.detail).toBe("Toyota Proace (K0 van, EV)");
   });
 
   it("reads one maker under its other names", () => {

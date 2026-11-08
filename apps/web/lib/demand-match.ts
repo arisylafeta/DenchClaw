@@ -303,6 +303,23 @@ const MAKER_ALIAS: [RegExp, string][] = [
   [/^murata\b/, "sony"],
 ];
 
+const fold = (text: string) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+/**
+ * Make and model as one name, without the make twice: stock lists often repeat it in the model ("Citroen" +
+ * "CITROEN C4 SPACETOURER", "Toyota" + "Toyota Proace", "Citroën" + "Citroen Berlingo"). Case and accents are ignored.
+ */
+export function makeAndModel(make: string | null | undefined, model: string | null | undefined): string {
+  const m = (make ?? "").trim();
+  let rest = (model ?? "").trim();
+  if (m) {
+    while (fold(rest).startsWith(fold(m)) && (rest.length === m.length || /[\s\-/,]/.test(rest[m.length]))) {
+      rest = rest.slice(m.length).replace(/^[\s\-/,]+/, "");
+    }
+  }
+  return [m, rest].filter(Boolean).join(" ");
+}
+
 /** One lower-case word for a maker as written: "Samsung SDI" and "SAMSUNG" are "samsung", "LG Energy Solution" is "lg". */
 export function makerWord(value: string | null | undefined): string | null {
   const text = (value ?? "").toLowerCase().trim().replace(/\s+/g, " ");
@@ -541,7 +558,7 @@ export function scoreCandidate(req: Requirement, candidate: Candidate): Match | 
     const makeOk = !req.makeWords.length || req.makeWords.some((w) => text.includes(` ${w} `));
     if (hit && !makeOk && c.make) return null;
     checks.push(hit
-      ? { key: "product", label: "Product", state: "pass", detail: `${[c.make, c.model].filter(Boolean).join(" ") || c.title}` }
+      ? { key: "product", label: "Product", state: "pass", detail: makeAndModel(c.make, c.model) || c.title }
       : { key: "product", label: "Product", state: "partial", detail: `AI: ${c.ai!.reason}` });
   } else if (req.makeWords.length) {
     const hit = req.makeWords.some((w) => text.includes(` ${w} `));
@@ -640,8 +657,7 @@ const groupLabel = (m: Match) => {
   const c = m.candidate;
   if (c.source === "trade" || c.source === "supply") return c.title;
   // Stock lists often repeat the make in the model ("Citroen Citroen Berlingo").
-  const model = c.make && c.model?.toLowerCase().startsWith(c.make.toLowerCase()) ? c.model.slice(c.make.length).trim() : c.model;
-  const name = [c.make, model].filter(Boolean).join(" ") || c.title;
+  const name = makeAndModel(c.make, c.model) || c.title;
   const size = c.kwh ? ` · ${c.kwhEstimated ? "~" : ""}${c.kwh < 1 ? `${Math.round(c.kwh * 1000)} Wh` : kwhLabel(c.kwh)}` : "";
   return `${name}${size}${c.format && c.format !== "Packs" ? ` ${c.format.toLowerCase()}` : ""}`;
 };

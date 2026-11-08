@@ -1,7 +1,7 @@
 // The request Matches row in words: what the supplier holds, where that comes from, and one fit mark per
 // requirement the request states (✓ fits, ≈ close, ? not stated, ✗ misses). Pure: built from the scorer's own checks,
 // so the marks and the ranking cannot disagree.
-import { cellCodes, countryFromText, type Candidate, type Check, type CheckState, type Match, type Requirement } from "../demand-match";
+import { cellCodes, countryFromText, makeAndModel, type Candidate, type Check, type CheckState, type Match, type Requirement } from "../demand-match";
 import type { FitMark, FitState } from "../matches-types";
 
 const STATE: Record<CheckState, FitState> = { pass: "fits", partial: "close", unknown: "unstated", fail: "misses" };
@@ -30,10 +30,8 @@ export function productName(c: Candidate): string {
   const code = codeLike(c.supplierRef) ? c.supplierRef! : null;
   const codeMaker = cellCodes(`${c.title} ${code ?? ""}`.toLowerCase()).makes[0];
   const make = c.make ? prettyMake(c.make) : codeMaker ? codeMaker[0].toUpperCase() + codeMaker.slice(1) : null;
-  // Stock lists often repeat the make in the model ("Citroen Citroen Berlingo").
-  const rawModel = c.model ?? (c.make ? null : code);
-  const model = make && rawModel?.toLowerCase().startsWith(make.toLowerCase()) ? rawModel.slice(make.length).trim() : rawModel;
-  const name = [make, model].filter(Boolean).join(" ");
+  // Stock lists often repeat the make in the model ("Citroen Citroen Berlingo"): makeAndModel drops the repeat.
+  const name = makeAndModel(make, c.model ?? (c.make ? null : code));
   if (!name || (!c.model && !code)) {
     return c.title;
   }
