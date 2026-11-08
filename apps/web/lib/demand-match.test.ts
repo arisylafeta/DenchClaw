@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Demand } from "./bulk-demand";
-import { bestLine, bySeller, mergeSupplyDuplicates, fewestSellers, kwhFromText, matchDemand, requirementFor, scoreCandidate, sellerKey, type Candidate } from "./demand-match";
+import { bestLine, bySeller, cellCodes, cellMiss, mergeSupplyDuplicates, fewestSellers, kwhFromText, matchDemand, requestCodeHit, requirementFor, scoreCandidate, sellerKey, statedUnits, type Candidate } from "./demand-match";
 
 vi.mock("server-only", () => ({}));
 
@@ -249,5 +249,73 @@ describe("supply/marketplace duplicates (REB-566)", () => {
     const diff = unit({ source: "supply", seller: "Other Co", title: "INR18650-26E cells" });
     const trade = unit({ source: "trade", seller: "Voltaplex", title: "INR18650-26E cells" });
     expect(mergeSupplyDuplicates([diff, trade], [market]).feed).toHaveLength(2);
+  });
+});
+
+// Matches v4 slice 1, on the shapes of the live rows (8 Nov): the 50E request, Ro Cell's Lishen catalogue line and the
+// seller email's INR21700-50E line, which has no make, model or format and keeps its code in supplier_ref.
+describe("honest matches on a cell request (v4)", () => {
+  const ask = () => requirementFor(demand({
+    product_family: "Samsung 50E-equivalent 21700 cells", wants: "500,000 Samsung 50E (21700) cylindrical cells or equivalent",
+    volume: 500_000, volume_unit: "cells", quantity: "500,000", location: "Poland (delivery site tbc)",
+    spec: { formats: ["Cells"], cell_makers: ["Samsung SDI"], cell_formats: ["Cylindrical"] },
+  }));
+  const lishen = (o: Partial<Candidate> = {}) => unit({
+    key: "stock:rocell_r15", source: "trade", seller: "Ro Cell", make: "LISHEN", model: "LR21700LH", format: "Cells", title: "LISHEN LR21700LH",
+    description: "Cell: LISHEN LR21700LH - 10,8Wh 3Ah 3,6V", supplierRef: "rocell-2026-10-08-r15", kwh: 0.011, units: null, ...o,
+  });
+  const inr50e = (o: Partial<Candidate> = {}) => unit({
+    key: "stock:sto_91fe9a2f", source: "trade", seller: "E-bike seller", make: null, model: null, format: null,
+    title: "Seller email 22 Oct 2026: loose cells from e-bike packs, shipping from Florida, USA",
+    description: "Seller email 22 Oct 2026: loose cells from e-bike packs, shipping from Florida, USA; part of 1,400+ cell lot; label code 2 LF1T; 20 cells per source pack. Per-type quantity and condition not stated. Seller wrote '2170' for the 21700 type.",
+    supplierRef: "INR21700-50E", units: 1, unitsBare: true, ...o,
+  });
+
+  it("reads the maker and model the ask names, from the spec and from the cell code", () => {
+    const r = ask();
+    expect(r.cellMakers).toEqual(["samsung"]);
+    expect(r.cellModels).toEqual(["50e"]);
+    expect(cellCodes("inr21700-50e")).toEqual({ models: ["50e"], makes: ["samsung"] });
+    expect(cellCodes("lishen lr21700lh")).toEqual({ models: ["lh"], makes: ["lishen"] });
+  });
+
+  it("drops Lishen LR21700LH from a Samsung 50E request, and says why", () => {
+    expect(scoreCandidate(ask(), lishen())).toBeNull();
+    expect(cellMiss(ask(), lishen())).toMatchObject({ key: "make" });
+    // A Samsung line with another model is a miss too; an unstated maker or model stays a match to check.
+    expect(cellMiss(ask(), unit({ format: "Cells", title: "Samsung INR21700-40T cells" }))).toMatchObject({ key: "model" });
+    const unstated = scoreCandidate(ask(), unit({ format: "Cells", title: "21700 cells, grade A", units: 80_000 }))!;
+    expect(unstated.checks.find((c) => c.key === "model")).toMatchObject({ state: "unknown", detail: "Maker and model not stated" });
+    expect(unstated.verdict).toBe("check");
+  });
+
+  it("finds the INR21700-50E line through its code, though it has no make, model or format", () => {
+    expect(requestCodeHit(ask(), inr50e())).toBe("50e");
+    const m = scoreCandidate(ask(), inr50e())!;
+    expect(m).not.toBeNull();
+    expect(m.checks.find((c) => c.key === "model")).toMatchObject({ state: "pass", detail: "Samsung 50E" });
+    // Its bare 1 is a placeholder on a cell request: not stated, never "1 of 500000".
+    expect(m.candidate.units).toBeNull();
+    expect(m.checks.find((c) => c.key === "quantity")).toMatchObject({ state: "unknown", detail: "Quantity not stated" });
+    expect(m.checks.map((c) => c.detail)).not.toContain("1 of 500000");
+  });
+
+  it("keeps a 12 V line with no make out of a pack request", () => {
+    const packs = requirementFor(demand({ wants: "Complete, reusable EV traction-battery packs 50kWh+", volume: 24, volume_unit: "packs", spec: { formats: ["Packs"] } }));
+    const agm = unit({ source: "trade", make: null, model: null, format: null, title: "VW GOLF IV Van 1J1 2001 Battery YBX9012", partNumber: "YBX9012", supplierRef: "135571281834" });
+    expect(requestCodeHit(packs, agm)).toBeNull();
+    // A part code the request names does let a line with no make in.
+    const byPart = requirementFor(demand({ wants: "40 Toyota Proace packs SU001B5189", spec: { formats: ["Packs"] } }));
+    expect(requestCodeHit(byPart, unit({ make: null, title: "Battery pack", supplierRef: "SU001B5189" }))).toBe("su001b5189");
+  });
+
+  it("reads a bare 1 as not stated on cells and modules, and as one pack on packs", () => {
+    const cellLine = unit({ format: "Cells", units: 1, unitsBare: true });
+    const packLine = unit({ format: "Packs", units: 1, unitsBare: true });
+    expect(statedUnits(ask(), cellLine)).toBeNull();
+    const packs = requirementFor(demand({ wants: "Hyundai Kona 64 kWh packs", volume: 10, volume_unit: "packs" }));
+    expect(statedUnits(packs, packLine)).toBe(1);
+    // A stated 1 (not bare) stays 1 everywhere.
+    expect(statedUnits(ask(), unit({ format: "Cells", units: 1 }))).toBe(1);
   });
 });

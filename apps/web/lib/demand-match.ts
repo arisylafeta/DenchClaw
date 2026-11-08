@@ -21,6 +21,8 @@ export type Candidate = {
   /** True when kWh was borrowed from marketplace listings of the same make and model, not stated for this row. */
   kwhEstimated: boolean;
   units: number | null;
+  /** True when `units` is only a stock line's default of 1, with no stated quantity behind it. */
+  unitsBare?: boolean;
   price: number | null;
   currency: string | null;
   /** True when the currency was inferred from the seller's country rather than stated. */
@@ -30,6 +32,16 @@ export type Candidate = {
   soh: number | null;
   year: number | null;
   partNumber: string | null;
+  /** Every part or cell code the source states, when it has more than one. */
+  partNumbers?: string[];
+  /** The seller's own reference for the line, often the cell or part code ("INR21700-50E"). */
+  supplierRef?: string | null;
+  /** The source's own description of the line. */
+  description?: string | null;
+  /** Where the line comes from, in words: "catalogue", "stock list", "email", "marketplace listing". */
+  sourceKind?: string | null;
+  /** The day the source stated it, when known. */
+  observedOn?: string | null;
   photos: number;
   tested: boolean;
   verified: boolean;
@@ -43,7 +55,7 @@ export type Candidate = {
 
 export type CheckState = "pass" | "partial" | "unknown" | "fail";
 export type Check = { key: CheckKey; label: string; state: CheckState; detail: string };
-export type CheckKey = "product" | "capacity" | "chemistry" | "format" | "quantity" | "price";
+export type CheckKey = "product" | "model" | "capacity" | "chemistry" | "format" | "quantity" | "price";
 
 export type Economics = {
   /** Seller price in EUR per kWh, when price and kWh are known. */
@@ -173,6 +185,14 @@ export type Requirement = {
   /** Traction packs for reuse: containerised and stationary systems are a different product. */
   evOnly: boolean;
   cellTokens: string[];
+  /** Cell makers the ask names, as one lower-case word each ("samsung"), from `spec.cell_makers` and the words. */
+  cellMakers: string[];
+  /** Cell model codes the ask names ("50e" from "Samsung 50E" or "INR21700-50E"). */
+  cellModels: string[];
+  /** Part and product codes in the ask ("su001b5189", "inr21700-50e"): a stock line with no make must hit one. */
+  partCodes: string[];
+  /** Conditions the ask states (`spec.conditions`), for the condition mark. */
+  conditions: string[];
   /** Human summary of what the ask pins down, for the "What they want" card. */
   pinned: string[];
 };
@@ -226,6 +246,46 @@ export function countryFromText(text: string | null | undefined): string | null 
   return null;
 }
 
+// Cell model codes, as sellers and buyers write them. A code names its maker where the maker is not in doubt:
+// "50E" and "INR21700-50E" are Samsung, "NCR…" is Panasonic, "LR21700LH" is Lishen. "INR" alone names no maker.
+const CELL_MODEL_MAKER: Record<string, string> = {
+  "50e": "samsung", "50s": "samsung", "50g": "samsung", "53g": "samsung", "48g": "samsung", "40t": "samsung", "35e": "samsung",
+  "30q": "samsung", "33g": "samsung", "29e": "samsung", "26j": "samsung", "25r": "samsung", "26e": "samsung", "58e": "samsung",
+  mj1: "lg", hg2: "lg", he4: "lg", hb6: "lg", mh1: "lg", m50: "lg", m50lt: "lg", m50t: "lg", m58t: "lg", m36: "lg",
+  p42a: "molicel", p45b: "molicel", p28a: "molicel", p26a: "molicel", p50b: "molicel",
+};
+const CELL_PREFIX_MAKER: Record<string, string> = { ncr: "panasonic", lr: "lishen" };
+/** Every word that names a cell maker, for reading the maker a stock line states. */
+const CELL_MAKER_WORDS = [...CELL_MAKERS, "molicel", "murata", "sony", "bak", "dmegc", "ampace", "hithium", "rept"];
+const CODE_STOP = new Set(["cell", "cells", "pcs", "li", "ion", "lot", "lots", "pack", "packs", "type", "size", "mah", "ah", "wh", "v"]);
+const SIZE = "18650|21700|26650|32700|4680|2170";
+// "INR21700-50E", "LR21700LH", "NCR2170M-4", "26650FS3": an optional maker prefix, the size, then the model suffix.
+const FULL_CODE = new RegExp(`(?<![a-z0-9])([a-z]{2,4})?-?(?:${SIZE})-?([a-z]{1,3}\\d{0,2}[a-z]?|\\d{2}[a-z]{1,2})?(?![a-z0-9])`, "g");
+// A model written on its own: "Samsung 50E", "LG MJ1", "Molicel P42A".
+const LONE_MODEL = /(?<![a-z0-9])(\d{2}[eqtrgj]|mj1|hg2|he4|hb6|mh1|m50lt|m50t|m58t|m50|p42a|p45b|p28a|p26a|p50b)(?![a-z0-9])/g;
+
+/** Cell model codes in a text and the makers they name. The text should already be lower case. */
+export function cellCodes(text: string): { models: string[]; makes: string[] } {
+  const models = new Set<string>();
+  const makes = new Set<string>();
+  for (const m of text.matchAll(FULL_CODE)) {
+    const prefix = m[1];
+    const suffix = m[2];
+    if (prefix && CELL_PREFIX_MAKER[prefix]) makes.add(CELL_PREFIX_MAKER[prefix]);
+    if (suffix && !CODE_STOP.has(suffix)) models.add(suffix);
+  }
+  for (const m of text.matchAll(LONE_MODEL)) models.add(m[1]);
+  for (const model of models) if (CELL_MODEL_MAKER[model]) makes.add(CELL_MODEL_MAKER[model]);
+  return { models: [...models], makes: [...makes] };
+}
+
+/** One lower-case word for a maker as written: "Samsung SDI" and "SAMSUNG" are "samsung", "LG Energy Solution" is "lg". */
+export function makerWord(value: string | null | undefined): string | null {
+  const word = (value ?? "").toLowerCase().trim().split(/[\s,/()-]+/)[0];
+  return word && !NO_MAKER.has(word) ? word : null;
+}
+const NO_MAKER = new Set(["unknown", "n", "na", "n.a", "none", "other", "various", "generic", "mixed", "unbranded", "oem"]);
+
 
 /** Reads what a demand row actually pins down: the structured spec first, then its words. A word only counts as a
  * product when some seller uses it in a make or model (`vocab`), so "homogeneous lots" never becomes a product. */
@@ -261,6 +321,15 @@ export function requirementFor(demand: Demand, vocab?: Set<string>): Requirement
   }
   const cellTokens = [...new Set([...t.matchAll(/(?<![0-9])(18650|21700|26650|32700|4680|2170)(?![0-9])| (\d{2}e) /g)]
     .map((m) => (m[1] === "2170" ? "21700" : m[1] ?? m[2])))];
+  const askCodes = cellCodes(t);
+  const cellMakers = [...new Set([
+    ...(spec.cell_makers ?? []).map(makerWord),
+    ...CELL_MAKER_WORDS.filter((word) => t.includes(` ${word} `)),
+    ...askCodes.makes,
+  ].filter((word): word is string => !!word))];
+  // A code has letters and digits and is not a figure with its unit ("64kwh", "80-100ah") or a year range.
+  const partCodes = [...new Set(t.trim().split(" ").filter((word) => word.length >= 5 && /[a-z]/.test(word) && /\d/.test(word)
+    && !/^[\d.]+(-[\d.]+)?(kwh|kw|ah|mah|wh|mwh|v|km|kg|x)$/.test(word)))];
   const kwh = spec.kwh_min != null || spec.kwh_max != null
     ? { min: spec.kwh_min ?? 0, max: spec.kwh_max ?? 10_000 }
     : kwhFromText(text) ?? (platformKwh ? { options: platformKwh } : null);
@@ -296,6 +365,10 @@ export function requirementFor(demand: Demand, vocab?: Set<string>): Requirement
     evOnly: (spec.origins ?? []).some((o) => o === "Passenger EV" || o === "Bus or truck") || / (ev|traction|traction-battery|vehicle) /.test(t),
     wantsNew: (spec.conditions ?? []).length > 0 && (spec.conditions ?? []).every((c) => c === "New or surplus"),
     cellTokens,
+    cellMakers: cellTokens.length ? cellMakers : [],
+    cellModels: cellTokens.length ? askCodes.models : [],
+    partCodes,
+    conditions: [...(spec.conditions ?? [])],
     pinned: [],
   };
   req.pinned = [
@@ -309,7 +382,65 @@ export function requirementFor(demand: Demand, vocab?: Set<string>): Requirement
   return req;
 }
 
-const candidateText = (c: Candidate) => norm(`${c.make ?? ""} ${c.model ?? ""} ${c.title} ${c.partNumber ?? ""}`);
+// The seller's reference and description often carry the only code on a line ("INR21700-50E" in `supplier_ref`).
+const candidateText = (c: Candidate) =>
+  norm(`${c.make ?? ""} ${c.model ?? ""} ${c.title} ${c.partNumber ?? ""} ${(c.partNumbers ?? []).join(" ")} ${c.supplierRef ?? ""} ${c.description ?? ""}`);
+
+/** The maker a line states: its make, else a maker word in its text, else the maker its cell code names. */
+export function statedCellMaker(c: Candidate): string | null {
+  const text = candidateText(c);
+  return makerWord(c.make) ?? CELL_MAKER_WORDS.find((word) => text.includes(` ${word} `)) ?? cellCodes(text).makes[0] ?? null;
+}
+
+/** True for an ask for cells or modules, where a lone stock quantity of 1 is a placeholder, never one cell. */
+const wantsSmallUnits = (req: Requirement) =>
+  req.cellTokens.length > 0 || (req.formats.length > 0 && req.formats.every((f) => f === "Cells" || f === "Modules"));
+
+/**
+ * The quantity a seller actually stated. A stock line's bare 1 (nothing else behind it) on a cell or module ask, or on
+ * a cell or module line, is "not stated"; for packs, 1 still means one pack.
+ */
+export function statedUnits(req: Requirement, c: Candidate): number | null {
+  if (c.units == null) return null;
+  if (c.unitsBare && c.units === 1 && (wantsSmallUnits(req) || c.format === "Cells" || c.format === "Modules")) return null;
+  return c.units;
+}
+
+/**
+ * The code from the ask that a stock line with no make hits: a cell model, a part code, or for a cell ask its size.
+ * Such a line is only considered when this returns one, so 12 V and AGM lines with no make stay out of pack asks.
+ */
+export function requestCodeHit(req: Requirement, c: Candidate): string | null {
+  const text = candidateText(c);
+  const models = cellCodes(text).models;
+  const model = req.cellModels.find((m) => models.includes(m));
+  if (model) return model;
+  const part = req.partCodes.find((code) => text.includes(code));
+  if (part) return part;
+  const size = req.cellTokens.length ? statedCellSize(text) : null;
+  return size && req.cellTokens.includes(size) ? size : null;
+}
+
+export type CellMiss = { key: "make" | "model"; detail: string };
+
+/**
+ * Why a cell line is a different product from the one asked for, or null. A different stated maker or model is a miss;
+ * an unstated one is not. Slice 3 shows these as near matches, so the reason is returned rather than swallowed.
+ */
+export function cellMiss(req: Requirement, c: Candidate): CellMiss | null {
+  if (!req.cellTokens.length) return null;
+  const maker = statedCellMaker(c);
+  if (req.cellMakers.length && maker && !req.cellMakers.includes(maker)) {
+    return { key: "make", detail: `Maker is ${titleWord(maker)}, the buyer asked for ${req.cellMakers.map(titleWord).join(" or ")}` };
+  }
+  const models = cellCodes(candidateText(c)).models;
+  if (req.cellModels.length && models.length && !models.some((m) => req.cellModels.includes(m))) {
+    return { key: "model", detail: `Model is ${models.map((m) => m.toUpperCase()).join(" / ")}, the buyer asked for ${req.cellModels.map((m) => m.toUpperCase()).join(" or ")}` };
+  }
+  return null;
+}
+
+const titleWord = (word: string) => (word.length <= 3 ? word.toUpperCase() : word[0].toUpperCase() + word.slice(1));
 
 function kwhFits(req: Requirement, kwh: number): CheckState {
   if (!req.kwh) return "unknown";
@@ -323,7 +454,7 @@ function kwhFits(req: Requirement, kwh: number): CheckState {
 }
 
 const kwhLabel = (kwh: number) => `${Math.round(kwh * 10) / 10} kWh`;
-const PRODUCT_CHECKS = new Set<CheckKey>(["product", "capacity", "chemistry", "format"]);
+const PRODUCT_CHECKS = new Set<CheckKey>(["product", "model", "capacity", "chemistry", "format"]);
 
 // Energy a cylindrical cell of each size can hold, in Wh. A "21700" listing at 340 Wh is a mislabelled prismatic.
 const CELL_WH: Record<string, [number, number]> = { "18650": [5, 13], "21700": [9, 26], "26650": [8, 22], "32700": [12, 25], "4680": [70, 110] };
@@ -334,9 +465,13 @@ export function statedCellSize(text: string): string | null {
 }
 
 /** Judges one candidate: null when it is clearly not what was asked for, else Exact or Check with its economics. */
-export function scoreCandidate(req: Requirement, c: Candidate): Match | null {
+export function scoreCandidate(req: Requirement, candidate: Candidate): Match | null {
   const checks: Check[] = [];
+  const units = statedUnits(req, candidate);
+  // The match carries the honest quantity, so every reader (detail line, coverage, groups) sees "not stated".
+  const c = units === candidate.units ? candidate : { ...candidate, units };
   const text = candidateText(c);
+  let modelCheck: Check | null = null;
 
   // Product: named models must appear; else named makes; else the trade/supply AI judgement.
   if (req.cellTokens.length) {
@@ -356,6 +491,18 @@ export function scoreCandidate(req: Requirement, c: Candidate): Match | null {
     if (req.cellFormats.length && c.cellFormat && !req.cellFormats.some((f) => c.cellFormat!.toLowerCase().includes(f.toLowerCase()))) return null;
     const hit = size && sizes.includes(size) ? size : req.cellTokens.find((tok) => !(tok in CELL_WH) && text.includes(tok));
     checks.push({ key: "product", label: "Cell type", state: hit ? "pass" : "unknown", detail: hit ? `${hit} cells` : "Cell size not stated" });
+    // Maker and model: a different stated one is another product; an unstated one stays a match to check.
+    if (cellMiss(req, c)) return null;
+    if (req.cellMakers.length || req.cellModels.length) {
+      const maker = statedCellMaker(c);
+      const models = cellCodes(text).models.filter((m) => req.cellModels.includes(m));
+      const makerOk = !req.cellMakers.length || !!maker;
+      const modelOk = !req.cellModels.length || models.length > 0;
+      const name = [maker ? titleWord(maker) : null, models[0]?.toUpperCase()].filter(Boolean).join(" ");
+      modelCheck = makerOk && modelOk
+        ? { key: "model", label: "Cell model", state: "pass", detail: name }
+        : { key: "model", label: "Cell model", state: "unknown", detail: !makerOk && !modelOk ? "Maker and model not stated" : !makerOk ? "Maker not stated" : "Model not stated" };
+    }
   } else if (req.products.length) {
     const hit = req.products.find((p) => p.anyOf.some((m) => text.includes(` ${m} `) || text.includes(` ${m.replace(/\s/g, "")} `))
       && !p.not.some((n) => text.includes(` ${n} `)));
@@ -432,15 +579,17 @@ export function scoreCandidate(req: Requirement, c: Candidate): Match | null {
   // Quantity. A seller who has not stated one is "Check", never counted as one unit.
   if (c.units == null && (req.unitsNeeded || req.kwhNeeded)) {
     checks.push({ key: "quantity", label: "Quantity", state: "unknown", detail: "Quantity not stated" });
-  } else if (req.unitsNeeded) {
-    const have = c.units ?? 1;
+  } else if (req.unitsNeeded && c.units != null) {
+    const have = c.units;
     checks.push({ key: "quantity", label: "Quantity", state: have >= req.unitsNeeded ? "pass" : "partial",
       detail: `${have} of ${req.unitsNeeded} ${have >= req.unitsNeeded ? "" : "(group with others below)"}`.trim() });
-  } else if (req.kwhNeeded && c.kwh) {
-    const have = (c.units ?? 1) * c.kwh;
+  } else if (req.kwhNeeded && c.kwh && c.units != null) {
+    const have = c.units * c.kwh;
     checks.push({ key: "quantity", label: "Quantity", state: have >= req.kwhNeeded ? "pass" : "partial",
       detail: `${Math.round(have)} of ${Math.round(req.kwhNeeded)} kWh` });
   }
+  // Last, so a reader that shows the first open check (the supply tab's gap) keeps what it showed before.
+  if (modelCheck) checks.push(modelCheck);
 
   // Location, seller trust and freshness are shown as columns, not scored: the trader judges them at a glance.
   // Exact needs every product check to pass and no missing quantity or seller price; a buyer with no price set does not count against it.
