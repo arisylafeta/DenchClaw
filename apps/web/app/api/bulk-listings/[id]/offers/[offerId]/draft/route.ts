@@ -1,3 +1,4 @@
+import { ALLOWED_EMAILS, currentUser } from "@/lib/auth";
 import { getListing } from "@/lib/crm-postgres/bulk-listings";
 import { offerOutreach, setOpenDraft } from "@/lib/crm-postgres/bulk-offer-mail";
 import { readMailDraft } from "@/lib/crm-postgres/mail";
@@ -24,6 +25,13 @@ function kindFor(stage: string | null, chase: boolean, kind: "supply" | "demand"
 export async function POST(_req: Request, { params }: Context) {
   const guard = await guardBulkTrades();
   if ("response" in guard) { return guard.response; }
+  // The draft is written in Alex's voice and signed by him, so it takes the same allow-list as the send. Read-only
+  // access to the tab is not enough to put words in his mouth.
+  const user = await currentUser();
+  if (!user) { return Response.json({ error: "Unauthorized" }, { status: 401 }); }
+  if (!ALLOWED_EMAILS.has(user.email.toLowerCase())) {
+    return Response.json({ error: "Only Ari or Alex can create offer drafts." }, { status: 403 });
+  }
   const { id, offerId } = await params;
   if (!await getListing(id)) { return notFound("Listing"); }
   const outreach = await offerOutreach(id, offerId);

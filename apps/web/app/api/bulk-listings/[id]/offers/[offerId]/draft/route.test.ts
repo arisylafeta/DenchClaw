@@ -56,6 +56,17 @@ describe("POST offer draft", () => {
     expect(m.offerOutreach).not.toHaveBeenCalled();
   });
 
+  // The draft goes out under Alex's name, so creating one takes the sender allow-list, not just a session.
+  it("refuses a signed-in user who may not send as Alex, and writes no draft", async () => {
+    m.currentUser.mockResolvedValue({ id: "u2", email: "someone@rebattery.io", displayName: "Someone" });
+    const res = await call();
+    expect(res.status).toBe(403);
+    expect((await res.json() as { error: string }).error).toMatch(/Only Ari or Alex/);
+    expect(m.getListing).not.toHaveBeenCalled();
+    expect(m.createOfferEmailDraft).not.toHaveBeenCalled();
+    expect(m.setOpenDraft).not.toHaveBeenCalled();
+  });
+
   it("creates a draft, stores its id and returns copy without the other party's name", async () => {
     const res = await call();
     expect(res.status).toBe(201);
