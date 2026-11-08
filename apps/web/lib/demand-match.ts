@@ -108,7 +108,7 @@ export const toEur = (amount: number | null, currency: string | null) =>
   amount == null || !currency || !(currency.toUpperCase() in EUR_PER) ? null : amount * EUR_PER[currency.toUpperCase()];
 
 // Buy-box makes as the words a seller writes in make or model.
-const MAKE_WORDS: Record<string, string[]> = {
+export const MAKE_WORDS: Record<string, string[]> = {
   Tesla: ["tesla"],
   "VW Group": ["volkswagen", "vw", "skoda", "audi", "seat", "cupra", "porsche"],
   Renault: ["renault", "dacia"],
@@ -126,16 +126,16 @@ const MAKE_WORDS: Record<string, string[]> = {
   "Toyota or Lexus": ["toyota", "lexus"],
 };
 // Cell and module makers count as makes too ("LG Chem modules", "CATL cells").
-const CELL_MAKERS = ["lg", "samsung", "catl", "panasonic", "eve", "svolt", "lishen", "calb", "gotion", "sk", "farasis", "envision", "aesc", "cbak", "terrae"];
+export const CELL_MAKERS = ["lg", "samsung", "catl", "panasonic", "eve", "svolt", "lishen", "calb", "gotion", "sk", "farasis", "envision", "aesc", "cbak", "terrae"];
 const MAKE_WORDS_FLAT = new Set([...Object.values(MAKE_WORDS).flat(), ...CELL_MAKERS]);
 const ALL_MAKE_WORDS = new Set([...MAKE_WORDS_FLAT, "stellantis", "group", "chem", "sdi", "energy", "solution"]);
 
 // Platform names buyers use, as the models a seller lists. Each alias expands to any of its models.
 // `not` drops a model that shares the word ("Proace City" is a K9 van, not the K0 Proace); `kwh` is what the platform
 // name itself implies when the ask gives no capacity.
-type Platform = { models: string[]; not?: string[]; kwh?: number[] };
+export type Platform = { models: string[]; not?: string[]; kwh?: number[] };
 const K9 = ["berlingo", "combo", "partner", "rifter", "doblo", "proace city"];
-const PLATFORMS: Record<string, Platform> = {
+export const PLATFORMS: Record<string, Platform> = {
   meb: { models: ["id.3", "id3", "id.4", "id4", "id.5", "id5", "id. buzz", "buzz", "enyaq", "born", "q4", "elroq"] },
   "e-k9": { models: K9 },
   k9: { models: K9 },
