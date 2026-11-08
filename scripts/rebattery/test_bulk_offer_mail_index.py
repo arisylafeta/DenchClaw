@@ -143,6 +143,28 @@ def test_fills_the_thread_and_proposes_the_link_once_gmail_sync_supplies_it(db):
     assert cur.fetchone() == ("proposed",)
 
 
+def test_a_candidate_offer_with_an_indexed_sent_mail_moves_to_offered(db):
+    _, cur, ids = db
+    link(cur, ids)
+    cur.execute("update crm_bulk_offers set stage = 'candidate', data = '{\"open_draft_id\": \"draft_1\"}'::jsonb where id = %s", (ids["offer"],))
+    mail(cur, f"m1_{ids['tag']}", "outbound", "2026-10-20T10:00:00Z", to=ids["email"], person=ids["person"], thread=ids["thread"])
+    out = run("--apply", "--since", "2026-10-01")
+    assert out.returncode == 0, out.stderr
+    assert "advanced 1" in out.stdout
+    cur.execute("select stage, data->>'open_draft_id' from crm_bulk_offers where id = %s", (ids["offer"],))
+    assert cur.fetchone() == ("offered", None)
+    assert count(cur, "select count(*) from crm_bulk_listing_activity where offer_id = %s and data->>'source' = 'bulk_offer_mail_index' and data->>'stage' = 'offered'", (ids["offer"],)) == 1
+    # Idempotent: a second run finds no candidate and writes no second activity row.
+    again = run("--apply", "--since", "2026-10-01")
+    assert "advanced 0" in again.stdout
+    assert count(cur, "select count(*) from crm_bulk_listing_activity where offer_id = %s and data->>'source' = 'bulk_offer_mail_index' and data->>'stage' = 'offered'", (ids["offer"],)) == 1
+    # Never backwards.
+    cur.execute("update crm_bulk_offers set stage = 'negotiating' where id = %s", (ids["offer"],))
+    assert "advanced 0" in run("--apply", "--since", "2026-10-01").stdout
+    cur.execute("select stage from crm_bulk_offers where id = %s", (ids["offer"],))
+    assert cur.fetchone() == ("negotiating",)
+
+
 def test_reply_is_logged_at_its_real_time_and_never_moves_the_stage(db):
     _, cur, ids = db
     link(cur, ids)

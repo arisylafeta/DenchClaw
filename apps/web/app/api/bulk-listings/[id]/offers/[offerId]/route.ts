@@ -1,4 +1,5 @@
 import { getListing } from "@/lib/crm-postgres/bulk-listings";
+import { markNoStock } from "@/lib/crm-postgres/bulk-offer-mail";
 import { OFFER_STAGES, OfferConflict, addThreadEntry, getOffer, linkOffer, offerThread, updateOffer, type OfferPatch, type OfferStage } from "@/lib/crm-postgres/bulk-offers";
 import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
 
@@ -21,7 +22,8 @@ export async function PATCH(req: Request, { params }: Context) {
   const guard = await guardBulkTrades();
   if ("response" in guard) return guard.response;
   const { id, offerId } = await params;
-  if (!await getListing(id)) return notFound("Listing");
+  const listing = await getListing(id);
+  if (!listing) return notFound("Listing");
   const body = await readJson(req) as Record<string, unknown> | null;
   if (!body) return badRequest("Invalid request.");
   const patch: OfferPatch = {};
@@ -44,7 +46,16 @@ export async function PATCH(req: Request, { params }: Context) {
     catch (err) { if (err instanceof OfferConflict) return Response.json({ error: err.message, offerId: err.existingOfferId ?? null }, { status: 409 }); throw err; }
   }
   const offer = await updateOffer(id, offerId, patch, guard.userId);
-  return offer ? Response.json({ offer }) : notFound("Offer");
+  if (!offer) return notFound("Offer");
+  // "No stock" from a supplier means the stock line we asked about is gone at its source. Exactly that row
+  // is marked stale; on a listing it only suggests closing the listing, which a person still decides.
+  if (offer.stage === "declined" || offer.stage === "lost") {
+    if ((offer.declined_reason ?? "").trim().toLowerCase() === "no stock") {
+      const noStock = await markNoStock(id, offerId, listing.kind === "demand" ? "demand" : "supply", guard.userId);
+      return Response.json({ offer, noStock });
+    }
+  }
+  return Response.json({ offer });
 }
 
 /** Add a note, call or message to the thread. */
@@ -52,7 +63,8 @@ export async function POST(req: Request, { params }: Context) {
   const guard = await guardBulkTrades();
   if ("response" in guard) return guard.response;
   const { id, offerId } = await params;
-  if (!await getListing(id)) return notFound("Listing");
+  const listing = await getListing(id);
+  if (!listing) return notFound("Listing");
   const body = await readJson(req) as Record<string, unknown> | null;
   if (!body || !(KINDS as readonly unknown[]).includes(body.kind)) return badRequest("Invalid entry kind.");
   if (typeof body.title !== "string" || !body.title.trim()) return badRequest("Write something first.");

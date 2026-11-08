@@ -1,4 +1,5 @@
 import { getListing } from "@/lib/crm-postgres/bulk-listings";
+import { chaseOffers } from "@/lib/crm-postgres/bulk-offer-mail";
 import { OFFER_STAGES, OfferConflict, addOffer, listOffers, type OfferStage } from "@/lib/crm-postgres/bulk-offers";
 import { badRequest, guardBulkTrades, linkedWrite, notFound, readJson } from "@/lib/bulk-trades-route";
 
@@ -11,7 +12,10 @@ export async function GET(_req: Request, { params }: Context) {
   if ("response" in guard) return guard.response;
   const { id } = await params;
   if (!await getListing(id)) return notFound("Listing");
-  return Response.json({ offers: await listOffers(id, guard.userId) });
+  const [offers, chase] = await Promise.all([listOffers(id, guard.userId), chaseOffers(id)]);
+  // Chase is worked out when the list is read: an offered offer, one unanswered email, three working days.
+  const due = new Set(chase.map((row) => row.offerId));
+  return Response.json({ offers: offers.map((offer) => ({ ...offer, chase_due: due.has(offer.id) })) });
 }
 
 export async function POST(req: Request, { params }: Context) {
