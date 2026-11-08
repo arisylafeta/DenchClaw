@@ -189,13 +189,20 @@ function ThreadPanel({ base, offerId, request: requestSide, onUpdated, onDraft }
   /** A lost or declined stage waits here until its reason is written. */
   const [outcomeStage, setOutcomeStage] = useState<"declined" | "lost" | null>(null);
   const [outcomeReason, setOutcomeReason] = useState("");
+  /** What the outcome did to the linked stock, or the suggestion when there is no stock link. */
+  const [outcomeNote, setOutcomeNote] = useState<string | null>(null);
   const apply = (r: { offer: OfferRow; thread?: ThreadEntry[] }) => {
     setOffer(r.offer); if (r.thread) setThread(r.thread);
   };
   useEffect(() => { let live = true; request<{ offer: OfferRow; thread: ThreadEntry[] }>(url).then((r) => { if (live) apply(r); }).catch((e) => { if (live) setError(e instanceof Error ? e.message : "Could not load."); }); return () => { live = false; }; }, [url]);
   async function patch(body: Record<string, unknown>) {
     setBusy(true); setError(null);
-    try { const r = await request<{ offer: OfferRow }>(url, { method: "PATCH", body: JSON.stringify(body) }); setOffer(r.offer); const t = await request<{ offer: OfferRow; thread: ThreadEntry[] }>(url); apply(t); onUpdated(); }
+    try {
+      const r = await request<{ offer: OfferRow; noStock?: { marked: string | null; suggestion: string | null } }>(url, { method: "PATCH", body: JSON.stringify(body) });
+      setOffer(r.offer);
+      setOutcomeNote(r.noStock?.marked ? "The linked stock line is now stale." : r.noStock?.suggestion ?? null);
+      const t = await request<{ offer: OfferRow; thread: ThreadEntry[] }>(url); apply(t); onUpdated();
+    }
     catch (err) { setError(err instanceof Error ? err.message : "Could not save."); } finally { setBusy(false); }
   }
   /** Builds or reopens the offer email, then shows it in the side panel to edit and send. */
@@ -255,6 +262,7 @@ function ThreadPanel({ base, offerId, request: requestSide, onUpdated, onDraft }
           <button type="button" disabled={busy} className={`${rowFocus} ${buttonClass}`} style={buttonStyle} onClick={() => setOutcomeStage(null)}>Cancel</button>
         </form>
       )}
+      {outcomeNote && <p role="status" className="text-[12px]" style={{ color: "var(--bt-muted)" }}>{outcomeNote}</p>}
       {offer?.declined_reason && (offer.stage === "declined" || offer.stage === "lost") && (
         <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}><span className="font-semibold">{STAGE_LABEL[offer.stage]}</span>: {offer.declined_reason}</p>
       )}
