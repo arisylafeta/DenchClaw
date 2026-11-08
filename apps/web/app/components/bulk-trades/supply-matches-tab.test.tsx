@@ -160,7 +160,7 @@ describe("Matches tab", () => {
     expect(marks.map((mark) => mark.textContent)).toEqual([
       "✓fits:Samsung 50E", "?not stated:Format", "≈close:US → PL", "✗misses:EUR 2, over max",
     ]);
-    expect(screen.getByText(/Stated stock 0 of 500,000 · 1 source hasn't said how many/)).toBeTruthy();
+    expect(screen.getByLabelText("What we matched on").textContent).toMatch(/Stated stock 0 of 500,000.*1 source hasn't said/);
     expect(screen.getByLabelText("Fit marks").textContent).toContain("? not stated");
     // The marks replace the reason and the quantity line on a request row.
     expect(screen.queryByText("Cell model matches: Samsung 50E")).toBeNull();
@@ -173,9 +173,55 @@ describe("Matches tab", () => {
       source: "Live trade, 7 Nov", fit: [{ key: "quantity", label: "40 available · need 2–13", state: "fits" }],
     })], { id: "btd_stn", kind: "demand", coverage: { stated: 76, need: 2, needMax: 13, unstated: 0 } }))));
     render(<DemandMatchesTab demandId="btd_stn" active />);
-    expect(await screen.findByText(/Stated stock 76 · need 2–13/)).toBeTruthy();
-    expect(screen.queryByText(/76 of 2/)).toBeNull();
+    await screen.findByText("Motorgreen");
+    expect(screen.getByLabelText("What we matched on").textContent).toContain("Stated stock 76 · need 2–13");
+    expect(screen.getByLabelText("What we matched on").textContent).not.toContain("76 of 2");
     expect(screen.getByRole("list", { name: "How it fits" }).textContent).toContain("40 available · need 2–13");
+  });
+
+  it("lays a request out as the mockup: requirement chips, a ranked card, and rows that open", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(result([row({
+      key: "stock:sto_50e", name: "AATGNR (US cell seller)", tags: ["unlisted stock"], reason: "Cell model matches: Samsung 50E", checks: [],
+      detail: "Quantity not stated", price: null, stockId: "sto_50e", country: "United States",
+      holds: "Samsung INR21700-50E · quantity not stated", source: "Email, 27 Oct",
+      quote: "Seller email 22 Oct 2026: loose cells from e-bike packs", link: null, askFor: ["quantity", "price per unit"],
+      fit: [
+        { key: "model", label: "Samsung 50E", state: "fits", name: "Cell model", asked: "Samsung 50E", have: "Samsung INR21700-50E" },
+        { key: "quantity", label: "Quantity", state: "unstated", name: "Quantity", asked: "500,000", have: "Not stated" },
+      ],
+    })], {
+      id: "btd_1", kind: "demand", coverage: { stated: 0, need: 500_000, unstated: 1 },
+      summary: { chips: [{ label: "Samsung 50E-equivalent 21700 cells", strong: true }, { label: "Cells" }, { label: "Ceiling €1.00/cell · internal" }], outreach: { asked: 1, replied: 0, chaseDue: 1 } },
+    }))));
+    render(<DemandMatchesTab demandId="btd_1" active />);
+    expect(await screen.findByText("Samsung 50E-equivalent 21700 cells")).toBeTruthy();
+    const summary = screen.getByLabelText("What we matched on");
+    expect(summary.textContent).toContain("Matched on");
+    expect(summary.textContent).toContain("Ceiling €1.00/cell · internal");
+    expect(summary.textContent).toContain("1 source matches");
+    expect(summary.textContent).toMatch(/1 asked · 0 replied · 1 chase due/);
+    expect(screen.getByText("Matches")).toBeTruthy();
+    expect(screen.getByText("· ranked by fit, then stated quantity")).toBeTruthy();
+    expect(screen.getByText("Not contacted")).toBeTruthy();
+    expect(screen.getByText("Unlisted stock")).toBeTruthy();
+    // The row opens on click: the source, "How it fits" and "This deal with …".
+    const toggle = screen.getAllByRole("button", { expanded: false }).find((button) => button.textContent?.includes("AATGNR"))!;
+    expect(screen.queryByText("Where this comes from")).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Where this comes from")).toBeTruthy();
+    expect(screen.getByText("“Seller email 22 Oct 2026: loose cells from e-bike packs”")).toBeTruthy();
+    const table = screen.getByRole("table");
+    expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual(["Requirement", "Buyer asked", "They have", "Fit"]);
+    // The table's marks are glyph and word.
+    expect(within(table).getAllByRole("row").slice(1).map((r) => r.textContent)).toEqual([
+      "Cell modelSamsung 50ESamsung INR21700-50E✓fits", "Quantity500,000Not stated?not stated",
+    ]);
+    expect(screen.getByText("This deal with AATGNR")).toBeTruthy();
+    expect(screen.getByText("Ask for: quantity, price per unit.")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Add to offers" })).toHaveLength(2);
+    fireEvent.click(toggle);
+    expect(screen.queryByText("Where this comes from")).toBeNull();
   });
 
   it("keeps the supply tab exactly as it was: reason, detail and checks, with no marks or legend", async () => {

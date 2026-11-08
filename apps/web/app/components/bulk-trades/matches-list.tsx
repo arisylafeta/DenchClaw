@@ -2,19 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import type { FitMark, FitState, MatchOffer, MatchRow, MatchTag, MatchesResult } from "@/lib/matches-types";
+import type { MatchOffer, MatchRow, MatchTag, MatchesResult } from "@/lib/matches-types";
 import type { OfferStage } from "@/lib/crm-postgres/bulk-offers";
 import { Button, Chip, LinkButton, StatusDot, type ChipTone } from "@/components/ui/board";
 import { ErrorText, request } from "./trade-ui";
 import { rowFocus } from "./demand-page";
+import { offerDate, RequestMatches, STAGE_LABEL } from "./request-matches";
 import css from "./demand-panel.module.css";
-
-const STAGES: [OfferStage, string][] = [
-  ["candidate", "Candidate"], ["offered", "Offered"], ["negotiating", "Negotiating"],
-  ["contract_out", "Contract out"], ["signed", "Signed"], ["invoiced", "Invoice out"], ["paid", "Paid"], ["complete", "Complete"],
-  ["declined", "Declined"], ["lost", "Lost"],
-];
-const STAGE_LABEL = Object.fromEntries(STAGES) as Record<OfferStage, string>;
 
 /** The six reasons Alex uses, in the order he says them. Any other detail goes in the text field. */
 const QUICK_REASONS = ["Price", "Wrong format", "Wrong chemistry", "Already sourced", "No longer buying", "Other"] as const;
@@ -25,50 +19,6 @@ const TAG_TONE: Record<MatchTag, ChipTone> = {
   marketplace: "neutral",
   "unlisted stock": "neutral",
   lead: "blue",
-};
-
-/** The four fit marks: always a glyph and a word, so colour is never the only signal. */
-const FIT: Record<FitState, { glyph: string; word: string; tone: ChipTone }> = {
-  fits: { glyph: "✓", word: "fits", tone: "green" },
-  close: { glyph: "≈", word: "close", tone: "amber" },
-  unstated: { glyph: "?", word: "not stated", tone: "neutral" },
-  misses: { glyph: "✗", word: "misses", tone: "red" },
-};
-
-function FitMarks({ marks }: { marks: FitMark[] }) {
-  return (
-    <ul className="mt-1 flex flex-wrap gap-1.5" aria-label="How it fits">
-      {marks.map((mark) => (
-        <li key={`${mark.key}:${mark.label}`}>
-          <Chip tone={FIT[mark.state].tone} variant="subtle" title={`${mark.label}: ${FIT[mark.state].word}`}>
-            <span aria-hidden className="font-bold">{FIT[mark.state].glyph}</span>
-            <span className="sr-only">{FIT[mark.state].word}:</span>
-            {mark.label}
-          </Chip>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function FitLegend() {
-  return (
-    <span className="inline-flex flex-wrap gap-x-2" aria-label="Fit marks">
-      {(Object.keys(FIT) as FitState[]).map((state) => (
-        <span key={state}><span aria-hidden className="font-bold">{FIT[state].glyph}</span> {FIT[state].word}</span>
-      ))}
-    </span>
-  );
-}
-
-/** "8 Nov", or "8 Nov 2025" once the date is not this year. */
-const offerDate = (iso: string | null) => {
-  if (!iso) {
-    return "";
-  }
-  const date = new Date(iso);
-  const sameYear = date.getFullYear() === new Date().getFullYear();
-  return date.toLocaleDateString("en-GB", sameYear ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
 };
 
 type Props = {
@@ -126,8 +76,6 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
 
   const rows = showAll ? result.rows : result.rows.slice(0, 10);
   const hidden = result.rows.length - rows.length;
-  const withMarks = result.rows.some((row) => row.fit);
-  const coverage = result.coverage;
 
   async function add(row: MatchRow) {
     setAdding(row.key);
@@ -175,6 +123,75 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
     }
   }
 
+  // The Not a fit reasons, the same on both tabs.
+  const notAFitForm = (row: MatchRow) => (
+    <form
+      className="mt-2 flex flex-col gap-2 rounded-lg border p-2.5"
+      style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
+      aria-label={`Why ${row.name} is not a fit`}
+      onSubmit={(event) => { event.preventDefault(); void saveNotAFit(row); }}
+    >
+      <div className="flex flex-wrap gap-1.5">
+        {QUICK_REASONS.map((reason) => (
+          <button
+            key={reason}
+            type="button"
+            aria-pressed={quick === reason}
+            onClick={() => setQuick(quick === reason ? null : reason)}
+            className={`${rowFocus} rounded-md border px-2 py-1 text-[12px]`}
+            style={{
+              borderColor: quick === reason ? "var(--color-text)" : "var(--color-border)",
+              background: quick === reason ? "var(--color-surface-hover)" : "transparent",
+              fontWeight: quick === reason ? 600 : 400,
+            }}
+          >
+            {reason}
+          </button>
+        ))}
+      </div>
+      <input
+        aria-label="Anything else"
+        maxLength={160}
+        value={note}
+        onChange={(event) => setNote(event.target.value)}
+        placeholder="Anything else (optional)"
+        className="w-full rounded-md border px-2 py-1.5 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
+      />
+      <div className="flex items-center gap-2">
+        <Button type="submit" variant="primary" size="xs" disabled={!quick || saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+        <LinkButton variant="secondary" size="xs" onClick={() => { setAsking(null); setQuick(null); setNote(""); }}>
+          Cancel
+        </LinkButton>
+      </div>
+    </form>
+  );
+
+  const askNotAFit = (row: MatchRow) => { setAsking(asking === row.key ? null : row.key); setQuick(null); setNote(""); };
+
+  // A request lays its matches out as the v4 mockup (summary card, ranked rows that open); a supply listing keeps v3's list.
+  if (result.kind === "demand") {
+    return (
+      <RequestMatches
+        result={result}
+        rows={rows}
+        hidden={hidden}
+        onShowAll={() => setShowAll(true)}
+        criteriaOpen={open}
+        onToggleCriteria={() => setOpen(!open)}
+        adding={adding}
+        onAdd={(row) => void add(row)}
+        asking={asking}
+        onAskNotAFit={askNotAFit}
+        notAFitForm={notAFitForm}
+        error={<ErrorText error={actionError} />}
+        onOpenOffers={onOpenOffers}
+      />
+    );
+  }
+
   return (
     <div className="flex w-full min-w-0 flex-col gap-3">
       <div>
@@ -197,18 +214,7 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
         {result.rows.length > 0 && (
           <p className="mt-1 px-1 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
             {result.rows.length} {result.rows.length === 1 ? "match" : "matches"} · {result.considered.toLocaleString("en-GB")} checked
-            {coverage && (
-              <> · Stated stock {coverage.stated.toLocaleString("en-GB")}
-                {coverage.needMax
-                  ? <> · need {coverage.need.toLocaleString("en-GB")}–{coverage.needMax.toLocaleString("en-GB")}</>
-                  : <> of {coverage.need.toLocaleString("en-GB")}</>}
-                {coverage.unstated > 0 && <> · {coverage.unstated} {coverage.unstated === 1 ? "source hasn't" : "sources haven't"} said how many</>}
-              </>
-            )}
           </p>
-        )}
-        {withMarks && result.rows.length > 0 && (
-          <p className="mt-0.5 px-1 text-[12px]" style={{ color: "var(--color-text-muted)" }}><FitLegend /></p>
         )}
       </div>
 
@@ -228,18 +234,8 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
                     {row.tags.map((tag) => <Chip key={tag} tone={TAG_TONE[tag]}>{tag}</Chip>)}
                     {row.price && <span className="ml-auto shrink-0 text-[12px] font-medium tabular-nums">{row.price}</span>}
                   </div>
-                  {row.fit ? (
-                    <>
-                      <p className="mt-0.5 text-[13px]">{row.holds ?? row.reason}</p>
-                      {row.source && <p className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>{row.source}</p>}
-                      {row.fit.length > 0 && <FitMarks marks={row.fit} />}
-                    </>
-                  ) : (
-                    <>
-                      <p className="mt-0.5 text-[13px]">{row.reason}</p>
-                      {row.detail && <p className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>{row.detail}</p>}
-                    </>
-                  )}
+                  <p className="mt-0.5 text-[13px]">{row.reason}</p>
+                  {row.detail && <p className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>{row.detail}</p>}
                   {row.checks.length > 0 && (
                     <p className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>Check: {row.checks.join(" · ")}</p>
                   )}
@@ -272,50 +268,7 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
                 </div>
               </div>
 
-              {asking === row.key && (
-                <form
-                  className="mt-2 flex flex-col gap-2 rounded-lg border p-2.5"
-                  style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
-                  aria-label={`Why ${row.name} is not a fit`}
-                  onSubmit={(event) => { event.preventDefault(); void saveNotAFit(row); }}
-                >
-                  <div className="flex flex-wrap gap-1.5">
-                    {QUICK_REASONS.map((reason) => (
-                      <button
-                        key={reason}
-                        type="button"
-                        aria-pressed={quick === reason}
-                        onClick={() => setQuick(quick === reason ? null : reason)}
-                        className={`${rowFocus} rounded-md border px-2 py-1 text-[12px]`}
-                        style={{
-                          borderColor: quick === reason ? "var(--color-text)" : "var(--color-border)",
-                          background: quick === reason ? "var(--color-surface-hover)" : "transparent",
-                          fontWeight: quick === reason ? 600 : 400,
-                        }}
-                      >
-                        {reason}
-                      </button>
-                    ))}
-                  </div>
-                  <input
-                    aria-label="Anything else"
-                    maxLength={160}
-                    value={note}
-                    onChange={(event) => setNote(event.target.value)}
-                    placeholder="Anything else (optional)"
-                    className="w-full rounded-md border px-2 py-1.5 text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-                    style={{ borderColor: "var(--color-border)", background: "var(--color-surface)" }}
-                  />
-                  <div className="flex items-center gap-2">
-                    <Button type="submit" variant="primary" size="xs" disabled={!quick || saving}>
-                      {saving ? "Saving…" : "Save"}
-                    </Button>
-                    <LinkButton variant="secondary" size="xs" onClick={() => { setAsking(null); setQuick(null); setNote(""); }}>
-                      Cancel
-                    </LinkButton>
-                  </div>
-                </form>
-              )}
+              {asking === row.key && notAFitForm(row)}
             </li>
           ))}
         </ul>

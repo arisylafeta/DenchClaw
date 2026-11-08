@@ -1,0 +1,111 @@
+/* The request Matches tab, transcribed from the approved mockup (Matches v4, direction A "Ledger", Main.dc.html).
+   Values are the mock's own; only the data differs. The supply tab does not use this file. */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+  background: #f5f5f4;
+  color: #1c1c1a;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap a { color: #4d5300; }
+.wrap a:hover { color: #2f3300; }
+.wrap button { font: inherit; color: inherit; cursor: pointer; }
+.wrap button:focus-visible,
+.wrap a:focus-visible { outline: 2px solid #687000; outline-offset: 2px; }
+
+.card { background: #fff; border: 1px solid rgba(0, 0, 0, 0.09); border-radius: 12px; }
+.summary { padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+.matchedOn { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.matchedOnLabel { font-weight: 600; margin-right: 4px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px;
+  background: #f0efed; color: #3f3f3a; font-size: 12px; white-space: nowrap;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+.chip b { font-weight: 600; color: #1c1c1a; overflow: hidden; text-overflow: ellipsis; }
+.criteria { margin: 0; padding-left: 12px; border-left: 1px solid rgba(0, 0, 0, 0.09); list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #55554f; }
+.stats { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; font-size: 12.5px; }
+.stock { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bar { height: 6px; border-radius: 3px; background: #ecebe8; overflow: hidden; width: 120px; display: inline-block; }
+.bar span { display: block; height: 6px; background: #687000; border-radius: 3px; }
+.due { color: #8a4908; }
+.muted { color: #6f6f68; }
+
+.tag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 6px; font-size: 11.5px; font-weight: 600; background: #f0efed; color: #4a4a44; white-space: nowrap; }
+.tagMk { background: #eef3c4; color: #4d5300; }
+.tagLead { background: #eaf0fb; color: #1e4f9a; }
+
+.m { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; padding: 2px 8px; border-radius: 6px; max-width: 100%; }
+.m i { font-style: normal; font-weight: 700; }
+.mOk { background: #edf8f1; color: #146c36; }
+.mClose { background: #fdf5e9; color: #8a4908; }
+.mUnk { background: #f0efed; color: #55554f; }
+.mMiss { background: #fcf2f1; color: #a3221b; }
+
+.btn {
+  min-height: 36px; padding: 7px 13px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.13); background: #fff;
+  font-weight: 600; font-size: 13px; white-space: nowrap;
+}
+.btn:hover { background: #f4f4f2; }
+.btn:disabled { cursor: not-allowed; opacity: 0.6; }
+.btnPri { background: #e7f346; border-color: #cbd62c; color: #1c1c1a; }
+.btnPri:hover { background: #d4e030; }
+.btnGhost { border-color: transparent; background: transparent; color: #55554f; font-weight: 500; display: inline-flex; align-items: center; gap: 4px; }
+.criteriaToggle { margin-left: auto; }
+
+.sec { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 14px 18px 10px; }
+.secTitle { font-weight: 650; font-size: 14px; }
+.secTitle span { font-weight: 500; }
+.legend { font-size: 12px; display: flex; gap: 12px; flex-wrap: wrap; }
+
+.row { border-top: 1px solid rgba(0, 0, 0, 0.06); }
+.rowOpen { background: #fbfbf9; }
+.rowLine { display: flex; align-items: flex-start; gap: 12px; }
+.rowmain {
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 20px; padding: 14px 18px; width: 100%; min-width: 0;
+  box-sizing: border-box; text-align: left; background: none; border: 0; flex: 1 1 auto;
+}
+.rowmain:hover { background: rgba(231, 229, 228, 0.4); }
+.left { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.nameLine { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.name { font-weight: 650; font-size: 14px; }
+.country { font-size: 12px; }
+.holds { font-size: 13px; color: #1c1c1a; }
+.source { font-size: 12px; }
+.marks { flex: 1 1 300px; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; list-style: none; margin: 0; padding: 0; }
+.status { flex: 0 0 190px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #55554f; }
+.status b { color: #1c1c1a; font-weight: 600; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #b8b8b0; margin-right: 6px; vertical-align: 1px; }
+.dotDue { background: #c26a0a; }
+.actions { flex: 0 0 auto; display: flex; gap: 8px; padding: 14px 18px 0 0; }
+
+.detail { display: flex; flex-wrap: wrap; gap: 20px; padding: 4px 18px 18px 48px; }
+.block { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.blockSource { flex: 1 1 300px; }
+.blockFit { flex: 2 1 420px; gap: 6px; }
+.blockDeal { flex: 1 1 240px; }
+.blockTitle { font-weight: 600; font-size: 12.5px; }
+.quote { border-radius: 8px; background: #f7f7f5; padding: 10px 12px; font-size: 12.5px; color: #3f3f3a; overflow-wrap: anywhere; }
+.who { font-size: 12px; }
+.dealNote { font-size: 12.5px; }
+.dealActions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.ft { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.ft td, .ft th { padding: 6px 8px; border-top: 1px solid rgba(0, 0, 0, 0.06); text-align: left; vertical-align: top; }
+.ft th { font-weight: 600; color: #6f6f68; font-size: 11.5px; border-top: 0; }
+.notAFit { padding: 0 18px 14px; }
+.empty { padding: 14px 18px; color: #6f6f68; border-top: 1px solid rgba(0, 0, 0, 0.06); }
+.more { align-self: flex-start; }
+
+/* Phone width: the actions drop under the row instead of squeezing it, and the detail loses the checkbox indent. */
+@media (max-width: 640px) {
+  .rowLine { flex-wrap: wrap; gap: 0; }
+  .actions { padding: 0 18px 14px; width: 100%; box-sizing: border-box; }
+  .detail { padding-left: 18px; }
+  .status { flex: 1 1 190px; }
+}
