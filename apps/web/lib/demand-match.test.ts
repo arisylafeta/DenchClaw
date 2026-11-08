@@ -309,12 +309,23 @@ describe("honest matches on a cell request (v4)", () => {
     expect(requestCodeHit(byPart, unit({ make: null, title: "Battery pack", supplierRef: "SU001B5189" }))).toBe("su001b5189");
   });
 
+  it("reads a decimal comma in a description as a decimal, and never takes a description's 'cells' for a cell lot", () => {
+    const repair = requirementFor(demand({ product_family: "18650 / 21700 cylindrical cells", wants: "21700 18650", volume: 100_000, volume_unit: "cells" }));
+    const samsung35e = unit({ source: "trade", make: "SAMSUNG", model: "INR18650-35E", format: "Cells", title: "SAMSUNG INR18650-35E", description: "Cell: SAMSUNG INR18650-35E - 12,06Wh 3,35Ah 3,6V", kwh: 0.012 });
+    expect(scoreCandidate(repair, samsung35e)).not.toBeNull();
+    const eUp = unit({ source: "trade", make: "VW", model: "VW e-Up!", format: null, title: "VW VW e-Up!", description: "Donor 2014; seller says 'working but low range, probably one or more cells faulty'." });
+    expect(scoreCandidate(repair, eUp)).toBeNull();
+  });
+
   it("reads a bare 1 as not stated on cells and modules, and as one pack on packs", () => {
     const cellLine = unit({ format: "Cells", units: 1, unitsBare: true });
     const packLine = unit({ format: "Packs", units: 1, unitsBare: true });
     expect(statedUnits(ask(), cellLine)).toBeNull();
     const packs = requirementFor(demand({ wants: "Hyundai Kona 64 kWh packs", volume: 10, volume_unit: "packs" }));
     expect(statedUnits(packs, packLine)).toBe(1);
+    // A pack is one pack on a cell ask too, and a module line keeps its 1 on a pack ask.
+    expect(statedUnits(ask(), packLine)).toBe(1);
+    expect(statedUnits(packs, unit({ format: "Modules", units: 1, unitsBare: true }))).toBe(1);
     // A stated 1 (not bare) stays 1 everywhere.
     expect(statedUnits(ask(), unit({ format: "Cells", units: 1 }))).toBe(1);
   });

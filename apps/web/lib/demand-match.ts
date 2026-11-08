@@ -382,9 +382,13 @@ export function requirementFor(demand: Demand, vocab?: Set<string>): Requirement
   return req;
 }
 
+// A decimal comma ("3,35Ah", "36,8KW") is a decimal point; a thousands comma ("1,400") is left to norm.
+const decimals = (text: string) => text.replace(/(\d),(\d{1,2})(?!\d)/g, "$1.$2");
+/** What the line is called: make, model, title and its codes, without the free-text description. */
+const nameText = (c: Candidate) =>
+  norm(decimals(`${c.make ?? ""} ${c.model ?? ""} ${c.title} ${c.partNumber ?? ""} ${(c.partNumbers ?? []).join(" ")} ${c.supplierRef ?? ""}`));
 // The seller's reference and description often carry the only code on a line ("INR21700-50E" in `supplier_ref`).
-const candidateText = (c: Candidate) =>
-  norm(`${c.make ?? ""} ${c.model ?? ""} ${c.title} ${c.partNumber ?? ""} ${(c.partNumbers ?? []).join(" ")} ${c.supplierRef ?? ""} ${c.description ?? ""}`);
+const candidateText = (c: Candidate) => (c.description ? `${nameText(c)}${norm(decimals(c.description)).trimStart()}` : nameText(c));
 
 /** The maker a line states: its make, else a maker word in its text, else the maker its cell code names. */
 export function statedCellMaker(c: Candidate): string | null {
@@ -397,12 +401,12 @@ const wantsSmallUnits = (req: Requirement) =>
   req.cellTokens.length > 0 || (req.formats.length > 0 && req.formats.every((f) => f === "Cells" || f === "Modules"));
 
 /**
- * The quantity a seller actually stated. A stock line's bare 1 (nothing else behind it) on a cell or module ask, or on
- * a cell or module line, is "not stated"; for packs, 1 still means one pack.
+ * The quantity a seller actually stated. On a cell or module ask, a stock line's bare 1 (nothing else behind it) is
+ * "not stated", never one cell; a pack is still one pack, on any ask.
  */
 export function statedUnits(req: Requirement, c: Candidate): number | null {
   if (c.units == null) return null;
-  if (c.unitsBare && c.units === 1 && (wantsSmallUnits(req) || c.format === "Cells" || c.format === "Modules")) return null;
+  if (c.unitsBare && c.units === 1 && wantsSmallUnits(req) && c.format !== "Packs" && c.format !== "Systems") return null;
   return c.units;
 }
 
@@ -487,7 +491,8 @@ export function scoreCandidate(req: Requirement, candidate: Candidate): Match | 
     const ah = text.match(/(\d+(?:\.\d+)?) ?ah\b/);
     if (sizes.some((tok) => tok !== "4680") && ah && Number(ah[1]) > 6) return null;
     // A trade or batch that never says cells (packs, a BESS tender) is not a cell lot, whatever the inbox AI linked.
-    if (!c.format && !/ cells? /.test(text)) return null;
+    // The line's name must say cells: a description that mentions "one or more cells faulty" is not a cell lot.
+    if (!c.format && !/ cells? /.test(nameText(c))) return null;
     if (req.cellFormats.length && c.cellFormat && !req.cellFormats.some((f) => c.cellFormat!.toLowerCase().includes(f.toLowerCase()))) return null;
     const hit = size && sizes.includes(size) ? size : req.cellTokens.find((tok) => !(tok in CELL_WH) && text.includes(tok));
     checks.push({ key: "product", label: "Cell type", state: hit ? "pass" : "unknown", detail: hit ? `${hit} cells` : "Cell size not stated" });
