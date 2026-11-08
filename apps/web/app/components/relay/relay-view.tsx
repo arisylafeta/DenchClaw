@@ -1212,13 +1212,13 @@ function DealBar({ item: i, busy, onRun, onAsk, onLink, onOpenCompany }: { item:
         {!working && dismantlerOnly && i.deal_action === "create" && <button type="button" className={s.btn} disabled={busy} title="Only for a real lot, about 10 packs or €20k and up" onClick={() => onRun("create")}>{job?.status === "failed" && job.action === "create" ? "Try again: create deal" : "+ Create deal"}</button>}
         {!working && !picking && <button type="button" className={s.btn} disabled={busy} title="Tie this thread to one of our open deals. Relay keeps the link; it never guesses one for a supplier." onClick={() => setPicking(true)}>{i.bulk_listing_id ? "Change deal" : "Link to deal"}</button>}
       </div>
-      {picking && <DealPicker current={i.bulk_listing_id} busy={busy} onPick={(id) => { setPicking(false); onLink(id); }} onCancel={() => setPicking(false)} />}
+      {picking && <DealPicker current={i.bulk_listing_id} canUnlink={!!i.relay_link} busy={busy} onPick={(id) => { setPicking(false); onLink(id); }} onCancel={() => setPicking(false)} />}
     </div>
   );
 }
 
 /** Pick one of our open deals for this thread, or unlink it. */
-function DealPicker({ current, busy, onPick, onCancel }: { current: string | null; busy: boolean; onPick: (listingId: string | null) => void; onCancel: () => void }) {
+function DealPicker({ current, canUnlink, busy, onPick, onCancel }: { current: string | null; canUnlink: boolean; busy: boolean; onPick: (listingId: string | null) => void; onCancel: () => void }) {
   const [deals, setDeals] = useState<RelayDealOption[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [choice, setChoice] = useState("");
@@ -1240,7 +1240,7 @@ function DealPicker({ current, busy, onPick, onCancel }: { current: string | nul
             ))}
           </select>}
       <button type="button" className={cx(s.btn, s.pri)} disabled={!choice || busy} onClick={() => onPick(choice)}>Link</button>
-      {current && <button type="button" className={s.btn} disabled={busy} title="Removes the link you made here. The next scan puts back the sender's own deal, if they have one." onClick={() => onPick(null)}>Unlink</button>}
+      {current && canUnlink && <button type="button" className={s.btn} disabled={busy} title="Removes the link you made here. The next scan puts back the sender's own deal, if they have one." onClick={() => onPick(null)}>Unlink</button>}
       <button type="button" className={cx(s.btn, s.ghost)} onClick={onCancel}>Cancel</button>
     </div>
   );
