@@ -4,13 +4,17 @@ import { ChevronDown, ChevronRight, ExternalLink, Mail, MessageCircle, Phone, Pl
 import { useCallback, useEffect, useState } from "react";
 import type { Offer, OfferStage, ThreadEntry } from "@/lib/crm-postgres/bulk-offers";
 import { shortDate } from "@/lib/bulk-trade-details";
-import { ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "./trade-ui";
+import { DetailSheet, ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "./trade-ui";
+import { MailDraftView } from "../crm/inbox/mail-draft-view";
 import { rowFocus } from "./demand-page";
 
 import { BusyRegion, Sh } from "./bt-shimmer";
 
-const PLACEHOLDER_OFFER = { id: "loading", name: null, stage: "candidate", messages: 1 } as Offer;
-const PLACEHOLDER_OFFERS = Array.from({ length: 4 }, (_, i) => ({ ...PLACEHOLDER_OFFER, id: `loading-${i}` }));
+/** An offer as the list reads it: the row plus the chase the server works out on read. */
+type OfferRow = Offer & { chase_due?: boolean };
+
+const PLACEHOLDER_OFFER = { id: "loading", name: null, stage: "candidate", messages: 1 } as OfferRow;
+const PLACEHOLDER_OFFERS: OfferRow[] = Array.from({ length: 4 }, (_, i) => ({ ...PLACEHOLDER_OFFER, id: `loading-${i}` }));
 const PLACEHOLDER_THREAD = Array.from({ length: 4 }, (_, i) => ({ id: `loading-${i}`, channel: "note", title: "", body: " ", at: "", direction: null, ref: null, href: null } as ThreadEntry));
 
 const STAGES: [OfferStage, string][] = [
@@ -72,22 +76,34 @@ function WaitingPill({ offer }: { offer: Offer }) {
   );
 }
 
+/** The offer row's stage and, while it waits, a chase: one unanswered email and three working days. */
+function ChasePill() {
+  return (
+    <span data-chase className="inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+      style={{ background: "var(--bt-amber-bg)", color: "var(--bt-amber)", borderColor: "var(--bt-amber-border)" }}>
+      Chase
+    </span>
+  );
+}
+
 /** Who we offered this to, one thread each. Inside a thread: the whole conversation, stage, terms and next step. */
-export function OffersTab({ demandId, listingId, onChanged }: { demandId: string; listingId?: string; onChanged: () => void }) {
+export function OffersTab({ demandId, listingId, request: requestSide = false, onChanged }: { demandId: string; listingId?: string; request?: boolean; onChanged: () => void }) {
   const base = listingId ? `/api/bulk-listings/${encodeURIComponent(listingId)}/offers` : `/api/bulk-trades/demand/${encodeURIComponent(demandId)}/offers`;
-  const [offers, setOffers] = useState<Offer[] | null>(null);
+  const [offers, setOffers] = useState<OfferRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
-    try { setOffers((await request<{ offers: Offer[] }>(base)).offers); setError(null); }
+    try { setOffers((await request<{ offers: OfferRow[] }>(base)).offers); setError(null); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not load offers."); }
   }, [base]);
   useEffect(() => { void load(); }, [load]);
-  return <OfferList offers={offers} error={error} base={base} onUpdated={() => { void load(); onChanged(); }} />;
+  return <OfferList offers={offers} error={error} base={base} request={requestSide} onUpdated={() => { void load(); onChanged(); }} />;
 }
 
-function OfferList({ offers, error, base, onUpdated }: {
-  offers: Offer[] | null; error: string | null; base: string; onUpdated: () => void;
+function OfferList({ offers, error, base, request: requestSide, onUpdated }: {
+  offers: OfferRow[] | null; error: string | null; base: string; request: boolean; onUpdated: () => void;
 }) {
+  // The open email draft, shown in the side panel over the list.
+  const [draft, setDraft] = useState<{ offerId: string; draftId: string } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const loading = offers === null && !error;
   const [adding, setAdding] = useState(false);
@@ -131,14 +147,15 @@ function OfferList({ offers, error, base, onUpdated }: {
                       <span className="truncate text-[14px] font-semibold"><Sh on={loading} chars={18}>{o.name ?? "Unnamed"}</Sh></span>
                       <StagePill stage={o.stage} loading={loading} />
                       {!loading && <WaitingPill offer={o} />}
+                      {!loading && o.chase_due && <ChasePill />}
                     </span>
                     <span className="mt-0.5 block truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>
-                      <Sh on={loading} chars={32}>{[o.incoming && o.from_kind ? `From ${o.from_kind}: ${o.from_label ?? ""}` : null, terms, o.declined_reason && (o.stage === "declined" || o.stage === "lost") ? `Why: ${o.declined_reason}` : null, o.next_step ? `Next: ${o.next_step}` : null, o.last_touch_on ? `Last touch ${dateOf(o.last_touch_on)}${o.last_touch_via ? ` by ${o.last_touch_via}` : ""}` : null].filter(Boolean).join(" · ") || "No contact yet"}</Sh>
+                      <Sh on={loading} chars={32}>{[o.chase_due ? "Chase due" : null, o.incoming && o.from_kind ? `From ${o.from_kind}: ${o.from_label ?? ""}` : null, terms, o.declined_reason && (o.stage === "declined" || o.stage === "lost") ? `Why: ${o.declined_reason}` : null, o.next_step ? `Next: ${o.next_step}` : null, o.last_touch_on ? `Last touch ${dateOf(o.last_touch_on)}${o.last_touch_via ? ` by ${o.last_touch_via}` : ""}` : null].filter(Boolean).join(" · ") || "No contact yet"}</Sh>
                     </span>
                   </span>
                   <span className="shrink-0 text-[11px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={2}>{o.messages > 0 ? `${o.messages} ${o.messages === 1 ? "message" : "messages"}${o.last_message_at ? ` · ${dateOf(o.last_message_at)}` : ""}` : "No messages"}</Sh></span>
                 </button>
-                {!loading && openId === o.id && <ThreadPanel base={base} offerId={o.id} onUpdated={onUpdated} />}
+                {!loading && openId === o.id && <ThreadPanel base={base} offerId={o.id} request={requestSide} onUpdated={onUpdated} onDraft={(draftId) => setDraft({ offerId: o.id, draftId })} />}
               </li>
             );
           })}
@@ -147,28 +164,43 @@ function OfferList({ offers, error, base, onUpdated }: {
       {offers && !offers.length && !adding && (
         <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>No offers yet. Shortlist on Matches, or start a thread for each person you offer this to.</p>
       )}
+      {draft && (
+        <DetailSheet title="Email draft" onClose={() => setDraft(null)}>
+          <MailDraftView draftId={draft.draftId} sendPath={`${base}/${encodeURIComponent(draft.offerId)}/send`} onSent={onUpdated} />
+        </DetailSheet>
+      )}
     </BusyRegion>
   );
 }
 
 /** The open thread inside its offer row: stage, terms, next step, a composer and the messages, each an accordion item. */
-function ThreadPanel({ base, offerId, onUpdated }: { base: string; offerId: string; onUpdated: () => void }) {
+function ThreadPanel({ base, offerId, request: requestSide, onUpdated, onDraft }: {
+  base: string; offerId: string; request: boolean; onUpdated: () => void; onDraft: (draftId: string) => void;
+}) {
   const url = `${base}/${encodeURIComponent(offerId)}`;
-  const [offer, setOffer] = useState<Offer | null>(null);
+  const [drafting, setDrafting] = useState(false);
+  const [offer, setOffer] = useState<OfferRow | null>(null);
   const [thread, setThread] = useState<ThreadEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** A lost or declined stage waits here until its reason is written. */
   const [outcomeStage, setOutcomeStage] = useState<"declined" | "lost" | null>(null);
   const [outcomeReason, setOutcomeReason] = useState("");
-  const apply = (r: { offer: Offer; thread?: ThreadEntry[] }) => {
+  const apply = (r: { offer: OfferRow; thread?: ThreadEntry[] }) => {
     setOffer(r.offer); if (r.thread) setThread(r.thread);
   };
-  useEffect(() => { let live = true; request<{ offer: Offer; thread: ThreadEntry[] }>(url).then((r) => { if (live) apply(r); }).catch((e) => { if (live) setError(e instanceof Error ? e.message : "Could not load."); }); return () => { live = false; }; }, [url]);
+  useEffect(() => { let live = true; request<{ offer: OfferRow; thread: ThreadEntry[] }>(url).then((r) => { if (live) apply(r); }).catch((e) => { if (live) setError(e instanceof Error ? e.message : "Could not load."); }); return () => { live = false; }; }, [url]);
   async function patch(body: Record<string, unknown>) {
     setBusy(true); setError(null);
-    try { const r = await request<{ offer: Offer }>(url, { method: "PATCH", body: JSON.stringify(body) }); setOffer(r.offer); const t = await request<{ offer: Offer; thread: ThreadEntry[] }>(url); apply(t); onUpdated(); }
+    try { const r = await request<{ offer: OfferRow }>(url, { method: "PATCH", body: JSON.stringify(body) }); setOffer(r.offer); const t = await request<{ offer: OfferRow; thread: ThreadEntry[] }>(url); apply(t); onUpdated(); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not save."); } finally { setBusy(false); }
+  }
+  /** Builds or reopens the offer email, then shows it in the side panel to edit and send. */
+  async function draftEmail() {
+    setDrafting(true); setError(null);
+    try { const r = await request<{ draftId: string }>(`${url}/draft`, { method: "POST" }); onDraft(r.draftId); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not draft the email."); }
+    finally { setDrafting(false); }
   }
   const loading = offer === null && !error;
   const current = offer ?? PLACEHOLDER_OFFER;
@@ -177,6 +209,11 @@ function ThreadPanel({ base, offerId, onUpdated }: { base: string; offerId: stri
     <BusyRegion busy={loading} label="Loading thread" className="flex w-full flex-col gap-4 pb-4 pl-12 pr-4">
       <div className="flex items-center gap-3">
         <p className="min-w-0 flex-1 truncate text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={30}>{[current.contact, current.wants].filter(Boolean).join(" · ") || "No contact details yet"}</Sh></p>
+        {offer && (offer.stage === "candidate" || offer.stage === "offered") && (
+          <button type="button" disabled={busy || drafting} onClick={() => void draftEmail()} className={`${rowFocus} ${buttonClass} inline-flex items-center gap-1.5`} style={buttonStyle}>
+            <Mail size={13} aria-hidden /> {drafting ? "Preparing…" : offer.chase_due ? "Chase email" : "Draft email"}
+          </button>
+        )}
         <select aria-label="Stage" value={outcomeStage ?? current.stage ?? "candidate"} disabled={busy || !offer}
           onChange={(e) => {
             const next = e.target.value as OfferStage;
@@ -200,6 +237,14 @@ function ThreadPanel({ base, offerId, onUpdated }: { base: string; offerId: stri
             void patch({ stage, declinedReason: reason });
           }}>
           <span className="text-[12px]" style={{ color: "var(--bt-muted)" }}>{STAGE_LABEL[outcomeStage]}: why?</span>
+          {requestSide && (
+            <span className="flex flex-wrap items-center gap-1.5">
+              {["No stock", "Price", "Wrong spec", "Went elsewhere"].map((reason) => (
+                <button key={reason} type="button" disabled={busy} onClick={() => setOutcomeReason(reason)}
+                  className={`${rowFocus} rounded-full border px-2 py-0.5 text-[11px]`} style={buttonStyle}>{reason}</button>
+              ))}
+            </span>
+          )}
           <input aria-label="Outcome reason" required maxLength={500} autoFocus value={outcomeReason} onChange={(e) => setOutcomeReason(e.target.value)}
             placeholder="Why it ended, e.g. price too high, chose another supplier"
             className={`${inputClass} min-w-[240px] flex-1 text-[12px]`} style={inputStyle} />

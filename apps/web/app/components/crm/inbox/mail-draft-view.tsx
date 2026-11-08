@@ -108,8 +108,11 @@ async function call(url: string, method: string, body: unknown): Promise<MailDra
   return data as MailDraft;
 }
 
-/** Content-tab view of one prepared mail draft. Unsent drafts can be edited here and sent after a confirmation. */
-export function MailDraftView({ draftId }: { draftId: string }) {
+/**
+ * Content-tab view of one prepared mail draft. Unsent drafts can be edited here and sent after a confirmation.
+ * `sendPath` lets an owning surface (an offer) send through its own route, so the record moves with the send.
+ */
+export function MailDraftView({ draftId, sendPath, onSent }: { draftId: string; sendPath?: string; onSent?: () => void }) {
   const load = useMailDraft(draftId);
   const [copied, setCopied] = useState(false);
   // The latest version this tab saved; wins over the poll until the poll catches up.
@@ -150,9 +153,14 @@ export function MailDraftView({ draftId }: { draftId: string }) {
   async function send() {
     setBusy("send"); setNotice(null);
     try {
-      await call(`/api/mail/drafts/${encodeURIComponent(d.id)}/send`, "POST", { confirm: true, updated_at: d.updated_at });
-      setConfirming(false); setNotice({ tone: "ok", text: "Sent." });
+      // The offer's own route also needs to know which draft it is sending; the inbox route names it in the URL.
+      const result = await call(sendPath ?? `/api/mail/drafts/${encodeURIComponent(d.id)}/send`, "POST",
+        sendPath ? { confirm: true, updated_at: d.updated_at, draft_id: d.id } : { confirm: true, updated_at: d.updated_at });
+      const warning = (result as unknown as { warning?: string | null }).warning;
+      setConfirming(false);
+      setNotice({ tone: warning ? "error" : "ok", text: warning ? `Sent, but ${warning.charAt(0).toLowerCase()}${warning.slice(1)}` : "Sent." });
       setSaved({ ...d, state: "sent", sent_at: new Date().toISOString() });
+      onSent?.();
     } catch (error) { setConfirming(false); setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not send." }); }
     finally { setBusy(null); }
   }

@@ -190,7 +190,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
       {tab === "Matches" && matchError && <p className="text-[13px]" style={{ color: "var(--bt-red)" }}>{matchError}</p>}
       <MatchaTab listingId={demand.id} active={tab === "Matcha"} />
       {tab === "Documents" && <DocumentsTab listingId={demand.id} />}
-      {tab === "Offers" && <OffersTab listingId={demand.id} demandId={demand.id} onChanged={onChanged} />}
+      {tab === "Offers" && <OffersTab listingId={demand.id} demandId={demand.id} request onChanged={onChanged} />}
       {tab === "History" && (
         <div className="flex w-full flex-col gap-6">
           {actions("Activity")}

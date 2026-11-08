@@ -113,6 +113,47 @@ describe("Offers tab", () => {
       && c.body === JSON.stringify({ stage: "declined", declinedReason: "Price too high" }))).toBe(true));
   });
 
+  it("drafts the offer email and opens it in the side panel", async () => {
+    const calls: { url: string; method: string; body?: string }[] = [];
+    const draft = {
+      id: "d1", state: "draft", identity_key: "alex", transport: "gmail", purpose: "personal", from_email: "alex@rebattery.io",
+      to_emails: ["a@attero.example"], cc_emails: [], bcc_emails: [], subject: "40 x 50 kWh NMC packs", body_text: "Hi there,\n\nWe have the packs.\n\nBest,\nAlex",
+      body_html: null, thread_id: null, campaign_id: null, created_at: "2026-11-08T10:00:00Z", updated_at: "2026-11-08T10:00:00Z",
+      links: [], warnings: [], approval: null, attachments: [], editable: { main: "Hi there,\n\nWe have the packs.\n\nBest,\nAlex", signature: null },
+    };
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? "GET", body: init?.body as string | undefined });
+      const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200 });
+      if (url.endsWith("/offers") && !init?.method) return json({ offers: [offer] });
+      if (url.endsWith("/offers/bof_1/draft")) return json({ draftId: "d1", kind: "chase", subject: draft.subject, body: draft.body_text, reused: false });
+      if (url.endsWith("/api/mail/drafts/d1")) return json(draft);
+      if (url.endsWith("/offers/bof_1")) return json({ offer, thread });
+      return json({});
+    }));
+    render(<OffersTab demandId="d1" onChanged={() => {}} />);
+    await userEvent.click(await screen.findByText("Attero Recycling"));
+    await userEvent.click(await screen.findByRole("button", { name: /Draft email/ }));
+    expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/offers/bof_1/draft"))).toBe(true);
+    expect(await screen.findByRole("region", { name: "Email draft" })).toBeInTheDocument();
+    expect((await screen.findAllByText(draft.subject)).length).toBeGreaterThan(0);
+  });
+
+  it("marks a chase on an offered row whose email has gone unanswered", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ offers: [{ ...offer, chase_due: true }] }), { status: 200 })));
+    render(<OffersTab demandId="d1" onChanged={() => {}} />);
+    expect(await screen.findByText(/Chase due/)).toBeInTheDocument();
+    expect(screen.getByText("Chase")).toBeInTheDocument();
+  });
+
+  it("offers 'No stock' as a quick decline reason on a request", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/offers") ? { offers: [offer] } : { offer, thread }), { status: 200 })));
+    render(<OffersTab demandId="d1" request onChanged={() => {}} />);
+    await userEvent.click(await screen.findByText("Attero Recycling"));
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Stage" }), "declined");
+    await userEvent.click(screen.getByRole("button", { name: "No stock" }));
+    expect((screen.getByLabelText("Outcome reason") as HTMLInputElement).value).toBe("No stock");
+  });
+
   it("shows a lost or declined reason on the row", async () => {
     const declined = { ...offer, stage: "declined" as const, declined_reason: "Chose another supplier" };
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ offers: [declined] }), { status: 200 })));
