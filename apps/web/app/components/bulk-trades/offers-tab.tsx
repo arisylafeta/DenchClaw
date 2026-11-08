@@ -115,7 +115,7 @@ function OfferList({ offers, error, base, request: requestSide, onUpdated }: {
   const [formError, setFormError] = useState<string | null>(null);
   async function create(input: { name: string; contact?: string }) {
     setBusy(true); setFormError(null);
-    try { const created = (await request<{ offer: Offer }>(base, { method: "POST", body: JSON.stringify(input) })).offer; onUpdated(); setOpenId(created.id); setName(""); setContact(""); setAdding(false); }
+    try { const created = (await request<{ offer: Offer }>(base, { method: "POST", body: JSON.stringify({ ...input, source: "manual" }) })).offer; onUpdated(); setOpenId(created.id); setName(""); setContact(""); setAdding(false); }
     catch (err) { setFormError(err instanceof Error ? err.message : "Could not add."); }
     finally { setBusy(false); }
   }

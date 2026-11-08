@@ -27,6 +27,11 @@ export async function POST(req: Request, { params }: Context) {
   for (const key of ["contact", "personId", "companyId", "wants", "counterpartId"]) if (body[key] != null && typeof body[key] !== "string") return badRequest(`${key} must be text.`);
   if (body.stage != null && !(OFFER_STAGES as readonly unknown[]).includes(body.stage)) return badRequest("Invalid stage.");
   if (body.data != null && (typeof body.data !== "object" || Array.isArray(body.data))) return badRequest("data must be an object.");
+  if (body.source != null && body.source !== "match" && body.source !== "manual") { return badRequest("Unknown offer source."); }
+  // A matched row always carries the CRM company or person it stands for. Without one there is nothing to guard the
+  // offer against a second row, so the answer is to link the company, not to store an unguarded offer. Only the
+  // Offers tab's own "New offer" form makes an offer from a typed name, and it says so.
+  if (!body.companyId && !body.personId && body.source !== "manual") { return badRequest("Link this company in the CRM first."); }
   if (!await getListing(id)) return notFound("Listing");
   return linkedWrite(async () => {
     try {

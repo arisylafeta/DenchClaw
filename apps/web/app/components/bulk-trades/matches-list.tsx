@@ -103,6 +103,8 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
         ...(row.personId ? { personId: row.personId } : {}),
         ...(row.companyId ? { companyId: row.companyId } : {}),
         stage: "candidate",
+        // A matched row is a CRM company or person, so the server refuses a name-only add from here.
+        source: "match",
         data: {
           match: { reason: row.reason, rank: row.rank, at: new Date().toISOString() },
           ...(row.stockId ? { stock_opportunity_id: row.stockId } : {}),

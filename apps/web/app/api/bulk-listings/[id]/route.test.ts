@@ -45,9 +45,22 @@ describe("listing routes", () => {
   it("creates a supply offer and validates its stage", async () => {
     mocks.add.mockResolvedValue({ id: "offer" });
     const post = (body: unknown) => POST(new Request(req, { method: "POST", body: JSON.stringify(body) }), params);
-    expect((await post({ name: "Buyer", stage: "invalid" })).status).toBe(400);
-    expect((await post({ name: "Buyer", stage: "contract_out" })).status).toBe(201);
+    expect((await post({ name: "Buyer", companyId: "co", stage: "invalid" })).status).toBe(400);
+    expect((await post({ name: "Buyer", companyId: "co", stage: "contract_out" })).status).toBe(201);
     expect(mocks.add).toHaveBeenCalledWith("supply-1", expect.objectContaining({ name: "Buyer", stage: "contract_out" }));
+  });
+  // A Matches row with no company or person id has nothing to key the offer on, so the server sends the person to the
+  // CRM instead of storing an offer no duplicate check can guard. The Offers tab's typed offer still works.
+  it("refuses a matched offer with no CRM identity and allows the typed one", async () => {
+    mocks.add.mockResolvedValue({ id: "offer" });
+    const post = (body: unknown) => POST(new Request(req, { method: "POST", body: JSON.stringify(body) }), params);
+    const refused = await post({ name: "ABZ Metals", source: "match", stage: "candidate" });
+    expect(refused.status).toBe(400);
+    expect((await refused.json()).error).toBe("Link this company in the CRM first.");
+    expect(mocks.add).not.toHaveBeenCalled();
+    expect((await post({ name: "ABZ Metals", source: "manual" })).status).toBe(201);
+    expect((await post({ name: "ABZ Metals", personId: "person-1" })).status).toBe(201);
+    expect((await post({ name: "ABZ Metals", source: "email" })).status).toBe(400);
   });
   it("uses the seller's mailbox context without a buyer profile", async () => {
     expect(await (await context(req, params)).json()).toEqual({ buyer: null, mail: [], person: null });
