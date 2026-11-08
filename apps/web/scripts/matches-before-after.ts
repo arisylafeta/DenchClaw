@@ -57,10 +57,16 @@ async function snapshot(): Promise<Snapshot> {
 }
 
 const JUNK = /\b(12 ?v|agm|starter|start[- ]stop|lead[- ]acid|efb|48 ?v|auxiliary|aux)\b/i;
+/** The quantity a row states, as a number or "not stated", so "1 units" and "1 pack" read the same. */
 const quantityOf = (row: Row) => {
   const text = row.holds ?? row.detail ?? "";
-  const hit = text.match(/quantity not stated|[\d,]+ (?:units?|cells?|packs?|modules?|systems?)/i);
-  return hit ? hit[0].toLowerCase() : "?";
+  // The quantity is its own " · " part of the line: "1 pack", "12,400 cells", "quantity not stated".
+  for (const part of text.split(" · ")) {
+    if (/^quantity not stated$/i.test(part.trim())) return "not stated";
+    const hit = part.trim().match(/^([\d,]+) (?:units?|cells?|packs?|modules?|systems?)$/i);
+    if (hit) return hit[1].replace(/,/g, "");
+  }
+  return "?";
 };
 const label = (row: Row) => `${row.name} · ${row.stockTitle ?? row.holds ?? row.reason}`.replace(/\|/g, "/");
 const marks = (row: Row) => (row.fit ?? []).map((mark) => `${{ fits: "✓", close: "≈", unstated: "?", misses: "✗" }[mark.state] ?? mark.state} ${mark.label}`).join(", ");
