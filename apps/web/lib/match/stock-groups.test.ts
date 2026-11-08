@@ -151,6 +151,20 @@ describe("grouping a request's stock by seller and pack identity", () => {
     expect(groupSummary(rows, inputs, cells).count).toEqual({ suppliers: 1, units: 3, word: "lots" });
   });
 
+  it("reads a line with no format on a cell request as a lot, by its code: a 50E and a 35E never merge", () => {
+    const cells = requirementFor(demand({ wants: "100,000 18650 or 21700 cells for repair", volume: 100_000, volume_unit: "cells", spec: { formats: ["Cells"] } }));
+    const email = (code: string) => line({
+      make: null, model: null, format: null, capacity_kwh: null, quantity: 1, quantity_available: null, quantity_stated: null, price_eur: null,
+      supplier: "AATGNR (US cell seller)", company_id: "comp_aat", person_id: "p_aat", supplier_ref: code, source: "supplier email",
+      title: "Seller email 22 Oct 2026: loose cells from e-bike packs, shipping from Florida, USA", description: `Loose ${code} cells`,
+    });
+    const { rows } = build([email("INR21700-50E"), email("INR18650-35E")], cells);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => !row.group)).toBe(true);
+    const { rows: same } = build([email("INR21700-50E"), email("INR21700-50E")], cells);
+    expect(same[0].group).toMatchObject({ lots: true, unsure: false, count: 2, countWord: "lots" });
+  });
+
   it("gives the group ranges where units differ, and counts SoH stated", () => {
     const req = ask({ wants: "2-13 Vauxhall Vivaro-e 50 kWh packs", max_price: 2100, price_currency: "EUR", price_unit: "pack" });
     const lines = [

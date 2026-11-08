@@ -108,7 +108,7 @@ const SOH_SOURCE: Record<string, string> = { supplier_test: "supplier test", lis
 const prettyMake = (make: string) => (make.length > 3 && make === make.toUpperCase() ? make[0] + make.slice(1).toLowerCase() : make);
 const noYear = (text: string) => text.replace(/\s+(19|20)\d{2}(\s*-\s*((19|20)?\d{2})?)?$/, "").trim();
 /** Stock-list tails a chip does not need: "21->>", " >", ">>", and body codes ("208 II UB, UP, UW, UJ"). */
-const tidy = (text: string) => noYear(text.replace(/\s*\d{0,4}\s*-*>+.*$/, "").replace(/(\s+[A-Z0-9]{2,3},)+\s+[A-Z0-9]{2,3}$/, "").trim());
+const tidy = (text: string) => noYear(text.replace(/\s*(\d{2,4}\s*-+)?>+.*$/, "").replace(/(\s+[A-Z0-9]{2,3},)+\s+[A-Z0-9]{2,3}$/, "").trim());
 const title = (word: string) => word[0].toUpperCase() + word.slice(1);
 
 /** The vehicle a chip names: make and model family, without trims, years, kWh or brackets ("Citroen Berlingo Electric"). */
@@ -271,6 +271,10 @@ function identityKey(member: Member): string | null {
     const model = c.model ?? (codeLike(c.supplierRef) ? c.supplierRef : null) ?? c.partNumber;
     return model ? `lot|${c.format}|${foldText(c.make)}|${foldText(model)}` : null;
   }
+  // A line that names neither make nor model has no vehicle to keep it apart by: it never groups.
+  if (!c.make && !c.model) {
+    return null;
+  }
   return member.extra?.identity?.key ?? null;
 }
 
@@ -429,7 +433,11 @@ export function splitByKwh(members: Member[]): Member[][] {
  * cell/module model. Rows that are not unlisted stock, or have nothing to group on, stay as they are. A group sits where
  * its best-ranked unit sat; ranks are renumbered.
  */
-export function groupStock(inputs: GroupInput[], req: Requirement, now: Date = new Date()): MatchRow[] {
+export function groupStock(given: GroupInput[], req: Requirement, now: Date = new Date()): MatchRow[] {
+  // On a cell or module request, a line that states no format is a lot of that kind (an emailed list of loose cells).
+  const lotKind: Candidate["format"] = req.cellTokens.length || req.formats.includes("Cells") ? "Cells" : req.formats.includes("Modules") ? "Modules" : null;
+  const inputs = given.map((input) => (lotKind && !input.match.candidate.format
+    ? { ...input, match: { ...input.match, candidate: { ...input.match.candidate, format: lotKind } } } : input));
   const byKey = new Map(inputs.map((input) => [input.match.candidate.key, input]));
   const groupable = inputs.filter((input) => input.row.key.startsWith("stock:") && identityKey(input));
   const buckets = new Map<string, Member[]>();
