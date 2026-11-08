@@ -325,6 +325,8 @@ export function makeAndModel(make: string | null | undefined, model: string | nu
   const m = (make ?? "").trim();
   let rest = (model ?? "").trim();
   if (m) {
+    // "MG" + "MG4": the model already carries the make, so it is the whole name.
+    if (fold(rest).startsWith(fold(m)) && /\d/.test(rest[m.length] ?? "")) return rest;
     while (fold(rest).startsWith(fold(m)) && (rest.length === m.length || /[\s\-/,]/.test(rest[m.length]))) {
       rest = rest.slice(m.length).replace(/^[\s\-/,]+/, "");
     }

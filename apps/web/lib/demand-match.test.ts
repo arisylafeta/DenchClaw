@@ -366,7 +366,8 @@ describe("review fixes (v4 slice 1)", () => {
     expect(makeAndModel("Citroen", "CITROEN C4 SPACETOURER")).toBe("Citroen C4 SPACETOURER");
     expect(makeAndModel("Citroën", "Citroen Berlingo")).toBe("Citroën Berlingo");
     expect(makeAndModel("VW", "VW e-Up!")).toBe("VW e-Up!");
-    expect(makeAndModel("MG", "MG4")).toBe("MG MG4");
+    expect(makeAndModel("MG", "MG4")).toBe("MG4");
+    expect(makeAndModel("MG", "MG 4")).toBe("MG 4");
     const r = requirementFor(demand({ wants: "Toyota Proace 50 kWh packs" }), new Set(["toyota", "proace"]));
     const m = scoreCandidate(r, unit({ make: "Toyota", model: "Toyota Proace (K0 van, EV)", title: "Toyota Proace", kwh: 50 }))!;
     expect(m.checks.find((c) => c.key === "product")?.detail).toBe("Toyota Proace (K0 van, EV)");
