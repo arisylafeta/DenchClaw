@@ -124,8 +124,8 @@ export async function offerOutreach(listingId: string, offerId: string, now: Dat
       `select field_key, value, status, visibility, coalesce(alternatives, '[]'::jsonb) as alternatives
        from crm_bulk_listing_fields where bulk_listing_id = $1`, [row.listing_id]),
     offerContactReason(row),
-    queryPg<{ sent_at: string; subject: string | null }>(
-      `select sent_at::text, subject from crm_bulk_offer_mail where offer_id = $1 order by sent_at desc limit 1`, [offerId]),
+    queryPg<{ sent_at: string; subject: string | null; replied_at: string | null }>(
+      `select sent_at::text, subject, replied_at::text from crm_bulk_offer_mail where offer_id = $1 order by sent_at desc limit 1`, [offerId]),
     buyerFacts(row.buyer_company_id),
   ]);
   const key = buildProductKey({ fields, title: row.listing_title });
@@ -145,7 +145,8 @@ export async function offerOutreach(listingId: string, offerId: string, now: Dat
     buyer,
     lastSent: lastSent[0] ? { sent_at: lastSent[0].sent_at, subject: lastSent[0].subject } : null,
     openDraftId,
-    chaseDue: !!lastSent[0] && chaseDue(lastSent[0].sent_at, now),
+    // A chase is only due while the last email is unanswered, exactly as `chaseOffers` reads it.
+    chaseDue: !!lastSent[0] && !lastSent[0].replied_at && chaseDue(lastSent[0].sent_at, now),
   };
 }
 

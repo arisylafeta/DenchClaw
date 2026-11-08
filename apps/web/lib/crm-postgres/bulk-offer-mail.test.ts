@@ -186,6 +186,9 @@ describe.skipIf(!TEST_URL)("offer outreach (matches v3, slice 2)", () => {
     expect(due).not.toContain(id("o_replied"));
     expect(due).not.toContain(id("o_candidate"));
     expect((await mail.offerOutreach(id("sup"), id("o_chase"), now))?.chaseDue).toBe(true);
+    // The reply stops the chase on the offer's own facts too, not only in the listing-wide list.
+    expect((await mail.offerOutreach(id("sup"), id("o_replied"), now))?.chaseDue).toBe(false);
+    expect((await mail.offerOutreach(id("sup"), id("o_fresh"), now))?.chaseDue).toBe(false);
   });
 
   it("marks exactly the linked stock line stale on a request, and nothing without the link", async () => {
