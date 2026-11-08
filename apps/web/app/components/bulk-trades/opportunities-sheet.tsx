@@ -109,14 +109,13 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false, showSide = 
       <span className="hidden @2xl:block"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
       <span className="min-w-0">
         <span className="flex items-start gap-1">
-          <button type="button" disabled={loading} title={row.title}
-            className="line-clamp-2 min-w-0 flex-1 text-left text-[13px] font-semibold leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"><Sh on={loading} chars={25}>{row.title}</Sh></button>
+          <button type="button" disabled={loading} title={row.company ? `${row.company}: ${row.title}` : row.title}
+            className="line-clamp-2 min-w-0 flex-1 text-left text-[13px] font-semibold leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"><Sh on={loading} chars={25}>{row.company ? `${row.company}: ${row.title}` : row.title}</Sh></button>
           {!loading && showSide && <SideChip side={row.side} />}
           {!loading && row.is_trade && <span className="text-[11px]" style={{ color: "var(--bt-green)" }}>Trade</span>}
           {!loading && <CopyIdButton id={row.id} />}
         </span>
         <span className="mt-0.5 flex min-w-0 items-center gap-2 text-[12px]" style={{ color: "var(--bt-muted)" }}>
-          {(loading || row.company) && <span className="min-w-0 truncate" title={row.company ?? undefined}><Sh on={loading} chars={14}>{row.company}</Sh></span>}
           {!loading && row.latest && <span className="hidden shrink-0 @2xl:inline-flex"><IconDate icon={latestIcon} date={row.latest.at} title={[row.latest.kind, row.latest.label, row.latest.at ? shortDate(row.latest.at.slice(0, 10)) : null].filter(Boolean).join(" · ")} /></span>}
           {!loading && <span className="@2xl:hidden"><DriverAvatar owner={row.owner} size={18} /></span>}
         </span>

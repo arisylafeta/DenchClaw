@@ -83,7 +83,7 @@ function ActionRow({ row, today, onOpen, onNext }: { row: SheetRow; today: strin
         <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px]" style={{ color: "var(--bt-muted)" }}>
           <span>{kindLabel(row)}</span><span aria-hidden="true">·</span>
           <button type="button" title={row.title} className="min-w-0 max-w-full truncate text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]">
-            {row.company ? `${row.company}, ` : ""}{row.title}
+            {row.company ? `${row.company}: ` : ""}{row.title}
           </button>
           {row.likelihood != null && <><span aria-hidden="true">·</span><span>{row.likelihood}% chance</span></>}
         </span>
