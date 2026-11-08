@@ -188,6 +188,13 @@ export function identityInput(row: StockRow): IdentityInput {
   };
 }
 
+/** A marketplace listing as a pack-identity input: its own make, model, kWh and part number, keyed by the row key. */
+export function listingIdentityInput(c: Candidate): IdentityInput {
+  const format = c.format ? c.format.toLowerCase().replace(/s$/, "") : null;
+  const parts = [c.partNumber, ...(c.partNumbers ?? [])].filter((part): part is string => !!part?.trim());
+  return { id: c.key, make: c.make, model: c.model, format, capacity_kwh: c.kwh, quantity: c.units ?? 1, part_numbers: parts, graph: null };
+}
+
 /** The units-table facts of a stock line: its pack identity, stated damage and where its SoH comes from. */
 export function stockExtra(row: StockRow, packs: Map<string, PackIdentity>): StockExtra {
   return {
@@ -488,11 +495,16 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
   });
   // Slice 2: identical stock from one seller is one row. Pack identity is learned over every live stock line, so a
   // group never depends on what this request happened to match.
-  const packs = packIdentities(stock.map(identityInput));
+  // Marketplace listings learn their identity alongside the stock lines, so a listed part number can inherit a pack the
+  // graph knows from a stock line.
+  const listings = ranked.map(({ match }) => match.candidate).filter((c) => c.key.startsWith("listing:"));
+  const packs = packIdentities([...stock.map(identityInput), ...listings.map(listingIdentityInput)]);
   const byId = new Map(stock.map((row) => [row.id, row]));
   const inputs: GroupInput[] = ranked.map(({ match }, index) => {
     const line = unitRows[index].stockId ? byId.get(unitRows[index].stockId!) : undefined;
-    return { row: unitRows[index], match, extra: line ? stockExtra(line, packs) : null };
+    const listingExtra: StockExtra | null = match.candidate.key.startsWith("listing:")
+      ? { identity: packs.get(match.candidate.key) ?? null, damage: [], sohBasis: null, sohText: null } : null;
+    return { row: unitRows[index], match, extra: line ? stockExtra(line, packs) : listingExtra };
   });
   const rows = groupStock(inputs, requirement);
   const need = requirement.unitsNeeded;

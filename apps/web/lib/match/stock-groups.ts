@@ -448,14 +448,17 @@ export function groupStock(given: GroupInput[], req: Requirement, now: Date = ne
   const inputs = given.map((input) => (lotKind && !input.match.candidate.format
     ? { ...input, match: { ...input.match, candidate: { ...input.match.candidate, format: lotKind } } } : input));
   const byKey = new Map(inputs.map((input) => [input.match.candidate.key, input]));
-  const groupable = inputs.filter((input) => input.row.key.startsWith("stock:") && identityKey(input));
+  // Stock lines and marketplace listings group alike (Ari, 8 Nov: one seller's identical marketplace packs were one row each).
+  const groupable = inputs.filter((input) => /^(stock|listing):/.test(input.row.key) && identityKey(input));
   const buckets = new Map<string, Member[]>();
   for (const seller of bySeller(groupable.map((input) => input.match))) {
     for (const match of seller.matches) {
       const member = byKey.get(match.candidate.key)!;
       // bySeller folds names ("LKQ Synetiq" and "Synetiq"); two different CRM companies are still two sellers.
       const who = member.row.companyId ?? member.row.personId ?? "";
-      const bucket = `${seller.key}|${who}|${identityKey(member)}`;
+      // A marketplace listing and an unlisted stock line never share a row: they are offered through different paths.
+      const kind = member.row.key.slice(0, member.row.key.indexOf(":"));
+      const bucket = `${seller.key}|${who}|${kind}|${identityKey(member)}`;
       buckets.set(bucket, [...(buckets.get(bucket) ?? []), member]);
     }
   }

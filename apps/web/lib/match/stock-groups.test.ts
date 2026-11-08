@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { requirementFor, scoreCandidate, type Requirement } from "../demand-match";
 import { fitMarks } from "./fit-marks";
 import { groupMarks, groupStock, groupSummary, packIdentities, sohMark, splitByKwh, vehicleName, type GraphMatch, type GroupInput, type IdentityInput } from "./stock-groups";
-import { identityInput, stockCandidate, stockExtra, type StockRow } from "../crm-postgres/demand-matches-v2";
+import { identityInput, listingIdentityInput, stockCandidate, stockExtra, type StockRow } from "../crm-postgres/demand-matches-v2";
 import type { Demand } from "../bulk-demand";
 import type { MatchRow } from "../matches-types";
 
@@ -194,6 +194,42 @@ describe("grouping a request's stock by seller and pack identity", () => {
   });
 });
 
+describe("marketplace listings", () => {
+  /** A stock line re-keyed as a marketplace listing row, as demandMatchesV2 builds it (no stock id, no CRM identity). */
+  function listingInputs(lines: StockRow[], req: Requirement = ask()): GroupInput[] {
+    const candidates = lines.map((row) => {
+      const c = stockCandidate(row);
+      return { ...c, key: `listing:${row.id}`, source: "marketplace" as const };
+    });
+    const packs = packIdentities(candidates.map(listingIdentityInput));
+    return candidates.map((c, index) => {
+      const match = scoreCandidate(req, c);
+      if (!match) throw new Error(`${c.title} does not match`);
+      const row: MatchRow = {
+        key: c.key, rank: index + 1, name: c.seller ?? "?", detail: null, tags: ["marketplace"], reason: c.title, checks: [], price: null,
+        offer: null, companyId: null, personId: null, contact: null, stockId: null, fit: fitMarks(req, match, { price: null }),
+        link: null, sourceKind: "marketplace", askFor: [],
+      };
+      return { row, match, extra: { identity: packs.get(c.key) ?? null, damage: [], sohBasis: null, sohText: null } };
+    });
+  }
+
+  it("groups one seller's listings that share a part number (Ari, 8 Nov: Autohandel DIDIER's Audi Q4 packs)", () => {
+    const rows = groupStock(listingInputs([line({ part_numbers: ["9868397180"] }), line({ part_numbers: ["9868397180"] }), line({ part_numbers: ["9868397180"] })]), ask(), NOW);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].group!.units).toHaveLength(3);
+    expect(rows[0].group!.stockIds).toEqual([]);
+  });
+
+  it("never puts a marketplace listing and an unlisted stock line in one row", () => {
+    const stockSide = build([line({ part_numbers: ["9868397180"] }), line({ part_numbers: ["9868397180"] })]).inputs;
+    const listingSide = listingInputs([line({ part_numbers: ["9868397180"] }), line({ part_numbers: ["9868397180"] })]);
+    const rows = groupStock([...stockSide, ...listingSide], ask(), NOW);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.group!.units[0].key.split(":")[0]).sort()).toEqual(["listing", "stock"]);
+  });
+});
+
 describe("merge safety", () => {
   const MEDIUM: GraphMatch = { ...STELLANTIS, confidence: "medium" };
   const vivaro = (o: Partial<StockRow> & { graph?: GraphMatch | null } = {}) => line(o);
@@ -207,7 +243,7 @@ describe("merge safety", () => {
   });
 
   it("merges different makes on one identical listed part number", () => {
-    const { rows } = build([vivaro({ part_numbers: ["9868397180"] }), rifter({ part_numbers: ["9868397180"] })]);
+    const { rows } = build([line({ part_numbers: ["9868397180"] }), rifter({ part_numbers: ["9868397180"] })]);
     expect(rows).toHaveLength(1);
     expect(rows[0].group!.pack).toBe("50 kWh pack, part 9868397180");
   });
