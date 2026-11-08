@@ -91,6 +91,35 @@ describe.skipIf(!TEST_URL)("offer outreach (matches v3, slice 2)", () => {
     expect(facts?.privateValues).not.toContain("Rotterdam");
   });
 
+  it("reads a request's product, quantity and timing from the demand row, and a person named after their company has no first name", async () => {
+    await pg.queryPg(`insert into crm_companies (id, name) values ($1, 'Ro Cell'), ($2, 'Battery Partners')`, [id("rocell"), id("bp")]);
+    await pg.queryPg(`insert into crm_people (id, company_id, full_name, email) values ($1, $2, 'ro cell', $3)`,
+      [id("rocell_mailbox"), id("rocell"), `rocell_${run}@supplier.test`]);
+    await pg.queryPg(
+      `insert into crm_bulk_listings (id, kind, party, company_id, summary, status, location, spec, context)
+       values ($1, 'demand', 'Battery Partners', $2, 'Wants 50E cells', 'open', 'Poland (delivery site tbc)', $3::jsonb, '{}'::jsonb)`,
+      [id("dem50e"), id("bp"), JSON.stringify({
+        intent: "request", product_family: "Samsung 50E-equivalent 21700 cells", volume: 500000, volume_unit: "cells",
+        needed_by: "2027-01-31", max_price: 1, price_currency: "EUR", price_unit: "cell", formats: ["Cells"], cell_makers: ["Samsung SDI"],
+      })]);
+    await pg.queryPg(
+      `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, stage, data)
+       values ($1, $2, 'counterparty', $3, $4, 'Ro Cell', 'candidate', '{}'::jsonb)`,
+      [id("o_rocell"), id("dem50e"), id("rocell_mailbox"), id("rocell")]);
+    const facts = (await mail.offerOutreach(id("dem50e"), id("o_rocell")))!;
+    expect(facts.recipientFirstName).toBeNull();
+    expect(facts.request).toMatchObject({ productFamily: "Samsung 50E-equivalent 21700 cells", volume: 500000, volumeUnit: "cells", neededBy: "2027-01-31", maxPrice: 1 });
+    expect(facts.privateValues).toContain("Battery Partners");
+    const email = buildOfferEmail({
+      kind: "request_stock", key: facts.product.key, fields: facts.product.fields, recipientFirstName: facts.recipientFirstName,
+      location: facts.location, buyer: facts.buyer, request: facts.request, side: facts.kind, privateValues: facts.privateValues,
+    });
+    expect(email.body.startsWith("Hello,\n\nWe're looking for 500,000 x Samsung 50E-equivalent 21700 cells in Poland.")).toBe(true);
+    expect(email.body).toContain("They're needed by 31 January 2027.");
+    expect(email.body).not.toMatch(/Battery Partners|1\.00|EUR/);
+    await pg.queryPg(`delete from crm_bulk_offers where id = $1`, [id("o_rocell")]);
+  });
+
   it("writes the buyer email from those facts: no price, no after_nda value, and the town only when teaser", async () => {
     await offer(id("o_email"), id("sup"), "candidate", {}, id("buyer12"));
     const build = async () => {

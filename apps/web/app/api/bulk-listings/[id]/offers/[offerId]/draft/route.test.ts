@@ -137,4 +137,26 @@ describe("POST offer draft", () => {
     const res = await call();
     expect((await res.json() as { kind: string }).kind).toBe("request_stock");
   });
+
+  it("builds the stock ask from the request's own facts, greets a company mailbox with Hello, and keeps the buyer out", async () => {
+    // Requests have no field rows: product, quantity and timing come from crm_bulk_demand.
+    m.offerOutreach.mockResolvedValue(outreach({
+      kind: "demand", stage: "candidate", listingId: "btd_1", location: "Poland (delivery site tbc)", recipientFirstName: null,
+      product: { key: buildProductKey({ fields: [], title: "500,000x Samsung 50E 21700 Cells" }), fields: [] },
+      buyer: null, privateValues: ["Battery Partners", "Battery Partners Ltd", "buyer@batterypartners.example"],
+      request: {
+        productFamily: "Samsung 50E-equivalent 21700 cells", volume: 500_000, volumeUnit: "cells", quantity: "500,000",
+        neededBy: "2027-01-31", spec: { formats: ["Cells"], cell_makers: ["Samsung SDI"] }, maxPrice: 1.15,
+      },
+    }));
+    const res = await call();
+    expect(res.status).toBe(201);
+    const { body, subject } = await res.json() as { body: string; subject: string };
+    expect(subject).toBe("Stock enquiry: 500,000 x Samsung 50E-equivalent 21700 cells");
+    expect(body.startsWith("Hello,\n\nWe're looking for 500,000 x Samsung 50E-equivalent 21700 cells in Poland.")).toBe(true);
+    expect(body).toContain("They're needed by 31 January 2027.");
+    for (const leak of ["Battery Partners", "1.15", "EUR", "tbc"]) {
+      expect(body).not.toContain(leak);
+    }
+  });
 });

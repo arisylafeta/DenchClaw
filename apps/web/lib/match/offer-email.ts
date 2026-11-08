@@ -16,6 +16,24 @@ export type BuyerFacts = {
   products?: unknown;
 };
 
+/**
+ * A request's own facts, from `crm_bulk_demand`: what the buyer wants, how many and by when. Requests have no
+ * listing field rows, so this is where a stock ask gets its product, quantity and timing. The ceiling is here only so
+ * the finished copy can be checked against it; the template never writes it.
+ */
+export type RequestFacts = {
+  productFamily?: string | null;
+  volume?: number | null;
+  volumeUnit?: string | null;
+  /** The quantity as written, used only when there is no volume. */
+  quantity?: string | null;
+  /** ISO date. */
+  neededBy?: string | null;
+  spec?: Record<string, unknown> | null;
+  /** The buyer's price ceiling. Private: never in the copy. */
+  maxPrice?: number | null;
+};
+
 export type OfferEmailInput = {
   kind: OfferEmailKind;
   /** The lot's product key (supply) or the requested product (request). */
@@ -27,6 +45,8 @@ export type OfferEmailInput = {
   /** Where the goods are, as written on the listing. Only the town and country survive. */
   location?: string | null;
   buyer?: BuyerFacts | null;
+  /** On a request: the request's own facts, for the stock ask and its chase. */
+  request?: RequestFacts | null;
   /** Which side we are writing for, so a chase asks the right question. */
   side?: "supply" | "demand";
   /** The subject of the last email on this offer, for a chase. */
@@ -49,10 +69,22 @@ const clean = (value: string | null | undefined) => (value ?? "").replace(/\s+/g
 
 const SIGN_OFF = "Best,\nAlex";
 
-/** A first name for the greeting, or null when what we hold is not one (an email, a number, a sentence). */
-export function firstName(value: string | null | undefined): string | null {
+/** True when two names are the same once case, spaces and punctuation are ignored ("ro cell" and "Ro Cell"). */
+export const sameName = (a: string | null | undefined, b: string | null | undefined) => {
+  const key = (value: string | null | undefined) => clean(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return !!key(a) && key(a) === key(b);
+};
+
+/**
+ * A first name for the greeting, or null when what we hold is not one (an email, a number, a sentence). A "person"
+ * whose name is the company's ("ro cell" at Ro Cell) is a mailbox, not a person, so it has no first name either.
+ */
+export function firstName(value: string | null | undefined, companyNames: (string | null | undefined)[] = []): string | null {
   const text = clean(value);
   if (!text || text.includes("@") || /\d/.test(text)) {
+    return null;
+  }
+  if (companyNames.some((company) => sameName(company, text))) {
     return null;
   }
   const first = text.split(/[\s,]+/)[0] ?? "";
@@ -120,7 +152,8 @@ export function publicPlace(location: string | null | undefined): string | null 
 
 /** The country alone: a stock ask to a seller never says more about where the buyer is than that. */
 export function publicCountry(location: string | null | undefined): string | null {
-  const parts = clean(location).split(",").map((part) => part.trim()).filter(Boolean);
+  // "Poland (delivery site tbc)": an aside in brackets is not part of the country.
+  const parts = clean(clean(location).replace(/\([^)]*\)/g, " ")).split(",").map((part) => part.trim()).filter(Boolean);
   const country = parts[parts.length - 1];
   return country && isPlaceWord(country) ? country : null;
 }
@@ -353,7 +386,75 @@ export function firstLeak(
 
 function greeting(name: string | null | undefined): string {
   const first = firstName(name);
-  return first ? `Hi ${first},` : "Hi there,";
+  return first ? `Hi ${first},` : "Hello,";
+}
+
+const asStrings = (value: unknown) => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && !!item.trim()) : []);
+
+/** What the request wants, in its own short words: the product family, else what the structured spec says. */
+export function requestProduct(request: RequestFacts | null | undefined): string | null {
+  const family = clean(request?.productFamily);
+  if (family) {
+    return family;
+  }
+  const spec = request?.spec ?? {};
+  const bits = [
+    ...asStrings(spec.cell_makers).slice(0, 1),
+    ...asStrings(spec.makes).slice(0, 2),
+    typeof spec.kwh_min === "number" && typeof spec.kwh_max === "number" ? `${round(spec.kwh_min)}-${round(spec.kwh_max)} kWh`
+      : typeof spec.kwh_min === "number" ? `${round(spec.kwh_min)}+ kWh` : null,
+    ...asStrings(spec.chemistries).slice(0, 2),
+    asStrings(spec.formats)[0]?.toLowerCase() ?? null,
+  ].filter((bit): bit is string => !!bit);
+  return bits.length ? bits.join(" ") : null;
+}
+
+/** "500,000 cells", from the volume, else the quantity as written when it is short and has a figure. */
+export function requestQuantity(request: RequestFacts | null | undefined): string | null {
+  if (request?.volume != null && request.volume > 0) {
+    const unit = clean(request.volumeUnit).toLowerCase();
+    return `${request.volume.toLocaleString("en-GB")}${unit ? ` ${unit}` : ""}`;
+  }
+  const written = clean(request?.quantity);
+  return written && /\d/.test(written) && written.length <= 40 ? written : null;
+}
+
+/** "31 January 2027", from the needed-by date. */
+export function requestTiming(request: RequestFacts | null | undefined): string | null {
+  const iso = clean(request?.neededBy).slice(0, 10);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(`${iso}T00:00:00Z`) : null;
+  return date && !Number.isNaN(date.getTime())
+    ? date.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
+    : null;
+}
+
+/** "500,000 x Samsung 50E-equivalent 21700 cells", or the product with its quantity in brackets. */
+function requestPhrase(request: RequestFacts, product: string): string {
+  const quantity = requestQuantity(request);
+  if (!quantity) {
+    return product;
+  }
+  const unit = clean(request.volumeUnit).toLowerCase().replace(/s$/, "");
+  const amount = request.volume != null && request.volume > 0 ? request.volume.toLocaleString("en-GB") : null;
+  if (amount && unit && product.toLowerCase().includes(unit)) {
+    return `${amount} x ${product}`;
+  }
+  return `${product} (${quantity})`;
+}
+
+/** The state of health a request asks for, from its spec. A requirement, never a fact about the seller's stock. */
+function requestSohLine(request: RequestFacts | null | undefined): string | null {
+  const soh = request?.spec?.min_soh;
+  return typeof soh === "number" && soh > 0 ? `We need at least ${round(soh)}% state of health.` : null;
+}
+
+/** The ceiling as it might be written, so the finished copy can be checked against every form of it. */
+function ceilingValues(request: RequestFacts | null | undefined): string[] {
+  const max = request?.maxPrice;
+  if (max == null || !(max > 0)) {
+    return [];
+  }
+  return [String(max), max.toFixed(2), `EUR ${max}`, `EUR ${max.toFixed(2)}`, `€${max}`, `€${max.toFixed(2)}`];
 }
 
 /**
@@ -392,10 +493,21 @@ export function buildOfferEmail(input: OfferEmailInput): OfferEmail {
     const ask = want ? "Is it still of interest?" : "Would you like the full spec sheet?";
     body = `${greeting(input.recipientFirstName)}\n\n${opening}\n\n${facts}\n\n${ask}\n\n${SIGN_OFF}`;
   } else if (input.kind === "request_stock") {
-    const short = productPhrase(input.key);
-    subject = short ? `Stock enquiry: ${short}` : "Stock enquiry";
-    const facts = [requirementLine(fields)].filter(Boolean).join(" ");
-    body = `${greeting(input.recipientFirstName)}\n\nWe're looking for ${product}${where}.${facts ? ` ${facts}` : ""}\n\nDo you have anything that fits?\n\n${SIGN_OFF}`;
+    // A request's own facts first: requests have no field rows, so the key alone says nothing about them.
+    const asked = requestProduct(input.request);
+    if (input.request && asked) {
+      const phrase = requestPhrase(input.request, asked);
+      const timing = requestTiming(input.request);
+      subject = `Stock enquiry: ${phrase}`;
+      const facts = [timing ? `They're needed by ${timing}.` : null, requestSohLine(input.request) ?? requirementLine(fields)].filter(Boolean).join(" ");
+      body = `${greeting(input.recipientFirstName)}\n\nWe're looking for ${phrase}${where}.${facts ? ` ${facts}` : ""}\n\n`
+        + `Do you have anything that fits? If so, how many do you have, and when could they ship?\n\n${SIGN_OFF}`;
+    } else {
+      const short = productPhrase(input.key);
+      subject = short ? `Stock enquiry: ${short}` : "Stock enquiry";
+      const facts = [requirementLine(fields)].filter(Boolean).join(" ");
+      body = `${greeting(input.recipientFirstName)}\n\nWe're looking for ${product}${where}.${facts ? ` ${facts}` : ""}\n\nDo you have anything that fits?\n\n${SIGN_OFF}`;
+    }
   } else {
     const short = productPhrase(input.key);
     const previous = clean(input.previousSubject);
@@ -403,11 +515,13 @@ export function buildOfferEmail(input: OfferEmailInput): OfferEmail {
       ? (previous.toLowerCase().startsWith("re:") ? previous : `Re: ${previous}`)
       : short ? `Following up: ${short}` : "Following up";
     const ask = input.side === "demand" ? "Do you have anything that fits?" : "Is it still of interest?";
-    body = `${greeting(input.recipientFirstName)}\n\nFollowing up on the note I sent about ${product}.\n\n${ask}\n\n${SIGN_OFF}`;
+    const asked = input.side === "demand" && input.request ? requestProduct(input.request) : null;
+    const about = asked ? requestPhrase(input.request!, asked) : product;
+    body = `${greeting(input.recipientFirstName)}\n\nFollowing up on the note I sent about ${about}.\n\n${ask}\n\n${SIGN_OFF}`;
   }
 
   const leaked = firstLeak(`${subject}\n${body}`, input.privateValues ?? [])
-    ?? firstLeak(`${subject}\n${body}`, priceValues(fields), { shortWords: false });
+    ?? firstLeak(`${subject}\n${body}`, [...priceValues(fields), ...ceilingValues(input.request)], { shortWords: false });
   if (leaked) {
     throw new OfferEmailRefused(leaked);
   }

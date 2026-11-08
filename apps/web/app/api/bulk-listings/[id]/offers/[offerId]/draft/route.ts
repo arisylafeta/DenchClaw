@@ -62,6 +62,7 @@ export async function POST(_req: Request, { params }: Context) {
       recipientFirstName: outreach.recipientFirstName,
       location: outreach.location,
       buyer: outreach.buyer,
+      request: outreach.request ?? null,
       side: outreach.kind,
       previousSubject: outreach.lastSent?.subject ?? null,
       privateValues: outreach.privateValues,

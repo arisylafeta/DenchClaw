@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildProductKey, type FieldFact } from "./product-key";
 import {
   buildOfferEmail, buyerWant, firstName, OfferEmailRefused, priceLine, productPhrase, publicCountry, publicPlace, testStatusLine,
+  type RequestFacts,
 } from "./offer-email";
 
 /** A listing's field rows. Visibility defaults to `teaser`; a key in `visibility` overrides it. */
@@ -52,7 +53,7 @@ describe("the supply offer", () => {
 
   it("asks for the spec sheet when the buyer's own want is not held", () => {
     const email = supply({ fields: [], recipientFirstName: null, buyer: null });
-    expect(email.body).toContain("Hi there,");
+    expect(email.body).toContain("Hello,");
     expect(email.body).toContain("Would you like the full spec sheet?");
     expect(email.body).not.toContain("You were looking for");
   });
@@ -155,6 +156,62 @@ describe("the request stock ask", () => {
     expect(email.body).toContain("The buyer is asking for 80% state of health.");
     const disputed = buildOfferEmail({ kind: "request_stock", key: lot, fields: fields({ soh: "80%" }, { soh: "conflict" }) });
     expect(disputed.body).not.toContain("state of health");
+  });
+});
+
+describe("the request stock ask, from the request's own facts", () => {
+  // The 50E request as crm_bulk_demand holds it: no field rows, the facts on the demand row.
+  const request: RequestFacts = {
+    productFamily: "Samsung 50E-equivalent 21700 cells", volume: 500_000, volumeUnit: "cells", quantity: "500,000",
+    neededBy: "2027-01-31", spec: { formats: ["Cells"], cell_makers: ["Samsung SDI"], min_soh: 90 }, maxPrice: 1,
+  };
+  const ask = (over: Partial<Parameters<typeof buildOfferEmail>[0]> = {}) => buildOfferEmail({
+    kind: "request_stock", key: buildProductKey({ fields: [], title: "500,000x Samsung 50E 21700 Cells" }), fields: [],
+    location: "Poland (delivery site tbc)", recipientFirstName: "ro cell", request,
+    privateValues: ["Battery Partners", "Battery Partners Ltd", "buyer@batterypartners.example"], ...over,
+  });
+
+  it("states the product, the quantity and the timing", () => {
+    const email = ask({ recipientFirstName: null });
+    expect(email.subject).toBe("Stock enquiry: 500,000 x Samsung 50E-equivalent 21700 cells");
+    expect(email.body).toContain("We're looking for 500,000 x Samsung 50E-equivalent 21700 cells in Poland.");
+    expect(email.body).toContain("They're needed by 31 January 2027.");
+    expect(email.body).toContain("We need at least 90% state of health.");
+    expect(email.body).toContain("Do you have anything that fits? If so, how many do you have, and when could they ship?");
+  });
+
+  it("asks when they could ship when the request has no date, and falls back to the spec without a product family", () => {
+    const email = ask({ request: { ...request, productFamily: null, neededBy: null, spec: { formats: ["Cells"], cell_makers: ["Samsung SDI"] } } });
+    expect(email.body).toContain("We're looking for 500,000 x Samsung SDI cells in Poland.");
+    expect(email.body).not.toContain("needed by");
+    expect(email.body).toContain("when could they ship?");
+  });
+
+  it("never names the buyer, their company or their ceiling", () => {
+    const email = ask({ recipientFirstName: null });
+    for (const leak of ["Battery Partners", "batterypartners", "1.00", "EUR", "€", "tbc"]) {
+      expect(email.body).not.toContain(leak);
+      expect(email.subject).not.toContain(leak);
+    }
+    // A product family that names the buyer is refused rather than sent.
+    expect(() => ask({ request: { ...request, productFamily: "Battery Partners 50E cells" } })).toThrow(OfferEmailRefused);
+    // So is copy that would carry the ceiling.
+    expect(() => ask({ request: { ...request, productFamily: "Samsung 50E at EUR 1.00 per cell" } })).toThrow(OfferEmailRefused);
+  });
+
+  it("greets a person named after their company with Hello", () => {
+    expect(firstName("ro cell", ["Ro Cell"])).toBeNull();
+    expect(firstName("Ro  Cell", ["RO CELL"])).toBeNull();
+    expect(firstName("Michael Lee", ["Ancoo Technologies"])).toBe("Michael");
+    expect(ask({ recipientFirstName: firstName("ro cell", ["Ro Cell"]) }).body.startsWith("Hello,\n\n")).toBe(true);
+  });
+
+  it("chases a request with its own product", () => {
+    const email = buildOfferEmail({
+      kind: "chase", key: buildProductKey({ fields: [], title: "Lot" }), fields: [], side: "demand", request,
+      previousSubject: "Stock enquiry: 500,000 x Samsung 50E-equivalent 21700 cells",
+    });
+    expect(email.body).toContain("Following up on the note I sent about 500,000 x Samsung 50E-equivalent 21700 cells.");
   });
 });
 
