@@ -79,7 +79,11 @@ describe("stock lines on a request", () => {
     const m = scoreCandidate(ask, c)!;
     expect(holdsLine(m.candidate)).toBe("Samsung INR21700-50E · quantity not stated");
     expect(sourceLine(m.candidate, NOW)).toBe("Email, 27 Oct");
-    expect(fitMarks(ask, m)).toEqual([
+    const marks = fitMarks(ask, m);
+    // Each mark carries its "How it fits" row.
+    expect(marks[0]).toMatchObject({ name: "Cell model", asked: "Samsung 50E", have: "Samsung INR21700-50E" });
+    expect(marks.find((mark) => mark.key === "quantity")).toMatchObject({ asked: "500,000", have: "Not stated" });
+    expect(marks.map(({ key, label, state }) => ({ key, label, state }))).toEqual([
       { key: "model", label: "Samsung 50E", state: "fits" },
       { key: "size", label: "21700 size", state: "fits" },
       { key: "format", label: "Format", state: "unstated" },
@@ -96,8 +100,8 @@ describe("stock lines on a request", () => {
     const c = stockCandidate(stockRow({ make: "Kia", model: "EV6", format: "pack", capacity_kwh: 77.4, quantity: 1, quantity_stated: null, country: "Norway", title: "Kia EV6 77 kWh battery pack", source: "supplier email" }));
     const m = scoreCandidate(ask, c)!;
     expect(m.candidate.units).toBe(1);
-    expect(fitMarks(ask, m).find((mark) => mark.key === "quantity")).toEqual({ key: "quantity", label: "1 of 20", state: "close" });
-    expect(fitMarks(ask, m).find((mark) => mark.key === "location")).toEqual({ key: "location", label: "NO → PL", state: "close" });
+    expect(fitMarks(ask, m).find((mark) => mark.key === "quantity")).toMatchObject({ key: "quantity", label: "1 of 20", state: "close" });
+    expect(fitMarks(ask, m).find((mark) => mark.key === "location")).toMatchObject({ key: "location", label: "NO → PL", state: "close" });
   });
 });
 
@@ -105,7 +109,7 @@ describe("ranged asks", () => {
   it("marks quantity against the range: '40 available · need 2–13'", () => {
     const ask = requirementFor(demand({ quantity: "2-13 packs across 2 lines", volume: 2, volume_unit: "packs", wants: "Toyota Proace 50 kWh packs" }), new Set(["toyota", "proace"]));
     const c = stockCandidate(stockRow({ make: "Toyota", model: "Proace", format: "pack", capacity_kwh: 50, quantity: 40, quantity_stated: null, title: "40x Toyota Proace 50kWh Packs" }));
-    expect(fitMarks(ask, scoreCandidate(ask, c)!).find((mark) => mark.key === "quantity")).toEqual({ key: "quantity", label: "40 available · need 2–13", state: "fits" });
+    expect(fitMarks(ask, scoreCandidate(ask, c)!).find((mark) => mark.key === "quantity")).toMatchObject({ key: "quantity", label: "40 available · need 2–13", state: "fits" });
   });
 });
 

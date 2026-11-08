@@ -5,11 +5,13 @@ import "server-only";
 // demand-side scorer, so one unit of stock is judged the same way everywhere.
 import { queryPg } from "../postgres";
 import { requestCodeHit, requirementFor, scoreCandidate, vocabulary, type Candidate, type Match, type Requirement } from "../demand-match";
-import { fitMarks, holdsLine, sourceLine, unitsPhrase } from "../match/fit-marks";
+import { askFor, countryName, fitMarks, holdsLine, rowCountry, sourceLine, unitsPhrase } from "../match/fit-marks";
+import { chaseOffers } from "./bulk-offer-mail";
 import { inventoryFor } from "./demand-match-supply";
 import { getDemand } from "./bulk-demand";
 import { offersForListing } from "./match-offers";
-import type { FitMark, MatchesResult, MatchRow, MatchTag } from "../matches-types";
+import type { FitMark, MatchesResult, MatchRow, MatchTag, RequestSummary, RequirementChip } from "../matches-types";
+import type { Demand } from "../bulk-demand";
 
 type DemandSource = "ourListings" | "marketplace" | "unlistedStock";
 
@@ -71,6 +73,8 @@ export type StockRow = {
   /** What the evidence says the source was, for telling a catalogue from a stock list. */
   evidence_source: string | null;
   observed_on: string | null;
+  /** The source page, when the line has one (a dismantler or eBay listing). */
+  source_url?: string | null;
 };
 
 const NUMBER = (path: string) => `case when jsonb_typeof(s.details->${path}) = 'number' then (s.details->${path})::text::numeric::float8
@@ -93,7 +97,7 @@ async function unlistedStock(): Promise<StockRow[]> {
             case when jsonb_typeof(s.details->'part_numbers') = 'array'
                  then array(select jsonb_array_elements_text(s.details->'part_numbers')) end as part_numbers,
             s.supplier_ref, s.description, s.source, s.details->'evidence'->>'source' as evidence_source,
-            s.observed_on::text as observed_on,
+            s.observed_on::text as observed_on, s.source_url,
             s.location, coalesce(nullif(c.country, ''), nullif(s.location, '')) as country,
             coalesce(s.details->'sync'->>'lastSeen', s.observed_on::text, s.updated_at::date::text) as seen_on
      from crm_stock_opportunities s
@@ -162,7 +166,7 @@ export function stockCandidate(row: StockRow): Candidate {
     price: row.price_eur, currency: row.price_eur != null ? "EUR" : null, currencyAssumed: false,
     country: row.country, location: row.location, soh: row.soh_percent, year: row.year, partNumber: partNumbers[0] ?? null,
     partNumbers, supplierRef: row.supplier_ref, description: row.description,
-    sourceKind: stockSourceKind(row), observedOn: row.observed_on,
+    sourceKind: stockSourceKind(row), observedOn: row.observed_on, sourceUrl: row.source_url ?? null,
     photos: 0, tested: false, verified: row.company_id != null, seen: row.seen_on,
     href: `/trades/stock/${row.id}`, ai: null, alsoIn: [],
   };
@@ -206,6 +210,81 @@ function requestChecks(match: Match, missing: string[], marks: FitMark[]): strin
     .filter((check) => check.state !== "pass" && !shown.has(check.key) && !check.detail.startsWith("AI:"))
     .map((check) => check.detail.replace(/\s*\(group with others below\)/i, ""));
   return [...new Set([...gaps, missing.length ? `Ask for ${missing.join(", ")}` : null].filter((entry): entry is string => !!entry))].slice(0, 3);
+}
+
+/** The source page for a row, when it has one. Stock lines link only to their own source URL. */
+function sourceLink(candidate: Candidate): MatchRow["link"] {
+  if (candidate.key.startsWith("stock:")) {
+    return candidate.sourceUrl && /^https?:\/\//.test(candidate.sourceUrl) ? { href: candidate.sourceUrl, label: "Open source" } : null;
+  }
+  if (candidate.source === "marketplace") {
+    return { href: candidate.href, label: "Open listing" };
+  }
+  return candidate.href ? { href: candidate.href, label: candidate.source === "supply" ? "Open supply listing" : "Open trade" } : null;
+}
+
+const CURRENCY: Record<string, string> = { EUR: "€", GBP: "£", USD: "$" };
+const shortDay = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00Z`)
+  .toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+/**
+ * The request's requirements as chips, in the mock's order: product, format, quantity, condition or SoH, delivery,
+ * needed by, and the ceiling, marked internal. Only what the request states.
+ */
+export function requestChips(requirement: Requirement, demand: Pick<Demand, "product_family" | "wants" | "volume_unit" | "location" | "needed_by" | "max_price" | "price_currency" | "price_unit" | "spec">): RequirementChip[] {
+  const chips: RequirementChip[] = [];
+  const product = (demand.product_family || demand.wants).replace(/\s+/g, " ").trim();
+  if (product) {
+    chips.push({ label: product.length > 60 ? `${product.slice(0, 59).trimEnd()}…` : product, strong: true });
+  }
+  const formats = requirement.formats.map((format) => format.toLowerCase()).join(" / ");
+  if (formats) {
+    const shape = requirement.cellFormats.join(" / ");
+    const label = shape ? `${shape} ${formats}` : formats;
+    chips.push({ label: label[0].toUpperCase() + label.slice(1) });
+  }
+  const unit = (demand.volume_unit ?? "units").toLowerCase();
+  if (requirement.unitsRange) {
+    chips.push({ label: `${requirement.unitsRange.min.toLocaleString("en-GB")}–${requirement.unitsRange.max.toLocaleString("en-GB")} ${unit}` });
+  } else if (requirement.unitsNeeded != null) {
+    chips.push({ label: `${requirement.unitsNeeded.toLocaleString("en-GB")} ${unit}` });
+  } else if (requirement.kwhNeeded != null) {
+    chips.push({ label: `${requirement.kwhNeeded.toLocaleString("en-GB")} kWh` });
+  }
+  if (requirement.minSoh != null) {
+    chips.push({ label: `SoH ${requirement.minSoh}%+` });
+  } else if (requirement.conditions.length) {
+    chips.push({ label: requirement.conditions.join(" / ") });
+  }
+  const place = countryName(requirement.country);
+  if (place) {
+    chips.push({ label: `Delivery ${place}` });
+  }
+  if (demand.needed_by) {
+    chips.push({ label: `By ${shortDay(demand.needed_by)}` });
+  }
+  if (demand.max_price != null) {
+    const currency = (demand.price_currency ?? "EUR").toUpperCase();
+    const amount = Number(demand.max_price).toLocaleString("en-GB", { minimumFractionDigits: Number(demand.max_price) < 10 ? 2 : 0, maximumFractionDigits: 2 });
+    const money = CURRENCY[currency] ? `${CURRENCY[currency]}${amount}` : `${currency} ${amount}`;
+    chips.push({ label: `Ceiling ${money}${demand.price_unit ? `/${demand.price_unit}` : ""} · internal` });
+  }
+  return chips;
+}
+
+/** Offers on the request so far: asked (emailed, or moved past candidate), replied, and chase due. */
+async function outreachCounts(listingId: string): Promise<RequestSummary["outreach"]> {
+  const [row] = await queryPg<{ offers: number; asked: number; replied: number }>(
+    `select count(*)::int as offers,
+            count(*) filter (where m.sent_at is not null or o.stage not in ('candidate'))::int as asked,
+            count(*) filter (where m.replied_at is not null or o.stage in ('negotiating', 'contract_out', 'signed', 'invoiced', 'paid', 'complete'))::int as replied
+     from crm_bulk_offers o
+     left join lateral (select sent_at, replied_at from crm_bulk_offer_mail where offer_id = o.id order by sent_at desc limit 1) m on true
+     where o.role = 'counterparty' and (o.bulk_listing_id = $1 or o.counterpart_id = $1)`, [listingId]);
+  if (!row?.offers) {
+    return null;
+  }
+  return { asked: row.asked, replied: row.replied, chaseDue: 0 };
 }
 
 type Identity = { companyId: string | null; personId: string | null; contact: string | null };
@@ -272,11 +351,14 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
   if (!demand) {
     return null;
   }
-  const [inventory, stock, offers] = await Promise.all([
+  const [inventory, stock, offers, outreach, chase] = await Promise.all([
     inventoryFor(demandId),
     unlistedStock(),
     offersForListing(demandId),
+    outreachCounts(demandId),
+    chaseOffers(demandId),
   ]);
+  const chaseIds = new Set(chase.map((row) => row.offerId));
   const { candidates, hidden, verdicts, errors } = inventory;
   // One requirement per request, from the same vocabulary the demand tab already uses: what a seller writes in a
   // make or model. Stock rows are then judged against it, never allowed to redefine the ask.
@@ -318,6 +400,7 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
     const who = identity.get(candidate.key) ?? { companyId: null, personId: null, contact: null };
     const price = firmPrice(candidate);
     const marks = fitMarks(requirement, match, { price });
+    const offer = offers.find(who.companyId, who.personId, candidate.seller ?? "");
     return {
       key: candidate.key,
       rank: index + 1,
@@ -331,7 +414,7 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
       reason: reasonFor(match, candidate),
       checks: requestChecks(match, missing, marks),
       price,
-      offer: offers.find(who.companyId, who.personId, candidate.seller ?? ""),
+      offer: offer && chaseIds.has(offer.id) ? { ...offer, chaseDue: true } : offer,
       companyId: who.companyId,
       personId: who.personId,
       contact: who.contact,
@@ -339,6 +422,11 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
       holds: holdsLine(candidate),
       source: [sourceLine(candidate), candidate.location ?? candidate.country].filter(Boolean).join(" · ") || null,
       fit: marks,
+      country: rowCountry(candidate),
+      quote: (candidate.description ?? candidate.title).trim() || null,
+      link: sourceLink(candidate),
+      // A seller with no price is asked for one even when the buyer set no ceiling (so there is no price mark).
+      askFor: [...new Set([...askFor(marks), ...(price || marks.some((mark) => mark.key === "price") ? [] : ["price per unit"]), ...missing])],
     };
   });
   const need = requirement.unitsNeeded;
@@ -351,6 +439,7 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
     considered: candidates.length + stockCandidates.length,
     blocked: rows.length ? null : "Nothing fits yet. Add a dossier or a listing field to widen the match.",
     errors,
+    summary: { chips: requestChips(requirement, demand), outreach: outreach ? { ...outreach, chaseDue: chaseIds.size } : null },
     // Only stated quantities count towards the need; a line that has not said is counted apart.
     coverage: need ? {
       stated: scored.reduce((sum, row) => sum + (row.candidate.units ?? 0), 0),

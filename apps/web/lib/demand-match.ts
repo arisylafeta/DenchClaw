@@ -42,6 +42,8 @@ export type Candidate = {
   sourceKind?: string | null;
   /** The day the source stated it, when known. */
   observedOn?: string | null;
+  /** The source page, when it has one. */
+  sourceUrl?: string | null;
   photos: number;
   tested: boolean;
   verified: boolean;

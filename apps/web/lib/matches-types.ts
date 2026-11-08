@@ -5,7 +5,11 @@
 export type MatchTag = "live ask" | "our listing" | "marketplace" | "unlisted stock" | "lead";
 
 /** The offer this row already became, if any. */
-export type MatchOffer = { id: string; stage: string; date: string | null };
+export type MatchOffer = {
+  id: string; stage: string; date: string | null;
+  /** Request rows: the last email has gone unanswered three working days. */
+  chaseDue?: boolean;
+};
 
 export type MatchRow = {
   /** Stable per listing: `demand:<id>`, `company:<id>`, `listing:<id>`, `trade:<id>`, `supply:<id>` or `stock:<id>`. */
@@ -34,6 +38,14 @@ export type MatchRow = {
   source?: string | null;
   /** Request rows only: one mark per requirement the request states. */
   fit?: FitMark[];
+  /** Request rows: where the goods are, by country name. */
+  country?: string | null;
+  /** Request rows: the source's own words, quoted when the row is opened. */
+  quote?: string | null;
+  /** Request rows: the source itself, when it has a page. */
+  link?: { href: string; label: string } | null;
+  /** Request rows: what to ask this seller for. */
+  askFor?: string[];
 };
 
 /** How one requirement fits: ✓ fits, ≈ close, ? not stated, ✗ misses. Always shown as glyph and word, never colour alone. */
@@ -45,6 +57,10 @@ export type FitMark = {
   /** What the row has against it, short: "Samsung 50E", "12,400 of 500,000", "Quantity". */
   label: string;
   state: FitState;
+  /** The "How it fits" row: the requirement's name, what the buyer asked, what they have. */
+  name?: string;
+  asked?: string;
+  have?: string;
 };
 
 /** Stated stock against the request's need. Only stated quantities count. */
@@ -73,4 +89,15 @@ export type MatchesResult = {
   errors: string[];
   /** Requests with a unit count only. */
   coverage?: MatchCoverage | null;
+  /** Requests only: the "Matched on" chips and the outreach so far. */
+  summary?: RequestSummary | null;
+};
+
+/** One requirement chip; `strong` is the product itself. */
+export type RequirementChip = { label: string; strong?: boolean };
+
+export type RequestSummary = {
+  chips: RequirementChip[];
+  /** Offers on the request: asked (emailed or past candidate), replied, chase due. Null when there are none. */
+  outreach: { asked: number; replied: number; chaseDue: number } | null;
 };
