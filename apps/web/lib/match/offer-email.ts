@@ -114,6 +114,11 @@ export function publicPlace(location: string | null | undefined): string | null 
   return `${parts[parts.length - 2]}, ${parts[parts.length - 1]}`;
 }
 
+/** The unsafe pieces of a location: a street, a unit number or a postcode. Town and country are not here. */
+export function addressParts(location: string | null | undefined): string[] {
+  return clean(location).split(",").map((part) => part.trim()).filter((part) => part.length >= 4 && !isPlaceWord(part));
+}
+
 const fieldOf = (fields: FieldFact[], key: string) => fields.find((field) => field.field_key === key) ?? null;
 
 /**
