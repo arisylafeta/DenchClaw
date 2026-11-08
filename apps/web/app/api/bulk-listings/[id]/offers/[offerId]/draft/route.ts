@@ -1,0 +1,77 @@
+import { getListing } from "@/lib/crm-postgres/bulk-listings";
+import { offerOutreach, setOpenDraft } from "@/lib/crm-postgres/bulk-offer-mail";
+import { readMailDraft } from "@/lib/crm-postgres/mail";
+import { buildOfferEmail, OfferEmailRefused, type OfferEmailKind } from "@/lib/match/offer-email";
+import { createOfferEmailDraft, OfferDraftError } from "@/lib/match/offer-draft";
+import { badRequest, guardBulkTrades, notFound } from "@/lib/bulk-trades-route";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+type Context = { params: Promise<{ id: string; offerId: string }> };
+
+/** Chase only while offered; otherwise the side's first email decides the shape. */
+function kindFor(stage: string | null, chase: boolean, kind: "supply" | "demand"): OfferEmailKind {
+  if (stage === "offered" && chase) {
+    return "chase";
+  }
+  return kind === "supply" ? "supply_offer" : "request_stock";
+}
+
+/**
+ * Prepares one offer email as a draft. The copy is built from the offer, the listing and the buyer's dossier
+ * only. One open draft per offer: while the stored draft is still unsent, the same one comes back.
+ */
+export async function POST(_req: Request, { params }: Context) {
+  const guard = await guardBulkTrades();
+  if ("response" in guard) { return guard.response; }
+  const { id, offerId } = await params;
+  if (!await getListing(id)) { return notFound("Listing"); }
+  const outreach = await offerOutreach(id, offerId);
+  if (!outreach) { return notFound("Offer"); }
+  if (outreach.stage !== "candidate" && outreach.stage !== "offered") {
+    return badRequest("Draft an email only while the offer is a candidate or offered.");
+  }
+  if (outreach.blocked || !outreach.email) {
+    return Response.json({ error: outreach.blocked ?? "This offer has no email address." }, { status: 409 });
+  }
+  const kind = kindFor(outreach.stage, outreach.chaseDue, outreach.kind);
+
+  if (outreach.openDraftId) {
+    const open = await readMailDraft(outreach.openDraftId, guard.userId);
+    if (open && open.state === "draft") {
+      return Response.json({ draftId: open.id, kind, subject: open.subject, body: open.body_text, reused: true });
+    }
+    // The stored draft was sent or deleted: drop the pointer rather than open a second copy of it.
+    await setOpenDraft(offerId, null);
+  }
+
+  let email;
+  try {
+    email = buildOfferEmail({
+      kind,
+      key: outreach.product.key,
+      fields: outreach.product.fields,
+      recipientFirstName: outreach.recipientFirstName,
+      location: outreach.location,
+      buyer: outreach.buyer,
+      previousSubject: outreach.lastSent?.subject ?? null,
+      privateValues: outreach.privateValues,
+    });
+  } catch (error) {
+    if (error instanceof OfferEmailRefused) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
+    throw error;
+  }
+
+  try {
+    const draftId = await createOfferEmailDraft({ to: [outreach.email], subject: email.subject, body: email.body });
+    await setOpenDraft(offerId, draftId);
+    return Response.json({ draftId, kind: email.kind, subject: email.subject, body: email.body, reused: false }, { status: 201 });
+  } catch (error) {
+    if (error instanceof OfferDraftError) {
+      return Response.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
+}

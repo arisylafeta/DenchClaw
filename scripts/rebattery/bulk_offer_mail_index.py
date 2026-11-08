@@ -5,8 +5,10 @@ Runs after the Gmail sync. Reads sent mail, and for each message tied to a bulk 
   1. records one row in crm_bulk_offer_mail (the index);
   2. links the Gmail thread to the listing and offer as `proposed` (never `confirmed`);
   3. stamps the offer's last touch and writes the Story `mail` row if it is missing;
-  4. when a reply lands on an indexed thread, logs it at its real time and sets the offer to waiting on us.
-It never sends mail, moves a stage, closes a record or alerts. It does not read or write Relay.
+  4. when a reply lands on an indexed thread, logs it at its real time and sets the offer to waiting on us;
+  5. an offer still at `candidate` with an indexed sent mail is moved to `offered` (the send happened but the
+     server may have died before the stage move). Only forward, never back, and only once.
+It never sends mail, closes a record or alerts. It does not read or write Relay.
 Dry run unless --apply. Idempotent: a second run changes nothing.
 
   bulk_offer_mail_index.py [--apply] [--since YYYY-MM-DD] [--include-recipient]
@@ -119,6 +121,33 @@ def set_waiting(cur, offer_id, who, since):
     return cur.rowcount
 
 
+def advance(cur, o, message_id=None):
+    """An offer with a sent mail has been offered. Moves candidate to offered only, so it can never go back."""
+    cur.execute("""update crm_bulk_offers set stage = 'offered', data = data - 'open_draft_id', updated_at = now()
+                   where id = %s and stage = 'candidate'""", (o["offer_id"],))
+    if cur.rowcount == 0:
+        return 0
+    data = {"from": "candidate", "stage": "offered", "source": "bulk_offer_mail_index"}
+    if message_id:
+        data["message_id"] = message_id
+    cur.execute("""insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, person_id, kind, title, data)
+                   values (%s, %s, %s, 'status', %s, %s::jsonb)""",
+                (o["listing_id"], o["offer_id"], o.get("person_id"), f"{o['name'] or o['party']} · Offered", json.dumps(data)))
+    return 1
+
+
+def reconcile_candidates(cur):
+    """Every offer still at candidate that has an indexed sent email. Idempotent: a moved offer is not a candidate."""
+    n = 0
+    for r in rows(cur, """select o.id as offer_id, o.bulk_listing_id as listing_id, o.person_id, o.name, l.party,
+                                 (select message_id from crm_bulk_offer_mail i where i.offer_id = o.id order by sent_at limit 1) as message_id
+                          from crm_bulk_offers o join crm_bulk_listings l on l.id = o.bulk_listing_id
+                          where o.role = 'counterparty' and o.stage = 'candidate'
+                            and exists (select 1 from crm_bulk_offer_mail i where i.offer_id = o.id)"""):
+        n += advance(cur, r, r.get("message_id"))
+    return n
+
+
 def fill_threads(cur):
     """Sent mail has no thread id until Gmail sync runs: fill it in and add the proposed link."""
     n = 0
@@ -156,7 +185,7 @@ def main():
     conn = psycopg2.connect(DSN)
     conn.autocommit = False
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    s = dict(indexed=0, linked=0, touched=0, story=0, threads_filled=0, replies=0, not_offer_mail=0, recipient_only=0, ambiguous=0, errors=0)
+    s = dict(indexed=0, linked=0, touched=0, story=0, threads_filled=0, replies=0, advanced=0, not_offer_mail=0, recipient_only=0, ambiguous=0, errors=0)
     recipient_only, ambiguous, errors = [], [], []
     waiting = {}  # offer id -> (who, when): the latest message decides
 
@@ -212,6 +241,7 @@ def main():
             errors.append(f"reply {r['reply_id']}: {exc}")
     for offer_id, (who, when) in waiting.items():
         set_waiting(cur, offer_id, who, when)
+    s["advanced"] = reconcile_candidates(cur)
 
     if args.apply:
         conn.commit()
