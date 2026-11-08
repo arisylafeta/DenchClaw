@@ -84,7 +84,7 @@ export type RelayDraftView = {
     /** Why the last send attempt did not go out, if it didn't. */
     failure: { reason: string; detail?: unknown } | null;
     /** Send-later time Alex picked, while it waits. */
-    scheduled: { at: string } | null;
+    scheduled: { at: string; changed: boolean } | null;
     warnings: string[];
   } | null;
 };
@@ -682,7 +682,7 @@ async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, 
   // What Relay wrote, split from the signature the same way as the sent copy, so learning compares like with like.
   const originals = await mainCopies([primaryId, ...followRows.map((f) => f.mailId).filter((id): id is string => !!id)]);
   await withPgTransaction(async (tx) => {
-    await tx.query("update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail')", [itemId]);
+    await tx.query(SKIP_DRAFTS_SQL, [itemId]);
     await tx.query(`insert into relay_draft (item_id, role, position, title, why, mail_message_id, source_note, agent_log, original_body, origin) values ($1, 'primary', 0, $2, '', $3, $4, $5::jsonb, $6, $7)`,
       [itemId, `Reply to ${item.counterpart_name ?? ctx.to}`, primaryId, note, JSON.stringify([...log, ...sources]), originals.get(primaryId) ?? null, origin]);
     for (const [index, f] of followRows.entries()) {
@@ -735,7 +735,7 @@ async function startJob(item: RelayItem, ownerId: string, rawNote: string): Prom
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeFileSync(join(dir, "prompt.txt"), `${JOB_SYSTEM(ctx.rules, dir, ctx.guide)}\n\n${ctx.prompt}`, { mode: 0o600 });
   await withPgTransaction(async (tx) => {
-    await tx.query("update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail')", [item.id]);
+    await tx.query(SKIP_DRAFTS_SQL, [item.id]);
     await tx.query("update relay_item set status = 'review', updated_at = now() where id = $1", [item.id]);
   });
   const child = spawn("/usr/bin/python3", [JOB_RUNNER, job.id], { detached: true, stdio: "ignore" });
@@ -809,6 +809,10 @@ async function createMailDraft(d: NewDraft): Promise<string> {
 
 // ---------- review ----------
 
+/** Drops an item's unsent drafts; a dropped draft's send-later is cancelled with it, so it can never go out. */
+const SKIP_DRAFTS_SQL = `with s as (update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail') returning mail_message_id)
+  update mail_message set personalization = personalization - 'scheduled_send' where id in (select mail_message_id from s) and state = 'draft' and personalization ? 'scheduled_send'`;
+
 type DraftRow = { id: string; item_id: string; role: "primary" | "follow"; position: number; title: string; why: string; state: RelayDraftView["state"]; source_note: string; agent_log: unknown; mail_message_id: string | null; gmail_draft_id: string | null };
 
 /** Items in Review with their drafts (read live from mail_message) and suggested to-dos. */
@@ -820,8 +824,11 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
   const ids = items.map((i) => i.id);
   const drafts = await queryPg<DraftRow>(`select id,item_id,role,position,title,why,state,source_note,agent_log,mail_message_id,gmail_draft_id from relay_draft where item_id = any($1) and state <> 'skipped' order by position`, [ids]);
   const mailIds = drafts.map((d) => d.mail_message_id).filter((id): id is string => !!id);
-  const mails = mailIds.length ? await queryPg<{ id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null; body_text: string | null; updated_at: string; personalization: { attachments?: unknown; send_failure?: { reason: string; detail?: unknown }; scheduled_send?: { at?: string } } | null; transport: string | null }>(
-    `select id,state,identity_key,from_email,coalesce(to_emails,'{}') as to_emails,coalesce(cc_emails,'{}') as cc_emails,coalesce(bcc_emails,'{}') as bcc_emails,subject,body_text,updated_at,personalization,transport from mail_message where id = any($1)`, [mailIds]) : [];
+  const mails = mailIds.length ? await queryPg<{ id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null; body_text: string | null; updated_at: string; personalization: { attachments?: unknown; send_failure?: { reason: string; detail?: unknown }; scheduled_send?: { at?: string } } | null; transport: string | null; schedule_changed: boolean }>(
+    `select id,state,identity_key,from_email,coalesce(to_emails,'{}') as to_emails,coalesce(cc_emails,'{}') as cc_emails,coalesce(bcc_emails,'{}') as bcc_emails,subject,body_text,updated_at,personalization,transport,
+       coalesce(personalization ? 'scheduled_send' and ((personalization->'scheduled_send'->>'version')::timestamptz is distinct from updated_at
+         or coalesce(personalization->'scheduled_send'->'attachments', 'null'::jsonb) <> coalesce(personalization->'attachments', 'null'::jsonb)), false) as schedule_changed
+     from mail_message where id = any($1)`, [mailIds]) : [];
   const byMail = new Map(mails.map((m) => [m.id, m]));
   const todos = await queryPg<RelayTodo>(`select t.id,t.item_id,t.title,t.detail,t.kind,t.state,w.reb_key,null as source,t.created_at from relay_todo t left join work_tasks w on w.id = t.work_task_id where t.item_id = any($1) and t.state in ('suggested','accepted') order by t.created_at`, [ids]);
   const facts = new Map<string, RelayFacts>();
@@ -851,7 +858,7 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
         mail: m ? { id: m.id, state: m.state, identity_key: m.identity_key, from_email: m.from_email, to_emails: m.to_emails, cc_emails: m.cc_emails, bcc_emails: m.bcc_emails, subject: m.subject,
           main: splitCopy(m.body_text, signatures.get(m.identity_key ?? "") ?? null).main, updated_at: m.updated_at, attachments: draftAttachments(m.personalization?.attachments), transport: m.transport,
           failure: m.personalization?.send_failure ?? null,
-          scheduled: m.state === "draft" && m.personalization?.scheduled_send?.at ? { at: m.personalization.scheduled_send.at } : null, warnings: ((m.personalization as { oneoff?: { warnings?: unknown[] } } | null)?.oneoff?.warnings ?? []).filter((w): w is string => typeof w === "string") } : null,
+          scheduled: m.state === "draft" && m.personalization?.scheduled_send?.at ? { at: m.personalization.scheduled_send.at, changed: m.schedule_changed } : null, warnings: ((m.personalization as { oneoff?: { warnings?: unknown[] } } | null)?.oneoff?.warnings ?? []).filter((w): w is string => typeof w === "string") } : null,
       };
     }),
     todos: todos.filter((t) => t.item_id === item.id),
@@ -928,7 +935,7 @@ export async function scheduleSend(draftId: string, owner: { id: string; email: 
   if (!mail.to_emails.length) throw new RelayError(400, "Add a recipient before scheduling.");
   const [row] = await queryPg<{ at: string }>(
     `update mail_message set personalization = jsonb_set(coalesce(personalization, '{}'::jsonb) - 'send_failure', '{scheduled_send}',
-       jsonb_build_object('at', $2::timestamptz, 'version', updated_at, 'by', $3::text, 'set_at', now()), true)
+       jsonb_build_object('at', $2::timestamptz, 'version', updated_at, 'attachments', coalesce(personalization->'attachments', 'null'::jsonb), 'by', $3::text, 'set_at', now()), true)
      where id = $1 and state = 'draft' and date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $4::timestamptz)
      returning personalization->'scheduled_send'->>'at' as at`, [mail.id, sendAt.toISOString(), owner.email, new Date(mail.updated_at).toISOString()]);
   if (!row) throw new RelayError(409, "This draft changed since you opened it. Reload to see the latest.");
@@ -1119,7 +1126,7 @@ export async function markDone(itemId: string, ownerId: string, ownerEmail: stri
   } catch {
     throw new RelayError(502, "Gmail didn't accept the change. Try again.");
   }
-  await queryPg("update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail')", [itemId]);
+  await queryPg(SKIP_DRAFTS_SQL, [itemId]);
   return updateRelayItem(itemId, ownerId, { status: "done", done_reason: reason });
 }
 

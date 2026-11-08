@@ -83,37 +83,58 @@ def decide(row: dict, now: datetime) -> dict | None:
     return None
 
 
-def claim_due(conn) -> list[dict]:
-    """Takes every due schedule off its draft in one statement and returns what each one was."""
+RECLAIM_AFTER = timedelta(minutes=20)  # a claim this old was left by a runner that died; the next run retries it
+AT_SQL = "(case when m.personalization->'scheduled_send'->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' then (m.personalization->'scheduled_send'->>'at')::timestamptz end)"
+
+
+def claim_next(conn) -> dict | None:
+    """Claims the next due schedule (one row per transaction) by stamping claimed_at, keeping the pin so a runner that
+    dies mid-way is retried. Only drafts Relay still holds count: a draft dropped by Done or a re-draft never sends.
+    same_version compares the pinned version and attachments with the draft as it is now, just before sending."""
     with conn.cursor() as cur:
-        cur.execute("""with d as (
-              select id, personalization->'scheduled_send' as s, updated_at from mail_message
-              where state = 'draft' and personalization ? 'scheduled_send'
-                and (personalization->'scheduled_send'->>'at')::timestamptz <= now()
-              for update skip locked)
-            update mail_message m set personalization = m.personalization - 'scheduled_send' from d where m.id = d.id
-            returning m.id, d.s->>'by', (d.s->>'at')::timestamptz,
-              coalesce(d.updated_at = (d.s->>'version')::timestamptz, false), coalesce(array_to_string(m.to_emails, ', '), '')""")
-        rows = [{"id": r[0], "by": r[1], "at": r[2], "same_version": r[3], "to": r[4]} for r in cur.fetchall()]
+        cur.execute(f"""with d as (
+              select m.id from mail_message m
+              where m.state = 'draft' and m.personalization ? 'scheduled_send' and {AT_SQL} <= now()
+                and exists (select 1 from relay_draft rd where rd.mail_message_id = m.id and rd.state in ('draft','gmail'))
+                and coalesce((m.personalization->'scheduled_send'->>'claimed_at')::timestamptz, '-infinity') < now() - %s::interval
+              order by {AT_SQL} limit 1
+              for update of m skip locked)
+            update mail_message m set personalization = jsonb_set(m.personalization, '{{scheduled_send,claimed_at}}', to_jsonb(now()), true)
+            from d where m.id = d.id
+            returning m.id, m.personalization->'scheduled_send'->>'by', {AT_SQL},
+              coalesce(m.updated_at = (m.personalization->'scheduled_send'->>'version')::timestamptz
+                and coalesce(m.personalization->'scheduled_send'->'attachments', 'null'::jsonb) = coalesce(m.personalization->'attachments', 'null'::jsonb), false)""",
+                    (f"{int(RECLAIM_AFTER.total_seconds())} seconds",))
+        r = cur.fetchone()
     conn.commit()
-    return rows
+    return {"id": r[0], "by": r[1], "at": r[2], "same_version": r[3]} if r else None
 
 
-def run_due() -> int:
+def unpin(conn, message_id: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute("update mail_message set personalization = personalization - 'scheduled_send' where id = %s", (message_id,))
+    conn.commit()
+
+
+def run_due(limit: int = 50) -> int:
+    """Sends due scheduled drafts one at a time. Per-email failures are recorded on the draft and printed (no
+    addresses); the exit code is non-zero only when the runner itself breaks."""
     conn = psycopg2.connect(DSN)
     try:
-        rows = claim_due(conn)
-        now = datetime.now(timezone.utc)
-        failed = 0
-        for row in rows:
-            problem = decide(row, now)
+        for _ in range(limit):
+            row = claim_next(conn)
+            if not row:
+                break
+            problem = decide(row, datetime.now(timezone.utc))
             if problem:
                 note(conn, row["id"], problem)
-            elif main(row["id"], row["by"]) == 0:
-                continue
-            failed += 1
-            print(f"Scheduled email to {row['to'] or 'unknown'} did not send. Open Relay Review to see why.")
-        return 1 if failed else 0
+                ok = False
+            else:
+                ok = main(row["id"], row["by"]) == 0
+            unpin(conn, row["id"])
+            if not ok:
+                print("A scheduled Relay email did not send. Open Relay Review to see why.")
+        return 0
     finally:
         conn.close()
 

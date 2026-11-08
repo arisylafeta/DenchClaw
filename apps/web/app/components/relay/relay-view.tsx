@@ -443,7 +443,7 @@ function Review({ data, reload, say, onBack, sending, startSend }: {
   const ordered = [...item.drafts].sort((a, b) => a.position - b.position);
   const viewId = views[item.id] && ordered.some((d) => d.id === views[item.id]) ? views[item.id] : ordered[0]?.id;
   const draft = ordered.find((d) => d.id === viewId) ?? ordered[0];
-  const isSent = (d: RelayDraftView) => d.state === "sent" || d.id in sending || !!d.mail?.scheduled;
+  const isSent = (d: RelayDraftView) => d.state === "sent" || d.id in sending || (!!d.mail?.scheduled && !d.mail.scheduled.changed);
   const [finishing, setFinishing] = useState(false);
   const finish = async () => {
     setFinishing(true);
@@ -574,6 +574,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
   const [later, setLater] = useState(false);
   const [custom, setCustom] = useState("");
   const [scheduling, setScheduling] = useState(false);
+  const [checking, setChecking] = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   // A rewrite from the AI panel saves server-side; pick up the new copy when the draft's version moves on.
   useEffect(() => { if (mail && local && mail.updated_at !== local.updated_at && !saving) setLocal({ subject: mail.subject ?? "", body: mail.main, to: mail.to_emails.join(", "), cc: mail.cc_emails.join(", "), bcc: mail.bcc_emails.join(", "), updated_at: mail.updated_at }); }, [mail?.updated_at]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -628,6 +629,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
     if (!custom) return;
     const [date, time] = custom.split("T");
     const at = londonWallToUtc(date, time);
+    if (londonInputValue(at) !== custom) { say("That time doesn't exist in London: the clocks change then. Pick another."); return; }
     const problem = sendAtProblem(at);
     if (problem) { say(problem); return; }
     void scheduleAt(at.toISOString());
@@ -641,7 +643,6 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
     setScheduling(true);
     try { if (await startSend(draft.id, mail.updated_at, mail.to_emails.join(", "))) onNext(); } finally { setScheduling(false); }
   };
-  const [checking, setChecking] = useState(false);
   const checkSent = async () => {
     setChecking(true);
     try {
@@ -716,8 +717,10 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
           </div>)
         : sent ? <div className={s.sentbox}>✓ Sent. Relay brings this back to Follow up if there&apos;s no reply.</div>
         : scheduled ? (
-          <div className={cx(s.sentbox, s.schedbox)}>
-            <span>Sends <b>{sendLabel(scheduled.at)}</b> to {mail.to_emails.join(", ")}. If they reply before then, it waits for you.</span>
+          <div className={cx(s.sentbox, s.schedbox, scheduled.changed && s.schedwarn)}>
+            {scheduled.changed
+              ? <span><b>Won&apos;t send {sendLabel(scheduled.at)}:</b> this draft changed after you scheduled it. Send it now or cancel and schedule again.</span>
+              : <span>Sends <b>{sendLabel(scheduled.at)}</b> to {mail.to_emails.join(", ")}. If they reply before then, it waits for you.</span>}
             <span className={s.sp} />
             <button type="button" className={s.btn} disabled={scheduling} onClick={() => void sendNow()}>Send now</button>
             <button type="button" className={cx(s.btn, s.ghost)} disabled={scheduling} onClick={() => void cancelSchedule()}>Cancel</button>

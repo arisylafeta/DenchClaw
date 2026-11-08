@@ -386,3 +386,4 @@
 .later { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 18px 14px; }
 .later .btn { padding: 7px 12px; font-size: 13px; }
 .later input { border: 1px solid var(--line); border-radius: 11px; padding: 6px 10px; font: inherit; font-size: 13px; background: var(--card); color: inherit; }
+.schedbox.schedwarn { background: var(--amber-soft); color: var(--ink); }
