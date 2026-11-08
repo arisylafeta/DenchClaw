@@ -252,7 +252,8 @@ export async function supplyMatchesV2(listingId: string): Promise<MatchesResult 
   );
   const contactOf = new Map(contacts.map((row) => [row.company_id, row]));
 
-  for (const buyer of ranked.ranked) {
+  // A company with no product overlap at all is not a match; the tab shows the ones the key actually reached.
+  for (const buyer of ranked.ranked.filter((row) => row.productTier > 0)) {
     rows.push(buyerRow(buyer, contactOf.get(buyer.companyId) ?? null, touch.get(buyer.companyId) ?? null, offers));
   }
   const listed = rows.map((row, index) => ({ ...row, rank: index + 1 }));

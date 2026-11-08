@@ -130,7 +130,8 @@ function reasonFor(match: Match, candidate: Candidate): string {
 function checksFor(match: Match, missing: string[]): string[] {
   const gaps = match.checks
     .filter((check) => check.state !== "pass" && !check.detail.startsWith("AI:"))
-    .map((check) => check.detail);
+    // The grouped supply tab said where the rest of the ask was; this list has no groups below.
+    .map((check) => check.detail.replace(/\s*\(group with others below\)/i, ""));
   return [...new Set([...gaps, missing.length ? `Ask for ${missing.join(", ")}` : null].filter((entry): entry is string => !!entry))].slice(0, 3);
 }
 
