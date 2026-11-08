@@ -244,7 +244,7 @@ describe("Matches tab", () => {
       location: "Leeds", price: `EUR ${(2000 + i * 10).toLocaleString("en-GB")}`, seen: "7 Nov", link: { href: `https://northway.example/${i}`, label: "Listing" }, ...o,
     });
     const grouped = (units: MatchUnit[], o: Partial<MatchGroupView> = {}) => row({
-      key: "group:stock:sto_1", name: "Northway Parts", tags: ["unlisted stock"], reason: "Stellantis 46 kWh NMC pack × 11", checks: [],
+      key: "group:stock:sto_1", name: "Northway Parts", country: "United Kingdom", tags: ["unlisted stock"], reason: "Stellantis 46 kWh NMC pack × 11", checks: [],
       detail: "11 packs", price: "EUR 2,010–2,110", stockId: "sto_1", companyId: "c_nw", personId: "p_nw", sourceKind: "salvage listing",
       holds: "Stellantis 46 kWh NMC pack × 11", source: "EUR 2,010–2,110 per pack · Leeds, Warrington · salvage listings, seen 1–7 Nov",
       fit: [
@@ -256,8 +256,8 @@ describe("Matches tab", () => {
         pack: "Stellantis 46 kWh NMC pack", count: units.length, countWord: null, unsure: false, sameLabel: "Same pack in",
         vehicles: [{ name: "Vauxhall Vivaro-e", n: 6 }, { name: "Peugeot Rifter", n: 5 }],
         meta: "EUR 2,010–2,110 per pack · Leeds, Warrington · salvage listings, seen 1–7 Nov",
-        why: { title: "Why these count as the same pack", text: "The Vauxhall Vivaro-e and Peugeot Rifter carry the Stellantis 50 kWh NMC pack. Battery graph: matched on part number, high confidence." },
-        lots: false, units, stockIds: units.map((u) => u.stockId!), ...o,
+        why: { title: "Why these count as the same pack", text: "The Vauxhall Vivaro-e and Peugeot Rifter carry the Stellantis 50 kWh NMC pack.", source: "Battery graph · matched on part number · high confidence" },
+        lots: false, priceVaries: false, units, stockIds: units.map((u) => u.stockId!), ...o,
       },
     });
     const summary = { chips: [{ label: "Complete EV packs", strong: true }], outreach: null, count: { suppliers: 2, units: 12, word: "packs" }, packTypes: { types: 2, unconfirmed: 1 }, grouped: true };
@@ -282,6 +282,10 @@ describe("Matches tab", () => {
       expect(marks).toEqual(["✓fits:EUR 2,010–2,110", "≈close:SoH: 1 of 11 stated", "✓fits:In GB"]);
       // The status column and Add to offers as slice 1; no checkboxes yet (slice 4).
       expect(screen.getAllByText("Not contacted")).toHaveLength(2);
+      // A group reads like a single row: country and source tag in the header, Add to offers and Not a fit.
+      const header = screen.getByText("Stellantis 46 kWh NMC pack").parentElement!;
+      expect(header.textContent).toBe("Northway PartsStellantis 46 kWh NMC pack× 11United KingdomUnlisted stock");
+      expect(screen.getAllByRole("button", { name: "Not a fit" })).toHaveLength(2);
       expect(screen.getByText("Listed for sale")).toBeTruthy();
       expect(screen.queryByRole("checkbox")).toBeNull();
       expect(screen.queryByText("Pack type not confirmed")).toBeNull();
@@ -293,8 +297,13 @@ describe("Matches tab", () => {
       render(<DemandMatchesTab demandId="btd_stn" active />);
       const toggle = (await screen.findAllByRole("button", { expanded: false })).find((button) => button.textContent?.includes("Northway Parts"))!;
       fireEvent.click(toggle);
-      expect(screen.getByText("Why these count as the same pack:").parentElement?.textContent).toContain("carry the Stellantis 50 kWh NMC pack");
-      expect(screen.getByText("Units")).toBeTruthy();
+      // As A-mixed: why on the left (title, note, source), units on the right.
+      const why = screen.getByText("Why these count as the same pack").parentElement!;
+      expect(why.textContent).toBe("Why these count as the same packThe Vauxhall Vivaro-e and Peugeot Rifter carry the Stellantis 50 kWh NMC pack.Battery graph · matched on part number · high confidence");
+      expect(why.className).toContain("gWhy");
+      expect(screen.getByText("Units").className).toContain("blockTitle");
+      expect(screen.getByText("Units").parentElement!.className).toContain("gUnits");
+      expect(screen.queryByText("Prices vary a lot, check the units")).toBeNull();
       expect(screen.getByText("· 11, cheapest first")).toBeTruthy();
       const table = screen.getByRole("table");
       expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual(["Vehicle", "Year", "Stock ref", "SoH / condition", "Location", "Price", "Seen", "Link"]);
@@ -319,13 +328,16 @@ describe("Matches tab", () => {
       const units = [unit(1), unit(2), unit(3)];
       vi.stubGlobal("fetch", vi.fn(async () => json(result([grouped(units, {
         pack: "Pack from Citroen e-Berlingo", unsure: true, sameLabel: "Listed as", vehicles: [{ name: "Citroen e-Berlingo", n: 3 }],
-        why: { title: "Why this is kept apart", text: "These listings name the Citroen e-Berlingo but give no part number." },
+        why: { title: "Why this is kept apart", text: "These listings name the Citroen e-Berlingo but give no part number.", source: "Ask the seller for the pack label photo or part number" },
+        priceVaries: true,
       })], { id: "btd_stn", kind: "demand", summary }))));
       render(<DemandMatchesTab demandId="btd_stn" active />);
       expect(await screen.findByText("Pack type not confirmed")).toBeTruthy();
       expect(screen.getByText("Listed as")).toBeTruthy();
       fireEvent.click(screen.getAllByRole("button", { expanded: false }).find((button) => button.textContent?.includes("Northway Parts"))!);
-      expect(screen.getByText("Why this is kept apart:")).toBeTruthy();
+      expect(screen.getByText("Why this is kept apart")).toBeTruthy();
+      expect(screen.getByText("Ask the seller for the pack label photo or part number")).toBeTruthy();
+      expect(screen.getByText("Prices vary a lot, check the units")).toBeTruthy();
       expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
     });
 
@@ -361,6 +373,23 @@ describe("Matches tab", () => {
       expect(body).toMatchObject({ name: "Northway Parts", companyId: "c_nw", personId: "p_nw", data: { stock_opportunity_id: "sto_1", stock_opportunity_ids: ["sto_1", "sto_2", "sto_3"] } });
       expect(await screen.findByText(/In offers · Candidate 8 Nov/)).toBeTruthy();
       expect(calls.filter((call) => call.startsWith("POST"))).toHaveLength(1);
+    });
+
+    it("Not a fit on a group sends the group's key once, and the group leaves the list", async () => {
+      const calls: string[] = [];
+      vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push(`${init?.method ?? "GET"} ${url} ${init?.body ?? ""}`);
+        if (init?.method === "POST") return json({ activity: { id: "a1" }, count: 3 }, 201);
+        return json(result([grouped([unit(1), unit(2), unit(3)])], { id: "btd_stn", kind: "demand", summary }));
+      }));
+      render(<DemandMatchesTab demandId="btd_stn" active />);
+      fireEvent.click(await screen.findByRole("button", { name: "Not a fit" }));
+      fireEvent.click(screen.getByRole("button", { name: "Price" }));
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(screen.queryByText("Northway Parts")).toBeNull());
+      const posts = calls.filter((call) => call.startsWith("POST"));
+      expect(posts).toHaveLength(1);
+      expect(JSON.parse(posts[0].split(" ").slice(2).join(" "))).toEqual({ key: "group:stock:sto_1", label: "Northway Parts", reason: "Price" });
     });
 
     it("leaves the supply tab as it was, even next to a grouped request", async () => {

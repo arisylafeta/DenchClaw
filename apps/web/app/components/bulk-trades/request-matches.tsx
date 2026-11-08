@@ -93,7 +93,10 @@ type GroupRowProps = {
   row: MatchRow;
   isOpen: boolean;
   onToggle: () => void;
-  action: ReactNode;
+  /** Add to offers (or Open in Offers) and Not a fit, as on a single row. */
+  actions: ReactNode;
+  /** The Not a fit reasons, when asked for this row. */
+  notAFit: ReactNode;
 };
 
 /**
@@ -102,7 +105,7 @@ type GroupRowProps = {
  * (A-zoe): why the packs count as the same, then the units, cheapest first: five, then all of them in a scrolling box
  * with a fixed header.
  */
-function GroupRow({ row, isOpen, onToggle, action }: GroupRowProps) {
+function GroupRow({ row, isOpen, onToggle, actions, notAFit }: GroupRowProps) {
   const [all, setAll] = useState(false);
   const group = row.group!;
   const where = standing(row.offer, row.sourceKind);
@@ -115,11 +118,13 @@ function GroupRow({ row, isOpen, onToggle, action }: GroupRowProps) {
       <div className={css.rowLine}>
         {/* Slice 4 seam: the group's pick checkbox goes here, before the row button. */}
         <button type="button" className={css.rowmain} aria-expanded={isOpen} aria-controls={detailId} onClick={onToggle}>
-          <div className={css.gLeft}>
+          <div className={`${css.left} ${css.gLeft}`}>
             <div className={css.gTitle}>
               <span className={css.name}>{row.name}</span>
               <span className={css.gPack}>{group.pack}</span>
               <span className={css.name}>× {group.count}{group.countWord ? ` ${group.countWord}` : ""}</span>
+              {row.country && <span className={`${css.muted} ${css.country}`}>{row.country}</span>}
+              {row.tags.map((tag) => <span key={tag} className={`${css.tag} ${TAG_CLASS[tag] ?? ""}`}>{tagLabel(tag)}</span>)}
               {group.unsure && <span className={`${css.tag} ${css.tagWarn}`}>Pack type not confirmed</span>}
             </div>
             {group.sameLabel && group.vehicles.length > 0 && (
@@ -130,22 +135,30 @@ function GroupRow({ row, isOpen, onToggle, action }: GroupRowProps) {
             )}
             <div className={`${css.muted} ${css.source}`}>{group.meta}</div>
           </div>
-          <ul className={`${css.marks} ${css.gMarks}`} aria-label="How it fits">
+          <ul className={css.marks} aria-label="How it fits">
             {marks.map((mark) => <Mark key={`${mark.key}:${mark.label}`} mark={mark} />)}
           </ul>
-          <div className={`${css.status} ${css.gStatus}`}>
+          <div className={css.status}>
             <span><span className={`${css.dot} ${where.due ? css.dotDue : ""}`} aria-hidden /><b>{where.stage}</b></span>
             {where.note && <span>{where.note}</span>}
           </div>
         </button>
-        <div className={css.actions}>{action}</div>
+        <div className={css.actions}>{actions}</div>
       </div>
       {isOpen && (
         <div id={detailId} className={css.gDetail}>
-          {group.why && <div className={css.why}><b>{group.why.title}:</b> {group.why.text}</div>}
-          <div className={css.unitsHead}>
-            <span className={css.unitsTitle}>{group.lots ? "Lots" : "Units"} <span className={css.muted}>· {group.units.length}, cheapest first</span></span>
+          {group.why && (
+            <div className={css.gWhy}>
+              <div className={css.blockTitle}>{group.why.title}</div>
+              <div className={css.why}>{group.why.text}</div>
+              {group.why.source && <div className={`${css.muted} ${css.who}`}>{group.why.source}</div>}
+            </div>
+          )}
+          <div className={css.gUnits}>
+          <div className={css.blockTitle}>
+            {group.lots ? "Lots" : "Units"} <span className={css.muted}>· {group.units.length}, cheapest first</span>
           </div>
+          {group.priceVaries && <div className={`${css.muted} ${css.who}`}>Prices vary a lot, check the units</div>}
           <div className={css.ubox} style={all ? { maxHeight: 360 } : undefined} role="region" aria-label={`${row.name}: ${noun}`} tabIndex={all ? 0 : undefined}>
             <table className={css.ut}>
               <thead>
@@ -176,8 +189,10 @@ function GroupRow({ row, isOpen, onToggle, action }: GroupRowProps) {
               {all ? "Show fewer" : `Show all ${group.units.length} ${noun} (${group.units.length - FIRST_UNITS} more)`}
             </button>
           )}
+          </div>
         </div>
       )}
+      {notAFit}
     </div>
   );
 }
@@ -307,7 +322,11 @@ export function RequestMatches({
         {rows.map((row) => {
           const isOpen = open === row.key;
           if (row.group) {
-            return <GroupRow key={row.key} row={row} isOpen={isOpen} onToggle={() => setOpen(isOpen ? null : row.key)} action={action(row, true)} />;
+            return (
+              <GroupRow key={row.key} row={row} isOpen={isOpen} onToggle={() => setOpen(isOpen ? null : row.key)}
+                actions={<>{action(row, true)}{notAFit(row)}</>}
+                notAFit={asking === row.key ? <div className={css.notAFit}>{notAFitForm(row)}</div> : null} />
+            );
           }
           const where = standing(row.offer, row.sourceKind);
           const marks = row.fit ?? [];
