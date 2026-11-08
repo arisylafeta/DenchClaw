@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { stockCandidate, stockSourceKind, stockUnits, type StockRow } from "./demand-matches-v2";
+import { listingCandidate, type ListingRow, type SpecRow } from "./demand-match-supply";
 import { requirementFor, scoreCandidate } from "../demand-match";
 import { fitMarks, holdsLine, sourceLine } from "../match/fit-marks";
 import type { Demand } from "../bulk-demand";
@@ -97,5 +98,26 @@ describe("stock lines on a request", () => {
     expect(m.candidate.units).toBe(1);
     expect(fitMarks(ask, m).find((mark) => mark.key === "quantity")).toEqual({ key: "quantity", label: "1 of 20", state: "close" });
     expect(fitMarks(ask, m).find((mark) => mark.key === "location")).toEqual({ key: "location", label: "NO → PL", state: "close" });
+  });
+});
+
+describe("marketplace listings on a request", () => {
+  const listing = (spec: Partial<SpecRow>): ListingRow => ({
+    id: "l1", title: "Hyundai Kona 64 kWh pack", seo_slug: null, buy_now_price: null, currency: null, updated_at: null, published_at: null,
+    visibility: "public", accounts: { name: "Seller" }, listing_media: null,
+    listing_specs: {
+      chemistry: null, format: "pack", soh: null, quantity: null, quantity_available: null, pack_kwh: 64, manufacturer: "Hyundai",
+      model: "Kona", year_manufacture: null, location_address: null, metadata_json: null, test_data_json: null, ...spec,
+    },
+  });
+
+  it("counts a listing with no quantity as one pack on a pack request, and as not stated on a cell request", () => {
+    const packs = requirementFor(demand({ wants: "Hyundai Kona 64 kWh packs", volume: 10, volume_unit: "packs" }), new Set(["hyundai", "kona"]));
+    expect(scoreCandidate(packs, listingCandidate(listing({})))!.candidate.units).toBe(1);
+    const cells = requirementFor(demand({ wants: "21700 cells", volume: 100_000, volume_unit: "cells", spec: { formats: ["Cells"] } }));
+    const cellListing = listingCandidate(listing({ format: "cell", manufacturer: "Samsung", model: "INR21700-50E", pack_kwh: null }));
+    expect(scoreCandidate(cells, cellListing)!.candidate.units).toBeNull();
+    // A stated available count is always used.
+    expect(scoreCandidate(cells, listingCandidate(listing({ format: "cell", manufacturer: "Samsung", model: "INR21700-50E", pack_kwh: null, quantity_available: 12_400 })))!.candidate.units).toBe(12_400);
   });
 });

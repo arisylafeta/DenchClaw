@@ -10,14 +10,14 @@ import { countryFromText, kwhFromText, mergeSupplyDuplicates, type Candidate, ty
 const CACHE_MS = 5 * 60_000;
 const SITE = "https://www.rebattery.io/marketplace/";
 
-type ListingRow = {
+export type ListingRow = {
   id: string; title: string; seo_slug: string | null; buy_now_price: number | null; currency: string | null;
   updated_at: string | null; published_at: string | null; visibility: string;
   accounts: { name: string | null } | null;
   listing_specs: SpecRow | SpecRow[] | null;
   listing_media: { count: number }[] | null;
 };
-type SpecRow = {
+export type SpecRow = {
   chemistry: string | null; format: string | null; soh: number | null; quantity: number | null; quantity_available: number | null;
   pack_kwh: number | null; manufacturer: string | null; model: string | null; year_manufacture: number | null;
   location_address: { countryCode?: string; region?: string; city?: string; country?: string } | null;
@@ -65,7 +65,7 @@ export function marketplaceCandidates(): Promise<Candidate[]> {
   return listingCache.rows;
 }
 
-function listingCandidate(row: ListingRow): Candidate {
+export function listingCandidate(row: ListingRow): Candidate {
   const spec = Array.isArray(row.listing_specs) ? row.listing_specs[0] ?? null : row.listing_specs;
   const where = spec?.location_address;
   return {
@@ -80,9 +80,10 @@ function listingCandidate(row: ListingRow): Candidate {
     cellFormat: spec?.metadata_json?.cellFormat ?? null,
     kwh: spec?.pack_kwh != null ? Number(spec.pack_kwh) : null,
     kwhEstimated: false,
-    // No quantity is "not stated", never one unit. A lone 1 with no available count is a placeholder on a cell ask.
-    units: spec?.quantity_available ?? spec?.quantity ?? null,
-    unitsBare: spec?.quantity_available == null && spec?.quantity === 1,
+    // As for stock lines: a listing with no count, or a lone 1, is one pack on a pack ask and "not stated" on a cell or
+    // module ask (the scorer's statedUnits decides which, from the bare flag).
+    units: spec?.quantity_available ?? spec?.quantity ?? 1,
+    unitsBare: spec?.quantity_available == null && (spec?.quantity == null || spec.quantity === 1),
     price: row.buy_now_price != null ? Number(row.buy_now_price) : null,
     currency: row.currency,
     currencyAssumed: false,
