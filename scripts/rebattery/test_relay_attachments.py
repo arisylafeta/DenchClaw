@@ -33,9 +33,10 @@ def test_plan_reads_documents_and_names_the_rest_with_a_reason():
     ]
 
 
-def test_plan_asks_by_id_when_a_name_is_used_twice_and_lists_it_once():
-    files = ra.plan([att("scan.pdf", aid="first"), att("scan.pdf", aid="second")], reads_left=4)
-    assert [(f["filename"], f["fetch"]) for f in files] == [("scan.pdf", "first")]
+def test_plan_lists_a_name_used_twice_once_and_does_not_fetch_it():
+    files = ra.plan([att("scan.pdf", aid="first"), att("scan.pdf", aid="second"), att("invite.ics"), att("invite.ics", inline=True)], reads_left=4)
+    assert [(f["filename"], f.get("fetch"), f.get("why")) for f in files] == [
+        ("scan.pdf", None, "not read (two files share this name)"), ("invite.ics", None, "not read (two files share this name)")]
 
 
 def test_extract_reads_word_excel_csv_and_invites(tmp_path):
@@ -79,7 +80,7 @@ def test_a_bloated_office_file_is_not_opened(tmp_path, monkeypatch):
     assert ra.extract(docx, "big.docx") == {"read": False, "why": "empty"}
 
 
-def fake_cli(calls, lists, fail=()):
+def fake_cli(calls, lists, fail=(), broken=()):
     def cli_json(*args, timeout=60):
         calls.append(args)
         if args[0] == "list":
@@ -87,7 +88,7 @@ def fake_cli(calls, lists, fail=()):
         message, name, out = args[-2], args[-1], Path(args[2])
         if name in fail:
             return None
-        out.write_text(f"Text of {name} on {message}, long enough to count as read.")
+        out.write_bytes(b"not a zip" if name in broken else f"Text of {name} on {message}, long enough to count as read.".encode())
         return {"path": str(out)}
     return cli_json
 
@@ -98,7 +99,9 @@ def test_main_reads_newest_first_within_the_allowance_and_caches_whole_answers(t
     monkeypatch.setattr(ra, "CACHE", tmp_path / "cache")
     monkeypatch.setattr(ra, "cli_json", fake_cli(calls, lists))
     assert ra.main(["m2", "m1"]) == 0
-    files = json.loads(capsys.readouterr().out)["files"]
+    answer = json.loads(capsys.readouterr().out)
+    files = answer["files"]
+    assert answer["missed"] is False
     assert [(f["message_id"], f["filename"], f["read"]) for f in files] == [
         ("m2", "a.txt", True), ("m2", "b.txt", True), ("m2", "c.txt", True), ("m1", "d.txt", True), ("m1", "e.txt", False), ("m1", "photo.png", False)]
     assert files[0]["text"].startswith("Text of a.txt on m2") and "text" not in files[4] and files[4]["why"] == "not read (enough files already)"
@@ -109,14 +112,35 @@ def test_main_reads_newest_first_within_the_allowance_and_caches_whole_answers(t
     assert calls == [] and [(f["filename"], f["read"]) for f in again] == [("d.txt", True), ("e.txt", True), ("photo.png", False)]
 
 
-def test_main_does_not_cache_a_failed_download_or_an_unlisted_message(tmp_path, monkeypatch, capsys):
+def test_main_does_not_cache_a_failed_download_and_reports_an_unlisted_message(tmp_path, monkeypatch, capsys):
     calls = []
     monkeypatch.setattr(ra, "CACHE", tmp_path / "cache")
     monkeypatch.setattr(ra, "cli_json", fake_cli(calls, {"m1": [att("a.txt"), att("b.txt")]}, fail={"b.txt"}))
     assert ra.main(["m1", "gone"]) == 0
-    files = json.loads(capsys.readouterr().out)["files"]
-    assert [(f["filename"], f["read"], f.get("why")) for f in files] == [("a.txt", True, None), ("b.txt", False, "could not be downloaded just now")]
+    answer = json.loads(capsys.readouterr().out)
+    assert [(f["filename"], f["read"], f.get("why")) for f in answer["files"]] == [("a.txt", True, None), ("b.txt", False, "could not be downloaded just now")]
+    assert answer["missed"] is True
     assert not (tmp_path / "cache" / "m1.json").exists() and not (tmp_path / "cache" / "gone.json").exists()
+    # Nothing could be listed at all: still an answer, and it says so.
+    assert ra.main(["gone"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"files": [], "missed": True}
+
+
+def test_main_says_so_when_time_runs_out_before_every_message_is_looked_at(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(ra, "CACHE", tmp_path / "cache")
+    monkeypatch.setattr(ra, "BUDGET_SECONDS", 0)
+    monkeypatch.setattr(ra, "cli_json", fake_cli([], {"m1": [att("a.txt")]}))
+    assert ra.main(["m1"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"files": [], "missed": True}
+
+
+def test_main_does_not_cache_a_file_that_would_not_open(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(ra, "CACHE", tmp_path / "cache")
+    monkeypatch.setattr(ra, "cli_json", fake_cli([], {"m1": [att("stock.xlsx")]}, broken={"stock.xlsx"}))
+    assert ra.main(["m1"]) == 0
+    answer = json.loads(capsys.readouterr().out)
+    assert [(f["filename"], f["read"], f["why"]) for f in answer["files"]] == [("stock.xlsx", False, "could not be opened")]
+    assert not (tmp_path / "cache" / "m1.json").exists()
 
 
 def test_main_rejects_missing_or_odd_ids():

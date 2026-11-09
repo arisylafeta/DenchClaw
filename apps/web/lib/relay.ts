@@ -16,7 +16,7 @@ import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
 import { dealResultFits, dealSummaryText, isPersonalDomain, ownsDeal, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
 import { SENDERS, senderRefusal, type SenderKey } from "./relay-senders";
 import { contextPack, HAS_FILES_SQL } from "./relay-context";
-import { NO_PACK, stripQuoted, type Pack, type PackSource } from "./relay-context-core";
+import { knownBackground, NO_PACK, stripQuoted, type Pack, type PackSource } from "./relay-context-core";
 import { askInstruction, askLabel, buildChecklist, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
 
 const run = promisify(execFile);
@@ -853,8 +853,8 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
   for (const item of items) {
     const messages = await threadMessages(item.mail_thread_id);
     const deal = await dealSummary(item.bulk_listing_id, messages.find((m) => m.direction === "inbound")?.from_email ?? item.counterpart_email);
-    // The background a draft was written from counts as known, so a figure from an attached quote is not flagged.
-    const notes = drafts.filter((d) => d.item_id === item.id).map((d) => `${d.source_note}\n${Array.isArray(d.agent_log) ? (d.agent_log as unknown[]).join("\n") : ""}\n${Array.isArray(d.background) ? (d.background as PackSource[]).map((b) => b?.text ?? "").join("\n") : ""}`).join("\n");
+    // What they sent and what was written to them before counts as known, so a figure from an attached quote is not flagged.
+    const notes = drafts.filter((d) => d.item_id === item.id).map((d) => `${d.source_note}\n${Array.isArray(d.agent_log) ? (d.agent_log as unknown[]).join("\n") : ""}\n${knownBackground(d.background)}`).join("\n");
     const corpus = [deal, notes, item.context, item.last_message?.text ?? "", ...messages.map((m) => m.body_text ?? "")].join("\n");
     const participants = [...new Set(messages.flatMap((m) => [m.from_email ?? "", ...m.to_emails, ...m.cc_emails]).concat(item.counterpart_email ?? "")
       .map((a) => a.toLowerCase().trim()).filter((a) => a && !a.endsWith("@rebattery.io")))];

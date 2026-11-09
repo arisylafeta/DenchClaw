@@ -2,8 +2,9 @@
 """Relay attachment reader: the text of the files on an email thread, for the draft's background.
 
 Run by the CRM (lib/relay-context.ts) as: relay_attachments.py <mail_message id> [<mail_message id> ...]
-Message ids come newest first. Prints {"files": [...]}: each real file (not a signature image) with its text when it
-is a PDF, Word, Excel, CSV, text or calendar file, else the reason it was not read. Bytes come from Gmail through
+Message ids come newest first. Prints {"files": [...], "missed": bool}: each real file (not a signature image) with its
+text when it is a PDF, Word, Excel, CSV, text or calendar file, else the reason it was not read; missed says a message's
+files could not be listed or time ran out first. Bytes come from Gmail through
 `rebattery-mail attachment` (read-only) into a temporary folder that is removed again; only the result is kept, one
 small JSON per message in CACHE, because a stored email's files never change. Nothing here writes mail or the CRM.
 A file's text is untrusted: the CRM passes it to the drafter as information, never as instructions.
@@ -16,6 +17,7 @@ import io
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -32,7 +34,9 @@ MAX_BYTES = 15 << 20    # larger files are named, not downloaded
 MAX_UNPACKED = 60 << 20  # a Word or Excel file that unpacks past this is not opened
 LOGO_BYTES = 8000       # a smaller picture is a signature logo or icon, not something sent to be looked at
 BANNER_BYTES = 200_000  # a picture under this that repeats down the thread is a signature banner
-BUDGET_SECONDS = 60
+BUDGET_SECONDS = 45     # with the last download and read this ends well inside the CRM's 75 second limit
+LIST_SECONDS = 15
+GET_SECONDS = 25
 
 READERS = {"pdf": "pdf", "docx": "docx", "xlsx": "xlsx", "xlsm": "xlsx", "csv": "csv", "tsv": "csv", "txt": "text", "ics": "ics"}
 IMAGES = {"png", "jpg", "jpeg", "jfif", "gif", "heic", "webp", "bmp", "tif", "tiff", "svg"}
@@ -63,7 +67,7 @@ def unpacked_size(path: Path) -> int:
 
 
 def read_pdf(path: Path) -> str:
-    result = subprocess.run(["/usr/bin/pdftotext", "-layout", "-l", "8", str(path), "-"], capture_output=True, timeout=30)
+    result = subprocess.run(["/usr/bin/pdftotext", "-layout", "-l", "8", str(path), "-"], capture_output=True, timeout=15)
     return result.stdout.decode("utf-8", "replace") if result.returncode == 0 else ""
 
 
@@ -151,10 +155,11 @@ def plan(attachments: list[dict], reads_left: int) -> list[dict]:
             entry["why"] = "too large to read"
         elif reads_left <= 0:
             entry["why"] = "not read (enough files already)"
+        elif [str(other.get("filename") or "").lower() for other in attachments if isinstance(other, dict)].count(name.lower()) > 1:
+            # Gmail is asked by name, and its ids change with every call, so two parts with one name cannot be told apart.
+            entry["why"] = "not read (two files share this name)"
         else:
-            # Gmail is asked by name; two parts with one name can only be told apart by id.
-            names = [str(other.get("filename") or "").lower() for other in attachments if isinstance(other, dict)]
-            entry["fetch"] = name if names.count(name.lower()) == 1 else a.get("attachmentId") or name
+            entry["fetch"] = name
             reads_left -= 1
         files.append(entry)
     return files
@@ -168,12 +173,13 @@ def cli_json(*args: str, timeout: int = 60) -> dict | None:
         return None
 
 
-def read_message(message_id: str, reads_left: int, deadline: float) -> tuple[list[dict], bool]:
-    """One message's files, and whether the answer is complete enough to keep (nothing failed on the way)."""
-    listed = cli_json("list", "--", message_id)
+def read_message(message_id: str, reads_left: int, deadline: float) -> tuple[list[dict] | None, bool]:
+    """One message's files, and whether the answer is complete enough to keep (nothing failed on the way). None when the
+    files could not even be listed."""
+    listed = cli_json("list", "--", message_id, timeout=LIST_SECONDS)
     attachments = (listed or {}).get("attachments")
     if not isinstance(attachments, list):
-        return [], False
+        return None, False
     files, complete = plan(attachments, reads_left), True
     with tempfile.TemporaryDirectory(prefix="relay-att-") as folder:
         for index, entry in enumerate(files):
@@ -181,11 +187,14 @@ def read_message(message_id: str, reads_left: int, deadline: float) -> tuple[lis
             if not selector:
                 continue
             out = Path(folder) / f"{index}.{extension(entry['filename'])}"
-            got = cli_json("get", "--out", str(out), "--", message_id, selector) if time.monotonic() < deadline else None
+            left = deadline - time.monotonic()
+            got = cli_json("get", "--out", str(out), "--", message_id, selector, timeout=int(max(5, min(GET_SECONDS, left)))) if left > 0 else None
             if not got or not out.is_file():
                 entry["why"], complete = "could not be downloaded just now", False
                 continue
             entry.update(extract(out, entry["filename"]))
+            if entry.get("why") == "could not be opened":
+                complete = False  # it may open next time (a slow reader, a half download)
     return files, complete
 
 
@@ -211,14 +220,18 @@ def store(message_id: str, files: list[dict]) -> None:
 def main(message_ids: list[str]) -> int:
     if not message_ids or any(not re.fullmatch(r"[A-Za-z0-9_:.@-]{1,120}", m) for m in message_ids):
         return 2
-    deadline, found, out, reads, named = time.monotonic() + BUDGET_SECONDS, [], [], 0, 0
+    deadline, found, out, reads, named, missed = time.monotonic() + BUDGET_SECONDS, [], [], 0, 0, False
     for message_id in message_ids[:6]:
         files = cached(message_id)
         if files is None:
             if time.monotonic() >= deadline:
+                missed = True
                 break
             # A full read is kept whatever this thread's allowance, so the cache answers every later draft the same way.
             files, complete = read_message(message_id, MAX_READ, deadline)
+            if files is None:
+                missed = True
+                continue
             if complete:
                 store(message_id, files)
         found.append((message_id, files))
@@ -238,9 +251,11 @@ def main(message_ids: list[str]) -> int:
             else:
                 named += 1
             out.append({**entry, "message_id": message_id})
-    print(json.dumps({"files": out}))
+    print(json.dumps({"files": out, "missed": missed}))
     return 0
 
 
 if __name__ == "__main__":
+    # Stopped from outside: leave through the normal exits, so the temporary folder and any download in flight go too.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
     sys.exit(main(sys.argv[1:]))
