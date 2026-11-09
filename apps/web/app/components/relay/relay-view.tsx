@@ -8,6 +8,7 @@ import { londonInputValue, londonWallToUtc, sendAtProblem, sendLabel, sendSlots,
 import type { RelayDealOption, RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayRule, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
 import { missingInstruction, type ChecklistItem, type DealChecklist } from "@/lib/relay-checklist";
 import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
+import { isSenderKey, SENDERS } from "@/lib/relay-senders";
 import s from "./relay.module.css";
 
 const ChatPanel = dynamic(() => import("@/app/components/chat-panel").then((m) => m.ChatPanel), { ssr: false });
@@ -564,6 +565,7 @@ function failureText(failure: { reason: string; detail?: unknown } | null, state
   const words: Record<string, string> = {
     thread_has_reply: "they replied since this was drafted. Read their reply first.",
     gmail_auth_unavailable: "Gmail login check failed. Try again in a minute.",
+    gmail_send_as_missing: 'Gmail can\'t send from this address yet. Add it in Gmail under Settings, Accounts, "Send mail as", or pick another From.',
     gmail_read_failed: "couldn't read Gmail to check for new replies. Try again.",
     approval_digest_mismatch: "the draft changed while sending. Check it and send again.",
     reply_mailbox_unavailable: "couldn't find the mailbox to check for replies.",
@@ -594,6 +596,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
   const [custom, setCustom] = useState("");
   const [scheduling, setScheduling] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   // A rewrite from the AI panel saves server-side; pick up the new copy when the draft's version moves on.
   useEffect(() => { if (mail && local && mail.updated_at !== local.updated_at && !saving) setLocal({ subject: mail.subject ?? "", body: mail.main, to: mail.to_emails.join(", "), cc: mail.cc_emails.join(", "), bcc: mail.bcc_emails.join(", "), updated_at: mail.updated_at }); }, [mail?.updated_at]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -618,6 +621,16 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
     } catch (err) { say(err instanceof Error ? err.message : "Couldn't save."); return null; } finally { setSaving(false); }
   };
   const useTo = async (address: string) => { await save({ ...local, to: address }); };
+  // From: saves the copy first, then the server re-signs that version as the new sender.
+  const changeSender = async (identity: string) => {
+    setSwitching(true);
+    try {
+      const version = await save();
+      if (!version) return;
+      await api(`/api/relay/drafts/${draft.id}/sender`, { method: "POST", body: { identity, updated_at: version.updated_at } });
+      await reload();
+    } catch (err) { say(err instanceof Error ? err.message : "Couldn't change who it is from."); } finally { setSwitching(false); }
+  };
   const sent = draft.state === "sent";
   const scheduled = mail.scheduled;
   const locked = sent || !!scheduled;
@@ -704,12 +717,17 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
   return (
     <div className={cx(s.card, s.editor)}>
       <div className={s.ebar}>
-        <div><div className={s.lab}>{draft.role === "primary" ? "Primary email" : "Follow-on email"} · {mail.identity_key === "supply" ? "supply@" : mail.identity_key === "buy" ? "buy@" : "alex@"}</div><h2>{draft.title}</h2></div>
+        <div><div className={s.lab}>{draft.role === "primary" ? "Primary email" : "Follow-on email"} · {(mail.from_email ?? "alex@").split("@")[0]}@</div><h2>{draft.title}</h2></div>
         <span className={cx(s.pill, sent ? s.ok : scheduled ? s.sched : s.warn)}><i />{sent ? "Sent" : scheduled ? (scheduled.undo ? "Sending" : "Scheduled") : draft.state === "gmail" ? "In Gmail drafts" : saving ? "Saving…" : "Draft"}</span>
       </div>
       {draft.role === "primary" && draft.source_note && <div className={s.fromnote}>Drafted from your note: <b>&ldquo;{draft.source_note}&rdquo;</b></div>}
       {draft.agent_log.length > 0 && <div className={s.log}>{draft.agent_log.map((l, k) => <span key={k}>{l}</span>)}</div>}
-      <div className={s.field} style={{ marginTop: 6 }}><span>From</span><div className={s.ro}>{mail.from_email}</div></div>
+      <div className={s.field} style={{ marginTop: 6 }}>
+        <label htmlFor={`from-${draft.id}`}>From</label>
+        {isSenderKey(mail.identity_key) && mail.transport === "gmail"
+          ? <select id={`from-${draft.id}`} value={mail.identity_key} disabled={locked || saving || switching} onChange={(e) => void changeSender(e.target.value)}>{SENDERS.map((sender) => <option key={sender.key} value={sender.key}>{sender.address}</option>)}</select>
+          : <div className={s.ro}>{mail.from_email}</div>}
+      </div>
       <div className={s.field}><label htmlFor={`to-${draft.id}`}>To</label><input id={`to-${draft.id}`} value={local.to} disabled={locked} placeholder="Add an address" onChange={(e) => setLocal({ ...local, to: e.target.value })} onBlur={() => void save()} /></div>
       {(["cc", "bcc"] as const).map((k) => <div key={k} className={s.field}><label htmlFor={`${k}-${draft.id}`}>{k === "cc" ? "Cc" : "Bcc"}</label><input id={`${k}-${draft.id}`} value={local[k]} disabled={locked || mail.transport !== "gmail"} placeholder="Add addresses, separated by commas" onChange={(e) => setLocal({ ...local, [k]: e.target.value })} onBlur={() => void save()} /></div>)}
       <div className={s.field}><label htmlFor={`sj-${draft.id}`}>Subject</label><input id={`sj-${draft.id}`} value={local.subject} disabled={locked} onChange={(e) => setLocal({ ...local, subject: e.target.value })} onBlur={() => void save()} /></div>

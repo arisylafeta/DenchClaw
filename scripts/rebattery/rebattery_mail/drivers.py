@@ -122,6 +122,24 @@ def sync_suppressions(stream, suppressions, apply, db=None):
     return results
 
 
+def require_send_as(account, address):
+    """Refuse unless the Gmail account may send as the address. Gmail does not reject an unknown From: it sends the
+    mail from the account's own address instead, so the recipient would see the wrong sender."""
+    if address.strip().lower() == account.strip().lower():
+        return
+    try:
+        listed = subprocess.run(['gog','--account',account,'gmail','settings','sendas','list','--json','--no-input'],
+                                capture_output=True, text=True, timeout=30, env=gog_env())
+        aliases = json.loads(listed.stdout).get('sendAs') or [] if not listed.returncode else None
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError) as exc:
+        raise ProviderError('gmail_auth_unavailable', cause=type(exc).__name__) from exc
+    if aliases is None:
+        raise ProviderError('gmail_auth_unavailable', returncode=listed.returncode)
+    usable = {a.get('sendAsEmail', '').lower() for a in aliases if a.get('isPrimary') or a.get('verificationStatus') == 'accepted'}
+    if address.strip().lower() not in usable:
+        raise Refused('gmail_send_as_missing', f'{address} is not a "Send mail as" address on {account}', address=address, account=account)
+
+
 class GmailSendDriver:
     def __init__(self, runner=None, gmail_no_send=False, reader=None):
         self.runner = runner or subprocess.run
@@ -140,6 +158,7 @@ class GmailSendDriver:
                 raise ProviderError('gmail_auth_unavailable', cause=type(exc).__name__) from exc
             if check.returncode:
                 raise ProviderError('gmail_auth_unavailable', returncode=check.returncode)
+            require_send_as(identity['gmail_account'], identity['address'])
         if message.get('personalization',{}).get('attachments'):
             from .attachment import verify_outbound
             verify_outbound(message['personalization']['attachments'])

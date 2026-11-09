@@ -7,13 +7,14 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { queryPg, withPgTransaction, type PgTransaction } from "./postgres";
 import { draftAttachments, readMailDraft } from "./crm-postgres/mail";
-import { editDraft, editableCopy, identitySignatures, sameVersion, textToHtml, splitCopy } from "./mail-draft-actions";
+import { changeDraftIdentity, DraftActionError, editDraft, editableCopy, identitySignatures, sameVersion, textToHtml, splitCopy } from "./mail-draft-actions";
 import type { DraftAttachment } from "./mail-types";
 import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 import { sendAtProblem, UNDO_SEND_SECONDS } from "./relay-send-time";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
 import { dealResultFits, dealSummaryText, isPersonalDomain, ownsDeal, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
+import { SENDERS, senderRefusal, type SenderKey } from "./relay-senders";
 import { askInstruction, askLabel, buildChecklist, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
 
 const run = promisify(execFile);
@@ -790,7 +791,8 @@ type NewDraft = { identity: ReplyIdentity; to: string[]; ccThread: boolean; thre
 
 /** Creates a mail_message draft through the mail CLI, so threading, the identity signature and content policy apply. */
 async function createMailDraft(d: NewDraft): Promise<string> {
-  const args = ["draft", "--identity", d.identity, "--transport", "gmail", "--purpose", "personal", "--to", d.to.join(","),
+  // --sign: supply@ and buy@ sign only these one-to-one emails, never their broadcasts and notices.
+  const args = ["draft", "--identity", d.identity, "--transport", "gmail", "--purpose", "personal", "--sign", "--to", d.to.join(","),
     `--subject=${d.subject}`, `--body=${d.body}`, `--html=${textToHtml(d.body)}`];  // the CLI wraps it with the signature in Gmail-native markup
   if (d.thread) args.push("--thread", d.thread);
   if (d.thread && d.ccThread) args.push("--cc-thread");
@@ -951,6 +953,27 @@ export async function cancelScheduledSend(draftId: string, ownerId: string): Pro
   const rows = await queryPg<{ id: string }>(
     `update mail_message set personalization = personalization - 'scheduled_send' where id = $1 and state = 'draft' and personalization ? 'scheduled_send' and not ${SEND_CLAIMED_SQL} returning id`, [relayDraft.mail_message_id]);
   if (!rows.length) throw new RelayError(409, "Too late to stop it: it is sending now, or has already gone.");
+}
+
+/** Changes who an unsent Relay email is from, for the version Alex is looking at. The mail tool signs it as the new
+ * sender and refuses an address Gmail cannot send as. Not while a send is held or scheduled: that version is pinned. */
+export async function changeSender(draftId: string, ownerId: string, identity: SenderKey, updatedAt: string): Promise<void> {
+  const relayDraft = await relayDraftForOwner(draftId, ownerId);
+  if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
+  const mail = await readMailDraft(relayDraft.mail_message_id, ownerId);
+  if (!mail) throw new RelayError(404, "Not found");
+  if (mail.state !== "draft") throw new RelayError(409, mail.state === "accepted" ? "Already sent." : "A send is already in progress or needs checking.");
+  if (!sameVersion(mail.updated_at, updatedAt)) throw new RelayError(409, "This draft changed since you opened it. Reload to see the latest.");
+  if (mail.identity_key === identity) return;
+  const [held] = await queryPg<{ id: string }>("select id from mail_message where id = $1 and personalization ? 'scheduled_send'", [mail.id]);
+  if (held) throw new RelayError(409, "Undo or cancel the send before changing who it is from.");
+  try {
+    await changeDraftIdentity(mail, identity);
+  } catch (error) {
+    const address = SENDERS.find((sender) => sender.key === identity)?.address ?? identity;
+    const words = error instanceof DraftActionError ? senderRefusal(error.message.split(":")[0], address) : null;
+    throw words ? new RelayError(409, words) : error;
+  }
 }
 
 /** "Check if it went": looks for the email in Gmail Sent; marks it sent, or returns it to a draft that can be sent again. */

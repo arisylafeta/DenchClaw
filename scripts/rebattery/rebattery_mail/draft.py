@@ -10,6 +10,10 @@ from .templating import compose, template_variables
 from .digest import digest, load
 
 
+# What a draft freezes about its sender; a send is refused when the identity has changed since.
+_SNAPSHOT_KEYS = ('address', 'display_name', 'reply_to', 'gmail_account', 'postmark_stream')
+
+
 def render_message(row, variables):
     try:
         return _render_message(row, variables)
@@ -36,10 +40,14 @@ def gmail_html(body_html, signature_html=''):
 
 def prepare(db, identity_key, recipients, purpose='personal', template=None, variables=None,
             subject=None, body=None, html=None, thread=None, campaign=None, verification=None, transport=None, message_id=None,
-            oneoff_blocks=None, allow_multiple_cta=False, cc=None, cc_thread=False):
+            oneoff_blocks=None, allow_multiple_cta=False, cc=None, cc_thread=False, sign=False):
     author, transport = policy.identity(db,identity_key,purpose,transport)
     variables = variables or {}
     generated = None
+    if sign and (template or oneoff_blocks is not None):
+        raise Refused('sign_requires_plain_draft')
+    # Plain drafts carry the identity's signature; an identity with auto_sign off signs only when the caller asks.
+    signs = not template and oneoff_blocks is None and (author.get('auto_sign', True) or sign)
     if oneoff_blocks is not None:
         from .blocks import compose_blocks, oneoff_template
         if template or body is not None or html is not None:
@@ -67,13 +75,15 @@ def prepare(db, identity_key, recipients, purpose='personal', template=None, var
         rendered = render_message({'subject':subject,'html':html or '', 'text_body':body,'required_variables':[]},variables)
         if not rendered['html'].strip():
             rendered['html'] = text_to_html(rendered['text'])
+    # The mailbox copy (BCC) is for a Gmail identity whose transactional mail leaves through Postmark (supply@), not for
+    # a Postmark identity that can also send through Gmail (hello@).
     row = {'id':message_id or uuid4().hex,'direction':'outbound','state':'draft','identity_key':identity_key,
            'from_email':author['address'],'transport':transport,'purpose':purpose,'to_emails':sorted(set(e.strip().lower() for e in recipients)),
-           'cc_emails':sorted(set(e.strip().lower() for e in (cc or []) if e.strip())),'bcc_emails':[author['address'].lower()] if transport == 'postmark-transactional' and author.get('gmail_account') else [],'recipient_email':recipients[0].strip().lower() if len(recipients)==1 else None,
-           'subject':rendered['subject'],'body_text':rendered['text'] + ('\n\n'+author['signature_text'] if not template and generated is None and author.get('signature_text') else ''),
-           'body_html':(gmail_html(rendered['html'], author.get('signature_html') or '') if not template and generated is None else rendered['html']),'thread_id':thread,'campaign_id':campaign,
+           'cc_emails':sorted(set(e.strip().lower() for e in (cc or []) if e.strip())),'bcc_emails':[author['address'].lower()] if transport == 'postmark-transactional' and author.get('gmail_account') and author.get('transactional_postmark_stream') else [],'recipient_email':recipients[0].strip().lower() if len(recipients)==1 else None,
+           'subject':rendered['subject'],'body_text':rendered['text'] + ('\n\n'+author['signature_text'] if signs and author.get('signature_text') else ''),
+           'body_html':(gmail_html(rendered['html'], (author.get('signature_html') or '') if signs else '') if not template and generated is None else rendered['html']),'thread_id':thread,'campaign_id':campaign,
            'personalization':{'variables':variables,'verification':verification or {},
-                              'identity_snapshot':{key:author.get(key) for key in ('address','display_name','reply_to','gmail_account','postmark_stream')}},'links':[]}
+                              'identity_snapshot':{key:author.get(key) for key in _SNAPSHOT_KEYS}},'links':[]}
     if generated is not None:
         row['personalization']['oneoff'] = {'warnings': generated['warnings'], 'variables_used': generated['variables_used']}
     if template and 'source_body_html' in (tpl.get('meta') or {}):
@@ -138,7 +148,8 @@ def create(args):
         blocks = read_blocks(args.oneoff_blocks) if getattr(args, 'oneoff_blocks', None) is not None else None
         row, author = prepare(db,args.identity,args.to.split(','),args.purpose,args.template,json.loads(args.vars),args.subject,args.body,args.html,args.thread,args.campaign,json.loads(args.verification),args.transport,args.id,
                               oneoff_blocks=blocks, allow_multiple_cta=getattr(args, 'allow_multiple_cta', False),
-                              cc=args.cc.split(',') if getattr(args,'cc',None) else None, cc_thread=getattr(args,'cc_thread',False))
+                              cc=args.cc.split(',') if getattr(args,'cc',None) else None, cc_thread=getattr(args,'cc_thread',False),
+                              sign=getattr(args,'sign',False))
         exclusions = []
         for email in [*row['to_emails'],*row['cc_emails']]:
             try:
@@ -182,11 +193,54 @@ def _address_list(value):
     return found
 
 
+_SIGNATURE_DIV = '<div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">'
+
+def resign(text, html, old, new):
+    """A plain draft's copy with the old identity's signature swapped for the new one's. Only an exact trailing
+    signature is removed, so copy that merely mentions the sender is left alone."""
+    text, html = (text or '').rstrip(), html or ''
+    old_text = (old.get('signature_text') or '').strip()
+    if old_text and text.endswith(old_text):
+        text = text[:-len(old_text)].rstrip()
+    if (new.get('signature_text') or '').strip():
+        text += '\n\n' + new['signature_text']
+    wrapped = html.startswith('<div dir="ltr">') and html.endswith('</div>')
+    inner = html[len('<div dir="ltr">'):-len('</div>')] if wrapped else html
+    old_html = (old.get('signature_html') or '').strip()
+    if old_html and inner.endswith(_SIGNATURE_DIV + old_html + '</div>'):
+        inner = inner[:-len(_SIGNATURE_DIV + old_html + '</div>')]
+    new_html = (new.get('signature_html') or '').strip()
+    return text, '<div dir="ltr">' + inner + (_SIGNATURE_DIV + new_html + '</div>' if new_html else '') + '</div>'
+
+
+def change_identity(db, row, key):
+    """Hand an unsent one-to-one Gmail draft to another identity of the same mailbox, signed as the new sender."""
+    from . import drivers
+    if row.get('campaign_id') or 'oneoff' in (row.get('personalization') or {}) or not (row['body_html'] or '').startswith('<div dir="ltr">'):
+        raise Refused('identity_fixed_on_template_draft')
+    if row['transport'] != 'gmail':
+        raise Refused('identity_change_requires_gmail')
+    with dict_cursor(db) as cur:
+        cur.execute('select * from mail_identity where key=%s', (row['identity_key'],))
+        old = dict(cur.fetchone() or {})
+    new, _ = policy.identity(db, key, row['purpose'], 'gmail')
+    # The reply anchor is a message in the old sender's mailbox, so the draft cannot move to another mailbox.
+    if (new['gmail_account'] or '').lower() != (old.get('gmail_account') or '').lower():
+        raise Refused('identity_mailbox_mismatch', identity=key)
+    drivers.require_send_as(new['gmail_account'], new['address'])
+    text, html = resign(row['body_text'], row['body_html'], old, new)
+    personalization = dict(row['personalization'] or {})
+    personalization['identity_snapshot'] = {k: new.get(k) for k in _SNAPSHOT_KEYS}
+    row.update(identity_key=key, from_email=new['address'], body_text=text, body_html=html, personalization=personalization)
+
+
 def edit(args):
     """Change an unsent draft in place. Switching away from marketing drops the unsubscribe footer."""
-    changes = {k: getattr(args, k) for k in ('purpose', 'subject', 'body', 'html', 'to', 'cc', 'bcc') if getattr(args, k, None) is not None}
+    changes = {k: getattr(args, k) for k in ('purpose', 'subject', 'body', 'html', 'to', 'cc', 'bcc', 'identity') if getattr(args, k, None) is not None}
     if not changes:
         raise UsageError('nothing_to_edit')
+    if 'identity' in changes and ('body' in changes or 'html' in changes):
+        raise UsageError('identity_change_keeps_copy', 'Change the sender and the copy in separate edits')
     with connection() as db:
         with dict_cursor(db) as cur:
             cur.execute("select * from mail_message where id=%s and state='draft' and idempotency_key is null for update", (args.target,))
@@ -194,6 +248,8 @@ def edit(args):
             if not row:
                 raise Refused('draft_not_editable', message_id=args.target)
             row = dict(row)
+            if 'identity' in changes and changes['identity'] != row['identity_key']:
+                change_identity(db, row, changes['identity'])
             text, html = row['body_text'] or '', row['body_html'] or ''
             purpose = changes.get('purpose', row['purpose'])
             if purpose != row['purpose']:
@@ -225,8 +281,8 @@ def edit(args):
                 raise Refused('cc_requires_gmail')
             for email in [e for k in ('cc', 'bcc') if k in changes for e in row[k + '_emails']]:
                 policy.recipient(db, email, {}, None, campaign=False)
-            cur.execute('update mail_message set purpose=%s,subject=%s,body_text=%s,body_html=%s,to_emails=%s,recipient_email=%s,cc_emails=%s,bcc_emails=%s,updated_at=now() where id=%s',
-                        (row['purpose'], row['subject'], row['body_text'], row['body_html'], row['to_emails'], row['recipient_email'], row['cc_emails'], row['bcc_emails'], args.target))
+            cur.execute('update mail_message set identity_key=%s,from_email=%s,personalization=%s,purpose=%s,subject=%s,body_text=%s,body_html=%s,to_emails=%s,recipient_email=%s,cc_emails=%s,bcc_emails=%s,updated_at=now() where id=%s',
+                        (row['identity_key'], row['from_email'], json.dumps(row['personalization']), row['purpose'], row['subject'], row['body_text'], row['body_html'], row['to_emails'], row['recipient_email'], row['cc_emails'], row['bcc_emails'], args.target))
     with connection(read_only=True) as db:
         _, rows = load(db, args.target)
     return {'message': rows[0], 'sha256': digest(rows)}
@@ -255,6 +311,7 @@ def register(subparsers):
     parser.add_argument('--cc', help='Comma-separated CC addresses (gmail transport only)')
     parser.add_argument('--cc-thread', action='store_true', help='CC everyone already on --thread (senders, To and CC), except ReBattery mailboxes and the To recipients')
     parser.add_argument('--campaign')
+    parser.add_argument('--sign', action='store_true', help='Add the signature of an identity that does not sign by default (supply, buy); plain drafts only')
     parser.add_argument('--apply',action='store_true')
     parser.set_defaults(handler=create)
     parser = subparsers.add_parser('edit')
@@ -266,6 +323,7 @@ def register(subparsers):
     parser.add_argument('--to', help='Replace the To list (comma-separated; at least one address)')
     parser.add_argument('--cc', help='Replace the CC list (comma-separated; empty clears it)')
     parser.add_argument('--bcc', help='Replace the BCC list (comma-separated; empty clears it)')
+    parser.add_argument('--identity', help='Send as another identity of the same Gmail mailbox; the signature follows the sender')
     parser.set_defaults(handler=edit)
     parser = subparsers.add_parser('preview')
     parser.add_argument('target')

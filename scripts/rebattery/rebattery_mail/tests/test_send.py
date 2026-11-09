@@ -881,6 +881,129 @@ def test_edit_draft_replaces_to_and_keeps_thread_and_cc_clean(env):
         draft.edit(NS(target=row['id'],purpose=None,subject=None,body=None,html=None,to='not-an-address',cc=None,bcc=None))
 
 
+@pytest.fixture
+def senders(env,monkeypatch):
+    """Alex's mailbox as live: alex@ signs every plain draft, supply@ and buy@ sign only when asked, hello@ has no signature."""
+    from rebattery_mail import drivers
+    with connection() as db,dict_cursor(db) as cur:
+        cur.execute("select key,signature_text,signature_html,gmail_account,auto_sign from mail_identity where key in ('alex','supply','hello')")
+        before=cur.fetchall()
+        cur.execute("update mail_identity set signature_text='Alex Polglase\nFounder & CEO\n',signature_html='<table><tr><td>Alex</td></tr></table>' where key='alex'")
+        cur.execute("update mail_identity set signature_text='Alex Polglase\nSupply\n',signature_html='<table><tr><td>Supply</td></tr></table>',auto_sign=false where key='supply'")
+        cur.execute("update mail_identity set gmail_account='alex@rebattery.io' where key='hello'")
+        cur.execute("""insert into mail_identity(key,address,display_name,gmail_account,signature_text,signature_html,allowed_purposes,auto_sign)
+            values ('buy','buy@rebattery.io','Buy @ ReBattery','alex@rebattery.io','Alex Polglase\nSourcing\n','<table><tr><td>Sourcing</td></tr></table>',array['personal','transactional'],false)""")
+    aliases={'supply@rebattery.io','hello@rebattery.io'}
+    def require_send_as(account,address):
+        if address not in aliases|{account}:
+            raise Refused('gmail_send_as_missing',address=address,account=account)
+    monkeypatch.setattr(drivers,'require_send_as',require_send_as)
+    yield env
+    with connection() as db,db.cursor() as cur:
+        cur.execute("delete from mail_message where identity_key='buy'")
+        cur.execute("delete from mail_identity where key='buy'")
+        for row in before:
+            cur.execute('update mail_identity set signature_text=%s,signature_html=%s,gmail_account=%s,auto_sign=%s where key=%s',
+                        (row['signature_text'],row['signature_html'],row['gmail_account'],row['auto_sign'],row['key']))
+
+
+SIGNATURE_DIV='<div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">'
+
+
+def test_identity_with_auto_sign_off_signs_only_a_plain_draft_that_asks(senders):
+    from rebattery_mail.templating import compose
+    email=senders+'0@example.test'
+    with connection() as db:
+        plain,_=draft.prepare(db,'supply',[email],subject='Hi',body='Hello',transport='gmail')
+        signed,author=draft.prepare(db,'supply',[email],subject='Hi',body='Hello',transport='gmail',sign=True)
+        own,_=draft.prepare(db,'alex',[email],subject='Hi',body='Hello')
+        with pytest.raises(Refused,match='sign_requires_plain_draft'):
+            draft.prepare(db,'supply',[email],template='any',sign=True)
+    assert plain['body_text']=='Hello' and SIGNATURE_DIV not in plain['body_html']
+    assert signed['body_text']=='Hello\n\nAlex Polglase\nSupply\n' and signed['body_html'].endswith(SIGNATURE_DIV+'<table><tr><td>Supply</td></tr></table></div></div>')
+    assert own['body_text'].endswith('Founder & CEO\n') and SIGNATURE_DIV in own['body_html']
+    # A template sent as supply@ (broadcasts, automated notices) stays unsigned; the same template as alex@ is signed.
+    template={'subject':'S','html':'<p>Body</p>{{{signature_html}}}','text_body':'Body\n\n{{signature_text}}','required_variables':[]}
+    assert 'Supply' not in json.dumps(compose(template,{},author,'personal','gmail'))
+    assert 'Founder' in compose(template,{},{**author,'auto_sign':True,'signature_text':'Founder','signature_html':'<b>Founder</b>'},'personal','gmail')['text']
+
+
+def test_edit_identity_switches_sender_signature_and_snapshot(senders):
+    email=senders+'0@example.test'
+    with connection() as db:
+        row,_=draft.prepare(db,'alex',[email],subject='Hi',body='Hello\n\nAlex Polglase mentioned it',message_id=senders+'switch')
+        draft.insert(db,row)
+    def switch(key):
+        return draft.edit(NS(target=row['id'],identity=key))['message']
+    moved=switch('supply')
+    assert (moved['identity_key'],moved['from_email'])==('supply','supply@rebattery.io')
+    assert moved['body_text']=='Hello\n\nAlex Polglase mentioned it\n\nAlex Polglase\nSupply\n'
+    assert moved['body_html'].count(SIGNATURE_DIV)==1 and moved['body_html'].endswith(SIGNATURE_DIV+'<table><tr><td>Supply</td></tr></table></div></div>')
+    assert moved['personalization']['identity_snapshot']=={'address':'supply@rebattery.io','display_name':'Supply @ ReBattery','reply_to':None,'gmail_account':'alex@rebattery.io','postmark_stream':None}
+    assert moved['subject']=='Hi' and moved['to_emails']==[email] and moved['transport']=='gmail'
+    # hello@ has no signature: the draft goes out unsigned, and gets Alex's back when he takes it again.
+    bare=switch('hello')
+    assert bare['from_email']=='hello@rebattery.io' and bare['body_text']=='Hello\n\nAlex Polglase mentioned it' and SIGNATURE_DIV not in bare['body_html']
+    assert bare['body_html'].startswith('<div dir="ltr"><div>Hello</div>') and bare['body_html'].endswith('</div>')
+    back=switch('alex')
+    assert back['body_text']==row['body_text'] and back['body_html']==row['body_html'] and back['personalization']['identity_snapshot']==row['personalization']['identity_snapshot']
+    assert switch('alex')['body_text']==row['body_text']
+    # The switched draft passes the send-time identity check.
+    switch('supply')
+    fake=Fake()
+    assert send.send_message(NS(target=row['id'],apply=False,approved_by='Ari'),fake)['results'][0]['state']=='accepted' and fake.calls==[row['id']]
+
+
+def test_edit_identity_refuses_what_gmail_cannot_send(senders):
+    email=senders+'0@example.test'
+    with connection() as db:
+        row,_=draft.prepare(db,'alex',[email],subject='Hi',body='Hello',message_id=senders+'refuse')
+        draft.insert(db,row)
+        templated,_=draft.prepare(db,'alex',[email],subject='Hi',body='Hello',html='<html><body><p>Hello</p></body></html>',message_id=senders+'tpl')
+        templated['body_html']='<html><body><p>Hello</p></body></html>'
+        draft.insert(db,templated)
+    def refusal(target,key,**more):
+        with pytest.raises(Refused) as caught:
+            draft.edit(NS(target=target,identity=key,**more))
+        return caught.value.rule
+    # buy@ is not a "Send mail as" address yet: Gmail would send the mail as alex@.
+    assert refusal(row['id'],'buy')=='gmail_send_as_missing'
+    assert refusal(row['id'],'ari')=='identity_mailbox_mismatch'
+    assert refusal(row['id'],'support')=='identity_transport_unavailable'
+    assert refusal(row['id'],'nobody')=='identity_unavailable'
+    assert refusal(templated['id'],'supply')=='identity_fixed_on_template_draft'
+    from rebattery_mail.core import UsageError
+    with pytest.raises(UsageError,match='separate edits'):
+        draft.edit(NS(target=row['id'],identity='supply',body='New',html='<div>New</div>'))
+    with connection(read_only=True) as db:
+        _,rows=load(db,row['id'])
+    assert rows[0]['identity_key']=='alex' and rows[0]['body_text']==row['body_text']
+
+
+def test_require_send_as_accepts_only_verified_aliases(monkeypatch):
+    from rebattery_mail import drivers
+    from rebattery_mail.core import ProviderError
+    calls=[]
+    listed={'sendAs':[{'sendAsEmail':'alex@rebattery.io','isPrimary':True},{'sendAsEmail':'Supply@rebattery.io','verificationStatus':'accepted'},
+                      {'sendAsEmail':'buy@rebattery.io','verificationStatus':'pending'}]}
+    result=NS(returncode=0,stdout=json.dumps(listed))
+    def runner(args,**kwargs):
+        calls.append(args)
+        return result
+    monkeypatch.setattr(drivers.subprocess,'run',runner)
+    drivers.require_send_as('alex@rebattery.io','Alex@rebattery.io')
+    assert calls==[]
+    drivers.require_send_as('alex@rebattery.io','supply@rebattery.io')
+    assert calls[0][:6]==['gog','--account','alex@rebattery.io','gmail','settings','sendas'] and 'send' not in calls[0]
+    for address in ('buy@rebattery.io','hello@rebattery.io'):
+        with pytest.raises(Refused) as caught:
+            drivers.require_send_as('alex@rebattery.io',address)
+        assert caught.value.rule=='gmail_send_as_missing' and address in str(caught.value)
+    result=NS(returncode=1,stdout='')
+    with pytest.raises(ProviderError,match='gmail_auth_unavailable'):
+        drivers.require_send_as('alex@rebattery.io','supply@rebattery.io')
+
+
 def test_gog_env_always_carries_keyring_and_home(monkeypatch,tmp_path):
     from rebattery_mail import core
     key=tmp_path/'key';key.write_text('secret\n')

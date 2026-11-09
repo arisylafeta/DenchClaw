@@ -95,6 +95,12 @@ export async function editDraft(draft: MailDraft, changes: { subject?: string; b
   try { await run(CLI, [...args, "--", draft.id], { timeout: 60_000, maxBuffer: 4 << 20 }); } catch (error) { throw cliError(error); }
 }
 
+/** Hands an unsent one-to-one draft to another sending identity. The CLI swaps the signature and refuses an address Gmail cannot send as. */
+export async function changeDraftIdentity(draft: MailDraft, identity: string): Promise<void> {
+  if (draft.state !== "draft") { throw new DraftActionError(409, "This draft was already sent or is being sent."); }
+  try { await run(CLI, ["edit", "--identity", identity, "--", draft.id], { timeout: 60_000, maxBuffer: 4 << 20 }); } catch (error) { throw cliError(error); }
+}
+
 /** Sends the current draft. Naming the approver is the CLI's go-ahead, so only a named human and the exact version they saw may send. */
 export async function sendDraft(draft: MailDraft, approver: string): Promise<{ sent: boolean }> {
   if (draft.state !== "draft") { throw new DraftActionError(409, "This draft was already sent or is being sent."); }

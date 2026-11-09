@@ -146,6 +146,8 @@
 .field { display: grid; grid-template-columns: 70px 1fr; align-items: center; border-bottom: 1px solid var(--line); padding: 0 18px; }
 .field label, .field > span:first-child { font-size: 13px; color: var(--muted); }
 .field input { border: 0; background: none; padding: 11px 0; outline: none; min-width: 0; width: 100%; }
+.field select { border: 0; background: none; padding: 11px 0; margin-left: -4px; outline: none; min-width: 0; width: 100%; font-size: 14.5px; cursor: pointer; }
+.field select:disabled { cursor: default; opacity: 1; }
 .ro { padding: 11px 0; font-size: 14.5px; overflow-wrap: anywhere; }
 .body { display: block; width: 100%; border: 0; resize: none; background: none; padding: 16px 18px; min-height: 220px; font-size: 15.5px; line-height: 1.6; outline: none; overflow: hidden; }
 .body:focus { background: color-mix(in srgb, var(--blue-soft) 35%, transparent); }

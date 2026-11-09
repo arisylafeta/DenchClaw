@@ -62,8 +62,10 @@ def compose(template_row, variables, identity_row, purpose, transport):
     values = template_variables(row, variables)
     # Reserved variables cannot override the sending identity or policy.
     unsubscribe_html, unsubscribe_text = policy.unsubscribe(identity_row, purpose, transport)
-    values.update(signature_html=identity_row.get('signature_html') or '',
-                  signature_text=identity_row.get('signature_text') or '',
+    # An identity with auto_sign off (supply@, buy@) signs only the one-to-one drafts a person writes, never a template.
+    signs = identity_row.get('auto_sign', True)
+    values.update(signature_html=(identity_row.get('signature_html') or '') if signs else '',
+                  signature_text=(identity_row.get('signature_text') or '') if signs else '',
                   unsubscribe_html=unsubscribe_html, unsubscribe_text=unsubscribe_text,
                   preview=variables.get('preview', ''))
     # Legacy DB templates have no shell slots; retain their signatures inside the

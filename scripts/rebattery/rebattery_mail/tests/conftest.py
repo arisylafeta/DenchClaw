@@ -48,6 +48,7 @@ def mail_test_database(request):
                 cur.execute(ROLE_MIGRATION.read_text())
             cur.execute((MIGRATIONS / '053_mail_template_meta.sql').read_text())
             cur.execute((MIGRATIONS / '086_mail_identity_transactional_stream.sql').read_text())
+            cur.execute((MIGRATIONS / '107_mail_sender_switch.sql').read_text())
         os.environ['DENCH_MAIL_DSN'] = dsn
         os.environ['BULK_TRADES_TEST_DATABASE_URL'] = dsn
         os.environ.pop('DENCH_MAIL_LIVE_SEND', None)
