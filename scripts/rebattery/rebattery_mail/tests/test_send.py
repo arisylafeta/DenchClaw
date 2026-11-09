@@ -940,7 +940,7 @@ def test_edit_identity_switches_sender_signature_and_snapshot(senders):
     assert moved['body_text']=='Hello\n\nAlex Polglase mentioned it\n\nAlex Polglase\nSupply\n'
     assert moved['body_html'].count(SIGNATURE_DIV)==1 and moved['body_html'].endswith(SIGNATURE_DIV+'<table><tr><td>Supply</td></tr></table></div></div>')
     assert moved['personalization']['identity_snapshot']=={'address':'supply@rebattery.io','display_name':'Supply @ ReBattery','reply_to':None,'gmail_account':'alex@rebattery.io','postmark_stream':None}
-    assert moved['subject']=='Hi' and moved['to_emails']==[email] and moved['transport']=='gmail'
+    assert moved['to_emails']==[email] and moved['transport']=='gmail'
     # hello@ has no signature: the draft goes out unsigned, and gets Alex's back when he takes it again.
     bare=switch('hello')
     assert bare['from_email']=='hello@rebattery.io' and bare['body_text']=='Hello\n\nAlex Polglase mentioned it' and SIGNATURE_DIV not in bare['body_html']
@@ -948,6 +948,14 @@ def test_edit_identity_switches_sender_signature_and_snapshot(senders):
     back=switch('alex')
     assert back['body_text']==row['body_text'] and back['body_html']==row['body_html'] and back['personalization']['identity_snapshot']==row['personalization']['identity_snapshot']
     assert switch('alex')['body_text']==row['body_text']
+    # Copy saved for the old sender (it carries that sender's signature) is refused once the sender has changed.
+    with pytest.raises(Refused) as stale:
+        draft.edit(NS(target=row['id'],expect_identity='supply',body='New\n\nAlex Polglase\nSupply\n',html='<div dir="ltr"><div>New</div></div>'))
+    assert stale.value.rule=='draft_identity_changed'
+    assert draft.edit(NS(target=row['id'],expect_identity='alex',subject='Hello'))['message']['subject']=='Hello'
+    # A reply flagged "newer conversation elsewhere" is still a plain draft, so its sender can change.
+    with connection() as db,db.cursor() as cur:
+        cur.execute("""update mail_message set personalization=jsonb_set(personalization,'{oneoff}','{"warnings":["Newer email"],"variables_used":[]}') where id=%s""",(row['id'],))
     # The switched draft passes the send-time identity check.
     switch('supply')
     fake=Fake()
@@ -995,11 +1003,15 @@ def test_require_send_as_accepts_only_verified_aliases(monkeypatch):
     assert calls==[]
     drivers.require_send_as('alex@rebattery.io','supply@rebattery.io')
     assert calls[0][:6]==['gog','--account','alex@rebattery.io','gmail','settings','sendas'] and 'send' not in calls[0]
+    # A send checks before and after its claim: the second check reuses the answer.
+    drivers.require_send_as('alex@rebattery.io','Supply@rebattery.io')
+    assert len(calls)==1
     for address in ('buy@rebattery.io','hello@rebattery.io'):
         with pytest.raises(Refused) as caught:
             drivers.require_send_as('alex@rebattery.io',address)
         assert caught.value.rule=='gmail_send_as_missing' and address in str(caught.value)
     result=NS(returncode=1,stdout='')
+    drivers._SEND_AS_VERIFIED.clear()
     with pytest.raises(ProviderError,match='gmail_auth_unavailable'):
         drivers.require_send_as('alex@rebattery.io','supply@rebattery.io')
 

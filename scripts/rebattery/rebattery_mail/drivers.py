@@ -122,10 +122,16 @@ def sync_suppressions(stream, suppressions, apply, db=None):
     return results
 
 
+# One answer per run: a send checks before and after its claim, and the second check must not fail a claimed message
+# on a slow Gmail.
+_SEND_AS_VERIFIED = set()
+
+
 def require_send_as(account, address):
     """Refuse unless the Gmail account may send as the address. Gmail does not reject an unknown From: it sends the
     mail from the account's own address instead, so the recipient would see the wrong sender."""
-    if address.strip().lower() == account.strip().lower():
+    key = (account.strip().lower(), address.strip().lower())
+    if key[0] == key[1] or key in _SEND_AS_VERIFIED:
         return
     try:
         listed = subprocess.run(['gog','--account',account,'gmail','settings','sendas','list','--json','--no-input'],
@@ -138,6 +144,7 @@ def require_send_as(account, address):
     usable = {a.get('sendAsEmail', '').lower() for a in aliases if a.get('isPrimary') or a.get('verificationStatus') == 'accepted'}
     if address.strip().lower() not in usable:
         raise Refused('gmail_send_as_missing', f'{address} is not a "Send mail as" address on {account}', address=address, account=account)
+    _SEND_AS_VERIFIED.add(key)
 
 
 class GmailSendDriver:

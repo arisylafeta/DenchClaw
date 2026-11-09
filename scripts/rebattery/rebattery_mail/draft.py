@@ -216,7 +216,8 @@ def resign(text, html, old, new):
 def change_identity(db, row, key):
     """Hand an unsent one-to-one Gmail draft to another identity of the same mailbox, signed as the new sender."""
     from . import drivers
-    if row.get('campaign_id') or 'oneoff' in (row.get('personalization') or {}) or not (row['body_html'] or '').startswith('<div dir="ltr">'):
+    # Only a plain draft carries Gmail's compose wrapper; template and one-off block drafts keep the catalogue shell.
+    if row.get('campaign_id') or not (row['body_html'] or '').startswith('<div dir="ltr">'):
         raise Refused('identity_fixed_on_template_draft')
     if row['transport'] != 'gmail':
         raise Refused('identity_change_requires_gmail')
@@ -241,6 +242,14 @@ def edit(args):
         raise UsageError('nothing_to_edit')
     if 'identity' in changes and ('body' in changes or 'html' in changes):
         raise UsageError('identity_change_keeps_copy', 'Change the sender and the copy in separate edits')
+    if 'identity' in changes:
+        # Gmail is asked before the draft row is locked, so a slow answer never holds up a save or a send of this draft.
+        from . import drivers
+        with connection(read_only=True) as db, dict_cursor(db) as cur:
+            cur.execute('select address,gmail_account from mail_identity where key=%s and active', (changes['identity'],))
+            target = cur.fetchone()
+        if target and target['gmail_account']:
+            drivers.require_send_as(target['gmail_account'], target['address'])
     with connection() as db:
         with dict_cursor(db) as cur:
             cur.execute("select * from mail_message where id=%s and state='draft' and idempotency_key is null for update", (args.target,))
@@ -248,6 +257,9 @@ def edit(args):
             if not row:
                 raise Refused('draft_not_editable', message_id=args.target)
             row = dict(row)
+            # Copy written for one sender carries that sender's signature, so it must not land after the sender changed.
+            if getattr(args, 'expect_identity', None) and args.expect_identity != row['identity_key']:
+                raise Refused('draft_identity_changed', 'The sender changed while this edit was being made. Reload and try again.')
             if 'identity' in changes and changes['identity'] != row['identity_key']:
                 change_identity(db, row, changes['identity'])
             text, html = row['body_text'] or '', row['body_html'] or ''
@@ -324,6 +336,7 @@ def register(subparsers):
     parser.add_argument('--cc', help='Replace the CC list (comma-separated; empty clears it)')
     parser.add_argument('--bcc', help='Replace the BCC list (comma-separated; empty clears it)')
     parser.add_argument('--identity', help='Send as another identity of the same Gmail mailbox; the signature follows the sender')
+    parser.add_argument('--expect-identity', help='Refuse the edit unless the draft still has this identity')
     parser.set_defaults(handler=edit)
     parser = subparsers.add_parser('preview')
     parser.add_argument('target')

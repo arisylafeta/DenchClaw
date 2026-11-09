@@ -19,6 +19,7 @@ export function senderRefusal(refused: string, address: string): string | null {
     identity_fixed_on_template_draft: "This email was built from a template, so its sender is fixed.",
     identity_change_requires_gmail: "Only an email that goes out through Gmail can change sender.",
     identity_mailbox_mismatch: `${address} sends from a different mailbox, so this reply can't move to it.`,
+    identity_transport_unavailable: `${address} isn't set up to send through Gmail yet.`,
   };
   return words[refused] ?? null;
 }

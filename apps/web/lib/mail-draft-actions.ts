@@ -92,7 +92,11 @@ export async function editDraft(draft: MailDraft, changes: { subject?: string; b
     if (clean.join(",") !== [...(draft[`${key}_emails`] ?? [])].sort().join(",")) { args.push(`--${key}=${clean.join(",")}`); }
   }
   if (args.length === 1) { return; }
-  try { await run(CLI, [...args, "--", draft.id], { timeout: 60_000, maxBuffer: 4 << 20 }); } catch (error) { throw cliError(error); }
+  // The copy above carries this identity's signature, so the CLI refuses it if the sender changed in the meantime.
+  try { await run(CLI, [...args, `--expect-identity=${draft.identity_key}`, "--", draft.id], { timeout: 60_000, maxBuffer: 4 << 20 }); } catch (error) {
+    const failed = cliError(error);
+    throw failed.message.startsWith("draft_identity_changed") ? new DraftActionError(409, "Who this email is from changed while it was saving. Reload and try again.") : failed;
+  }
 }
 
 /** Hands an unsent one-to-one draft to another sending identity. The CLI swaps the signature and refuses an address Gmail cannot send as. */

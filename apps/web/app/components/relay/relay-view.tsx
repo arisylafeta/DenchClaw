@@ -633,7 +633,8 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
   };
   const sent = draft.state === "sent";
   const scheduled = mail.scheduled;
-  const locked = sent || !!scheduled;
+  // A sender switch re-signs the saved copy; the editor holds still until that version is back.
+  const locked = sent || !!scheduled || switching;
   const to = splitAddrs(local.to);
   const verdict = beforeYouSend({ to, body: local.body, attachments: mail.attachments.length }, item.facts);
   const blocked = verdict.state === "stop";
@@ -725,7 +726,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
       <div className={s.field} style={{ marginTop: 6 }}>
         <label htmlFor={`from-${draft.id}`}>From</label>
         {isSenderKey(mail.identity_key) && mail.transport === "gmail"
-          ? <select id={`from-${draft.id}`} value={mail.identity_key} disabled={locked || saving || switching} onChange={(e) => void changeSender(e.target.value)}>{SENDERS.map((sender) => <option key={sender.key} value={sender.key}>{sender.address}</option>)}</select>
+          ? <select id={`from-${draft.id}`} value={mail.identity_key} disabled={locked || saving} onChange={(e) => void changeSender(e.target.value)}>{SENDERS.map((sender) => <option key={sender.key} value={sender.key}>{sender.address}</option>)}</select>
           : <div className={s.ro}>{mail.from_email}</div>}
       </div>
       <div className={s.field}><label htmlFor={`to-${draft.id}`}>To</label><input id={`to-${draft.id}`} value={local.to} disabled={locked} placeholder="Add an address" onChange={(e) => setLocal({ ...local, to: e.target.value })} onBlur={() => void save()} /></div>
@@ -778,8 +779,8 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
         ) : (
         <>
         <div className={s.eact}>
-          <button className={cx(s.btn, s.pri)} type="button" title="Sends in 30 seconds. You can undo until then." disabled={blocked || sending || saving || scheduling} onClick={() => void send()}>{sending ? "Sending…" : "Send"} <Arrow /></button>
-          <button className={s.btn} type="button" aria-expanded={later} disabled={blocked || sending || saving || scheduling} onClick={() => setLater((v) => !v)}><Clock /> Send later</button>
+          <button className={cx(s.btn, s.pri)} type="button" title="Sends in 30 seconds. You can undo until then." disabled={blocked || sending || saving || switching || scheduling} onClick={() => void send()}>{sending ? "Sending…" : "Send"} <Arrow /></button>
+          <button className={s.btn} type="button" aria-expanded={later} disabled={blocked || sending || saving || switching || scheduling} onClick={() => setLater((v) => !v)}><Clock /> Send later</button>
           <button className={s.btn} type="button" disabled={saving} onClick={() => void toGmail()}>{draft.state === "gmail" ? "✓ In Gmail drafts" : "Add to Gmail drafts"}</button>
           <span className={s.sp} />
           {draft.role === "primary" && <button className={cx(s.btn, s.ghost)} type="button" title="No reply needed after all: marks it read and labels it Sorted in Gmail; the draft is dropped" onClick={() => void markDone()}>Done, no reply</button>}
