@@ -33,10 +33,12 @@ def identity(db, key, purpose, transport=None):
     tstream = row.get('transactional_postmark_stream')
     if transport is None and purpose == 'transactional' and tstream:
         transport = 'postmark-transactional'
-    if transport == 'postmark-transactional' and tstream and not row['postmark_stream']:
-        row['postmark_stream'] = tstream
     if transport is None:
         transport = ('postmark-broadcast' if purpose == 'marketing' else 'postmark-transactional') if row['postmark_stream'] else 'gmail'
+    if transport == 'postmark-transactional' and tstream:
+        # The identity's own stream may be its broadcast stream (supply sends campaigns there), so
+        # transactional-stream mail always takes its transactional stream.
+        row['postmark_stream'] = tstream
     if (transport == 'gmail' and not row['gmail_account']) or (transport.startswith('postmark') and not row['postmark_stream']):
         raise Refused('identity_transport_unavailable')
     if purpose == 'marketing' and transport.startswith('postmark') and row['postmark_stream'] == 'outbound':

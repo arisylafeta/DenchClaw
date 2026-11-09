@@ -1018,6 +1018,19 @@ def test_cc_thread_collects_participants_without_own_or_to(env):
             draft.prepare(db,'alex',['buyer@example.test'],subject='S',body='B',cc_thread=True)
 
 
+def test_transactional_mail_uses_the_transactional_stream_beside_a_broadcast_stream(env):
+    with connection() as db:
+        with dict_cursor(db) as cur:
+            cur.execute("update mail_identity set postmark_stream='broadcast' where key='supply'")
+        author,transport=policy.identity(db,'supply','transactional')
+        assert transport=='postmark-transactional' and author['postmark_stream']=='outbound'
+        author,transport=policy.identity(db,'supply','transactional','postmark-transactional')
+        assert author['postmark_stream']=='outbound'
+        assert policy.identity(db,'supply','personal')[0]['postmark_stream']=='outbound'
+        assert policy.identity(db,'supply','marketing')[0]['postmark_stream']=='broadcast'
+        db.rollback()
+
+
 def test_verification_gates_campaigns_only(env):
     row=one(env);email=row['recipient_email']
     with connection(read_only=True) as db:
