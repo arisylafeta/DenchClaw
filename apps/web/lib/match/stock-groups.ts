@@ -407,12 +407,12 @@ function describe(members: Member[], lots: boolean): Pick<MatchGroupView, "pack"
   const tally = new Map<string, Member[]>();
   graphed.forEach((member) => tally.set(member.extra!.identity!.key, [...(tally.get(member.extra!.identity!.key) ?? []), member]));
   const best = [...tally.values()].sort((a, b) => b.length - a.length)[0]?.[0]?.extra?.identity ?? null;
-  // The graph's pack names the row only when the stated kWh agree with it (within 12% of its usable or gross figure):
+  // The graph's pack names the row only when the stated kWh agree with it (within 3% of its usable or gross figure):
   // a Zoe listed at 22 kWh under a part number the graph files as the ZE40 (41 kWh) is not titled "ZE40".
   const kwhs = members.map((member) => member.match.candidate.kwh).filter((value): value is number => value != null);
   const packKwh = [best?.usableKwh, best?.grossKwh].filter((value): value is number => value != null);
   const agrees = !kwhs.length || !packKwh.length
-    || kwhs.every((value) => value >= Math.min(...packKwh) / 1.12 && value <= Math.max(...packKwh) * 1.12);
+    || kwhs.every((value) => packKwh.some((figure) => near(value, figure)));
   const top = best && agrees ? best : null;
   // Different vehicles only ever meet on a shared confident identity; within one vehicle, one shared part number is one.
   const samePart = parts.length === 1 && members.every((member) => listedPart(member));
@@ -567,38 +567,51 @@ function groupRow(members: Member[], req: Requirement, now: Date): MatchRow {
 
 export type GroupInput = { row: MatchRow; match: Match; extra: StockExtra | null };
 
+/** Two kWh figures for one pack: within 3% of each other. */
+const near = (a: number, b: number) => Math.max(a, b) <= Math.min(a, b) * 1.03;
+
 /**
- * A group splits where its lines' stated kWh differ by more than `tolerance` (10% by default): a part number or graph
- * key does not always pin one pack (MG4 64 and 77 kWh under one number). One vehicle's lines group within 12%, so
- * usable and gross figures for one pack (Audi Q4: 77 and 82 kWh) stay together. A line with no kWh joins only when
- * there is a single capacity to join; otherwise it stands alone.
+ * Lines that are one pack by kWh (Ari, 9 Nov: 12% merged Ioniq 5 72.6 with 77.4 and Stellantis 49.2 with 54). Two lines
+ * join when their stated kWh are within 3%, or when a confident graph pack among them names one figure its usable kWh
+ * and the other its gross kWh, each within 3% (VW MEB: 77 usable, 82 gross). Union-find, so a chain through a graph line
+ * holds. A graph line whose own stated kWh is neither figure bridges nothing. A line with no kWh joins only when there is
+ * a single capacity to join; otherwise it stands alone.
  */
-export function splitByKwh(members: Member[], tolerance = 0.1): Member[][] {
+export function clusterByKwh(members: Member[]): Member[][] {
   const kwh = (member: Member) => member.match.candidate.kwh;
-  const stated = members.filter((member) => kwh(member) != null).sort((a, b) => kwh(a)! - kwh(b)!);
-  const clusters: Member[][] = [];
-  for (const member of stated) {
-    const current = clusters[clusters.length - 1];
-    if (current && kwh(member)! <= kwh(current[0])! * (1 + tolerance)) current.push(member);
-    else clusters.push([member]);
+  const parent = members.map((_, index) => index);
+  const find = (index: number): number => (parent[index] === index ? index : (parent[index] = find(parent[index])));
+  const join = (a: number, b: number) => { parent[find(a)] = find(b); };
+  members.forEach((a, i) => members.forEach((b, j) => {
+    if (j > i && kwh(a) != null && kwh(b) != null && near(kwh(a)!, kwh(b)!)) join(i, j);
+  }));
+  members.forEach((line, i) => {
+    const identity = line.extra?.identity;
+    if (!identity?.confirmed || !identity.key.startsWith("pack|") || identity.usableKwh == null || identity.grossKwh == null) return;
+    const fits = (value: number) => near(value, identity.usableKwh!) || near(value, identity.grossKwh!);
+    if (kwh(line) != null && !fits(kwh(line)!)) return;
+    members.forEach((other, j) => { if (j !== i && kwh(other) != null && fits(kwh(other)!)) join(i, j); });
+  });
+  const components = new Map<number, Member[]>();
+  members.forEach((member, index) => components.set(find(index), [...(components.get(find(index)) ?? []), member]));
+  const loose = [...components.values()].filter((list) => list.length === 1 && kwh(list[0]) == null).map((list) => list[0]);
+  const sized = [...components.values()].filter((list) => !(list.length === 1 && kwh(list[0]) == null));
+  if (sized.length <= 1) {
+    return [[...(sized[0] ?? []), ...loose]];
   }
-  const unknown = members.filter((member) => kwh(member) == null);
-  if (clusters.length <= 1) {
-    return [[...(clusters[0] ?? []), ...unknown]];
-  }
-  return [...clusters, ...unknown.map((member) => [member])];
+  return [...sized, ...loose.map((member) => [member])];
 }
 
 /**
- * One seller's pack lines of one kind and format, as row sets. First by vehicle (make and model family) and a 12% kWh
- * band; part numbers and graph keys never split one vehicle. Then vehicle groups that share a confident identity (a
- * high graph key, or one identical listed part number; a medium key within one make) merge, union-find style, and a
- * merge of several vehicle groups splits again where stated kWh differ by more than 10%.
+ * One seller's pack lines of one kind and format, as row sets. First by vehicle (make and model family), split into
+ * packs by kWh (clusterByKwh); part numbers and graph keys never split one vehicle. Then vehicle groups that share a
+ * confident identity (a high graph key, or one identical listed part number; a medium key within one make) merge,
+ * union-find style, and the merge is split by the same kWh rule.
  */
 export function packSets(members: Member[]): Member[][] {
   const byVehicle = new Map<string, Member[]>();
   members.forEach((member) => byVehicle.set(vehicleKey(member)!, [...(byVehicle.get(vehicleKey(member)!) ?? []), member]));
-  const vehicles = [...byVehicle.values()].flatMap((list) => splitByKwh(list, 0.12));
+  const vehicles = [...byVehicle.values()].flatMap(clusterByKwh);
   const parent = vehicles.map((_, index) => index);
   const find = (index: number): number => (parent[index] === index ? index : (parent[index] = find(parent[index])));
   const owner = new Map<string, number>();
@@ -613,7 +626,7 @@ export function packSets(members: Member[]): Member[][] {
   vehicles.forEach((_, index) => merged.set(find(index), [...(merged.get(find(index)) ?? []), index]));
   return [...merged.values()].flatMap((indexes) => {
     const all = indexes.flatMap((index) => vehicles[index]);
-    return indexes.length > 1 ? splitByKwh(all) : [all];
+    return indexes.length > 1 ? clusterByKwh(all) : [all];
   });
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { requirementFor, scoreCandidate, type Requirement } from "../demand-match";
 import { fitMarks } from "./fit-marks";
-import { groupMarks, groupStock, groupSummary, packIdentities, sohMark, splitByKwh, vehicleName, type GraphMatch, type GroupInput, type IdentityInput } from "./stock-groups";
+import { groupMarks, groupStock, groupSummary, packIdentities, sohMark, clusterByKwh, vehicleName, type GraphMatch, type GroupInput, type IdentityInput } from "./stock-groups";
 import { identityInput, listingIdentityInput, stockCandidate, stockExtra, type StockRow } from "../crm-postgres/demand-matches-v2";
 import type { Demand } from "../bulk-demand";
 import type { MatchRow } from "../matches-types";
@@ -175,13 +175,13 @@ describe("grouping a request's stock by seller and pack identity", () => {
     const lines = [
       line({ graph: STELLANTIS, price_eur: 2020, soh_percent: 92 }),
       line({ graph: STELLANTIS, price_eur: 2075 }),
-      line({ graph: STELLANTIS, price_eur: 2210, soh_percent: 88, capacity_kwh: 52 }),
+      line({ graph: STELLANTIS, price_eur: 2210, soh_percent: 88, capacity_kwh: 51 }),
     ];
     const { rows } = build(lines, req);
     const marks = Object.fromEntries(rows[0].fit!.map((mark) => [mark.key, { label: mark.label, state: mark.state }]));
     expect(marks.condition).toEqual({ label: "SoH: 2 of 3 stated", state: "close" });
     expect(marks.price).toEqual({ label: "EUR 2,020–2,210", state: "close" });
-    expect(marks.capacity).toEqual({ label: "50–52 kWh", state: "fits" });
+    expect(marks.capacity).toEqual({ label: "50–51 kWh", state: "fits" });
     expect(marks.quantity).toEqual({ label: "3 available · need 2–13", state: "fits" });
     expect(marks.location).toEqual({ label: "In GB", state: "fits" });
     // Every SoH stated and at the minimum: one range, fits.
@@ -272,13 +272,14 @@ describe("marketplace listings", () => {
       expect(row.group!.units.map((unit) => unit.ref).filter(Boolean)).toContain("0Z1915910AJ");
     });
 
-    it("group by vehicle and capacity even with no confirmed pack, tagged and explained", () => {
+    it("without a graph line, 77 and 82 kWh stay two rows, each grouped by vehicle and capacity and tagged", () => {
       const rows = groupStock(listingInputs(listings.filter((row) => !row.part_numbers?.includes("0Z1915910CE")), meb(), [teacher]), meb(), NOW);
-      expect(rows).toHaveLength(1);
-      expect(rows[0].group).toMatchObject({ pack: "Audi Q4 · 77–82 kWh pack", count: 6, unsure: true, sameLabel: null });
+      expect(rows.map((row) => [row.group?.pack, row.group?.count, row.group?.unsure])).toEqual([
+        ["Audi Q4 · 77 kWh pack", 2, true], ["Audi Q4 · 82 kWh pack", 4, true],
+      ]);
       expect(rows[0].group!.why).toEqual({
         title: "Why these are one row",
-        text: "Grouped by vehicle and capacity as listed (Audi Q4, 77–82 kWh), not by a confirmed pack. Part numbers listed: 0Z1915910CD (4), 0Z1915910AJ; the battery graph has no confident match for them.",
+        text: "Grouped by vehicle and capacity as listed (Audi Q4, 77 kWh), not by a confirmed pack. Part numbers listed: 0Z1915910AJ, 0Z1915910CD; the battery graph has no confident match for them.",
         source: "Ask the seller for the pack label photo or part number",
       });
     });
@@ -339,11 +340,33 @@ describe("merge safety", () => {
     expect(high[0].group!.vehicles).toEqual([{ name: "Kia e-Niro", n: 2 }, { name: "Hyundai Kona Electric", n: 1 }]);
   });
 
-  it("splits one vehicle's lines more than 12% apart: a 42 kWh and a 49 kWh 2008 are two rows", () => {
+  it("splits one vehicle's lines more than 3% apart: a 42 kWh and a 49 kWh 2008 are two rows", () => {
     const req = requirementFor(demand({ wants: "2-13 Peugeot e-2008 packs", quantity: "2-13 packs", volume: 2, volume_unit: "packs", spec: { formats: ["Packs"] } }), new Set(["peugeot", "2008", "e-2008"]));
     const p2008 = (kwh: number) => line({ make: "Peugeot", model: "e-2008", capacity_kwh: kwh, title: `Peugeot e-2008 ${kwh} kWh battery` });
     const { rows } = build([p2008(42), p2008(42), p2008(49), p2008(49)], req);
     expect(rows.map((row) => row.group?.pack)).toEqual(["Peugeot e-2008 · 42 kWh pack", "Peugeot e-2008 · 49 kWh pack"]);
+  });
+
+  it("splits Ioniq 5 72.6 from 77.4 kWh, and a Stellantis van at 49.2/50 from 54 kWh, with no graph pack naming both", () => {
+    const req = requirementFor(demand({ wants: "2-13 Hyundai Ioniq 5 packs", quantity: "2-13 packs", volume: 2, volume_unit: "packs", spec: { formats: ["Packs"] } }),
+      new Set(["hyundai", "ioniq", "ioniq 5"]));
+    const ioniq = (kwh: number) => line({ make: "Hyundai", model: "Ioniq 5", capacity_kwh: kwh, title: `Hyundai Ioniq 5 ${kwh} kWh battery` });
+    expect(build([ioniq(72.6), ioniq(72.6), ioniq(77.4), ioniq(77.4)], req).rows.map((row) => row.group?.pack))
+      .toEqual(["Hyundai Ioniq 5 · 72.6 kWh pack", "Hyundai Ioniq 5 · 77.4 kWh pack"]);
+    // The Proace City case on the request's own vans (Stellantis 50 kWh and 54 kWh packs).
+    const van = (kwh: number) => line({ capacity_kwh: kwh, title: `Vauxhall Vivaro-e ${kwh} kWh battery` });
+    expect(build([van(49.2), van(50), van(54), van(54)]).rows.map((row) => row.group?.pack))
+      .toEqual(["Vauxhall Vivaro-e · 49.2–50 kWh pack", "Vauxhall Vivaro-e · 54 kWh pack"]);
+  });
+
+  it("joins usable and gross figures through a confident graph line, chaining by union-find", () => {
+    const MEB: GraphMatch = { ...STELLANTIS, pack_key: "fam:audi-bev-eu-v1-07", pack: "VW MEB 82 kWh gross / 77 kWh usable pack", usable_kwh: 77, gross_kwh: 82 };
+    const req = requirementFor(demand({ wants: "2-13 Audi Q4 packs", quantity: "2-13 packs", volume: 2, volume_unit: "packs", spec: { formats: ["Packs"] } }), new Set(["audi", "q4"]));
+    const q4 = (kwh: number, graph?: GraphMatch) => line({ make: "Audi", model: "Q4", capacity_kwh: kwh, title: `Audi Q4 ${kwh} kWh battery`, graph });
+    expect(build([q4(77), q4(82), q4(82, MEB)], req).rows.map((row) => row.group?.count ?? 1)).toEqual([3]);
+    expect(build([q4(77), q4(82), q4(82)], req).rows.map((row) => row.group?.count ?? 1)).toEqual([1, 2]);
+    // A graph line whose own stated kWh is neither figure bridges nothing.
+    expect(build([q4(77), q4(82), q4(60, MEB)], req).rows).toHaveLength(3);
   });
 
   it("does not title a group with a graph pack its stated kWh contradict", () => {
@@ -383,8 +406,8 @@ describe("the units table", () => {
 
   it("keeps unknown-kWh lines with a single capacity, and alone when capacities split", () => {
     const member = (kwh: number | null) => ({ row: { key: `k${kwh}` }, match: { candidate: { kwh } }, extra: null }) as unknown as GroupInput;
-    expect(splitByKwh([member(50), member(null), member(52)]).map((set) => set.length)).toEqual([3]);
-    expect(splitByKwh([member(64), member(77), member(null)]).map((set) => set.length)).toEqual([1, 1, 1]);
+    expect(clusterByKwh([member(50), member(null), member(51)]).map((set) => set.length)).toEqual([3]);
+    expect(clusterByKwh([member(64), member(77), member(null)]).map((set) => set.length)).toEqual([1, 1, 1]);
   });
 });
 
