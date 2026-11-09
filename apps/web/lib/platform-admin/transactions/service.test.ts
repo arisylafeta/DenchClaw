@@ -28,6 +28,7 @@ function deal(overrides: Partial<DealForRefund> = {}): DealForRefund {
 
 function makeDeps(overrides: Partial<RefundDeps> = {}): RefundDeps {
   return {
+    actorHasPlatformUser: vi.fn(async () => true),
     loadDeal: vi.fn(async () => deal()),
     refundCharge: vi.fn(async () => ({ id: "re_1", amount: 208000, currency: "gbp", created: 1794218702 })),
     finalize: vi.fn(async () => ({ outcome: "cancelled" as const, restoredQuantity: 1 })),
@@ -53,7 +54,12 @@ describe("transactions contract", () => {
     expect(refundBlocker({ ...base, status: "cancelled" })).toBe("Already cancelled");
     expect(refundBlocker({ ...base, paidOutAmount: 5 })).toBe("Seller already paid");
     expect(refundBlocker({ ...base, payoutStatus: "processing" })).toBe("Payout started");
-    expect(refundBlocker({ ...base, refundedAmount: 10 })).toBe("Already refunded");
+    expect(refundBlocker({ ...base, refundedAmount: 4 })).toBe("Partly refunded: resolve in Stripe");
+    expect(refundBlocker({ ...base, refundedAmount: 10, paymentStatus: "refunded" })).toBeNull();
+    expect(refundBlocker({ ...base, payoutRows: 1 })).toBe("Payout started");
+    expect(refundBlocker({ ...base, listingKind: "group" })).toBe("Group listing: cancel manually");
+    expect(refundBlocker({ ...base, dealQuantity: 1, specsQuantity: 1, specsAvailable: 1 })).toBe("Stock would exceed the listing total");
+    expect(refundBlocker({ ...base, capturedPayments: 2 })).toBe("More than one payment: refund in Stripe");
     expect(refundBlocker({ ...base, paymentIntentRef: null })).toBe("No captured payment");
   });
 });
@@ -80,6 +86,27 @@ describe("refund and cancel orchestration", () => {
     const result = await refundAndCancelDeal(deps, confirm);
     expect(result).toMatchObject({ ok: false, stage: "validate", error: "Seller already paid" });
     expect(deps.refundCharge).not.toHaveBeenCalled();
+  });
+
+  it("stops before any money moves when the acting admin has no platform user", async () => {
+    const deps = makeDeps({ actorHasPlatformUser: vi.fn(async () => false) });
+    const result = await refundAndCancelDeal(deps, confirm);
+    expect(result).toMatchObject({ ok: false, stage: "validate" });
+    expect(deps.refundCharge).not.toHaveBeenCalled();
+  });
+
+  it("does not refund a group listing the database would refuse to cancel", async () => {
+    const deps = makeDeps({ loadDeal: vi.fn(async () => deal({ listingKind: "group" })) });
+    const result = await refundAndCancelDeal(deps, confirm);
+    expect(result).toMatchObject({ ok: false, stage: "validate" });
+    expect(deps.refundCharge).not.toHaveBeenCalled();
+  });
+
+  it("finishes the cancellation when the webhook already recorded the refund", async () => {
+    const deps = makeDeps({ loadDeal: vi.fn(async () => deal({ refundedAmount: 2080, paymentStatus: "refunded", payoutStatus: "on_hold" })) });
+    const result = await refundAndCancelDeal(deps, confirm);
+    expect(result).toMatchObject({ ok: true });
+    expect(deps.finalize).toHaveBeenCalled();
   });
 
   it("stops before the database when Stripe fails", async () => {
@@ -136,6 +163,7 @@ describe("email copy", () => {
   it("renders the seller notice", () => {
     const mail = buildSellerCancelledEmail({ firstName: "Charles", number: "0B5C6B52", listingTitle: "Nissan Leaf" });
     expect(mail.subject).toBe("Transaction #0B5C6B52 has been cancelled");
-    expect(mail.html).toContain("Transaction #0B5C6B52 for Nissan Leaf has been cancelled");
+    expect(mail.html).toContain("Transaction #0B5C6B52 for Nissan Leaf has been cancelled.");
+    expect(mail.html).not.toContain("marketplace again");
   });
 });

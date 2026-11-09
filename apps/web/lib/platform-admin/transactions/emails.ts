@@ -62,14 +62,14 @@ export function buildSellerCancelledEmail(model: SellerCancelledModel): { subjec
   const html = wrap(
     `<h1 style="${H1}">${esc(subject)}</h1>` +
       `<p style="${P}">Hi ${esc(model.firstName)},</p>` +
-      `<p style="${P}">Transaction #${esc(model.number)} for ${esc(model.listingTitle)} has been cancelled. Your listing is available on the marketplace again.</p>`,
+      `<p style="${P}">Transaction #${esc(model.number)} for ${esc(model.listingTitle)} has been cancelled.</p>`,
   );
   const text = [
     subject,
     "",
     `Hi ${model.firstName},`,
     "",
-    `Transaction #${model.number} for ${model.listingTitle} has been cancelled. Your listing is available on the marketplace again.`,
+    `Transaction #${model.number} for ${model.listingTitle} has been cancelled.`,
   ].join("\n");
   return { subject, html, text };
 }

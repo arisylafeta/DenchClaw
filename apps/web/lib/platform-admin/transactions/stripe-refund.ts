@@ -64,6 +64,18 @@ export async function refundChargeInFull(
     throw new StripeRefundError("This charge already has a partial or different refund. Resolve it in Stripe first.", "refund_mismatch", 409);
   }
 
+  const charge = await stripe<{ amount: number; amount_captured?: number; currency: string; refunded: boolean; amount_refunded: number }>(
+    fetcher, secretKey, "GET", `/v1/charges/${encodeURIComponent(input.chargeId)}`,
+  );
+  const captured = charge.amount_captured ?? charge.amount;
+  if (charge.currency.toLowerCase() !== input.currency.toLowerCase() || captured !== input.amountMinor) {
+    throw new StripeRefundError(
+      `The Stripe charge (${(captured / 100).toFixed(2)} ${charge.currency.toUpperCase()}) does not match the settlement (${(input.amountMinor / 100).toFixed(2)} ${input.currency.toUpperCase()}). Refund it in Stripe.`,
+      "charge_mismatch",
+      409,
+    );
+  }
+
   const refund = await stripe<StripeRefund>(
     fetcher, secretKey, "POST", "/v1/refunds",
     {
@@ -73,7 +85,9 @@ export async function refundChargeInFull(
       "metadata[deal_id]": input.dealId,
       "metadata[source]": "dench_transactions_page",
     },
-    `rebattery-admin-refund-${input.dealId}`,
+    // Ten-minute bucket: concurrent double submits collapse into one request, while a genuine retry after a
+    // failed attempt is not stuck behind Stripe's 24h replay of the earlier error. Existing refunds are checked above.
+    `rebattery-admin-refund-${input.dealId}-${Math.floor(Date.now() / 600_000)}`,
   );
   if (refund.status !== "succeeded") {
     throw new StripeRefundError(`Stripe accepted the refund but its status is "${refund.status}". Check it in Stripe, then retry.`, "refund_not_succeeded", 202);

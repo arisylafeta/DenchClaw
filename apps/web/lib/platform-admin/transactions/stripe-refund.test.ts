@@ -11,6 +11,7 @@ describe("refundChargeInFull", () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const fetcher = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       calls.push({ url: String(url), init });
+      if (String(url).includes("/v1/charges/")) return json({ amount: 208000, amount_captured: 208000, currency: "gbp", refunded: false, amount_refunded: 0 });
       return String(url).includes("?charge=")
         ? json({ data: [] })
         : json({ id: "re_1", amount: 208000, currency: "gbp", status: "succeeded", created: 1 });
@@ -18,7 +19,7 @@ describe("refundChargeInFull", () => {
     const refund = await refundChargeInFull(input, { secretKey: "rk_test", fetcher });
     expect(refund.id).toBe("re_1");
     const post = calls.find((c) => c.init?.method === "POST")!;
-    expect((post.init!.headers as Record<string, string>)["Idempotency-Key"]).toBe("rebattery-admin-refund-deal-1");
+    expect((post.init!.headers as Record<string, string>)["Idempotency-Key"]).toMatch(/^rebattery-admin-refund-deal-1-\d+$/);
     expect(String(post.init!.body)).toContain("amount=208000");
     expect(String(post.init!.body)).toContain("reason=requested_by_customer");
   });
@@ -35,10 +36,15 @@ describe("refundChargeInFull", () => {
     await expect(refundChargeInFull(input, { secretKey: "rk_test", fetcher })).rejects.toThrow(/partial or different/);
   });
 
+  it("refuses when the charge amount differs from the settlement", async () => {
+    const fetcher = vi.fn(async (url: RequestInfo | URL) => String(url).includes("/v1/charges/") ? json({ amount: 300000, currency: "gbp" }) : json({ data: [] })) as unknown as typeof fetch;
+    await expect(refundChargeInFull(input, { secretKey: "rk_test", fetcher })).rejects.toThrow(/does not match the settlement/);
+  });
+
   it("surfaces Stripe errors and non-succeeded status", async () => {
-    const denied = vi.fn(async (url: RequestInfo | URL) => String(url).includes("?charge=") ? json({ data: [] }) : json({ error: { message: "Permission denied", code: "more_permissions_required" } }, 403)) as unknown as typeof fetch;
+    const denied = vi.fn(async (url: RequestInfo | URL) => String(url).includes("/v1/charges/") ? json({ amount: 208000, currency: "gbp" }) : String(url).includes("?charge=") ? json({ data: [] }) : json({ error: { message: "Permission denied", code: "more_permissions_required" } }, 403)) as unknown as typeof fetch;
     await expect(refundChargeInFull(input, { secretKey: "rk_test", fetcher: denied })).rejects.toBeInstanceOf(StripeRefundError);
-    const pending = vi.fn(async (url: RequestInfo | URL) => String(url).includes("?charge=") ? json({ data: [] }) : json({ id: "re_2", amount: 208000, currency: "gbp", status: "pending", created: 1 })) as unknown as typeof fetch;
+    const pending = vi.fn(async (url: RequestInfo | URL) => String(url).includes("/v1/charges/") ? json({ amount: 208000, currency: "gbp" }) : String(url).includes("?charge=") ? json({ data: [] }) : json({ id: "re_2", amount: 208000, currency: "gbp", status: "pending", created: 1 })) as unknown as typeof fetch;
     await expect(refundChargeInFull(input, { secretKey: "rk_test", fetcher: pending })).rejects.toThrow(/pending/);
   });
 });

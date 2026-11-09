@@ -152,7 +152,7 @@ export function TransactionsClient({ transactions }: { transactions: Transaction
           row.original.canRefund ? (
             <Button type="button" variant="outline" size="sm" onClick={() => { setSelected(row.original); setConfirmation(""); }}>
               <Undo2Icon className="size-4" />
-              Refund
+              {(row.original.refundedAmount ?? 0) > 0 ? "Finish cancellation" : "Refund"}
             </Button>
           ) : row.original.status === "cancelled" && (row.original.refundedAmount ?? 0) > 0 ? (
             <Button type="button" variant="ghost" size="sm" disabled={isPending} onClick={() => resend(row.original)}>
@@ -203,7 +203,7 @@ export function TransactionsClient({ transactions }: { transactions: Transaction
       <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && !isPending && setSelected(null)}>
         <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Refund and cancel #{selected?.number}?</DialogTitle>
+            <DialogTitle>{(selected?.refundedAmount ?? 0) > 0 ? "Finish cancelling" : "Refund and cancel"} #{selected?.number}?</DialogTitle>
             <DialogDescription>
               This refunds the full payment to the buyer&apos;s card on Stripe, cancels the deal, puts the listing back on the marketplace,
               and emails the buyer and the seller. It cannot be undone.

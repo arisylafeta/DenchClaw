@@ -46,7 +46,7 @@ export function firstName(fullName: string | null | undefined): string {
 }
 
 /** Why a deal cannot be refunded from this page, or null when it can. The database function re-checks every rule. */
-export function refundBlocker(input: {
+export type RefundFacts = {
   status: string;
   paymentStatus: string | null;
   payoutStatus: string | null;
@@ -54,15 +54,40 @@ export function refundBlocker(input: {
   refundedAmount: number | null;
   paidOutAmount: number | null;
   paymentIntentRef: string | null;
-}): string | null {
+  /** Mirrors the database function's own checks so money never moves for a deal it will refuse to cancel. */
+  dealQuantity?: number | null;
+  listingKind?: string | null;
+  specsQuantity?: number | null;
+  specsAvailable?: number | null;
+  payoutRows?: number;
+  capturedPayments?: number;
+};
+
+/**
+ * Why a deal cannot be refunded from this page, or null when it can. Mirrors every `not_eligible` branch of
+ * `admin_cancel_refunded_deal`. An open deal whose settlement is already fully refunded (the webhook beat us, or a
+ * previous attempt failed after Stripe) is allowed: the action then only finishes the cancellation.
+ */
+export function refundBlocker(input: RefundFacts): string | null {
   if (input.status === "cancelled") return "Already cancelled";
   if (input.status !== "open") return "Deal is not open";
   if (!input.paymentIntentRef || input.fundedAmount == null || input.fundedAmount <= 0) return "No captured payment";
-  if ((input.refundedAmount ?? 0) !== 0) return "Already refunded";
+  const refunded = input.refundedAmount ?? 0;
+  if (refunded !== 0 && refunded !== input.fundedAmount) return "Partly refunded: resolve in Stripe";
   if ((input.paidOutAmount ?? 0) !== 0) return "Seller already paid";
   if (["creating", "processing", "posted", "legacy_transferred"].includes(input.payoutStatus ?? "")) {
     return "Payout started";
   }
-  if (input.paymentStatus !== "funds_held" && input.paymentStatus !== "processing") return "Payment not held";
+  if ((input.payoutRows ?? 0) > 0) return "Payout started";
+  if (refunded === 0 && input.paymentStatus !== "funds_held") return "Payment not held";
+  if ((input.capturedPayments ?? 1) !== 1) return "More than one payment: refund in Stripe";
+  if (input.listingKind === "group") return "Group listing: cancel manually";
+  if (input.dealQuantity != null && input.dealQuantity <= 0) return "No stock reservation recorded";
+  if (
+    input.specsQuantity != null && input.specsAvailable != null && input.dealQuantity != null &&
+    input.specsAvailable + input.dealQuantity > input.specsQuantity
+  ) {
+    return "Stock would exceed the listing total";
+  }
   return null;
 }

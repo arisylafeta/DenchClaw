@@ -1,6 +1,12 @@
 import { transactionNumber, formatMoney, firstName, refundBlocker } from "./contract";
 
 export type DealForRefund = {
+  dealQuantity?: number | null;
+  listingKind?: string | null;
+  specsQuantity?: number | null;
+  specsAvailable?: number | null;
+  payoutRows?: number;
+  capturedPayments?: number;
   id: string;
   status: string;
   workflowStep: string;
@@ -26,6 +32,7 @@ export type FinalizeResult =
 export type EmailOutcome = { sent: boolean; skipped?: string; error?: string; messageId?: string };
 
 export type RefundDeps = {
+  actorHasPlatformUser: (email: string) => Promise<boolean>;
   loadDeal: (dealId: string) => Promise<DealForRefund | null>;
   refundCharge: (input: { chargeId: string; amountMinor: number; currency: string; dealId: string }) => Promise<RefundResult>;
   finalize: (input: { dealId: string; refund: RefundResult; actorEmail: string; reason: string }) => Promise<FinalizeResult>;
@@ -77,7 +84,7 @@ export async function sendCancellationEmails(deps: RefundDeps, deal: DealForRefu
  */
 export async function refundAndCancelDeal(
   deps: RefundDeps,
-  input: { dealId: string; confirmation: string; actorEmail: string; reason?: string },
+  input: { dealId: string; confirmation: string; actorEmail: string },
 ): Promise<RefundAndCancelResult> {
   const deal = await deps.loadDeal(input.dealId);
   if (!deal) return { ok: false, stage: "validate", error: "Transaction not found" };
@@ -96,13 +103,22 @@ export async function refundAndCancelDeal(
     refundedAmount: deal.refundedAmount,
     paidOutAmount: deal.paidOutAmount,
     paymentIntentRef: deal.paymentIntentRef,
+    dealQuantity: deal.dealQuantity,
+    listingKind: deal.listingKind,
+    specsQuantity: deal.specsQuantity,
+    specsAvailable: deal.specsAvailable,
+    payoutRows: deal.payoutRows,
+    capturedPayments: deal.capturedPayments,
   });
   if (blocker) return { ok: false, stage: "validate", error: blocker };
   if (!deal.chargeId || deal.fundedAmount == null) {
     return { ok: false, stage: "validate", error: "No Stripe charge recorded for this payment" };
   }
   const amountMinor = Math.round(deal.fundedAmount * 100);
-  const reason = (input.reason ?? "").trim() || "Refunded and cancelled by ReBattery admin";
+  if (!(await deps.actorHasPlatformUser(input.actorEmail))) {
+    return { ok: false, stage: "validate", error: `${input.actorEmail} has no platform user, so the cancellation cannot be attributed. Nothing was refunded.` };
+  }
+  const reason = "Refunded and cancelled by ReBattery admin";
 
   let refund: RefundResult;
   try {

@@ -71,7 +71,8 @@ export async function getTransactions(): Promise<TransactionRow[]> {
   const dealRows = (deals ?? []) as Row[];
   const dealIds = dealRows.map((d) => d.id as string);
 
-  const [settlements, intents, contacts] = await Promise.all([
+  const listingIds = dealRows.map((d) => d.listing_id as string);
+  const [settlements, intents, contacts, listings, specs, payouts] = await Promise.all([
     readRowsInBatches<Row>(dealIds, (ids) =>
       db.from("deal_settlements").select("deal_id, payment_status, payout_status, funded_amount, refunded_amount, paid_out_amount, currency").in("deal_id", ids),
     ),
@@ -79,7 +80,16 @@ export async function getTransactions(): Promise<TransactionRow[]> {
       db.from("deal_payment_intents").select("deal_id, provider_ref, status, payment_purpose").in("deal_id", ids),
     ),
     loadContacts(dealRows.flatMap((d) => [d.counterparty_account_id, d.supplier_account_id]).filter(Boolean)),
+    readRowsInBatches<Row>(listingIds, (ids) => db.from("listings").select("id, listing_kind").in("id", ids)),
+    readRowsInBatches<Row>(listingIds, (ids) => db.from("listing_specs").select("listing_id, quantity, quantity_available").in("listing_id", ids)),
+    readRowsInBatches<Row>(dealIds, (ids) => db.from("deal_payouts").select("deal_id").in("deal_id", ids)),
   ]);
+  const kindByListing = new Map(listings.map((l) => [l.id as string, l.listing_kind as string]));
+  const specsByListing = new Map(specs.map((x) => [x.listing_id as string, x]));
+  const payoutCount = new Map<string, number>();
+  for (const payout of payouts) payoutCount.set(payout.deal_id, (payoutCount.get(payout.deal_id) ?? 0) + 1);
+  const capturedCount = new Map<string, number>();
+  for (const intent of intents) if (intent.status === "captured") capturedCount.set(intent.deal_id, (capturedCount.get(intent.deal_id) ?? 0) + 1);
   const settlementByDeal = new Map(settlements.map((s) => [s.deal_id as string, s]));
   const intentByDeal = new Map<string, Row>();
   for (const intent of intents) {
@@ -97,6 +107,12 @@ export async function getTransactions(): Promise<TransactionRow[]> {
       refundedAmount: num(settlement?.refunded_amount),
       paidOutAmount: num(settlement?.paid_out_amount),
       paymentIntentRef: (intent?.status === "captured" ? intent.provider_ref : null) as string | null,
+      dealQuantity: Number(deal.quantity ?? 0),
+      listingKind: kindByListing.get(deal.listing_id) ?? null,
+      specsQuantity: num(specsByListing.get(deal.listing_id)?.quantity),
+      specsAvailable: num(specsByListing.get(deal.listing_id)?.quantity_available),
+      payoutRows: payoutCount.get(deal.id) ?? 0,
+      capturedPayments: capturedCount.get(deal.id) ?? 0,
     };
     const blocker = refundBlocker(row);
     return {
@@ -113,7 +129,13 @@ export async function getTransactions(): Promise<TransactionRow[]> {
       listingReference: deal.listing_reference ?? null,
       buyerName: contacts.get(deal.counterparty_account_id)?.name ?? null,
       sellerName: contacts.get(deal.supplier_account_id)?.name ?? null,
-      ...row,
+      status: row.status,
+      paymentStatus: row.paymentStatus,
+      payoutStatus: row.payoutStatus,
+      fundedAmount: row.fundedAmount,
+      refundedAmount: row.refundedAmount,
+      paidOutAmount: row.paidOutAmount,
+      paymentIntentRef: row.paymentIntentRef,
       canRefund: blocker === null,
       refundBlocker: blocker,
     } satisfies TransactionRow;
@@ -122,16 +144,20 @@ export async function getTransactions(): Promise<TransactionRow[]> {
 
 async function loadDealForRefund(dealId: string): Promise<DealForRefund | null> {
   const db = adminDb();
-  const { data: deal } = await db
+  const { data: deal, error: dealError } = await db
     .from("deals")
-    .select("id, status, workflow_step, agreed_currency, counterparty_account_id, supplier_account_id, listing_title:snapshot_json->>listing_title, listing_reference:snapshot_json->>listing_reference")
+    .select("id, status, workflow_step, quantity, listing_id, agreed_currency, counterparty_account_id, supplier_account_id, listing_title:snapshot_json->>listing_title, listing_reference:snapshot_json->>listing_reference")
     .eq("id", dealId)
     .maybeSingle();
+  if (dealError) throw new Error(`Could not read the transaction: ${dealError.message}`);
   if (!deal) return null;
-  const [{ data: settlement }, { data: intents }, contacts] = await Promise.all([
+  const [{ data: settlement }, { data: intents }, contacts, { data: listing }, { data: spec }, { data: payoutRows }] = await Promise.all([
     db.from("deal_settlements").select("payment_status, payout_status, funded_amount, refunded_amount, paid_out_amount, currency, funding_payment_intent_id").eq("deal_id", dealId).maybeSingle(),
     db.from("deal_payment_intents").select("id, provider_ref, stripe_charge_id, status").eq("deal_id", dealId),
     loadContacts([deal.counterparty_account_id, deal.supplier_account_id].filter(Boolean)),
+    db.from("listings").select("listing_kind").eq("id", deal.listing_id).maybeSingle(),
+    db.from("listing_specs").select("quantity, quantity_available").eq("listing_id", deal.listing_id).maybeSingle(),
+    db.from("deal_payouts").select("id").eq("deal_id", dealId),
   ]);
   const intent = ((intents ?? []) as Row[]).find((i) => i.id === settlement?.funding_payment_intent_id && i.status === "captured");
   const buyer = contacts.get(deal.counterparty_account_id);
@@ -148,6 +174,12 @@ async function loadDealForRefund(dealId: string): Promise<DealForRefund | null> 
     paidOutAmount: num(settlement?.paid_out_amount),
     paymentStatus: settlement?.payment_status ?? null,
     payoutStatus: settlement?.payout_status ?? null,
+    dealQuantity: Number(deal.quantity ?? 0),
+    listingKind: listing?.listing_kind ?? null,
+    specsQuantity: num(spec?.quantity),
+    specsAvailable: num(spec?.quantity_available),
+    payoutRows: ((payoutRows ?? []) as Row[]).length,
+    capturedPayments: ((intents ?? []) as Row[]).filter((i) => i.status === "captured").length,
     chargeId: intent?.stripe_charge_id ?? null,
     paymentIntentRef: intent?.provider_ref ?? null,
     buyer: { email: buyer?.email ?? null, name: buyer?.contactName ?? null },
@@ -158,6 +190,10 @@ async function loadDealForRefund(dealId: string): Promise<DealForRefund | null> 
 function deps(): RefundDeps {
   const db = adminDb();
   return {
+    actorHasPlatformUser: async (email) => {
+      const { data } = await db.from("users").select("id").ilike("email", email).limit(1);
+      return Boolean(data?.length);
+    },
     loadDeal: loadDealForRefund,
     refundCharge: async (input) => {
       const refund = await refundChargeInFull(input);
@@ -181,7 +217,8 @@ function deps(): RefundDeps {
     sendBuyer: sendRefundIssuedEmail,
     sendSeller: sendSellerCancelledEmail,
     audit: async (dealId, action, payload) => {
-      await db.from("audit_events").insert({ actor_user_id: null, entity_type: "deal", entity_id: dealId, action, payload_json: payload });
+      const { error } = await db.from("audit_events").insert({ actor_user_id: null, entity_type: "deal", entity_id: dealId, action, payload_json: payload });
+      if (error) console.error(`[transactions] audit event ${action} for ${dealId} failed: ${error.message}`);
     },
   };
 }
@@ -189,11 +226,10 @@ function deps(): RefundDeps {
 export async function refundAndCancelTransaction(input: {
   dealId: string;
   confirmation: string;
-  reason?: string;
 }): Promise<RefundAndCancelResult> {
   noStore();
   const actorEmail = await requireAdmin();
-  return refundAndCancelDeal(deps(), { ...input, actorEmail });
+  return refundAndCancelDeal(deps(), { dealId: input.dealId, confirmation: input.confirmation, actorEmail });
 }
 
 /** Resend both emails for a deal this page already cancelled. */
