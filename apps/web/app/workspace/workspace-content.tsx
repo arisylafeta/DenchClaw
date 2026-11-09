@@ -209,6 +209,10 @@ const LEFT_SIDEBAR_FULL_DEFAULT = 260;
 const LEFT_SIDEBAR_MIN = LEFT_SIDEBAR_COMPACT_WIDTH;
 const LEFT_SIDEBAR_MAX = 480;
 const CENTER_PANEL_MIN = 480;
+/** The chat can be dragged down to a slim rail (about 5% of a desktop screen) beside a wide page, and dragged back. */
+const CHAT_RAIL_WIDTH = 72;
+/** Below this width the chat shows as the rail instead of a squashed transcript. */
+const CHAT_RAIL_THRESHOLD = 260;
 /** Mail drafts read like a letter: open them at a compact width, not full-bleed. */
 const MAIL_DRAFT_PANEL_WIDTH = 600;
 const RIGHT_PANEL_MIN = 360;
@@ -1098,7 +1102,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
       return rightPanelWidth;
     }
     return clamp(
-      totalWidth - reservedLeftSidebarWidth - (chatPanelCollapsed ? 0 : CENTER_PANEL_MIN),
+      totalWidth - reservedLeftSidebarWidth - (chatPanelCollapsed ? 0 : CHAT_RAIL_WIDTH),
       RIGHT_PANEL_MIN,
       RIGHT_PANEL_MAX,
     );
@@ -1120,6 +1124,13 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
     ? availableRightPanelMaxWidth
     : Math.min(rightPanelWidth, availableRightPanelMaxWidth);
   const effectiveRightPanelWidth = rightPanelCollapsed ? 0 : renderedRightPanelWidth;
+  // The chat squeezed to a sliver beside a wide page shows as a rail; a click or a drag brings it back.
+  const chatAsRail = !isNarrow && !chatPanelCollapsed && !rightPanelCollapsed && layoutWidth > 0
+    && layoutWidth - reservedLeftSidebarWidth - effectiveRightPanelWidth < CHAT_RAIL_THRESHOLD;
+  const widenChat = useCallback(() => {
+    const totalWidth = layoutRef.current?.clientWidth ?? window.innerWidth;
+    setRightPanelWidth(clamp(totalWidth - reservedLeftSidebarWidth - CENTER_PANEL_MIN, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX));
+  }, [reservedLeftSidebarWidth]);
 
   // Snap-aware resize handler: dragging below the compact threshold snaps to icon mode;
   // dragging into the gap between threshold and full min snaps to full min.
@@ -2798,7 +2809,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
         className={`${isNarrow ? (chatHidden ? "hidden" : "flex-1 flex") : `${chatPanelCollapsed ? "flex-none" : "flex-1"} flex`} flex-col overflow-hidden relative`}
         style={{
           width: chatHidden ? 0 : undefined,
-          minWidth: chatHidden ? 0 : isMobile ? 0 : 300,
+          minWidth: chatHidden ? 0 : isMobile ? 0 : CHAT_RAIL_WIDTH,
           background: "var(--color-main-bg)",
           transition: "width 200ms ease, min-width 200ms ease",
         }}
@@ -2806,8 +2817,21 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
         inert={chatHidden ? true : undefined}
       >
 
+        {chatAsRail && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center gap-2 py-3" style={{ background: "var(--color-main-bg)" }} data-testid="chat-rail">
+            {leftSidebarCollapsed && (
+              <button type="button" onClick={() => setLeftSidebarCollapsed(false)} className="p-1.5 rounded-md cursor-pointer hover:bg-[var(--color-surface-hover)]" style={{ color: "var(--color-text-muted)" }} title="Show sidebar (⌘B)" aria-label="Show sidebar">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M9 3v18" /></svg>
+              </button>
+            )}
+            <button type="button" onClick={widenChat} className="flex flex-1 w-full flex-col items-center gap-2 rounded-md py-2 cursor-pointer hover:bg-[var(--color-surface-hover)]" style={{ color: "var(--color-text-muted)" }} title="Widen the chat (or drag the edge)" aria-label="Widen the chat">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+              <span className="text-xs font-medium" style={{ writingMode: "vertical-rl" }}>Chat</span>
+            </button>
+          </div>
+        )}
         {/* Chat panel stack — always visible, never replaced by content */}
-        <div className="flex-1 flex min-h-0 min-w-0 flex-col overflow-hidden" style={{ background: "var(--color-main-bg)" }}>
+        <div className="flex-1 flex min-h-0 min-w-0 flex-col overflow-hidden" style={{ background: "var(--color-main-bg)" }} inert={chatAsRail ? true : undefined}>
           {/* The real composer stays mounted while only its transcript loads. */}
           {hermesChats.enabled && <HermesNewChatDialog chats={hermesChats} />}
           {mainChatTabs.map((tab) => {
