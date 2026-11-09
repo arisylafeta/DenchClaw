@@ -39,8 +39,10 @@ function ConnectDrive({ onConnected, onCancel }: { onConnected: () => void; onCa
   };
   const start = async () => {
     setBusy(true); setError(null);
-    try { const data = await post({}); setUrl(data.url ?? null); if (data.url) { window.open(data.url, "_blank", "noopener"); } }
-    catch (err) { setError(err instanceof Error ? err.message : "Couldn't start."); } finally { setBusy(false); }
+    // Open the tab inside the click so the browser doesn't block it, then point it at Google.
+    const tab = window.open("about:blank", "_blank");
+    try { const data = await post({}); setUrl(data.url ?? null); if (data.url && tab) { tab.location.href = data.url; } else { tab?.close(); } }
+    catch (err) { tab?.close(); setError(err instanceof Error ? err.message : "Couldn't start."); } finally { setBusy(false); }
   };
   const finish = async () => {
     setBusy(true); setError(null);
@@ -74,6 +76,8 @@ export function AttachmentStrip({ messageId }: { messageId: string }) {
   useEffect(() => {
     const controller = new AbortController();
     setState({ status: "loading" });
+    setSaved({});
+    setConnectFor(null);
     void fetch(`/api/mail/messages/${encodeURIComponent(messageId)}/attachments`, { signal: controller.signal })
       .then(async (response) => {
         const body = await response.json() as { attachments?: MailAttachment[]; unavailable?: string; error?: string };
@@ -96,7 +100,6 @@ export function AttachmentStrip({ messageId }: { messageId: string }) {
       }
       if (!response.ok || !body.url) { throw new Error(body.message ?? "Couldn't save to Drive."); }
       setSaved((m) => ({ ...m, [filename]: { status: "saved", url: body.url!, converted: !!body.converted } }));
-      window.open(body.url, "_blank", "noopener");
     } catch (err) {
       setSaved((m) => ({ ...m, [filename]: { status: "failed", message: err instanceof Error ? err.message : "Couldn't save to Drive." } }));
     }
@@ -115,7 +118,7 @@ export function AttachmentStrip({ messageId }: { messageId: string }) {
         <span className="ml-1 truncate">{file.filename}</span>
         {file.sizeBytes !== null && <span className="ml-1 shrink-0 text-[11px]" style={{ color: "var(--color-text-muted)" }}>{formatBytes(file.sizeBytes)}</span>}
         {s?.status === "saved"
-          ? <a className={`${icon} ml-1`} href={s.url} target="_blank" rel="noopener noreferrer" title={`Saved to Drive · open${s.converted ? " in Google" : ""}`} aria-label={`Open ${file.filename} in Drive`}><Check size={14} style={{ color: "var(--color-success, #16a34a)" }} /></a>
+          ? <a className={`${icon} ml-1`} href={s.url} target="_blank" rel="noopener noreferrer" title={`Saved to Drive${s.converted ? " as a Google file" : ""} · click to open`} aria-label={`Open ${file.filename} in Drive`}><Check size={14} style={{ color: "var(--color-success, #16a34a)" }} /></a>
           : <button type="button" className={`${icon} ml-1`} disabled={s?.status === "saving"} onClick={() => void toDrive(file.filename)} title={s?.status === "failed" ? s.message : s?.status === "saving" ? "Saving to Drive…" : "Save to Google Drive"} aria-label={`Save ${file.filename} to Google Drive`}>
             {s?.status === "saving" ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden /> : <DriveLogo />}
           </button>}

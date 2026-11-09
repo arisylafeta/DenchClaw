@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const fsFiles = new Map<string, Buffer>([["/kr/token", Buffer.from("old")]]);
+const fsFiles = new Map<string, Buffer>([["/kr/_gogcli_key_v1_dG9rZW46ZGVmYXVsdDphbGV4QHJlYmF0dGVyeS5pbw", Buffer.from("old")]]);
 vi.mock("node:fs", () => ({
   readFileSync: (p: string) => { const b = fsFiles.get(p); if (!b) throw new Error("ENOENT"); return b; },
+  rmSync: (p: string) => { fsFiles.delete(p); },
   readdirSync: () => [...fsFiles.keys()].filter((k) => k.startsWith("/kr/")).map((k) => k.slice(4)),
   statSync: () => ({ isFile: () => true }),
   writeFileSync: (p: string, b: Buffer) => { fsFiles.set(p, b); },
@@ -57,16 +58,18 @@ describe("uploadToDrive", () => {
     const r = await uploadToDrive("alex@rebattery.io", "/tmp/x", "Advisor agreement.docx");
     expect(r).toEqual({ url: "https://docs.google.com/document/d/D1/edit", name: "Advisor agreement", converted: true });
     const upload = calls.find((c) => c.includes("upload"))!;
-    expect(upload).toEqual(expect.arrayContaining(["--account", "alex@rebattery.io", "--enable-commands", "drive", "--parent", "F1", "--convert-to", "doc", "--name", "Advisor agreement"]));
+    expect(upload).toEqual(expect.arrayContaining(["--account", "alex@rebattery.io", "--enable-commands", "drive", "--parent", "F1", "--convert-to", "doc", "--name", "Advisor agreement",
+      "--mime-type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]));
     expect(calls.some((c) => c.includes("mkdir"))).toBe(false);
   });
 
   it("creates the folder when missing and uploads a PDF as is", async () => {
     respond = (args) => args.includes("search") ? { stdout: JSON.stringify({ files: [] }) }
-      : args.includes("mkdir") ? { stdout: JSON.stringify({ file: { id: "F2" } }) }
+      : args.includes("mkdir") ? { stdout: JSON.stringify({ folder: { id: "F2" } }) }
       : { stdout: JSON.stringify({ file: { id: "P1", webViewLink: "https://drive.google.com/file/d/P1/view" } }) };
     const r = await uploadToDrive("alex@rebattery.io", "/tmp/x", "invoice.pdf");
     expect(r.converted).toBe(false);
+    expect(calls.find((c) => c.includes("upload"))).toContain("F2");
     expect(calls.find((c) => c.includes("upload"))).not.toContain("--convert-to");
   });
 
@@ -93,22 +96,35 @@ describe("connect", () => {
     let listed = 0;
     respond = (args) => {
       if (args.includes("list")) { listed++; return { stdout: listed === 1 ? AUTH_LIST : JSON.stringify({ accounts: [{ email: "alex@rebattery.io", scopes: ["https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/gmail.modify"] }] }) }; }
-      fsFiles.set("/kr/token", Buffer.from("new"));
+      fsFiles.set("/kr/_gogcli_key_v1_dG9rZW46ZGVmYXVsdDphbGV4QHJlYmF0dGVyeS5pbw", Buffer.from("new")); fsFiles.set("/kr/extra", Buffer.from("x"));
       return { stdout: "{}" };
     };
     await expect(driveConnectFinish("alex@rebattery.io", "http://127.0.0.1:1/oauth2/callback?state=a&code=b")).rejects.toMatchObject({ code: "drive_not_connected" });
-    expect(fsFiles.get("/kr/token")?.toString()).toBe("old");
+    expect(fsFiles.get("/kr/_gogcli_key_v1_dG9rZW46ZGVmYXVsdDphbGV4QHJlYmF0dGVyeS5pbw")?.toString()).toBe("old");
+    expect(fsFiles.has("/kr/extra")).toBe(false);
   });
 
   it("keeps the new login when every scope came through", async () => {
     let listed = 0;
     respond = (args) => {
       if (args.includes("list")) { listed++; return { stdout: listed === 1 ? AUTH_LIST : JSON.stringify({ accounts: [{ email: "alex@rebattery.io", scopes: ["https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/gmail.send"] }] }) }; }
-      fsFiles.set("/kr/token", Buffer.from("new"));
+      fsFiles.set("/kr/_gogcli_key_v1_dG9rZW46ZGVmYXVsdDphbGV4QHJlYmF0dGVyeS5pbw", Buffer.from("new")); fsFiles.set("/kr/extra", Buffer.from("x"));
       return { stdout: "{}" };
     };
     await driveConnectFinish("alex@rebattery.io", "http://127.0.0.1:1/oauth2/callback?state=a&code=b");
-    expect(fsFiles.get("/kr/token")?.toString()).toBe("new");
+    expect(fsFiles.get("/kr/_gogcli_key_v1_dG9rZW46ZGVmYXVsdDphbGV4QHJlYmF0dGVyeS5pbw")?.toString()).toBe("new");
+    fsFiles.delete("/kr/extra"); fsFiles.set("/kr/_gogcli_key_v1_dG9rZW46ZGVmYXVsdDphbGV4QHJlYmF0dGVyeS5pbw", Buffer.from("old"));
+  });
+
+  it("keeps the old login when the check after consent fails", async () => {
+    let listed = 0;
+    respond = (args) => {
+      if (args.includes("list")) { listed++; return listed === 1 ? { stdout: AUTH_LIST } : { error: { stderr: "keyring timeout" } }; }
+      fsFiles.set("/kr/_gogcli_key_v1_dG9rZW46ZGVmYXVsdDphbGV4QHJlYmF0dGVyeS5pbw", Buffer.from("new"));
+      return { stdout: "{}" };
+    };
+    await expect(driveConnectFinish("alex@rebattery.io", "http://127.0.0.1:1/oauth2/callback?state=a&code=b")).rejects.toMatchObject({ code: "drive_failed" });
+    expect(fsFiles.get("/kr/_gogcli_key_v1_dG9rZW46ZGVmYXVsdDphbGV4QHJlYmF0dGVyeS5pbw")?.toString()).toBe("old");
   });
 
   it("refuses a pasted address that isn't the callback, without calling Google", async () => {

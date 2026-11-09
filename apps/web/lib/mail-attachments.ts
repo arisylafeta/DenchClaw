@@ -5,7 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { queryPg } from "./postgres";
 import { mailboxScopeSql } from "./mail-scope";
-import { DriveError, uploadToDrive } from "./google-drive";
+import { DriveError, driveConnected, uploadToDrive } from "./google-drive";
 
 const run = promisify(execFile);
 const CLI = "/usr/local/bin/rebattery-mail";
@@ -55,9 +55,16 @@ export async function downloadMailAttachment(messageId: string, userId: string, 
   } finally { await rm(dir, { recursive: true, force: true }); }
 }
 
+const DRIVE_MAX_BYTES = 100 * 1024 * 1024;
+
 /** Fetches one attachment from Gmail and saves it to the signed-in user's own Google Drive (Relay attachments folder). */
 export async function saveMailAttachmentToDrive(messageId: string, user: { id: string; email: string }, filename: string): Promise<{ url: string; name: string; converted: boolean } | { error: string; status: number; message?: string }> {
   if (!validMessageId(messageId) || !filename || !(await owns(messageId, user.id))) return { error: "not_found", status: 404 };
+  if (!(await driveConnected(user.email).catch(() => false))) return { error: "drive_not_connected", status: 409, message: "Google Drive isn't connected to this account yet." };
+  const listed = await listMailAttachments(messageId, user.id);
+  const file = listed && "attachments" in listed ? listed.attachments.find((a) => a.filename === filename) : undefined;
+  if (!file) return { error: "attachment_not_found", status: 404 };
+  if ((file.sizeBytes ?? 0) > DRIVE_MAX_BYTES) return { error: "too_large", status: 413, message: "That file is over 100 MB. Download it instead." };
   const dir = await mkdtemp(path.join(os.tmpdir(), "mail-drive-"));
   try {
     const target = path.join(dir, "file");

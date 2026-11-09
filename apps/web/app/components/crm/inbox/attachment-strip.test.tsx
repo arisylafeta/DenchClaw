@@ -14,9 +14,7 @@ describe("attachment strip", () => {
     expect(link).toHaveAttribute("href", "/api/mail/messages/gmail_msg_1/attachments/download?name=Packs%20%26%20prices.xlsx");
     expect(screen.getByText("25 KB")).toBeInTheDocument();
   });
-  it("saves a file to Drive and opens it", async () => {
-    const open = vi.fn();
-    vi.stubGlobal("open", open);
+  it("saves a file to Drive and links to it", async () => {
     const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/drive")
       ? { url: "https://docs.google.com/document/d/D1/edit", converted: true, name: "a" }
       : { attachments: [{ filename: "a.docx", mediaType: "x", sizeBytes: 10 }] })));
@@ -25,7 +23,6 @@ describe("attachment strip", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Save a.docx to Google Drive" }));
     expect(await screen.findByRole("link", { name: "Open a.docx in Drive" })).toHaveAttribute("href", "https://docs.google.com/document/d/D1/edit");
     expect(fetchMock).toHaveBeenCalledWith("/api/mail/messages/m1/attachments/drive", expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "a.docx" }) }));
-    expect(open).toHaveBeenCalledWith("https://docs.google.com/document/d/D1/edit", "_blank", "noopener");
   });
   it("offers to connect Drive when the account has no Drive access", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("/drive")
