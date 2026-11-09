@@ -36,14 +36,17 @@ export function OkrView() {
   useEffect(() => { void load(); }, [load]);
 
   if (!data) {
-    return (
-      <div className={styles.root}>
-        <div className={styles.title}><h1>OKRs</h1></div>
-        <div className={styles.note} style={{ marginTop: 8 }}>
-          {error ? <span className={styles.error}>{error}<button type="button" className={styles.retry} onClick={() => void load()}>Try again</button></span> : "Loading"}
+    if (error) {
+      return (
+        <div className={styles.root}>
+          <div className={styles.title}><h1>OKRs</h1></div>
+          <div className={styles.note} style={{ marginTop: 8 }}>
+            <span className={styles.error}>{error}<button type="button" className={styles.retry} onClick={() => void load()}>Try again</button></span>
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
+    return <OkrSkeleton />;
   }
   return <OkrBody data={data} />;
 }
@@ -73,17 +76,7 @@ export function OkrBody({ data }: { data: OkrData }) {
         </div>
       </header>
 
-      {data.groups.map((group) => (
-        <section key={group.key} className={styles.obj} aria-label={group.title}>
-          <div className={styles.objhd}><b>{OBJECTIVES[group.key]}</b><span>{group.title}</span></div>
-          <div className={styles.krs}>
-            {data.krs.filter((kr) => kr.objective === group.key).map((kr) => <KrCard key={kr.key} kr={kr} data={data} />)}
-          </div>
-          <div className={styles.kpis}>
-            {group.kpis.map((kpi) => <KpiTile key={kpi.key} kpi={kpi} data={data} />)}
-          </div>
-        </section>
-      ))}
+      {data.groups.map((group) => <Objective key={group.key} group={group} data={data} />)}
 
       <div className={styles.legend} aria-hidden="true">
         <span><i style={{ background: "var(--o-accent)" }} />Week</span>
@@ -99,11 +92,11 @@ export function OkrBody({ data }: { data: OkrData }) {
   );
 }
 
-function KrCard({ kr, data }: { kr: Kr; data: OkrData }) {
+function KrCard({ kr, data, wide }: { kr: Kr; data: OkrData; wide?: boolean }) {
   const share = data.period.share;
   const pct = kr.actual === null ? 0 : Math.min(100, (kr.actual / kr.target) * 100);
   return (
-    <article className={`${styles.card} ${styles.kr}`}>
+    <article className={`${styles.card} ${styles.kr}`} data-wide={wide ? "true" : undefined}>
       <div className={styles.krhd}>
         <b>{kr.title}</b>
         <span className={styles.chip} data-s={kr.status}>{STATUS[kr.status]}</span>
@@ -122,7 +115,7 @@ function KrCard({ kr, data }: { kr: Kr; data: OkrData }) {
         <span>{data.period.started ? `Pace for today: ${formatValue(kr.target * share, kr.unit)}` : "Target for the quarter"}</span>
         {kr.actual !== null && kr.actual < kr.target && <span>{formatValue(kr.target - kr.actual, kr.unit)} to go</span>}
       </div>
-      {kr.kind === "total" && <KrTrend kr={kr} data={data} />}
+      {kr.kind === "total" && <div className={styles.krtrend}><KrTrend kr={kr} data={data} /></div>}
       {kr.note && <div className={styles.note}>{kr.note}</div>}
       <div className={styles.src}>{kr.source}</div>
     </article>
@@ -151,7 +144,7 @@ function KrTrend({ kr, data }: { kr: Kr; data: OkrData }) {
   );
 }
 
-function KpiTile({ kpi, data }: { kpi: Kpi; data: OkrData }) {
+function KpiTile({ kpi, data, wide }: { kpi: Kpi; data: OkrData; wide?: boolean }) {
   const [hover, setHover] = useState<number | null>(null);
   const hatch = `h${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const { weeks, current_index: current, baseline, period_index } = data;
@@ -168,12 +161,12 @@ function KpiTile({ kpi, data }: { kpi: Kpi; data: OkrData }) {
   const known = kpi.values.filter((v): v is number => v !== null);
   const max = Math.max(1, ...known);
 
-  const W = 300, H = 52, slot = W / weeks.length, bw = slot * 0.62;
+  const W = 300, H = wide ? 110 : 52, slot = W / weeks.length, bw = slot * 0.62;
   const bar = (v: number) => Math.max(1.5, (v / max) * (H - 4));
   const baseY = base === null ? null : H - 2 - (base / max) * (H - 4);
 
   return (
-    <article className={`${styles.card} ${styles.kpi}`}>
+    <article className={`${styles.card} ${styles.kpi}`} data-wide={wide ? "true" : undefined}>
       <div className={styles.kpilabel}>{kpi.label}</div>
       <div className={styles.kpival}>
         {value === null ? <span className={styles.none} style={{ fontSize: 15 }}>No data</span> : <span className={styles.n}>{formatValue(value, kpi.unit)}</span>}
@@ -219,5 +212,101 @@ function KpiTile({ kpi, data }: { kpi: Kpi; data: OkrData }) {
       </div>
       {kpi.hint && <div className={styles.hint}>{kpi.hint}</div>}
     </article>
+  );
+}
+
+const FEATURED_KPI = "mkt_hits";
+
+function useOpen(key: string): [boolean, () => void] {
+  const [open, setOpen] = useState(true);
+  const storeKey = `okr-open-${key}`;
+  useEffect(() => {
+    try { if (window.localStorage.getItem(storeKey) === "0") { setOpen(false); } } catch { /* storage unavailable */ }
+  }, [storeKey]);
+  return [open, () => setOpen((was) => {
+    try { window.localStorage.setItem(storeKey, was ? "0" : "1"); } catch { /* storage unavailable */ }
+    return !was;
+  })];
+}
+
+/** One objective as an accordion: its key results, then the KPIs behind them. */
+function Objective({ group, data }: { group: Group; data: OkrData }) {
+  const [open, toggle] = useOpen(group.key);
+  const panel = useId();
+  const krs = data.krs.filter((kr) => kr.objective === group.key);
+  // Marketplace leads with web hits, then its key result, both full width.
+  const featured = group.kpis.find((k) => k.key === FEATURED_KPI && group.key === "marketplace");
+  const rest = group.kpis.filter((k) => k !== featured);
+  return (
+    <section className={styles.obj} aria-label={group.title}>
+      <button type="button" className={styles.objhd} aria-expanded={open} aria-controls={panel} onClick={toggle}>
+        <svg className={styles.chev} data-open={open} viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+          <path d="M3 4.5 6 7.5 9 4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <b>{OBJECTIVES[group.key]}</b>
+        <span>{group.title}</span>
+        {!open && (
+          <span className={styles.objsum}>
+            {krs.map((kr) => <span key={kr.key} className={styles.chip} data-s={kr.status}>{kr.title}: {STATUS[kr.status]}</span>)}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div id={panel} className={styles.objbody}>
+          {featured && <KpiTile kpi={featured} data={data} wide />}
+          <div className={group.key === "marketplace" ? styles.krsWide : styles.krs}>
+            {krs.map((kr) => <KrCard key={kr.key} kr={kr} data={data} wide={group.key === "marketplace"} />)}
+          </div>
+          <div className={styles.kpis}>
+            {rest.map((kpi) => <KpiTile key={kpi.key} kpi={kpi} data={data} />)}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Bone({ w, h, r }: { w?: number | string; h: number; r?: number }) {
+  return <span className={styles.bone} style={{ width: w ?? "100%", height: h, borderRadius: r ?? 6 }} />;
+}
+
+/** Placeholder with the shape of the page while /api/okr loads. */
+export function OkrSkeleton() {
+  return (
+    <div className={styles.root} style={{ display: "grid", gap: 22 }} role="status" aria-busy="true" aria-label="Loading OKRs">
+      <header className={styles.head}>
+        <div className={styles.title}><h1>OKRs</h1><Bone w={140} h={14} /></div>
+        <div className={styles.qbar}>{Array.from({ length: 13 }, (_, i) => <span key={i} className={styles.bone} style={{ height: 6, borderRadius: 2 }} />)}</div>
+      </header>
+      {[0, 1].map((o) => (
+        <section key={o} className={styles.obj}>
+          <div className={styles.objhd}><Bone w={220} h={20} /></div>
+          <div className={styles.objbody}>
+            {o === 0 && <article className={`${styles.card} ${styles.kpi}`}><Bone w={90} h={12} /><Bone w={80} h={30} /><Bone h={120} r={4} /><Bone w={160} h={10} /></article>}
+            <article className={`${styles.card} ${styles.kr}`}>
+              <Bone w="40%" h={14} /><Bone w={120} h={40} /><Bone h={8} r={4} /><Bone h={70} r={4} />
+            </article>
+            <div className={styles.kpis}>
+              {Array.from({ length: o === 0 ? 5 : 4 }, (_, i) => (
+                <article key={i} className={`${styles.card} ${styles.kpi}`}><Bone w={90} h={12} /><Bone w={70} h={28} /><Bone h={52} r={4} /><Bone w="70%" h={10} /></article>
+              ))}
+            </div>
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/** Funnel tab placeholder, using the same shimmer. */
+export function FunnelSkeleton() {
+  return (
+    <div className={styles.root} style={{ display: "grid", gap: 18 }} role="status" aria-busy="true" aria-label="Loading funnel">
+      <div style={{ display: "grid", gap: 8 }}><Bone w={120} h={30} /><Bone w={200} h={14} /></div>
+      <div className={styles.kpis}>
+        {[0, 1, 2].map((i) => <article key={i} className={`${styles.card} ${styles.kpi}`}><Bone w={110} h={14} /><Bone w={90} h={44} /><Bone h={8} r={4} /><Bone w="60%" h={10} /></article>)}
+      </div>
+      <article className={styles.card}><Bone h={220} r={6} /></article>
+    </div>
   );
 }

@@ -7,7 +7,7 @@ import type { HomeData } from "@/lib/home";
 import { TARGETS, dayLabel, monthOf, shortPounds } from "@/lib/home-metrics";
 import { request } from "../bulk-trades/trade-ui";
 import { HomeChart } from "./home-chart";
-import { OkrView } from "./okr-view";
+import { FunnelSkeleton, OkrView } from "./okr-view";
 import styles from "./home.module.css";
 
 const NO_DATA = "No data yet";
@@ -45,14 +45,14 @@ export function FunnelView() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  return data ? <HomeBody data={data} /> : (
+  if (data) { return <HomeBody data={data} />; }
+  if (!error) { return <FunnelSkeleton />; }
+  return (
     <header className={styles.top}>
       <div>
         <h1>Funnel</h1>
         <div className={styles.date}>
-          {error
-            ? <span className={styles.error}>{error}<button type="button" className={styles.retry} onClick={() => void load()}>Try again</button></span>
-            : "Loading"}
+          <span className={styles.error}>{error}<button type="button" className={styles.retry} onClick={() => void load()}>Try again</button></span>
         </div>
       </div>
     </header>

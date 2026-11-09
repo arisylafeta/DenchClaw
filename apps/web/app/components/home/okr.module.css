@@ -38,7 +38,12 @@
 
 /* objectives */
 .obj { display: grid; gap: 14px; }
-.objhd { display: flex; align-items: baseline; gap: 10px; border-bottom: 1px solid var(--color-border); padding-bottom: 8px; }
+.objhd { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--color-border); padding: 4px 0 10px; min-height: 44px; flex-wrap: wrap; }
+.objhd:hover b { color: var(--o-accent); }
+.chev { flex: none; color: var(--color-text-muted); transition: transform 150ms ease; transform: rotate(-90deg); }
+.chev[data-open="true"] { transform: rotate(0deg); }
+.objsum { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.objbody { display: grid; gap: 14px; }
 .objhd b { font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
 .objhd span { font-size: 12px; color: var(--color-text-muted); }
 .card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; padding: 16px 18px; min-width: 0; }
@@ -90,3 +95,23 @@
 @media (prefers-reduced-motion: no-preference) {
   .meter i { transition: width 300ms ease; }
 }
+@media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
+
+/* wide marketplace cards */
+.krsWide { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.kr[data-wide="true"] { grid-template-columns: minmax(0, 1fr); }
+@container (min-width: 720px) {
+  .kr[data-wide="true"] { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); column-gap: 28px; }
+  .kr[data-wide="true"] > .krhd, .kr[data-wide="true"] > .src { grid-column: 1 / -1; }
+  .kr[data-wide="true"] > .krtrend { grid-column: 2; grid-row: 2 / span 4; align-self: end; }
+  .kr[data-wide="true"] > :not(.krhd):not(.krtrend):not(.src) { grid-column: 1; }
+  .kr[data-wide="true"] .trend { height: 140px; }
+}
+.kpi[data-wide="true"] .spark { height: 130px; }
+
+/* loading shimmer */
+.bone { display: block; background: var(--o-track); position: relative; overflow: hidden; opacity: 0.7; }
+.bone::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent); animation: shimmer 1.4s ease-in-out infinite; }
+:global(.dark) .bone::after { background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent); }
+@keyframes shimmer { to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .bone::after { animation: none; } }
