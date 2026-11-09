@@ -64,6 +64,7 @@ describe("platform operations tabs", () => {
     expect(inferContentTabTitle("~platform-admin/messages")).toBe("Message monitoring");
     expect(inferContentTabTitle("~platform-admin/payout-reviews")).toBe("Payout reviews");
     expect(inferContentTabTitle("~platform-admin/label-review")).toBe("Label review");
+    expect(inferContentTabTitle("~platform-admin/transactions")).toBe("Transactions");
   });
 });
 

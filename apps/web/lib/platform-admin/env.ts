@@ -7,6 +7,7 @@ export type PlatformAdminEnvInput = {
   POSTMARK_FROM_EMAIL?: string;
   NEXT_PUBLIC_SITE_URL?: string;
   STRIPE_GLOBAL_PAYOUTS_SECRET_KEY?: string;
+  STRIPE_REFUND_SECRET_KEY?: string;
 };
 
 function readProcessEnv(): PlatformAdminEnvInput {
@@ -18,6 +19,7 @@ function readProcessEnv(): PlatformAdminEnvInput {
     NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
     STRIPE_GLOBAL_PAYOUTS_SECRET_KEY:
       process.env.STRIPE_GLOBAL_PAYOUTS_SECRET_KEY,
+    STRIPE_REFUND_SECRET_KEY: process.env.STRIPE_REFUND_SECRET_KEY,
   };
 }
 
@@ -72,6 +74,17 @@ export function getStripeGlobalPayoutsEnv(
     secretKey: requireNonEmpty(
       input.STRIPE_GLOBAL_PAYOUTS_SECRET_KEY,
       "STRIPE_GLOBAL_PAYOUTS_SECRET_KEY",
+    ),
+  };
+}
+
+export function getStripeRefundEnv(
+  input: PlatformAdminEnvInput = readProcessEnv(),
+) {
+  return {
+    secretKey: requireNonEmpty(
+      input.STRIPE_REFUND_SECRET_KEY,
+      "STRIPE_REFUND_SECRET_KEY",
     ),
   };
 }

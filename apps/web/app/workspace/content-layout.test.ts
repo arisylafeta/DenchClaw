@@ -5,6 +5,7 @@ describe("contentUsesFullView", () => {
   it("gives payout reviews the full workspace canvas", () => {
     expect(contentUsesFullView("~platform-admin/payout-reviews")).toBe(true);
     expect(contentUsesFullView("~platform-admin/label-review")).toBe(true);
+    expect(contentUsesFullView("~platform-admin/transactions")).toBe(true);
     expect(contentUsesFullView("~platform-admin/listings")).toBe(true);
   });
 
