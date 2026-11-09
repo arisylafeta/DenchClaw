@@ -324,18 +324,25 @@ describe("Matches tab", () => {
       expect(screen.queryByRole("table")).toBeNull();
     });
 
-    it("tags an unconfirmed pack type and says why it is kept apart", async () => {
+    it("tags a group with no confirmed pack, names the vehicle in the title and says it is grouped by vehicle and capacity", async () => {
       const units = [unit(1), unit(2), unit(3)];
       vi.stubGlobal("fetch", vi.fn(async () => json(result([grouped(units, {
-        pack: "Pack from Citroen e-Berlingo", unsure: true, sameLabel: "Listed as", vehicles: [{ name: "Citroen e-Berlingo", n: 3 }],
-        why: { title: "Why this is kept apart", text: "These listings name the Citroen e-Berlingo but give no part number.", source: "Ask the seller for the pack label photo or part number" },
+        pack: "Citroen e-Berlingo · EV pack", unsure: true, sameLabel: null, vehicles: [{ name: "Citroen e-Berlingo", n: 3 }],
+        why: { title: "Why these are one row", text: "Grouped by vehicle and capacity as listed (Citroen e-Berlingo), not by a confirmed pack.", source: "Ask the seller for the pack label photo or part number" },
         priceVaries: true,
       })], { id: "btd_stn", kind: "demand", summary }))));
       render(<DemandMatchesTab demandId="btd_stn" active />);
       expect(await screen.findByText("Pack type not confirmed")).toBeTruthy();
-      expect(screen.getByText("Listed as")).toBeTruthy();
+      expect(screen.getByText("Citroen e-Berlingo · EV pack")).toBeTruthy();
+      // One vehicle: no "Same pack in" line.
+      expect(screen.queryByText("Same pack in")).toBeNull();
+      expect(screen.queryByText("Listed as")).toBeNull();
+      // Status and actions share the row's right-hand column, so group and single rows line up at every width.
+      const side = screen.getByText("Not contacted").closest("[class*='side']")!;
+      expect(side.textContent).toContain("Add to offers");
+      expect(side.textContent).toContain("Not a fit");
       fireEvent.click(screen.getAllByRole("button", { expanded: false }).find((button) => button.textContent?.includes("Northway Parts"))!);
-      expect(screen.getByText("Why this is kept apart")).toBeTruthy();
+      expect(screen.getByText("Why these are one row")).toBeTruthy();
       expect(screen.getByText("Ask the seller for the pack label photo or part number")).toBeTruthy();
       expect(screen.getByText("Prices vary a lot, check the units")).toBeTruthy();
       expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();

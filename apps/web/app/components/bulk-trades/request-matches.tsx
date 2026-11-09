@@ -71,6 +71,23 @@ function standing(offer: MatchOffer | null, sourceKind?: string | null): { stage
   return { stage: `In offers · ${stage} ${offerDate(offer.date)}`.trim(), note: offer.chaseDue ? "No reply · chase due" : null, due: !!offer.chaseDue };
 }
 
+/**
+ * The row's right-hand side: where the deal stands, then the actions. One element for every layout, so group rows and
+ * single rows line up: after the marks on one line when the list is wide, a fixed right column (actions on top) at
+ * Ari's width, and stacked with full-width actions on a phone (request-matches.module.css, container queries).
+ */
+function Side({ where, actions }: { where: ReturnType<typeof standing>; actions: ReactNode }) {
+  return (
+    <div className={css.side}>
+      <div className={css.status}>
+        <span><span className={`${css.dot} ${where.due ? css.dotDue : ""}`} aria-hidden /><b>{where.stage}</b></span>
+        {where.note && <span>{where.note}</span>}
+      </div>
+      <div className={css.actions}>{actions}</div>
+    </div>
+  );
+}
+
 /** A unit's SoH or condition: the mark (glyph, word for screen readers, label) and where the figure comes from. */
 function SohCell({ soh }: { soh: MatchUnit["soh"] }) {
   const look = MARK[soh.state];
@@ -127,7 +144,7 @@ function GroupRow({ row, isOpen, onToggle, actions, notAFit }: GroupRowProps) {
               {row.tags.map((tag) => <span key={tag} className={`${css.tag} ${TAG_CLASS[tag] ?? ""}`}>{tagLabel(tag)}</span>)}
               {group.unsure && <span className={`${css.tag} ${css.tagWarn}`}>Pack type not confirmed</span>}
             </div>
-            {group.sameLabel && group.vehicles.length > 0 && (
+            {group.sameLabel && group.vehicles.length > 1 && (
               <div className={css.same}>
                 <span className={css.muted}>{group.sameLabel}</span>
                 {group.vehicles.map((vehicle) => <span key={vehicle.name} className={css.veh}>{vehicle.name} <b>{vehicle.n}</b></span>)}
@@ -138,12 +155,8 @@ function GroupRow({ row, isOpen, onToggle, actions, notAFit }: GroupRowProps) {
           <ul className={css.marks} aria-label="How it fits">
             {marks.map((mark) => <Mark key={`${mark.key}:${mark.label}`} mark={mark} />)}
           </ul>
-          <div className={css.status}>
-            <span><span className={`${css.dot} ${where.due ? css.dotDue : ""}`} aria-hidden /><b>{where.stage}</b></span>
-            {where.note && <span>{where.note}</span>}
-          </div>
         </button>
-        <div className={css.actions}>{actions}</div>
+        <Side where={where} actions={actions} />
       </div>
       {isOpen && (
         <div id={detailId} className={css.gDetail}>
@@ -171,11 +184,11 @@ function GroupRow({ row, isOpen, onToggle, actions, notAFit }: GroupRowProps) {
               <tbody>
                 {visible.map((unit) => (
                   <tr key={unit.key}>
-                    <td className={css.wrap}>{unit.vehicle}</td>
+                    <td className={css.cellWrap}>{unit.vehicle}</td>
                     <td>{unit.year ?? ""}</td>
                     <td className={css.muted}>{unit.ref ?? "not stated"}</td>
                     <td><SohCell soh={unit.soh} /></td>
-                    <td className={css.wrap}>{unit.location ?? ""}</td>
+                    <td className={css.cellWrap}>{unit.location ?? ""}</td>
                     <td className={css.num}>{unit.price ?? ""}</td>
                     <td className={css.muted}>{unit.seen ?? ""}</td>
                     <td>{unit.link && <a href={unit.link.href} target="_blank" rel="noreferrer">{unit.link.label}</a>}</td>
@@ -352,15 +365,8 @@ export function RequestMatches({
                   <ul className={css.marks} aria-label="How it fits">
                     {marks.map((mark) => <Mark key={`${mark.key}:${mark.label}`} mark={mark} />)}
                   </ul>
-                  <div className={css.status}>
-                    <span><span className={`${css.dot} ${where.due ? css.dotDue : ""}`} aria-hidden /><b>{where.stage}</b></span>
-                    {where.note && <span>{where.note}</span>}
-                  </div>
                 </button>
-                <div className={css.actions}>
-                  {action(row, true)}
-                  {notAFit(row)}
-                </div>
+                <Side where={where} actions={<>{action(row, true)}{notAFit(row)}</>} />
               </div>
               {isOpen && (
                 <div id={detailId} className={css.detail}>

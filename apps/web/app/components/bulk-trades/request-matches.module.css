@@ -1,7 +1,13 @@
 /* The request Matches tab, transcribed from the approved mockup (Matches v4, direction A "Ledger", Main.dc.html).
-   Values are the mock's own; only the data differs. The supply tab does not use this file. */
+   Values are the mock's own; only the data differs. The supply tab does not use this file.
+   The mock was drawn at 1280px; the CRM's content column is often ~940px beside the sidebar. So rows follow the list's
+   own width (container queries on .wrap), not the viewport:
+   - 1180px and wider: the mock's single line (left 1 1 380, marks 1 1 300, status 0 0 190, actions);
+   - 620-1180px: two columns, the row's content on the left and a fixed 230px right column (actions, then status);
+   - under 620px: everything stacks, actions full width under the status. */
 
 .wrap {
+  container: matches / inline-size;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -66,32 +72,33 @@
 .legend { font-size: 12px; display: flex; gap: 12px; flex-wrap: wrap; }
 
 .row { border-top: 1px solid rgba(0, 0, 0, 0.06); }
-.rowLine { display: flex; align-items: flex-start; gap: 12px; }
+/* Under 620px (the base): the row's content, then status, then the actions at full width. */
+.rowLine { display: flex; flex-direction: column; }
 .rowmain {
-  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 20px; padding: 14px 18px; width: 100%; min-width: 0;
-  box-sizing: border-box; text-align: left; background: none; border: 0; flex: 1 1 auto;
+  display: flex; flex-direction: column; align-items: stretch; gap: 12px 20px; padding: 14px 18px 12px; width: 100%; min-width: 0;
+  box-sizing: border-box; text-align: left; background: none; border: 0;
 }
 /* One tone per row: the hover and open tints cover the whole row, edge to edge, actions and detail included. */
 .row:hover { background: rgba(231, 229, 228, 0.4); }
 .rowOpen, .rowOpen:hover { background: #fbfbf9; }
-.left { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.left { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .nameLine { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .name { font-weight: 650; font-size: 14px; }
 .country { font-size: 12px; }
 .holds { font-size: 13px; color: #1c1c1a; }
 .source { font-size: 12px; }
-.marks { flex: 1 1 300px; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; list-style: none; margin: 0; padding: 0; }
-.status { flex: 0 0 190px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #55554f; }
+.marks { min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; list-style: none; margin: 0; padding: 0; }
+.side { display: flex; flex-direction: column; gap: 12px; padding: 0 18px 14px; box-sizing: border-box; min-width: 0; }
+.status { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #55554f; }
 .status b { color: #1c1c1a; font-weight: 600; }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #b8b8b0; margin-right: 6px; vertical-align: 1px; }
 .dotDue { background: #c26a0a; }
-.actions { flex: 0 0 auto; display: flex; gap: 8px; padding: 14px 18px 0 0; }
+.actions { display: flex; gap: 8px; }
+.actions > * { flex: 1 1 0; }
 
-.detail { display: flex; flex-wrap: wrap; gap: 20px; padding: 4px 18px 18px 48px; }
+.detail { display: flex; flex-direction: column; gap: 20px; padding: 4px 18px 18px; }
 .block { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.blockSource { flex: 1 1 300px; }
-.blockFit { flex: 2 1 420px; gap: 6px; }
-.blockDeal { flex: 1 1 240px; }
+.blockFit { gap: 6px; }
 .blockTitle { font-weight: 600; font-size: 12.5px; }
 .quote { border-radius: 8px; background: #f7f7f5; padding: 10px 12px; font-size: 12.5px; color: #3f3f3a; overflow-wrap: anywhere; }
 .who { font-size: 12px; }
@@ -113,10 +120,10 @@
 .same { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; }
 .veh { display: inline-flex; gap: 4px; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(0, 0, 0, 0.1); font-size: 12px; white-space: nowrap; }
 .veh b { font-weight: 600; }
-/* Opened, as A-mixed: why on the left, units on the right; they stack when narrow. */
-.gDetail { display: flex; flex-wrap: wrap; gap: 20px; padding: 2px 18px 18px 48px; }
-.gWhy { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.gUnits { flex: 2 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+/* Opened, as A-mixed: why on the left, units on the right when wide; stacked (why, then units) below 1180px. */
+.gDetail { display: flex; flex-direction: column; gap: 20px; padding: 2px 18px 18px; }
+.gWhy { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.gUnits { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .why { border-radius: 8px; background: #f7f7f5; padding: 10px 12px; font-size: 12.5px; color: #3f3f3a; }
 .gUnits .blockTitle span { font-weight: 500; }
 .ubox { border: 1px solid rgba(0, 0, 0, 0.08); border-radius: 10px; overflow: auto; }
@@ -128,15 +135,42 @@
 .ut td { padding: 7px 8px; border-top: 1px solid rgba(0, 0, 0, 0.05); white-space: nowrap; vertical-align: middle; }
 .ut .num { text-align: right; font-variant-numeric: tabular-nums; }
 /* Long cells wrap so the table fits beside the why-note at desktop width; only phones scroll the box. */
-.ut td.wrap { white-space: normal; }
+.ut td.cellWrap { white-space: normal; }
 .sohSrc { font-size: 11.5px; }
 .linkbtn { background: none; border: 0; padding: 6px 0; color: #4d5300; font-weight: 600; font-size: 12.5px; text-decoration: underline; align-self: flex-start; }
 
-/* Phone width: the actions drop under the row instead of squeezing it, and the detail loses the checkbox indent. */
-@media (max-width: 640px) {
-  .rowLine { flex-wrap: wrap; gap: 0; }
-  .actions { padding: 0 18px 14px; width: 100%; box-sizing: border-box; }
-  .detail { padding-left: 18px; }
-  .gDetail { padding-left: 18px; }
-  .status { flex: 1 1 190px; }
+/* 620-1180px (Ari's ~940px): two columns. Left: name, country and tags, the holds line, the source line, then the marks.
+   Right, fixed 230px and right-aligned: Add to offers and Not a fit, then the status. The opened single row keeps the
+   same columns (where it comes from and how it fits on the left, this deal on the right); a group's why-note and units
+   stack, so the units table has the full width. */
+@container matches (min-width: 620px) {
+  .rowLine { display: grid; grid-template-columns: minmax(0, 1fr) 248px; align-items: start; }
+  .rowmain { padding: 14px 20px 14px 18px; }
+  .side { padding: 14px 18px 14px 0; align-items: flex-end; text-align: right; }
+  .status { align-items: flex-end; }
+  .actions { order: -1; justify-content: flex-end; }
+  .actions > * { flex: 0 0 auto; }
+  .detail { display: grid; grid-template-columns: minmax(0, 1fr) 230px; padding: 4px 18px 18px 48px; }
+  .blockSource, .blockFit { grid-column: 1; }
+  .blockDeal { grid-column: 2; grid-row: 1 / span 2; }
+  .gDetail { padding: 2px 18px 18px 48px; }
+}
+
+/* 1180px and wider: the mock's single line. Left 1 1 380, marks 1 1 300 (20px apart, as in the mock's row), status
+   0 0 190, then the actions; opened, the blocks sit side by side as in Main and A-mixed. */
+@container matches (min-width: 1180px) {
+  .rowLine { display: flex; flex-direction: row; align-items: flex-start; }
+  .rowmain { flex: 1 1 auto; flex-direction: row; flex-wrap: nowrap; padding: 14px 20px 14px 18px; }
+  .left { flex: 1 1 380px; }
+  .marks { flex: 1 1 300px; }
+  .side { flex: 0 0 auto; flex-direction: row; align-items: flex-start; gap: 30px; padding: 14px 18px 0 0; text-align: left; }
+  .status { flex: 0 0 190px; align-items: stretch; }
+  .actions { order: 0; }
+  .detail { display: flex; flex-wrap: wrap; }
+  .blockSource { flex: 1 1 300px; }
+  .blockFit { flex: 2 1 420px; }
+  .blockDeal { flex: 1 1 240px; }
+  .gDetail { flex-direction: row; flex-wrap: wrap; }
+  .gWhy { flex: 1 1 300px; }
+  .gUnits { flex: 2 1 520px; }
 }
