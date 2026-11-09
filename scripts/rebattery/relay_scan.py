@@ -122,6 +122,7 @@ PRIORITIES = ["overdue", "urgent", "high", "medium", "low"]
 # letters is a part number (LR166066, e500), and cell formats and years are not quantities.
 LOT = re.compile(r"(?<![\w.,])(\d[\d.,]*)((?:\s+(?:[\w-]*[a-z][\w-]*|\d{4,5})){0,2}?)\s*-?\s*"
                  r"(mwh|kwh|tonnes?|tons?|pallets?|packs?|modules?|units?|batter(?:y|ies)|cells?)\b", re.I)
+LEAD_TYPES = {"buyer", "supplier"}  # "partner" also catches product launches and event invites
 NOT_A_QUANTITY = {14500, 18350, 18650, 21700, 26650, 26700, 32650, 32700, 4680, 46800, 46950} | set(range(2000, 2040))
 # Words that make the number a price, weight or rate rather than a count: "€3,500 per battery", "370 kg battery".
 NOT_A_COUNT = re.compile(r"\b(kg|kgs|g|lbs?|per|each|eur|euros?|gbp|usd|pounds?|dollars?|v|volts?|ah|kw|km|miles|x)\b", re.I)
@@ -476,6 +477,9 @@ def compute_priority(result: dict, msgs: list[dict], ctx: dict, now: dt.datetime
         lot = ctx.get("contact_type") != "admin" and large_lot(f"{last.get('subject') or ''}\n{last.get('text') or ''}")
         if lot:
             return "urgent", f"large lot: {lot}"
+        # A new lead: a buyer or seller Alex has never written to.
+        if ctx.get("contact_type") in LEAD_TYPES and ctx.get("first_contact") and not outbound:
+            return "urgent", f"new lead: {ctx['contact_type']}"
     contact_type = ctx.get("contact_type")
     if contact_type == "buyer":
         return "high", "buyer"
@@ -956,6 +960,7 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
         ctx = {"triage": tri, "contact_type": contact_type, "deal_linked": deal_linked,
                "last_to": ctx_global.get("last_new_to", ctx_global["last_to"]), "last_from": ctx_global["last_from"],
                "known": bool(person) or bool(company_row) or counterpart in ctx_global["last_to"],
+               "first_contact": counterpart not in ctx_global["last_to"],
                "existing_open": bool(item and item["status"] == "open")}
         result = classify_thread(msgs, ctx, now, args.days, args.follow_days)
         newer, seen_known = newer_than(th["messages"], last, (item or {}).get("last_seen_message_id"))

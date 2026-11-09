@@ -618,3 +618,13 @@ def test_large_lot_is_urgent():
     pr, why = rs.compute_priority({"tab": "action"}, msgs, ctx(contact_type="supplier"), NOW)
     assert pr == "urgent" and "1,000" in why
     assert rs.compute_priority({"tab": "action"}, msgs, ctx(contact_type="admin"), NOW)[0] != "urgent"
+
+
+def test_new_lead_is_urgent():
+    msgs = [msg("inbound", 1, "Do you buy used Tesla packs? We have some.", frm="new@seller.example")]
+    pr, why = rs.compute_priority({"tab": "action"}, msgs, ctx(contact_type="supplier", first_contact=True), NOW)
+    assert pr == "urgent" and why == "new lead: supplier"
+    assert rs.compute_priority({"tab": "action"}, msgs, ctx(contact_type="supplier", first_contact=False), NOW)[0] != "urgent"
+    assert rs.compute_priority({"tab": "action"}, msgs, ctx(contact_type="logistics", first_contact=True), NOW)[0] != "urgent"
+    replied = [msg("outbound", 2, "Which packs?"), msgs[0]]
+    assert rs.compute_priority({"tab": "action"}, replied, ctx(contact_type="supplier", first_contact=True), NOW)[0] != "urgent"
