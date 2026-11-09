@@ -589,3 +589,32 @@ def test_choose_deal_never_links_a_supplier_to_someone_elses_demand():
     rob = "rob@donkersvagparts.nl"
     # The thread is tagged with R3's demand (Rob's colleague is a candidate on it), but Rob owns no listing.
     assert rs.choose_deal(rob, "supplier", {"r3-demand"}, "What do you offer for 58 kW packs?", {}) is None
+
+
+@pytest.mark.parametrize("text,lot", [
+    ("8.44 MWh Polarium Lithium Battery Lot | 1,000 Modules | Georgia", "8.44 MWh"),
+    ("a 1,000-unit lot of commercial lithium telecom batteries", "1,000-unit"),
+    ("Re: 677,000 Panasonic 21700 cells", "677,000 cells"),
+    ("Wir haben 1.200 kWh an Modulen", "1.200 kWh"),
+    ("We have 120 packs from a fleet", "120 packs"),
+    ("One 13.8kWh Outlander pack, 2 modules", None),
+    ("Roughly 2-2.2 KWH", None),
+    ("We have 30 packs", None),
+    ("320 US2000 modules, 10 pallets", "320 modules"),
+    ("Recliner with 18650 batteries", None),
+    ("Re: Your Jaguar Land Rover LR166066 packs", None),
+    ("R: [EXTERNAL]Fiat e500 packs", None),
+    ("In 2026 Tesla packs got cheaper", None),
+    ("Contact Rex 07938309456 320 US2000 modules", "320 modules"),
+    ("Indicative budget: around €1,200–3,500 per battery pack", None),
+    ("load and unload the 370 kg battery pack", None),
+])
+def test_large_lot(text, lot):
+    assert (rs.large_lot(text) is not None) == (lot is not None)
+
+
+def test_large_lot_is_urgent():
+    msgs = [msg("inbound", 1, "a 1,000-unit lot of telecom batteries for sale", subject="Polarium lot")]
+    pr, why = rs.compute_priority({"tab": "action"}, msgs, ctx(contact_type="supplier"), NOW)
+    assert pr == "urgent" and "1,000" in why
+    assert rs.compute_priority({"tab": "action"}, msgs, ctx(contact_type="admin"), NOW)[0] != "urgent"

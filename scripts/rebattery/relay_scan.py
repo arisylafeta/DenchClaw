@@ -117,6 +117,16 @@ TRIAGE_OTHER = {"2 Waiting", "4 Sorted", "5 Read"}
 STREAM_TYPE = {"Admin": "admin", "Investor": "partner"}
 CONTACT_TYPES = {"buyer", "supplier", "logistics", "partner", "admin", "other"}
 PRIORITIES = ["overdue", "urgent", "high", "medium", "low"]
+# A lot this size is a bulk-trade lead and goes to the top: "8.44 MWh", "1,000 Polarium modules",
+# "677,000 Panasonic 21700 cells". Up to two words may sit between number and unit. A number glued to
+# letters is a part number (LR166066, e500), and cell formats and years are not quantities.
+LOT = re.compile(r"(?<![\w.,])(\d[\d.,]*)((?:\s+(?:[\w-]*[a-z][\w-]*|\d{4,5})){0,2}?)\s*-?\s*"
+                 r"(mwh|kwh|tonnes?|tons?|pallets?|packs?|modules?|units?|batter(?:y|ies)|cells?)\b", re.I)
+NOT_A_QUANTITY = {14500, 18350, 18650, 21700, 26650, 26700, 32650, 32700, 4680, 46800, 46950} | set(range(2000, 2040))
+# Words that make the number a price, weight or rate rather than a count: "€3,500 per battery", "370 kg battery".
+NOT_A_COUNT = re.compile(r"\b(kg|kgs|g|lbs?|per|each|eur|euros?|gbp|usd|pounds?|dollars?|v|volts?|ah|kw|km|miles|x)\b", re.I)
+LOT_MIN = {"mwh": 1, "kwh": 1000, "tonne": 10, "ton": 10, "pallet": 10, "pack": 50, "module": 50, "unit": 50,
+           "battery": 50, "batterie": 50, "cell": 10000}
 # The kinds of email Alex handles. The summary tags each thread so its draft gets the matching card and examples from the
 # voice that relay_voice_study.py builds with the same keys.
 SITUATIONS = {
@@ -423,6 +433,32 @@ def classify_thread(msgs: list[dict], ctx: dict, now: dt.datetime, days: int = 1
     return {**out, "tab": "follow", "reason": f"no reply for {waited} working days (threshold {need})", "waiting_since": first_out["at"]}
 
 
+def lot_number(raw: str) -> float | None:
+    """'1,000' and '1.000' are thousands, '8.44' and '8,44' decimals."""
+    raw = raw.strip(".,")
+    if re.fullmatch(r"\d{1,3}([.,]\d{3})+", raw):
+        return float(re.sub(r"[.,]", "", raw))
+    try:
+        return float(raw.replace(",", "."))
+    except ValueError:
+        return None
+
+
+def large_lot(text: str | None) -> str | None:
+    """The first quantity in their message big enough to be a bulk lot, as written ("1,000 modules"), else None."""
+    text = text or ""
+    for m in LOT.finditer(text):
+        unit = m.group(3).lower().rstrip("s")
+        n = lot_number(m.group(1))
+        before = text[max(0, m.start() - 12):m.start()]
+        if (n is None or (m.group(1).isdigit() and int(m.group(1)) in NOT_A_QUANTITY) or m.group(1).startswith("0")
+                or NOT_A_COUNT.search(m.group(2)) or re.search(r"[€£$]|\b(eur|gbp|usd)\b", before, re.I)):
+            continue
+        if n >= LOT_MIN.get(unit, float("inf")):
+            return f"{m.group(1)} {m.group(3)}"
+    return None
+
+
 def compute_priority(result: dict, msgs: list[dict], ctx: dict, now: dt.datetime) -> tuple[str, str]:
     tab = result.get("tab")
     if tab == "other" or tab is None:
@@ -437,6 +473,9 @@ def compute_priority(result: dict, msgs: list[dict], ctx: dict, now: dt.datetime
         due = deadline_due(last.get("text"), last["at"])
         if due is not None and now.date() <= due <= (now + dt.timedelta(hours=24)).date():
             return "urgent", f"deadline due {due.isoformat()}"
+        lot = ctx.get("contact_type") != "admin" and large_lot(f"{last.get('subject') or ''}\n{last.get('text') or ''}")
+        if lot:
+            return "urgent", f"large lot: {lot}"
     contact_type = ctx.get("contact_type")
     if contact_type == "buyer":
         return "high", "buyer"
