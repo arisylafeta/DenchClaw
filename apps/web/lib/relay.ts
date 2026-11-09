@@ -17,7 +17,7 @@ import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
 import { dealResultFits, dealSummaryText, isPersonalDomain, ownsDeal, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
 import { SENDERS, senderRefusal, type SenderKey } from "./relay-senders";
 import { contextPack, HAS_FILES_SQL } from "./relay-context";
-import { knownBackground, NO_PACK, sinceFrom, stripQuoted, type Pack, type PackSource } from "./relay-context-core";
+import { knownBackground, NO_PACK, SINCE_NOTE, sinceFrom, stripQuoted, type Pack, type PackSource } from "./relay-context-core";
 import { askInstruction, askLabel, buildChecklist, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
 
 const run = promisify(execFile);
@@ -673,6 +673,8 @@ async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, 
   if (!body) throw new RelayError(502, "The assistant returned an empty draft. Try again.");
   const log = Array.isArray(parsed.log) ? parsed.log.filter((l): l is string => typeof l === "string").slice(0, 6) : [];
   const sources = Array.isArray(parsed.sources) ? parsed.sources.filter((l): l is string => typeof l === "string").slice(0, 6).map((l) => `Source: ${l}`) : [];
+  const since = sinceFrom(ctx.pack.sources);
+  if (since.length) log.push(`${SINCE_NOTE}${since.join("; ")}`);
   if (ctx.pack.read) log.push(ctx.pack.read);
   const primaryId = await createMailDraft({ identity: ctx.identity, to: [ctx.to], ccThread: true, thread: item.mail_thread_id, subject, body });
   if (files.length) {
@@ -860,7 +862,9 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
     const messages = await threadMessages(item.mail_thread_id);
     const deal = await dealSummary(item.bulk_listing_id, messages.find((m) => m.direction === "inbound")?.from_email ?? item.counterpart_email);
     // What they sent and what was written to them before counts as known, so a figure from an attached quote is not flagged.
-    const notes = drafts.filter((d) => d.item_id === item.id).map((d) => `${d.source_note}\n${Array.isArray(d.agent_log) ? (d.agent_log as unknown[]).join("\n") : ""}\n${knownBackground(d.background)}`).join("\n");
+    // The log's line of contact since quotes call titles and other threads' subjects, which are not known that way.
+    const logged = (d: (typeof drafts)[number]) => (Array.isArray(d.agent_log) ? (d.agent_log as unknown[]) : []).filter((l) => !String(l).startsWith(SINCE_NOTE)).join("\n");
+    const notes = drafts.filter((d) => d.item_id === item.id).map((d) => `${d.source_note}\n${logged(d)}\n${knownBackground(d.background)}`).join("\n");
     const corpus = [deal, notes, item.context, item.last_message?.text ?? "", ...messages.map((m) => m.body_text ?? "")].join("\n");
     const participants = [...new Set(messages.flatMap((m) => [m.from_email ?? "", ...m.to_emails, ...m.cc_emails]).concat(item.counterpart_email ?? "")
       .map((a) => a.toLowerCase().trim()).filter((a) => a && !a.endsWith("@rebattery.io")))];

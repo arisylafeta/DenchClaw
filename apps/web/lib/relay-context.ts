@@ -95,6 +95,8 @@ type Answer<T> = PromiseLike<{ data: T[] | null; error: unknown }>;
  * or ran out of time: then nothing is said, rather than "no account". */
 async function marketplace(counterpart: string): Promise<PackMarket | null> {
   try {
+    // "*" is a wildcard to the API and can't be escaped: such an address is not looked up, and nothing is said.
+    if (counterpart.includes("*")) return null;
     const db = getSupabaseAdminClient() as unknown as SupabaseClient;
     const signal = AbortSignal.timeout(MARKET_MS);
     const rows = async <T>(answer: Answer<T>) => {
@@ -114,7 +116,7 @@ async function marketplace(counterpart: string): Promise<PackMarket | null> {
       rows<{ id: string; name: string; role: string; status: string; account_type: string | null; created_at: string }>(
         db.from("accounts").select("id,name,role,status,account_type,created_at").in("id", ids).abortSignal(signal)),
       rows<{ status: string; supplier_account_id: string; counterparty_account_id: string }>(
-        db.from("deals").select("status,supplier_account_id,counterparty_account_id").or(`supplier_account_id.in.(${ids.join(",")}),counterparty_account_id.in.(${ids.join(",")})`).limit(200).abortSignal(signal)),
+        db.from("deals").select("status,supplier_account_id,counterparty_account_id").or(`supplier_account_id.in.(${ids.join(",")}),counterparty_account_id.in.(${ids.join(",")})`).limit(1000).abortSignal(signal)),
     ]);
     return {
       registered: true, signedUp: users[0].created_at,
