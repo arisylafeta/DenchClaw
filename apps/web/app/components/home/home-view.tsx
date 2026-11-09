@@ -7,13 +7,31 @@ import type { HomeData } from "@/lib/home";
 import { TARGETS, dayLabel, monthOf, shortPounds } from "@/lib/home-metrics";
 import { request } from "../bulk-trades/trade-ui";
 import { HomeChart } from "./home-chart";
+import { OkrView } from "./okr-view";
 import styles from "./home.module.css";
 
 const NO_DATA = "No data yet";
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const pct = (n: number, d: number) => (d > 0 ? `${Math.min(100, (n / d) * 100).toFixed(1)}%` : "0%");
 
+/** Home: the quarter's OKRs, with the marketplace funnel behind a second tab. */
 export function HomeView() {
+  const [tab, setTab] = useState<"okrs" | "funnel">("okrs");
+  return (
+    <div className={styles.root}>
+      <div className={styles.wrap}>
+        <div className={styles.tabs} role="tablist" aria-label="Home views">
+          {([["okrs", "OKRs"], ["funnel", "Funnel"]] as const).map(([key, label]) => (
+            <button key={key} type="button" role="tab" aria-selected={tab === key} data-active={tab === key} onClick={() => setTab(key)}>{label}</button>
+          ))}
+        </div>
+        {tab === "okrs" ? <OkrView /> : <FunnelView />}
+      </div>
+    </div>
+  );
+}
+
+export function FunnelView() {
   const [data, setData] = useState<HomeData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,23 +45,17 @@ export function HomeView() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  return (
-    <div className={styles.root}>
-      <div className={styles.wrap}>
-        {data ? <HomeBody data={data} /> : (
-          <header className={styles.top}>
-            <div>
-              <h1>Home</h1>
-              <div className={styles.date}>
-                {error
-                  ? <span className={styles.error}>{error}<button type="button" className={styles.retry} onClick={() => void load()}>Try again</button></span>
-                  : "Loading"}
-              </div>
-            </div>
-          </header>
-        )}
+  return data ? <HomeBody data={data} /> : (
+    <header className={styles.top}>
+      <div>
+        <h1>Funnel</h1>
+        <div className={styles.date}>
+          {error
+            ? <span className={styles.error}>{error}<button type="button" className={styles.retry} onClick={() => void load()}>Try again</button></span>
+            : "Loading"}
+        </div>
       </div>
-    </div>
+    </header>
   );
 }
 

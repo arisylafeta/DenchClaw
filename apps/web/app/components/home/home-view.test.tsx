@@ -8,7 +8,7 @@ import { weekRange } from "@/lib/home-metrics";
 import type { PlatformHome } from "@/lib/home-platform";
 import type { BulkHome } from "@/lib/home-bulk";
 import type { MetricKey, PulseWeek } from "@/lib/marketplace-pulse";
-import { HomeView } from "./home-view";
+import { FunnelView as HomeView } from "./home-view";
 import { niceMax } from "./home-chart";
 
 const NOW = new Date("2026-10-22T15:00:00Z");

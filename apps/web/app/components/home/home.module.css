@@ -145,3 +145,8 @@
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--h-down); margin-right: 6px; vertical-align: 1px; }
 .error { color: var(--h-down); }
 .retry { margin-left: 8px; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); min-height: 32px; }
+
+/* tabs between the OKR viewer and the funnel */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--color-border); }
+.tabs button { background: none; border: 0; padding: 8px 12px; font-size: 13px; font-weight: 550; color: var(--color-text-muted); border-bottom: 2px solid transparent; margin-bottom: -1px; min-height: 40px; }
+.tabs button[data-active="true"] { color: var(--color-text); border-bottom-color: var(--h-accent); }
