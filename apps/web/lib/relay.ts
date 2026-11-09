@@ -52,6 +52,8 @@ export type RelayItem = {
   updated_at: string;
   /** The kind of email (buyer_price, chase, ...), from the scan; picks the voice card and examples. */
   situation: string | null;
+  /** Their newest email in the thread that has files; Relay shows its attachments (download, save to Drive). */
+  attachment_message_id?: string | null;
   /** The shared inbox on the thread: supply@ for sellers, buy@ for buyers. Set on list views only. */
   inbox?: "supply" | "buy" | null;
   /** What Relay suggests for the deal: create one, or update it from their newest reply. */
@@ -99,7 +101,9 @@ export type RelayReviewItem = RelayItem & { drafts: RelayDraftView[]; todos: Rel
 
 
 const ITEM_COLUMNS = `i.id,i.tab,i.status,i.priority,i.counterpart_name,i.counterpart_email,i.company,i.contact_type,i.headline,i.context,i.last_message,
-  i.earlier,i.bulk_listing_id,i.deal_label,i.waiting_since,i.note,i.mail_thread_id,i.gmail_thread_id,i.updated_at,i.situation`;
+  i.earlier,i.bulk_listing_id,i.deal_label,i.waiting_since,i.note,i.mail_thread_id,i.gmail_thread_id,i.updated_at,i.situation,
+  (select m.id from mail_message m where m.thread_id = i.mail_thread_id and m.direction = 'inbound' and m.has_attachments
+     order by coalesce(m.sent_at, m.created_at) desc limit 1) as attachment_message_id`;
 
 const PRIORITY_ORDER = `case i.priority when 'urgent' then 0 when 'overdue' then 1 when 'high' then 2 when 'medium' then 3 else 4 end`;
 

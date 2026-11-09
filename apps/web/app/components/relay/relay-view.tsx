@@ -9,6 +9,7 @@ import type { RelayDealOption, RelayDraftView, RelayItem, RelayJob, RelayReviewI
 import { missingInstruction, type ChecklistItem, type DealChecklist } from "@/lib/relay-checklist";
 import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
 import { isSenderKey, SENDERS } from "@/lib/relay-senders";
+import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
 import s from "./relay.module.css";
 
 const ChatPanel = dynamic(() => import("@/app/components/chat-panel").then((m) => m.ChatPanel), { ssr: false });
@@ -398,6 +399,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onOpenCompany, o
                         <div className={s.mb}>{i.last_message.text}</div>
                       </div>
                     )}
+                    {i.attachment_message_id && <div onClick={(e) => e.stopPropagation()}><AttachmentStrip messageId={i.attachment_message_id} /></div>}
                     {i.earlier.length > 0 && <div className={s.earlier}>{i.earlier.map((e, k) => <span key={k}><b>{e.who}</b> · {e.when}: {e.summary}</span>)}</div>}
                     <DealBar item={i} busy={!!busy[i.id]} onRun={(action) => void dealJob(i, action)} onAsk={tab === "action" && i.can_ask ? () => void draftAsk(i) : undefined} onLink={(id) => void linkDeal(i, id)} onOpenCompany={onOpenCompany} />
                   </div>

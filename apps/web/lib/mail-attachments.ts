@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { queryPg } from "./postgres";
 import { mailboxScopeSql } from "./mail-scope";
+import { DriveError, uploadToDrive } from "./google-drive";
 
 const run = promisify(execFile);
 const CLI = "/usr/local/bin/rebattery-mail";
@@ -51,5 +52,26 @@ export async function downloadMailAttachment(messageId: string, userId: string, 
   } catch (error) {
     const rule = cliError(error);
     return { error: rule, status: rule.startsWith("attachment_not_found") || rule === "message_not_found" ? 404 : 502 };
+  } finally { await rm(dir, { recursive: true, force: true }); }
+}
+
+/** Fetches one attachment from Gmail and saves it to the signed-in user's own Google Drive (Relay attachments folder). */
+export async function saveMailAttachmentToDrive(messageId: string, user: { id: string; email: string }, filename: string): Promise<{ url: string; name: string; converted: boolean } | { error: string; status: number; message?: string }> {
+  if (!validMessageId(messageId) || !filename || !(await owns(messageId, user.id))) return { error: "not_found", status: 404 };
+  const dir = await mkdtemp(path.join(os.tmpdir(), "mail-drive-"));
+  try {
+    const target = path.join(dir, "file");
+    try {
+      await run(CLI, ["attachment", "get", "--out", target, "--", messageId, filename], { timeout: 300_000, maxBuffer: 4 << 20 });
+    } catch (error) {
+      const rule = cliError(error);
+      return { error: rule, status: rule.startsWith("attachment_not_found") || rule === "message_not_found" ? 404 : 502 };
+    }
+    try {
+      return await uploadToDrive(user.email, target, filename);
+    } catch (error) {
+      if (error instanceof DriveError) return { error: error.code, status: error.code === "drive_not_connected" ? 409 : 502, message: error.message };
+      throw error;
+    }
   } finally { await rm(dir, { recursive: true, force: true }); }
 }
