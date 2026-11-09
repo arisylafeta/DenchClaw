@@ -543,6 +543,17 @@ def load_threads(cur, owner_id: str, since: dt.datetime, extra_thread_ids: list[
     return threads
 
 
+def load_written_to(cur) -> tuple[set, set]:
+    """Every address anyone at ReBattery has emailed by hand (campaigns aside), ever, and their company domains.
+    Someone outside both is a first contact."""
+    cur.execute(
+        """select distinct lower(a) as email from mail_message m, unnest(m.to_emails || m.cc_emails) a
+            where m.direction = 'outbound' and m.state in ('accepted', 'received') and m.campaign_id is null
+              and coalesce(m.purpose, '') <> 'marketing'""")
+    emails = {email_of(r["email"]) for r in cur.fetchall()} - {""}
+    return emails, {domain_of(e) for e in emails} - FREEMAIL - {OWN_DOMAIN, ""}
+
+
 def load_contact_maps(cur, owner_id: str, since: dt.datetime) -> tuple[dict, dict, dict]:
     """last_to: when the owner last wrote to each address; last_from: when each address last wrote in;
     last_new_to: when the owner last wrote to each address outside an existing conversation (a new email, or more of his
@@ -960,7 +971,7 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
         ctx = {"triage": tri, "contact_type": contact_type, "deal_linked": deal_linked,
                "last_to": ctx_global.get("last_new_to", ctx_global["last_to"]), "last_from": ctx_global["last_from"],
                "known": bool(person) or bool(company_row) or counterpart in ctx_global["last_to"],
-               "first_contact": counterpart not in ctx_global["last_to"],
+               "first_contact": counterpart not in ctx_global["written_emails"] and domain_of(counterpart) not in ctx_global["written_domains"],
                "existing_open": bool(item and item["status"] == "open")}
         result = classify_thread(msgs, ctx, now, args.days, args.follow_days)
         newer, seen_known = newer_than(th["messages"], last, (item or {}).get("last_seen_message_id"))
@@ -1160,6 +1171,7 @@ def main(argv: list[str] | None = None) -> int:
             "sender_rules": load_sender_rules(cur, owner_id),
             "last_to": last_to, "last_from": last_from, "last_new_to": last_new_to,
         }
+        ctx_global["written_emails"], ctx_global["written_domains"] = load_written_to(cur)
         rows, jobs, seen = build_rows(threads, existing, ctx_global, now, args)
 
         llm_calls = 0
