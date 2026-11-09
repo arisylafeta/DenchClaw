@@ -14,7 +14,7 @@ describe("editDraft recipients", () => {
   beforeEach(() => { calls.length = 0; });
   it("replaces the To list through the mail CLI, lower-cased and sorted", async () => {
     await editDraft(draft, { to: ["Matt@P.energy"], cc: [] });
-    expect(calls).toEqual([["edit", "--to=matt@p.energy", "--cc=", "--", "d1"]]);
+    expect(calls).toEqual([["edit", "--to=matt@p.energy", "--cc=", "--expect-identity=alex", "--", "d1"]]);
   });
   it("does not call the CLI when To is unchanged", async () => {
     await editDraft(draft, { to: ["christoph@b.co"] });
