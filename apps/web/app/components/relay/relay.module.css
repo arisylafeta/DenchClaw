@@ -171,7 +171,6 @@
 .btn { border: 1px solid var(--line); background: var(--card); border-radius: 11px; padding: 10px 15px; font-weight: 600; font-size: 14px; display: inline-flex; gap: 8px; align-items: center; text-decoration: none; color: inherit; }
 .btn svg { width: 16px; height: 16px; }
 .btn.pri { background: var(--ink); color: var(--card); border-color: var(--ink); }
-.btn.confirm { background: var(--red); color: #fff; border-color: var(--red); }
 .btn.blue { background: var(--blue); color: #fff; border-color: var(--blue); }
 .btn.ghost { border-color: transparent; background: none; color: var(--muted); }
 .btn[disabled] { opacity: .45; cursor: not-allowed; }
@@ -383,6 +382,7 @@
 .pill.sched i, .st.sched { background: var(--blue); }
 .schedbox { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: var(--blue-soft); color: var(--blue-ink); }
 .schedbox .btn { padding: 7px 12px; font-size: 13px; }
+.schedbox .count { font-variant-numeric: tabular-nums; }
 .later { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 18px 14px; }
 .later .btn { padding: 7px 12px; font-size: 13px; }
 .later input { border: 1px solid var(--line); border-radius: 11px; padding: 6px 10px; font: inherit; font-size: 13px; background: var(--card); color: inherit; }

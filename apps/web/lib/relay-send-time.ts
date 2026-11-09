@@ -1,7 +1,10 @@
 /**
  * Send-later times for Relay, in London time. Alex often clears mail late at night and wants replies to land the next
- * morning: the quick picks are 8:00 and 10:00 on the next working-hours day, plus Monday 8:00 when that day is a weekend.
+ * morning: the quick picks are 8:00, 9:00 and 10:00 on the next working-hours day, plus Monday 8:00 when that day is a weekend.
  */
+
+/** How long Send holds an email so Alex can undo it. */
+export const UNDO_SEND_SECONDS = 30;
 
 const ZONE = "Europe/London";
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -43,7 +46,7 @@ export type SendSlot = { at: string; label: string };
 export function sendSlots(now = new Date()): SendSlot[] {
   const p = londonParts(now);
   const day = londonDate(now, p.hour * 60 + p.minute < 7 * 60 + 30 ? 0 : 1);
-  const slots = ["08:00", "10:00"].map((t) => londonWallToUtc(day, t));
+  const slots = ["08:00", "09:00", "10:00"].map((t) => londonWallToUtc(day, t));
   const weekday = londonParts(slots[0]).weekday;
   if (weekday === 6 || weekday === 0) slots.push(londonWallToUtc(londonDate(slots[0], weekday === 6 ? 2 : 1), "08:00"));
   return slots.map((at) => ({ at: at.toISOString(), label: sendLabel(at, now) }));
@@ -64,6 +67,11 @@ export function sendLabel(at: Date | string, now = new Date()): string {
 }
 
 export const MAX_SCHEDULE_DAYS = 60;
+
+/** Whole seconds left of a Send hold, never more than the hold itself (the browser's clock can differ from the server's). */
+export function undoSecondsLeft(at: Date | string, now = new Date()): number {
+  return Math.min(UNDO_SEND_SECONDS, Math.max(0, Math.ceil((new Date(at).getTime() - now.getTime()) / 1000)));
+}
 
 /** Why a send-later time can't be used, or null when it can: at least 2 minutes ahead and within 60 days. */
 export function sendAtProblem(at: Date, now = new Date()): string | null {

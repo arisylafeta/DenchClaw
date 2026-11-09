@@ -10,7 +10,7 @@ import { draftAttachments, readMailDraft } from "./crm-postgres/mail";
 import { editDraft, editableCopy, identitySignatures, sameVersion, textToHtml, splitCopy } from "./mail-draft-actions";
 import type { DraftAttachment } from "./mail-types";
 import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
-import { sendAtProblem } from "./relay-send-time";
+import { sendAtProblem, UNDO_SEND_SECONDS } from "./relay-send-time";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
 import { dealResultFits, dealSummaryText, isPersonalDomain, ownsDeal, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
@@ -83,8 +83,8 @@ export type RelayDraftView = {
     subject: string | null; main: string; updated_at: string; attachments: DraftAttachment[]; transport: string | null;
     /** Why the last send attempt did not go out, if it didn't. */
     failure: { reason: string; detail?: unknown } | null;
-    /** Send-later time Alex picked, while it waits. */
-    scheduled: { at: string; changed: boolean } | null;
+    /** When it will send, while it waits: the send-later time Alex picked, or (undo) the short hold after Send. */
+    scheduled: { at: string; changed: boolean; undo: boolean } | null;
     warnings: string[];
   } | null;
 };
@@ -824,7 +824,7 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
   const ids = items.map((i) => i.id);
   const drafts = await queryPg<DraftRow>(`select id,item_id,role,position,title,why,state,source_note,agent_log,mail_message_id,gmail_draft_id from relay_draft where item_id = any($1) and state <> 'skipped' order by position`, [ids]);
   const mailIds = drafts.map((d) => d.mail_message_id).filter((id): id is string => !!id);
-  const mails = mailIds.length ? await queryPg<{ id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null; body_text: string | null; updated_at: string; personalization: { attachments?: unknown; send_failure?: { reason: string; detail?: unknown }; scheduled_send?: { at?: string } } | null; transport: string | null; schedule_changed: boolean }>(
+  const mails = mailIds.length ? await queryPg<{ id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null; body_text: string | null; updated_at: string; personalization: { attachments?: unknown; send_failure?: { reason: string; detail?: unknown }; scheduled_send?: { at?: string; undo?: boolean } } | null; transport: string | null; schedule_changed: boolean }>(
     `select id,state,identity_key,from_email,coalesce(to_emails,'{}') as to_emails,coalesce(cc_emails,'{}') as cc_emails,coalesce(bcc_emails,'{}') as bcc_emails,subject,body_text,updated_at,personalization,transport,
        coalesce(personalization ? 'scheduled_send' and ((personalization->'scheduled_send'->>'version')::timestamptz is distinct from updated_at
          or coalesce(personalization->'scheduled_send'->'attachments', 'null'::jsonb) <> coalesce(personalization->'attachments', 'null'::jsonb)), false) as schedule_changed
@@ -858,7 +858,7 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
         mail: m ? { id: m.id, state: m.state, identity_key: m.identity_key, from_email: m.from_email, to_emails: m.to_emails, cc_emails: m.cc_emails, bcc_emails: m.bcc_emails, subject: m.subject,
           main: splitCopy(m.body_text, signatures.get(m.identity_key ?? "") ?? null).main, updated_at: m.updated_at, attachments: draftAttachments(m.personalization?.attachments), transport: m.transport,
           failure: m.personalization?.send_failure ?? null,
-          scheduled: m.state === "draft" && m.personalization?.scheduled_send?.at ? { at: m.personalization.scheduled_send.at, changed: m.schedule_changed } : null, warnings: ((m.personalization as { oneoff?: { warnings?: unknown[] } } | null)?.oneoff?.warnings ?? []).filter((w): w is string => typeof w === "string") } : null,
+          scheduled: m.state === "draft" && m.personalization?.scheduled_send?.at ? { at: m.personalization.scheduled_send.at, changed: m.schedule_changed, undo: m.personalization.scheduled_send.undo === true } : null, warnings: ((m.personalization as { oneoff?: { warnings?: unknown[] } } | null)?.oneoff?.warnings ?? []).filter((w): w is string => typeof w === "string") } : null,
       };
     }),
     todos: todos.filter((t) => t.item_id === item.id),
@@ -900,22 +900,37 @@ export async function settleSentDrafts(ownerId: string): Promise<number> {
 
 const SEND_RUNNER = "/root/denchclaw/scripts-live/scripts/rebattery/relay_send.py";
 
-/**
- * Starts the send of the exact version Alex confirmed, detached from the request: the mail CLI's own gates run
- * (approval digest, reply check, suppression, one claim per message) and it records the outcome on the message.
- * Nothing here can kill a send half way, so a send is never left "maybe sent" by a web timeout.
- */
-export async function queueSend(draftId: string, owner: { id: string; email: string }, updatedAt: string): Promise<void> {
+/** True while the runner holds a claim on the draft's send (it is going out now). Matches relay_send.py RECLAIM_AFTER. */
+const SEND_CLAIMED_SQL = "coalesce((personalization->'scheduled_send'->>'claimed_at')::timestamptz > now() - interval '20 minutes', false)";
+
+/** Pins the exact version Alex confirmed to a send time; the scheduled-send runner (relay_send.py --due) sends it then. */
+async function pinSend(draftId: string, owner: { id: string; email: string }, updatedAt: string, sendAt: Date, undo: boolean): Promise<{ at: string }> {
   const relayDraft = await relayDraftForOwner(draftId, owner.id);
   if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
   const mail = await readMailDraft(relayDraft.mail_message_id, owner.id);
   if (!mail) throw new RelayError(404, "Not found");
   if (mail.state !== "draft") throw new RelayError(409, mail.state === "accepted" ? "Already sent." : "A send is already in progress or needs checking.");
   if (!sameVersion(mail.updated_at, updatedAt)) throw new RelayError(409, "This draft changed since you opened it. Reload to see the latest.");
-  if (!mail.to_emails.length) throw new RelayError(400, "Add a recipient before sending.");
-  await queryPg("update mail_message set personalization = personalization - 'scheduled_send' where id = $1 and state = 'draft'", [mail.id]);
-  const child = spawn("/usr/bin/python3", [SEND_RUNNER, mail.id, owner.email], { detached: true, stdio: "ignore" });
-  child.unref();
+  if (!mail.to_emails.length) throw new RelayError(400, `Add a recipient before ${undo ? "sending" : "scheduling"}.`);
+  const [row] = await queryPg<{ at: string }>(
+    `update mail_message set personalization = jsonb_set(coalesce(personalization, '{}'::jsonb) - 'send_failure', '{scheduled_send}',
+       jsonb_build_object('at', $2::timestamptz, 'version', updated_at, 'attachments', coalesce(personalization->'attachments', 'null'::jsonb), 'by', $3::text, 'set_at', now(), 'undo', $5::boolean), true)
+     where id = $1 and state = 'draft' and date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $4::timestamptz) and not ${SEND_CLAIMED_SQL}
+     returning personalization->'scheduled_send'->>'at' as at`, [mail.id, sendAt.toISOString(), owner.email, new Date(mail.updated_at).toISOString(), undo]);
+  if (!row) throw new RelayError(409, "This draft changed since you opened it, or it is sending now. Reload to see the latest.");
+  return row;
+}
+
+/**
+ * Send: holds the exact version Alex confirmed for UNDO_SEND_SECONDS so he can undo, then sends it through the same
+ * runner and gates as Send later (approval digest, reply check, suppression, one claim per message), which records the
+ * outcome on the message. The timer only makes the send prompt: if this process restarts meanwhile, the every-minute
+ * scheduled-send cron sends it. Nothing here can kill a send half way.
+ */
+export async function queueSend(draftId: string, owner: { id: string; email: string }, updatedAt: string): Promise<{ at: string }> {
+  const held = await pinSend(draftId, owner, updatedAt, new Date(Date.now() + UNDO_SEND_SECONDS * 1000), true);
+  setTimeout(() => spawn("/usr/bin/python3", [SEND_RUNNER, "--due"], { detached: true, stdio: "ignore" }).unref(), UNDO_SEND_SECONDS * 1000 + 500).unref();
+  return held;
 }
 
 /**
@@ -926,29 +941,16 @@ export async function queueSend(draftId: string, owner: { id: string; email: str
 export async function scheduleSend(draftId: string, owner: { id: string; email: string }, updatedAt: string, sendAt: Date): Promise<{ at: string }> {
   const problem = sendAtProblem(sendAt);
   if (problem) throw new RelayError(400, problem);
-  const relayDraft = await relayDraftForOwner(draftId, owner.id);
-  if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
-  const mail = await readMailDraft(relayDraft.mail_message_id, owner.id);
-  if (!mail) throw new RelayError(404, "Not found");
-  if (mail.state !== "draft") throw new RelayError(409, mail.state === "accepted" ? "Already sent." : "A send is already in progress or needs checking.");
-  if (!sameVersion(mail.updated_at, updatedAt)) throw new RelayError(409, "This draft changed since you opened it. Reload to see the latest.");
-  if (!mail.to_emails.length) throw new RelayError(400, "Add a recipient before scheduling.");
-  const [row] = await queryPg<{ at: string }>(
-    `update mail_message set personalization = jsonb_set(coalesce(personalization, '{}'::jsonb) - 'send_failure', '{scheduled_send}',
-       jsonb_build_object('at', $2::timestamptz, 'version', updated_at, 'attachments', coalesce(personalization->'attachments', 'null'::jsonb), 'by', $3::text, 'set_at', now()), true)
-     where id = $1 and state = 'draft' and date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $4::timestamptz)
-     returning personalization->'scheduled_send'->>'at' as at`, [mail.id, sendAt.toISOString(), owner.email, new Date(mail.updated_at).toISOString()]);
-  if (!row) throw new RelayError(409, "This draft changed since you opened it. Reload to see the latest.");
-  return row;
+  return pinSend(draftId, owner, updatedAt, sendAt, false);
 }
 
-/** Cancels a pending send-later; the draft stays as it is. */
+/** Undo send, or cancel a pending send-later: the draft stays as it is. Refused once the runner has claimed it. */
 export async function cancelScheduledSend(draftId: string, ownerId: string): Promise<void> {
   const relayDraft = await relayDraftForOwner(draftId, ownerId);
   if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
   const rows = await queryPg<{ id: string }>(
-    "update mail_message set personalization = personalization - 'scheduled_send' where id = $1 and state = 'draft' and personalization ? 'scheduled_send' returning id", [relayDraft.mail_message_id]);
-  if (!rows.length) throw new RelayError(409, "It isn't scheduled any more. It may be sending now.");
+    `update mail_message set personalization = personalization - 'scheduled_send' where id = $1 and state = 'draft' and personalization ? 'scheduled_send' and not ${SEND_CLAIMED_SQL} returning id`, [relayDraft.mail_message_id]);
+  if (!rows.length) throw new RelayError(409, "Too late to stop it: it is sending now, or has already gone.");
 }
 
 /** "Check if it went": looks for the email in Gmail Sent; marks it sent, or returns it to a draft that can be sent again. */

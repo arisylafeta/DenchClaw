@@ -25,7 +25,7 @@ export async function POST(req: Request, { params }: Context) {
   }
 }
 
-/** Cancels the pending send-later; the draft stays. */
+/** Undoes a Send inside its hold, or cancels the pending send-later; the draft stays. */
 export async function DELETE(_req: Request, { params }: Context) {
   const guard = await guardRelay();
   if ("response" in guard) return guard.response;

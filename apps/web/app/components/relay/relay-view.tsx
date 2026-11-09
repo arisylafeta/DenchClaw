@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HermesConversation } from "@/lib/hermes-conversations";
 import { describeWhen, parseWhen } from "@/lib/relay-when";
-import { londonInputValue, londonWallToUtc, sendAtProblem, sendLabel, sendSlots } from "@/lib/relay-send-time";
+import { londonInputValue, londonWallToUtc, sendAtProblem, sendLabel, sendSlots, undoSecondsLeft, UNDO_SEND_SECONDS } from "@/lib/relay-send-time";
 import type { RelayDealOption, RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayRule, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
 import { missingInstruction, type ChecklistItem, type DealChecklist } from "@/lib/relay-checklist";
 import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
@@ -17,7 +17,8 @@ type SenderRule = { id: string; match: string; tab: "action" | "other" };
 type Summary = { tab: RelayTab; counts: Counts; items: RelayItem[]; review: RelayReviewItem[]; todos: RelayTask[]; scheduled: RelayTask[]; rules: RelayRule[]; senderRules: SenderRule[]; learnRun: LearnRun | null; voice: VoiceInfo | null; scannedAt: string | null; mailSyncedAt: string | null; avgReplyMinutes: number | null };
 /** A second button on the toast, next to Undo. */
 type ToastAction = { label: string; run: () => void | Promise<void> };
-type Say = (text: string, undo?: () => void, action?: ToastAction) => void;
+/** `until` (ms) keeps the toast up until then and counts the seconds down after the text: the undo window after Send. */
+type Say = (text: string, undo?: () => void, action?: ToastAction, until?: number) => void;
 type Page = "inbox" | "review" | "todos" | "rules";
 type LearnRun = { ran_at: string; sent: number; unchanged: number; edited: number; proposed: number; note: string };
 type VoiceInfo = { version: number; created_at: string; source_emails: number | null; eval: { judge_after_wins?: number; judge_before_wins?: number; n?: number } | null; guide: string };
@@ -61,15 +62,21 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
   const [tab, setTab] = useState<RelayTab>("action");
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ text: string; undo?: () => void; action?: ToastAction } | null>(null);
+  const [toast, setToast] = useState<{ text: string; undo?: () => void; action?: ToastAction; until?: number } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [, tick] = useState(0);
 
-  const say = useCallback<Say>((text, undo, action) => {
+  const say = useCallback<Say>((text, undo, action, until) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToast({ text, undo, action });
-    toastTimer.current = setTimeout(() => setToast(null), action ? 9000 : undo ? 6000 : 2800);
+    setToast({ text, undo, action, until });
+    toastTimer.current = setTimeout(() => setToast(null), until ? Math.max(0, until - Date.now()) : action ? 9000 : undo ? 6000 : 2800);
   }, []);
+  const counting = !!toast?.until;
+  useEffect(() => {
+    if (!counting) return;
+    const t = setInterval(() => tick((n) => n + 1), 500);
+    return () => clearInterval(t);
+  }, [counting]);
 
   const load = useCallback(async (which: RelayTab) => {
     try {
@@ -81,21 +88,33 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
     }
   }, []);
   useEffect(() => { void load(tab); }, [tab, load]);
-  // Sends run on the server after Alex confirms. The page moves on, watches the message's own state, and reports
-  // the outcome: Sent, or why not. The send itself does not depend on this tab staying open.
+  // Send holds the email on the server for 30 seconds, with Undo, then sends it. The page moves on, watches the
+  // message's own state, and reports the outcome: Sent, or why not. The send does not depend on this tab staying open.
   const [sending, setSending] = useState<Record<string, string>>({});
+  const undoSend = useCallback(async (draftId: string, toLabel: string) => {
+    try {
+      await api(`/api/relay/drafts/${draftId}/schedule`, { method: "DELETE" });
+      setSending((m) => Object.fromEntries(Object.entries(m).filter(([id]) => id !== draftId)));
+      say(`Stopped. The email to ${toLabel} is a draft again, in Review.`);
+      void load(tab);
+      return true;
+    } catch (err) {
+      say(err instanceof Error ? err.message : "Couldn't stop it.");
+      return false;
+    }
+  }, [say, load, tab]);
   const startSend = useCallback(async (draftId: string, updatedAt: string, toLabel: string) => {
     try {
-      await api(`/api/relay/drafts/${draftId}/send`, { method: "POST", body: { confirm: true, updated_at: updatedAt } });
+      const held = await api<{ undo_seconds?: number }>(`/api/relay/drafts/${draftId}/send`, { method: "POST", body: { confirm: true, updated_at: updatedAt } });
       setSending((m) => ({ ...m, [draftId]: toLabel }));
-      say(`Sending to ${toLabel}…`);
+      say(`Sending to ${toLabel}`, () => void undoSend(draftId, toLabel), undefined, Date.now() + (held.undo_seconds ?? UNDO_SEND_SECONDS) * 1000);
       void load(tab);
       return true;
     } catch (err) {
       say(`Not sent: ${err instanceof Error ? err.message : "something went wrong"}`);
       return false;
     }
-  }, [say, load, tab]);
+  }, [say, load, tab, undoSend]);
   // While Matcha creates or updates a deal, check every few seconds so its result shows on the email.
   const dealBusy = !!data?.items.some(dealWorking);
   useEffect(() => {
@@ -172,12 +191,12 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
         {error && <p className={s.error} role="alert">{error}</p>}
         {!data && !error && <p className={s.muted} role="status">Loading Relay…</p>}
         {data && page === "inbox" && <Inbox data={data} tab={tab} setTab={setTab} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenCompany={onOpenCompany} onDrafted={() => setPage("review")} />}
-        {data && page === "review" && <Review data={data} reload={() => load(tab)} say={say} onBack={() => setPage("inbox")} sending={sending} startSend={startSend} />}
+        {data && page === "review" && <Review data={data} reload={() => load(tab)} say={say} onBack={() => setPage("inbox")} sending={sending} startSend={startSend} undoSend={undoSend} />}
         {data && page === "rules" && <Rules data={data} reload={() => load(tab)} say={say} />}
         {data && page === "todos" && <Tasks tasks={data.todos} scheduled={data.scheduled ?? []} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenMailMessage={onOpenMailMessage} onDrafted={() => setPage("review")} />}
       </div>
       <div className={cx(s.toast, toast && s.on)} role="status" aria-live="polite">
-        <span>{toast?.text}</span>
+        <span>{toast?.text}{toast?.until ? ` in ${undoSecondsLeft(new Date(toast.until))} s` : ""}</span>
         {toast?.action && <button type="button" onClick={() => { void toast.action?.run(); setToast(null); }}>{toast.action.label}</button>}
         {toast?.undo && <button type="button" onClick={() => { toast.undo?.(); setToast(null); }}>Undo</button>}
       </div>
@@ -424,9 +443,9 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onOpenCompany, o
 type Local = { subject: string; body: string; to: string; cc: string; bcc: string; updated_at: string };
 const splitAddrs = (v: string) => v.replace(/;/g, ",").split(",").map((a) => a.trim()).filter(Boolean);
 
-function Review({ data, reload, say, onBack, sending, startSend }: {
+function Review({ data, reload, say, onBack, sending, startSend, undoSend }: {
   data: Summary; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void; onBack: () => void;
-  sending: Record<string, string>; startSend: (draftId: string, updatedAt: string, toLabel: string) => Promise<boolean>;
+  sending: Record<string, string>; startSend: (draftId: string, updatedAt: string, toLabel: string) => Promise<boolean>; undoSend: (draftId: string, toLabel: string) => Promise<boolean>;
 }) {
   const items = data.review;
   const [cur, setCur] = useState(0);
@@ -469,7 +488,7 @@ function Review({ data, reload, say, onBack, sending, startSend }: {
         <div className={s.col}>
           {!draft && item.job ? <JobCard job={item.job} itemId={item.id} reload={reload} say={say} />
             : draft ? <Editor key={draft.id} item={item} draft={draft} reload={reload} say={say} onBack={onBack} sendingTo={sending[draft.id]}
-            startSend={startSend}
+            startSend={startSend} undoSend={undoSend}
             onNext={() => {
               // The draft just confirmed counts as sent: go to its next unsent email, else the next person.
               const next = ordered.find((d) => d.id !== draft.id && !isSent(d));
@@ -483,7 +502,7 @@ function Review({ data, reload, say, onBack, sending, startSend }: {
               <div className={s.cards}>
                 {ordered.filter((d) => d.id !== draft?.id).map((d) => (
                   <button key={d.id} type="button" className={cx(s.card, s.fo, d.role === "primary" && s.primary)} onClick={() => { setViews((v) => ({ ...v, [item.id]: d.id })); }}>
-                    <div className={s.ft}><span className={s.step}>{d.role === "primary" ? "PRIMARY" : `FOLLOW-ON ${d.position}`}</span><span style={{ fontSize: 12.5, fontWeight: 500, color: d.mail?.scheduled ? "var(--blue-ink)" : isSent(d) ? "var(--green)" : "var(--muted)" }}>{d.mail?.scheduled ? sendLabel(d.mail.scheduled.at) : isSent(d) ? "Sent" : d.mail ? "Draft" : "Needs a recipient"}</span></div>
+                    <div className={s.ft}><span className={s.step}>{d.role === "primary" ? "PRIMARY" : `FOLLOW-ON ${d.position}`}</span><span style={{ fontSize: 12.5, fontWeight: 500, color: d.mail?.scheduled ? "var(--blue-ink)" : isSent(d) ? "var(--green)" : "var(--muted)" }}>{d.mail?.scheduled ? (d.mail.scheduled.undo ? "Sending…" : sendLabel(d.mail.scheduled.at)) : isSent(d) ? "Sent" : d.mail ? "Draft" : "Needs a recipient"}</span></div>
                     <b>{d.title}</b>
                     <span className={s.to}>{d.mail?.to_emails.length ? `To ${d.mail.to_emails.join(", ")}` : d.why}</span>
                     <span className={s.pv}>{d.mail?.main.split("\n").filter(Boolean).slice(1, 2).join(" ") || d.why}</span>
@@ -562,15 +581,15 @@ function failureText(failure: { reason: string; detail?: unknown } | null, state
   return words[reason] ?? `${reason.replace(/_/g, " ")}.`;
 }
 
-function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend }: {
+function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend, undoSend }: {
   item: RelayReviewItem; draft: RelayDraftView; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void; onBack: () => void; onNext: () => void;
-  sendingTo?: string; startSend: (draftId: string, updatedAt: string, toLabel: string) => Promise<boolean>;
+  sendingTo?: string; startSend: (draftId: string, updatedAt: string, toLabel: string) => Promise<boolean>; undoSend: (draftId: string, toLabel: string) => Promise<boolean>;
 }) {
   const mail = draft.mail;
   const [local, setLocal] = useState<Local | null>(mail ? { subject: mail.subject ?? "", body: mail.main, to: mail.to_emails.join(", "), cc: mail.cc_emails.join(", "), bcc: mail.bcc_emails.join(", "), updated_at: mail.updated_at } : null);
   const [saving, setSaving] = useState(false);
-  const [arming, setArming] = useState(false);
   const [sending, setSending] = useState(false);
+  const [, tick] = useState(0);
   const [later, setLater] = useState(false);
   const [custom, setCustom] = useState("");
   const [scheduling, setScheduling] = useState(false);
@@ -579,7 +598,9 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
   // A rewrite from the AI panel saves server-side; pick up the new copy when the draft's version moves on.
   useEffect(() => { if (mail && local && mail.updated_at !== local.updated_at && !saving) setLocal({ subject: mail.subject ?? "", body: mail.main, to: mail.to_emails.join(", "), cc: mail.cc_emails.join(", "), bcc: mail.bcc_emails.join(", "), updated_at: mail.updated_at }); }, [mail?.updated_at]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const el = bodyRef.current; if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; } }, [local?.body]);
-  useEffect(() => { if (!arming) return; const t = setTimeout(() => setArming(false), 5000); return () => clearTimeout(t); }, [arming]);
+  // While Send holds the email, count the seconds down.
+  const holdAt = mail?.state === "draft" && mail.scheduled?.undo ? mail.scheduled.at : null;
+  useEffect(() => { if (!holdAt) return; const t = setInterval(() => tick((n) => n + 1), 500); return () => clearInterval(t); }, [holdAt]);
 
   if (!mail || !local) {
     return <div className={cx(s.card, s.editor)}><div className={s.ebar}><div><div className={s.lab}>Follow-on email</div><h2>{draft.title}</h2></div></div><p style={{ padding: "14px 18px" }} className={s.muted}>{draft.why} Relay didn't know who to send this to, so there's no draft yet. Ask in the panel on the right, e.g. "draft this to Rob at Qube".</p></div>;
@@ -603,9 +624,9 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
   const to = splitAddrs(local.to);
   const verdict = beforeYouSend({ to, body: local.body, attachments: mail.attachments.length }, item.facts);
   const blocked = verdict.state === "stop";
+  // Send: one click. The server holds it for 30 seconds so it can be undone, then sends this exact version.
   const send = async () => {
-    if (!arming) { setArming(true); return; }
-    setArming(false); setSending(true);
+    setSending(true);
     try {
       const version = await save();
       if (!version) return;
@@ -639,6 +660,11 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
     try { await api(`/api/relay/drafts/${draft.id}/schedule`, { method: "DELETE" }); say("Schedule cancelled. It's a draft again."); await reload(); }
     catch (err) { say(err instanceof Error ? err.message : "Couldn't cancel."); } finally { setScheduling(false); }
   };
+  const undoHold = async () => {
+    setScheduling(true);
+    try { await undoSend(draft.id, mail.to_emails.join(", ")); } finally { setScheduling(false); }
+  };
+  const holdLeft = holdAt ? undoSecondsLeft(holdAt) : 0;
   const sendNow = async () => {
     setScheduling(true);
     try { if (await startSend(draft.id, mail.updated_at, mail.to_emails.join(", "))) onNext(); } finally { setScheduling(false); }
@@ -679,7 +705,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
     <div className={cx(s.card, s.editor)}>
       <div className={s.ebar}>
         <div><div className={s.lab}>{draft.role === "primary" ? "Primary email" : "Follow-on email"} · {mail.identity_key === "supply" ? "supply@" : mail.identity_key === "buy" ? "buy@" : "alex@"}</div><h2>{draft.title}</h2></div>
-        <span className={cx(s.pill, sent ? s.ok : scheduled ? s.sched : s.warn)}><i />{sent ? "Sent" : scheduled ? "Scheduled" : draft.state === "gmail" ? "In Gmail drafts" : saving ? "Saving…" : "Draft"}</span>
+        <span className={cx(s.pill, sent ? s.ok : scheduled ? s.sched : s.warn)}><i />{sent ? "Sent" : scheduled ? (scheduled.undo ? "Sending" : "Scheduled") : draft.state === "gmail" ? "In Gmail drafts" : saving ? "Saving…" : "Draft"}</span>
       </div>
       {draft.role === "primary" && draft.source_note && <div className={s.fromnote}>Drafted from your note: <b>&ldquo;{draft.source_note}&rdquo;</b></div>}
       {draft.agent_log.length > 0 && <div className={s.log}>{draft.agent_log.map((l, k) => <span key={k}>{l}</span>)}</div>}
@@ -709,7 +735,13 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
           <p><strong>{lead}</strong> {verdict.issues.map(issueText)}{okLine}{hasPromise ? " Any promise in this email is in your to-dos below." : ""}</p>
         </div>
       )}
-      {(sendingTo || mail.state === "sending") ? <div className={s.sentbox} style={{ background: "var(--blue-soft)", color: "var(--blue-ink)" }}>Sending to {sendingTo ?? to.join(", ")}… You can carry on; Relay tells you when it lands.</div>
+      {holdLeft > 0 ? (
+          <div className={cx(s.sentbox, s.schedbox)} role="status">
+            <span>Sending to {mail.to_emails.join(", ")} in <b className={s.count}>{holdLeft} s</b>.</span>
+            <span className={s.sp} />
+            <button type="button" className={s.btn} disabled={scheduling} onClick={() => void undoHold()}>Undo send</button>
+          </div>)
+        : (sendingTo || mail.state === "sending" || holdAt) ? <div className={s.sentbox} style={{ background: "var(--blue-soft)", color: "var(--blue-ink)" }}>Sending to {sendingTo ?? to.join(", ")}… You can carry on; Relay tells you when it lands.</div>
         : (mail.state === "failed" || mail.state === "unknown") ? (
           <div className={s.sentbox} style={{ background: "var(--amber-soft)", color: "var(--ink)" }}>
             <b>Not sent{mail.state === "unknown" ? " (unconfirmed)" : ""}:</b> {failureText(mail.failure, mail.state)}{" "}
@@ -728,7 +760,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
         ) : (
         <>
         <div className={s.eact}>
-          <button className={cx(s.btn, arming ? s.confirm : s.pri)} type="button" disabled={blocked || sending || saving || scheduling} onClick={() => void send()}>{sending ? "Sending…" : arming ? `Confirm send to ${firstName(to[0])}` : "Send"} <Arrow /></button>
+          <button className={cx(s.btn, s.pri)} type="button" title="Sends in 30 seconds. You can undo until then." disabled={blocked || sending || saving || scheduling} onClick={() => void send()}>{sending ? "Sending…" : "Send"} <Arrow /></button>
           <button className={s.btn} type="button" aria-expanded={later} disabled={blocked || sending || saving || scheduling} onClick={() => setLater((v) => !v)}><Clock /> Send later</button>
           <button className={s.btn} type="button" disabled={saving} onClick={() => void toGmail()}>{draft.state === "gmail" ? "✓ In Gmail drafts" : "Add to Gmail drafts"}</button>
           <span className={s.sp} />
