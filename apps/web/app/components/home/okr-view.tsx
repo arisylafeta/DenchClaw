@@ -131,23 +131,23 @@ function KrCard({ kr, data }: { kr: Kr; data: OkrData }) {
 
 /** Running total against the straight line to target, one point per quarter week. */
 function KrTrend({ kr, data }: { kr: Kr; data: OkrData }) {
-  const W = 300, H = 84, L = 2, T = 6, B = 16;
+  const W = 300, H = 84, L = 2, T = 6, B = 4;
   const n = kr.cumulative.length;
   const max = Math.max(kr.target, ...kr.cumulative.map((v) => v ?? 0));
   const x = (i: number) => L + (i / (n - 1)) * (W - L * 2);
   const y = (v: number) => T + (1 - v / max) * (H - T - B);
   const points = kr.cumulative.map((v, i) => (v === null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean);
   const last = kr.cumulative.reduce<number>((a, v, i) => (v === null ? a : i), -1);
-  const first = data.weeks[data.period_index];
   return (
+    <div>
     <svg className={styles.trend} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={`${kr.title}: running total against the line to target`}>
       <line x1={x(0)} y1={y(0)} x2={x(n - 1)} y2={y(kr.target)} stroke="var(--color-text-muted)" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
       <line x1={L} x2={W - L} y1={H - B} y2={H - B} stroke="var(--color-border)" vectorEffect="non-scaling-stroke" />
       {points.length > 1 && <polyline points={points.join(" ")} fill="none" stroke="var(--o-accent)" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />}
       {last >= 0 && <circle cx={x(last)} cy={y(kr.cumulative[last]!)} r="3" fill="var(--o-accent)" />}
-      <text x={L} y={H - 3} fontSize="10" fill="var(--color-text-muted)">{dayLabel(first)}</text>
-      <text x={W - L} y={H - 3} fontSize="10" fill="var(--color-text-muted)" textAnchor="end">{dayLabel(data.weeks.at(-1)!)}</text>
     </svg>
+    <div className={styles.kpifoot}><span>{dayLabel(data.weeks[data.period_index])}</span><span>Line to target</span><span>{dayLabel(data.weeks.at(-1)!)}</span></div>
+    </div>
   );
 }
 
