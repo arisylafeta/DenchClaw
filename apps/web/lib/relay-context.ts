@@ -1,12 +1,22 @@
 import "server-only";
 import { execFile } from "node:child_process";
+import { readdir, readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { visibleBody } from "./crm-postgres/whatsapp";
+import { getSupabaseAdminClient } from "./platform-admin/supabase";
 import { queryPg } from "./postgres";
 import { isPersonalDomain } from "./relay-identity";
-import { buildPack, day, NO_PACK, othersOnThread, sentBy, type Pack, type PackDeal, type PackDismantler, type PackFile, type PackMessage, type PackNote, type PackParties, type PackPerson } from "./relay-context-core";
+import { buildPack, callFromNote, callsWith, day, NO_PACK, othersOnThread, sentBy, type Pack, type PackCall, type PackChat, type PackDeal, type PackDismantler, type PackFile, type PackMarket, type PackMessage, type PackNote, type PackParties, type PackPerson } from "./relay-context-core";
 
 const run = promisify(execFile);
 const ATTACHMENT_READER = process.env.RELAY_ATTACHMENT_READER || "/root/denchclaw/scripts-live/scripts/rebattery/relay_attachments.py";
+// The local copy of Alex's Granola notes, one JSON file per call, refreshed by the daily collection.
+const GRANOLA_NOTES = process.env.RELAY_GRANOLA_NOTES || "/root/.local/share/rebattery/granola/raw";
+const GRANOLA_RESCAN_MS = 60_000;
+const GRANOLA_NOTE_BYTES = 8 << 20;
+const MARKET_MS = 4000;
 const READ_STATES = "('received','accepted','sent','delivered','opened','clicked','replied')";
 const MESSAGE_COLUMNS = `id, rfc_message_id, direction, from_email, coalesce(to_emails,'{}') as to_emails, subject, left(body_text, 6000) as body_text,
   coalesce(sent_at, accepted_at, created_at)::text as at, (coalesce(purpose, '') in ('marketing','transactional') or campaign_id is not null) as automated`;
@@ -41,6 +51,92 @@ async function threadFiles(messages: PackThreadMessage[]): Promise<{ files: Pack
   }
 }
 
+const granolaNotes = new Map<string, { stamp: string; call: PackCall | null }>();
+let calls: PackCall[] = [];
+let callsReadAt = 0;
+let callsReading: Promise<PackCall[]> | null = null;
+
+async function readCalls(): Promise<PackCall[]> {
+  const names = (await readdir(GRANOLA_NOTES)).filter((name) => name.endsWith(".json"));
+  const present = new Set(names);
+  for (const name of granolaNotes.keys()) if (!present.has(name)) granolaNotes.delete(name);
+  for (const name of names) {
+    try {
+      const path = join(GRANOLA_NOTES, name);
+      const info = await stat(path);
+      const stamp = `${info.mtimeMs}:${info.size}`;
+      if (granolaNotes.get(name)?.stamp === stamp) continue;
+      granolaNotes.set(name, { stamp, call: info.size > GRANOLA_NOTE_BYTES ? null : callFromNote(JSON.parse(await readFile(path, "utf8"))) });
+    } catch { /* a note being rewritten is read on the next pass */ }
+  }
+  return [...granolaNotes.values()].flatMap((note) => (note.call ? [note.call] : []));
+}
+
+/** Every call with someone from outside, from the local Granola copy. Only a changed note is read again, and the folder
+ * is looked at once a minute at most. Empty when the folder can't be read. */
+async function granolaCalls(): Promise<PackCall[]> {
+  if (Date.now() - callsReadAt < GRANOLA_RESCAN_MS) return calls;
+  callsReading ??= readCalls().then((found) => { calls = found; callsReadAt = Date.now(); return found; }).catch(() => calls).finally(() => { callsReading = null; });
+  return callsReading;
+}
+
+/** WhatsApp messages of the last 60 days in the direct chats linked to a CRM person with this address. Group chats never count. */
+const whatsappWith = (counterpart: string) => quiet(queryPg<PackChat>(
+  `select m.direction, coalesce(m.occurred_at, m.captured_at)::text as at, left(${visibleBody("m")}, 600) as body, m.attachment->>'type' as attachment
+   from whatsapp_message m join whatsapp_thread t on t.id = m.thread_id
+   where t.kind = 'direct' and m.deleted_at is null and coalesce(m.occurred_at, m.captured_at) > now() - interval '60 days'
+     and exists (select 1 from whatsapp_identity_link l join crm_people p on p.id = l.person_id
+       where l.account_id = t.account_id and l.identity_id = t.identity_id and l.valid_to is null and lower(p.email) = $1)
+   order by coalesce(m.occurred_at, m.captured_at) desc limit 40`, [counterpart]));
+
+type Answer<T> = PromiseLike<{ data: T[] | null; error: unknown }>;
+
+/** The marketplace account under this address, read live (the CRM's copy of sign-ups can lag). Null when the read failed
+ * or ran out of time: then nothing is said, rather than "no account". */
+async function marketplace(counterpart: string): Promise<PackMarket | null> {
+  try {
+    const db = getSupabaseAdminClient() as unknown as SupabaseClient;
+    const signal = AbortSignal.timeout(MARKET_MS);
+    const rows = async <T>(answer: Answer<T>) => {
+      const { data, error } = await answer;
+      if (error) throw error;
+      return data ?? [];
+    };
+    const found = await rows<{ id: string; email: string; created_at: string }>(
+      db.from("users").select("id,email,created_at").ilike("email", counterpart.replace(/[\\%_]/g, "\\$&")).order("created_at").limit(5).abortSignal(signal));
+    // ilike has its own wildcards; only an exact address counts.
+    const users = found.filter((u) => u.email.toLowerCase().trim() === counterpart);
+    if (!users.length) return { registered: false, accounts: [] };
+    const members = await rows<{ account_id: string }>(db.from("account_memberships").select("account_id").in("user_id", users.map((u) => u.id)).limit(6).abortSignal(signal));
+    const ids = [...new Set(members.map((m) => m.account_id))].slice(0, 3);
+    if (!ids.length) return { registered: true, signedUp: users[0].created_at, accounts: [] };
+    const [accounts, deals] = await Promise.all([
+      rows<{ id: string; name: string; role: string; status: string; account_type: string | null; created_at: string }>(
+        db.from("accounts").select("id,name,role,status,account_type,created_at").in("id", ids).abortSignal(signal)),
+      rows<{ status: string; supplier_account_id: string; counterparty_account_id: string }>(
+        db.from("deals").select("status,supplier_account_id,counterparty_account_id").or(`supplier_account_id.in.(${ids.join(",")}),counterparty_account_id.in.(${ids.join(",")})`).limit(200).abortSignal(signal)),
+    ]);
+    return {
+      registered: true, signedUp: users[0].created_at,
+      accounts: await Promise.all(accounts.map(async (a) => {
+        // The newest few listings with the true total, and the number of offers, for each account.
+        const [listings, offers] = await Promise.all([
+          db.from("listings").select("title,listing_status,reference,created_at", { count: "exact" }).eq("supplier_account_id", a.id).order("created_at", { ascending: false }).limit(5).abortSignal(signal),
+          db.from("purchase_offers").select("buyer_account_id", { count: "exact", head: true }).eq("buyer_account_id", a.id).abortSignal(signal),
+        ]);
+        if (listings.error || offers.error) throw listings.error ?? offers.error;
+        const newest = (listings.data ?? []) as { title: string; listing_status: string; reference: string | null; created_at: string }[];
+        const counts: Record<string, number> = {};
+        for (const d of deals) if (d.supplier_account_id === a.id || d.counterparty_account_id === a.id) counts[d.status] = (counts[d.status] ?? 0) + 1;
+        return { name: a.name, role: a.role, status: a.status, kind: a.account_type, since: a.created_at, listingCount: listings.count ?? newest.length,
+          listings: newest.map((l) => ({ title: l.title, status: l.listing_status, reference: l.reference, at: l.created_at })), deals: counts, offers: offers.count ?? 0 };
+      })),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Everything Relay looks up for a draft beyond the thread and the linked deal. Read-only, and it never fails a draft:
  * a part that cannot be read is left out. messages are the thread's shown messages, newest first.
@@ -60,6 +156,9 @@ export async function contextPack(counterpartEmail: string | null, messages: Pac
     // Mail from, to or copied to an address that passes the test.
     const addressed = (test: (address: string) => string) => `(${test("lower(from_email)")} or exists (select 1 from unnest(coalesce(to_emails,'{}') || coalesce(cc_emails,'{}')) a where ${test("lower(a)")}))`;
     const isThem = addressed((address) => `${address} = $1`);
+    const calling = granolaCalls();
+    const chats = whatsappWith(counterpart);
+    const market = marketplace(counterpart);
     const withPerson = quiet(queryPg<PackMessage>(
       `select ${MESSAGE_COLUMNS} from mail_message where state in ${READ_STATES} and ${isThem}
        order by coalesce(sent_at, accepted_at, created_at) desc limit 60`, [counterpart]));
@@ -93,8 +192,10 @@ export async function contextPack(counterpartEmail: string | null, messages: Pac
          order by (b.status in ('open','qualifying')) desc, coalesce(b.observed_on, b.created_at::date) desc limit 5`, [counterpart, domain ?? "", company?.id ?? "", linkedDealId ?? ""])),
     ]);
     const found = await filesReady;
+    const called = callsWith(await calling, counterpart, domain);
     return buildPack({ counterpart, domain, shown: messages, withPerson: await withPerson, withCompany: await withCompany, person: person ?? null, company: company ?? null,
-      notes, dismantler: dismantlers[0] ?? null, deals, files: found?.files ?? null, filesMissed: found?.missed, others: othersOnThread(counterpart, companyHost, messages) });
+      notes, dismantler: dismantlers[0] ?? null, deals, files: found?.files ?? null, filesMissed: found?.missed, others: othersOnThread(counterpart, companyHost, messages),
+      calls: called.person, companyCalls: called.company, chats: await chats, market: await market, lastShownAt: messages[0]?.at ?? null });
   } catch {
     return NO_PACK;
   }

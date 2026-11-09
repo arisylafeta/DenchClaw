@@ -101,7 +101,8 @@ export type WhatsappConversationData = {
   limit: number;
   offset: number;
 };
-const visibleBody = (alias: string) =>
+/** SQL for a message's text, null once it is deleted, view-once or expired. */
+export const visibleBody = (alias: string) =>
   `case when ${alias}.deleted_at is not null or (${alias}.metadata->'flags'->>'viewOnce')::boolean is true or nullif(${alias}.metadata->'flags'->>'expiresAt','')::timestamptz <= now() then null else ${alias}.body end`;
 
 const GREETING = "^[[:space:]]*(Hi|Hello|Hey|Dear)[[:space:]]+([A-Z][a-z][A-Za-z-]*)";

@@ -10,9 +10,13 @@ export function normaliseAmount(raw: string): string {
   return `${text[0]}${Number.isFinite(value) ? Math.round(value * 100) / 100 : text}`;
 }
 
-export const amountsIn = (text: string) => [...new Set((text.match(MONEY) ?? []).map(normaliseAmount))];
+/** Money figures as written: "£1,500", "€30k". */
+export const moneyIn = (text: string) => [...new Set((text.match(MONEY) ?? []).map((raw) => raw.trim().replace(/[,.]+$/, "")))];
 
-export type CheckFacts = { amounts: string[]; participants: string[]; unit: "cell" | "kwh" | null };
+export const amountsIn = (text: string) => [...new Set(moneyIn(text).map(normaliseAmount))];
+
+/** since: contact with them on other channels after the thread's newest email, as found when the draft was written. */
+export type CheckFacts = { amounts: string[]; participants: string[]; unit: "cell" | "kwh" | null; since?: string[] };
 export type CheckDraft = { to: string[]; body: string; attachments: number };
 export type Issue = { level: "block" | "check"; text: string; fix?: { label: string; to: string } };
 export type Verdict = { state: "ok" | "check" | "stop"; issues: Issue[]; good: string[] };
@@ -31,6 +35,7 @@ export function beforeYouSend(draft: CheckDraft, facts: CheckFacts): Verdict {
     if (stranger && known.size) issues.push({ level: "block", text: `${stranger} isn't on this thread.`, fix: facts.participants[0] ? { label: `Use ${facts.participants[0]}`, to: facts.participants[0] } : undefined });
     else good.push("it's going to the right person");
   }
+  if (facts.since?.length) issues.push({ level: "check", text: `Since this email: ${facts.since.slice(0, 3).join("; ")}. Check a reply is still needed.` });
   const seen = new Set(facts.amounts);
   const unknown = amountsIn(draft.body).filter((a) => !seen.has(a));
   for (const amount of unknown) issues.push({ level: "check", text: `${display(amount)} isn't in the thread or the deal. Check the number.` });

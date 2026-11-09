@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { amountsIn, beforeYouSend, normaliseAmount, promisesIn, senderRuleMatch } from "./relay-checks";
+import { amountsIn, beforeYouSend, moneyIn, normaliseAmount, promisesIn, senderRuleMatch } from "./relay-checks";
 
 const facts = { amounts: ["£480", "€30"], participants: ["lubomir@vojta.cz"], unit: "kwh" as const };
 
@@ -9,6 +9,16 @@ describe("relay checks", () => {
     expect(normaliseAmount("£480,")).toBe("£480");
     expect(normaliseAmount("€30k")).toBe("€30000");
     expect(amountsIn("It's £480, plus €30/kWh and £480 again")).toEqual(["£480", "€30"]);
+  });
+  it("keeps money figures as written", () => {
+    expect(moneyIn("Between £1,200 and £2,000. Then €30k, or £1,200.")).toEqual(["£1,200", "£2,000", "€30k"]);
+    expect(moneyIn("no figures")).toEqual([]);
+  });
+  it("asks whether a reply is still needed after contact elsewhere", () => {
+    const v = beforeYouSend({ to: ["lubomir@vojta.cz"], body: "Shipping is £480.", attachments: 0 }, { ...facts, since: ["call with them on 20 Oct 2026", "a", "b", "c"] });
+    expect(v.state).toBe("check");
+    expect(v.issues.map((i) => i.text)).toEqual(["Since this email: call with them on 20 Oct 2026; a; b. Check a reply is still needed."]);
+    expect(beforeYouSend({ to: ["lubomir@vojta.cz"], body: "Shipping is £480.", attachments: 0 }, { ...facts, since: [] }).state).toBe("ok");
   });
   it("is all clear for a clean draft", () => {
     const v = beforeYouSend({ to: ["lubomir@vojta.cz"], body: "Shipping is £480.", attachments: 0 }, facts);
