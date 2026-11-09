@@ -60,6 +60,9 @@ LLM_THREAD_LIMIT = 48  # threads summarised per run; the rest keep fallback cont
 OWN_DOMAIN = "rebattery.io"
 KEEP_STATES = {"received", "accepted"}
 SKIP_LABELS = {"SPAM", "TRASH", "DRAFT", "CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL"}
+# Message-IDs of mail we send through Postmark (marketplace and CRM). A spam-filtered reply that
+# references one is a real reply to us: Gmail spam swallowed sellers answering supply@ this way.
+OUR_SEND_REF = re.compile(r"@mtasv\.net>", re.I)
 FYI_LABELS = {"CATEGORY_UPDATES", "CATEGORY_FORUMS"}
 FREEMAIL = {"gmail.com", "googlemail.com", "hotmail.com", "outlook.com", "live.com", "yahoo.com", "icloud.com",
             "me.com", "aol.com", "gmx.de", "gmx.net", "web.de", "proton.me", "protonmail.com", "seznam.cz", "wp.pl",
@@ -80,6 +83,8 @@ CALENDAR_SUBJECT = re.compile(
     r"cancelled event|new event|event reminder)\s*(:|with)", re.I)
 AUTO_SUBJECT = re.compile(
     r"^\s*(automatic reply|auto(matic)?[- ]?reply|out of (the )?office|abwesenheitsnotiz|delivery status notification|"
+    r"automatische antwort|automatisch antwoord|r[ée]ponse automatique|respuesta autom[áa]tica|risposta automatica|"
+    r"resposta autom[áa]tica|automatick[áa] odpov[ěe]ď|automatyczna odpowied[źz]|automaattinen vastaus|automatiskt svar|"
     r"undeliverable|undelivered mail|mail delivery (failed|subsystem)|returned mail)\b", re.I)
 
 ASK = re.compile(r"\?|\b(offer|price|pricing|quote|let me know|could you|would you|can you|please confirm|"
@@ -312,12 +317,24 @@ def deadline_due(text: str | None, sent: dt.datetime) -> dt.date | None:
 
 # ---------- classification ----------
 
+def replies_to_us(m: dict, messages: list[dict]) -> bool:
+    """A message that answers one of ours: our outbound earlier in its thread, or a Postmark send in its references."""
+    if OUR_SEND_REF.search(f"{m.get('in_reply_to') or ''} {m.get('rfc_references') or ''}"):
+        return True
+    return any(o["direction"] == "outbound" and o["at"] < m["at"] and o.get("state") in KEEP_STATES and not o.get("campaign_id")
+               and any(not is_own(e) for e in (o.get("to_emails") or []) + (o.get("cc_emails") or [])) for o in messages)
+
+
 def real_messages(messages: list[dict]) -> list[dict]:
-    """Messages that count: sent or received, not campaigns, drafts, spam, internal or machine mail."""
+    """Messages that count: sent or received, not campaigns, drafts, spam, internal or machine mail.
+
+    Spam is kept when it replies to us (see replies_to_us)."""
     keep = []
     for m in messages:
-        labels = set(m.get("labels") or [])
-        if m.get("state") not in KEEP_STATES or m.get("campaign_id") or m.get("purpose") == "marketing" or labels & SKIP_LABELS:
+        skip = set(m.get("labels") or []) & SKIP_LABELS
+        if skip == {"SPAM"} and m["direction"] == "inbound" and replies_to_us(m, messages):
+            skip = set()
+        if m.get("state") not in KEEP_STATES or m.get("campaign_id") or m.get("purpose") == "marketing" or skip:
             continue
         if m["direction"] == "inbound":
             if is_own(m.get("from_email")) or is_automated(m.get("from_email"), m.get("subject")):
@@ -360,7 +377,10 @@ def classify_thread(msgs: list[dict], ctx: dict, now: dt.datetime, days: int = 1
             return {**out, "tab": None, "reason": "owner wrote to them since", "done_reason": "replied"}
         run = [m for m in msgs if m["at"] > max([x["at"] for x in msgs if x["direction"] == "outbound"], default=dt.datetime.min.replace(tzinfo=dt.timezone.utc))]
         waiting_since = run[0]["at"] if run else last["at"]
-        if triage_state == TRIAGE_ACTION:
+        # Triage records its verdict as proposed_state and only moves it to automated_state when a later
+        # pass sees the label stuck, so a first message triage labelled "1 Action" reads as proposed.
+        triage_action = triage_state == TRIAGE_ACTION or (triage_fresh and triage.get("proposed_state") == TRIAGE_ACTION)
+        if triage_action:
             tab, reason = "action", "triage: 1 Action"
         elif triage_state in TRIAGE_OTHER and triage_fresh:
             tab, reason = "other", f"triage: {triage_state}"
@@ -370,9 +390,11 @@ def classify_thread(msgs: list[dict], ctx: dict, now: dt.datetime, days: int = 1
             tab, reason = "action", "inbound question or request"
         elif ctx.get("known") and len((last.get("text") or "")) > 40:
             tab, reason = "action", "inbound from a known contact"
+        elif OUR_SEND_REF.search(f"{last.get('in_reply_to') or ''} {last.get('rfc_references') or ''}"):
+            tab, reason = "action", "reply to our email"
         else:
             tab, reason = "other", "unsolicited or FYI"
-        limit = follow_days if tab == "action" and triage_state == TRIAGE_ACTION else days
+        limit = follow_days if tab == "action" and triage_action else days
         if age_days > limit and not ctx.get("existing_open"):
             return {**out, "tab": None, "reason": "older than window", "done_reason": "expired"}
         if tab == "other" and age_days > days:
@@ -469,7 +491,7 @@ def load_threads(cur, owner_id: str, since: dt.datetime, extra_thread_ids: list[
     cur.execute(
         """select m.id, m.thread_id, m.direction, m.state, m.purpose, m.campaign_id, m.identity_key, m.gmail_message_id,
                   m.from_email, m.to_emails, m.cc_emails, m.subject, m.body_text, m.body_html, m.body_preview, m.labels,
-                  coalesce(m.sent_at, m.accepted_at, m.created_at) as at, p.full_name as from_name
+                  m.in_reply_to, m.rfc_references, coalesce(m.sent_at, m.accepted_at, m.created_at) as at, p.full_name as from_name
              from mail_message m left join crm_people p on p.id = m.from_person_id
             where m.mailbox_owner_id = %s and m.thread_id = any(%s)""",
         (owner_id, list(threads)))

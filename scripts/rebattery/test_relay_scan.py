@@ -46,6 +46,8 @@ def ctx(**kw):
     ("MAILER-DAEMON@mx.example.com", "fail"), ("calendar-notification@google.com", "x"),
     ("anna@dealer.no", "Invitation: Call @ Tue"), ("anna@dealer.no", "Accepted: Call"),
     ("anna@dealer.no", "Automatic reply: Kia packs"), ("bob@linkedin.com", "Hello"),
+    ("ana@naturgy.com", "Respuesta automática: Supply Update"), ("jan@x.nl", "Automatisch antwoord: Kia"),
+    ("eva@x.pl", "Automatyczna odpowiedź: packs"), ("luc@x.fr", "Réponse automatique : packs"),
 ])
 def test_automated_senders_filtered(email, subject):
     assert rs.is_automated(email, subject)
@@ -69,6 +71,16 @@ def test_real_messages_drops_internal_campaign_drafts_and_spam():
     assert [m["text"] for m in kept] == ["real one"]
 
 
+
+def test_spam_kept_when_it_replies_to_us():
+    postmark = msg("inbound", 1, "Yes, still for sale", labels=["SPAM"], in_reply_to="<872149c5-9e74@mtasv.net>")
+    in_thread = [msg("outbound", 3, "How many packs?"), msg("inbound", 1, "Twelve", labels=["SPAM"])]
+    stranger = msg("inbound", 1, "Cheap SEO", labels=["SPAM"], in_reply_to="<abc@mail.gmail.com>")
+    assert [m["text"] for m in rs.real_messages([postmark])] == ["Yes, still for sale"]
+    assert [m["text"] for m in rs.real_messages(in_thread)] == ["How many packs?", "Twelve"]
+    assert rs.real_messages([stranger]) == []
+    assert rs.real_messages([{**postmark, "labels": ["SPAM", "TRASH"]}]) == []
+
 # ---------- quote stripping ----------
 
 def test_strip_quotes():
@@ -91,6 +103,20 @@ def test_action_from_triage():
     r = rs.classify_thread(msgs, ctx(triage={"automated_state": "1 Action"}), NOW)
     assert r["tab"] == "action" and "triage" in r["reason"]
 
+
+
+def test_action_from_fresh_triage_proposal():
+    msgs = [msg("inbound", 1, "We have 1,000 Polarium modules for sale.", frm="ryan@broker.example", mid="g7")]
+    fresh = ctx(known=False, triage={"automated_state": None, "proposed_state": "1 Action", "last_classified_message_id": "g7"})
+    stale = ctx(known=False, triage={"automated_state": None, "proposed_state": "1 Action", "last_classified_message_id": "g6"})
+    assert rs.classify_thread(msgs, fresh, NOW)["tab"] == "action"
+    assert rs.classify_thread(msgs, stale, NOW)["tab"] == "other"
+
+
+def test_reply_to_our_postmark_send_is_action():
+    reply = msg("inbound", 1, "Yes, still for sale.", frm="dave@outlook.example",
+                in_reply_to="<872149c5-9e74@mtasv.net>")
+    assert rs.classify_thread([reply], ctx(known=False), NOW)["tab"] == "action"
 
 def test_action_from_question_without_triage():
     msgs = [msg("outbound", 3, "Hello"), msg("inbound", 1, "What price can you offer for 20 packs?")]
