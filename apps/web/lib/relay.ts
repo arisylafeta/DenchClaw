@@ -107,7 +107,7 @@ const ITEM_COLUMNS = `i.id,i.tab,i.status,i.priority,i.counterpart_name,i.counte
   (select m.id from mail_message m where m.thread_id = i.mail_thread_id and m.direction = 'inbound' and m.has_attachments
      and ${mailboxScopeSql("m", "i.owner_id")} order by m.sent_at desc nulls last, m.created_at desc limit 1) as attachment_message_id`;
 
-const PRIORITY_ORDER = `case i.priority when 'urgent' then 0 when 'overdue' then 1 when 'high' then 2 when 'medium' then 3 else 4 end`;
+export const PRIORITY_ORDER = `case i.priority when 'urgent' then 0 when 'overdue' then 1 when 'high' then 2 when 'medium' then 3 else 4 end`;
 
 /** Items waiting on the owner, by tab, most important first. Snoozed items stay hidden until their time comes. */
 export async function listRelayItems(ownerId: string, tab: RelayTab): Promise<RelayItem[]> {

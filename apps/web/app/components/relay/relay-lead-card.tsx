@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { assembleLead, cleanAnswer, cleanLeadState, leadChips, priceWarning, questionId, type LeadBlock, type LeadData, type LeadState } from "@/lib/relay-lead-core";
 import type { LeadCards as LeadCardList, LeadCardView } from "@/lib/relay-lead";
 import { undoSecondsLeft } from "@/lib/relay-send-time";
+import { api, cx } from "./relay-ui";
 import c from "./relay-lead-card.module.css";
 
 /**
@@ -18,15 +19,6 @@ type Sent = { cardId: string; draftId: string; name: string; until: number };
 
 /** A card is one prepared email: a newer email from them is a new card under the same id, with none of the old choices. */
 const cardKey = (card: LeadCardView) => `${card.id}:${card.message_id}`;
-const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(" ");
-
-async function api<T>(url: string, init?: { method?: string; body?: unknown }): Promise<T> {
-  const res = await fetch(url, { method: init?.method ?? "GET", headers: init?.body ? { "content-type": "application/json" } : undefined, body: init?.body ? JSON.stringify(init.body) : undefined, cache: "no-store" });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error((data as { error?: string } | null)?.error ?? "Something went wrong. Try again.");
-  return data as T;
-}
-
 /** "Sun 18:26" this week, "Sun 8 Nov, 18:26" for anything older. */
 function arrived(iso: string): string {
   const at = new Date(iso);
@@ -229,13 +221,15 @@ function SentPanel({ sent, next, onNext, onUndo }: { sent: Sent; next: string | 
   );
 }
 
-export function LeadCards({ data, error, reload, say, onInbox, onReview, onQueued, onUndone }: {
+export function LeadCards({ data, error, reload, say, start, onInbox, onReview, onQueued, onUndone }: {
   data: LeadCardList | null; error: string | null; reload: () => Promise<void>; say: Say; onInbox: () => void; onReview: () => void;
+  /** The card to open first: the one whose row was clicked in the inbox. */
+  start?: string | null;
   /** A card's reply is held for sending: the page watches it and reports the outcome. */
   onQueued: (draftId: string, toLabel: string) => void | Promise<void>;
   onUndone: (draftId: string) => void;
 }) {
-  const [at, setAt] = useState<string | null>(null);
+  const [at, setAt] = useState<string | null>(start ?? null);
   const [edits, setEdits] = useState<Record<string, LeadState>>({});
   const [sent, setSent] = useState<Sent | null>(null);
   const [busy, setBusy] = useState(false);

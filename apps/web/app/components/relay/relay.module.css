@@ -44,6 +44,29 @@
 .scan { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; }
 .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
 .pulse.stale { background: var(--amber); }
+/* The new inbox follows the approved mockup: larger type and more room than the table it replaced. */
+.root.fresh { --bg: #f3f4f6; padding: 32px 24px 48px; }
+:global(.dark) .root.fresh { --bg: #0d0f13; }
+.fresh .wrap { max-width: 1360px; gap: 20px; }
+.fresh .top { gap: 20px; }
+.fresh .brand { font-size: 28px; gap: 12px; }
+.fresh .logo { width: 40px; height: 40px; border-radius: 12px; }
+.fresh .logo i { width: 16px; height: 16px; border-width: 3px; }
+.fresh .tabs { border-radius: 16px; padding: 6px; flex-wrap: wrap; }
+.fresh .tabs button { padding: 10px 18px; border-radius: 12px; font-size: 15px; font-weight: 500; min-height: 44px; color: var(--ink2); }
+.fresh .tabs button[aria-selected="true"] { font-weight: 600; color: var(--card); }
+.fresh .tabs .n { font-family: inherit; font-size: 13px; padding: 2px 8px; }
+.fresh .scan { font-size: 14px; padding: 10px 16px; color: var(--ink2); }
+.fresh .pulse { width: 10px; height: 10px; }
+.oldlink { align-self: center; background: none; border: 0; padding: 10px 12px; min-height: 44px; font-size: 14px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
+.oldlink:hover { color: var(--ink); }
+@media (max-width: 640px) {
+  .root.fresh { padding: 16px 12px 40px; }
+  .fresh .brand { font-size: 22px; }
+  .fresh .logo { width: 34px; height: 34px; border-radius: 10px; }
+  .fresh .tabs button { padding: 10px 12px; }
+  .fresh .scan { margin-left: 0; }
+}
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 60%, transparent); } 100% { box-shadow: 0 0 0 8px transparent; } }
 
 /* score strip */
@@ -70,6 +93,10 @@
 .itabs button { border: 0; background: none; padding: 7px 13px; border-radius: 9px; font-weight: 600; font-size: 14px; color: var(--muted); display: flex; gap: 7px; align-items: center; }
 .itabs button[aria-selected="true"] { background: var(--blue-soft); color: var(--blue-ink); }
 .itabs button[aria-selected="true"] .n { background: var(--blue-tag); color: var(--blue-ink); }
+/* one list on its own page, reached from the new inbox */
+.only { display: flex; align-items: center; gap: 4px 16px; flex-wrap: wrap; margin-right: auto; }
+.only h2 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
+.backlink { background: none; border: 0; padding: 10px 0; min-height: 44px; font-size: 15px; font-weight: 600; color: var(--blue-ink); }
 .list { overflow: hidden; margin-top: 10px; }
 .grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 4fr) minmax(0, 1.5fr) 74px 120px; gap: 14px; }
 .lhead { padding: 12px 18px; background: var(--soft); font-size: 13px; color: var(--muted); font-weight: 500; }
@@ -98,6 +125,7 @@
 .pill.high i, .pill.ok i { background: var(--green); }
 .pill.medium i, .pill.warn i { background: var(--amber); }
 .thread { padding: 4px 18px 6px 68px; }
+.thread.flat { padding: 10px 20px 12px; }
 .lastmail { background: var(--soft); border-radius: 12px; padding: 12px 14px; margin: 4px 0 10px; }
 .mh { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
 .mh b { color: var(--ink); font-weight: 600; }

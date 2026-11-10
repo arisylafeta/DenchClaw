@@ -10,7 +10,9 @@ import { missingInstruction, type ChecklistItem, type DealChecklist } from "@/li
 import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
 import { isSenderKey, SENDERS } from "@/lib/relay-senders";
 import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
+import { Lanes, useSuggestions } from "./relay-lanes";
 import { LeadCards, useLeadCards } from "./relay-lead-card";
+import { api, colour, cx, firstName, initials } from "./relay-ui";
 import s from "./relay.module.css";
 
 const ChatPanel = dynamic(() => import("@/app/components/chat-panel").then((m) => m.ChatPanel), { ssr: false });
@@ -22,17 +24,14 @@ type Summary = { tab: RelayTab; counts: Counts; items: RelayItem[]; review: Rela
 type ToastAction = { label: string; run: () => void | Promise<void> };
 /** `until` (ms) keeps the toast up until then and counts the seconds down after the text: the undo window after Send. */
 type Say = (text: string, undo?: () => void, action?: ToastAction, until?: number) => void;
-type Page = "inbox" | "leads" | "review" | "todos" | "rules";
-/** Lead cards sit beside the inbox behind a switch, remembered on this device. */
-const LEAD_CARDS_KEY = "relay.leadCards";
+type Page = "inbox" | "leads" | "follow" | "other" | "review" | "todos" | "rules";
+/** The inbox as lanes is what Relay opens on. The table it replaced stays one click away, remembered on this device. */
+const NEW_INBOX_KEY = "relay.newInbox";
+/** The emails each page lists. The lanes are the emails that need a reply. */
+const PAGE_TAB: Partial<Record<Page, RelayTab>> = { inbox: "action", follow: "follow", other: "other" };
 type LearnRun = { ran_at: string; sent: number; unchanged: number; edited: number; proposed: number; note: string };
 type VoiceInfo = { version: number; created_at: string; source_emails: number | null; eval: { judge_after_wins?: number; judge_before_wins?: number; n?: number } | null; guide: string };
 
-const cx = (...names: (string | false | null | undefined)[]) => names.filter(Boolean).join(" ");
-const PALETTE = ["#2563EB", "#0EA5E9", "#7C3AED", "#DB2777", "#EA580C", "#16A34A", "#0D9488", "#4F46E5", "#B45309"];
-const colour = (name: string) => PALETTE[[...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % PALETTE.length];
-const initials = (name: string) => name.split(/[\s@.]+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
-const firstName = (name: string | null | undefined) => (name ?? "").split(/[\s@]/)[0] || "them";
 const PRIORITY_LABEL: Record<string, string> = { urgent: "Urgent", overdue: "Overdue", high: "High", medium: "Medium", low: "Low" };
 
 function ago(iso: string | null | undefined): string {
@@ -49,13 +48,6 @@ function when(iso: string | null | undefined): string {
 function duration(minutes: number | null): string {
   if (minutes == null) return "–";
   return minutes < 60 ? `${minutes}m` : minutes < 60 * 48 ? `${(minutes / 60).toFixed(1)}h` : `${Math.round(minutes / 1440)}d`;
-}
-
-async function api<T>(url: string, init?: { method?: string; body?: unknown }): Promise<T> {
-  const res = await fetch(url, { method: init?.method ?? "GET", headers: init?.body ? { "content-type": "application/json" } : undefined, body: init?.body ? JSON.stringify(init.body) : undefined, cache: "no-store" });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error((data as { error?: string } | null)?.error ?? "Something went wrong. Try again.");
-  return data as T;
 }
 
 const Clock = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>;
@@ -83,9 +75,13 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
     return () => clearInterval(t);
   }, [counting]);
 
+  // The list now on show. An answer for a list Alex has since left is dropped, and a late refresh loads this one.
+  const tabNow = useRef(tab);
+  tabNow.current = tab;
   const load = useCallback(async (which: RelayTab) => {
     try {
       const next = await api<Summary>(`/api/relay/summary?tab=${which}`);
+      if (which !== tabNow.current) return;
       setData(next);
       setError(null);
     } catch (err) {
@@ -93,15 +89,25 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
     }
   }, []);
   useEffect(() => { void load(tab); }, [tab, load]);
-  const [leadsOn, setLeadsOn] = useState(false);
-  useEffect(() => { try { setLeadsOn(localStorage.getItem(LEAD_CARDS_KEY) === "on"); } catch { /* no storage: the switch starts off */ } }, []);
-  const switchLeads = (on: boolean) => {
-    setLeadsOn(on);
-    try { localStorage.setItem(LEAD_CARDS_KEY, on ? "on" : "off"); } catch { /* not remembered */ }
-    setPage((now) => (on ? "leads" : now === "leads" ? "inbox" : now));
+  // null until this device's choice is read, so the old table never shows for a moment before the lanes.
+  const [lanesOn, setLanesOn] = useState<boolean | null>(null);
+  useEffect(() => { try { setLanesOn(localStorage.getItem(NEW_INBOX_KEY) !== "off"); } catch { setLanesOn(true); } }, []);
+  const fresh = lanesOn !== false;
+  /** In the new inbox each page lists its own emails; the old table picks them with its inner tabs. */
+  const goto = useCallback((next: Page) => {
+    setPage(next);
+    const list = PAGE_TAB[next];
+    if (fresh && list) setTab(list);
+  }, [fresh]);
+  const switchLanes = (on: boolean) => {
+    setLanesOn(on);
+    try { localStorage.setItem(NEW_INBOX_KEY, on ? "on" : "off"); } catch { /* not remembered */ }
+    setPage("inbox");
+    setTab("action");
   };
-  const leads = useLeadCards(leadsOn);
-  const leadsReady = leads.data?.cards.filter((x) => x.status === "ready").length ?? 0;
+  const leads = useLeadCards(lanesOn === true);
+  /** The lead card to open: the one whose row was clicked in the lanes. */
+  const [leadAt, setLeadAt] = useState<string | null>(null);
   // Send holds the email on the server for 30 seconds, with Undo, then sends it. The page moves on, watches the
   // message's own state, and reports the outcome: Sent, or why not. The send does not depend on this tab staying open.
   const [sending, setSending] = useState<Record<string, string>>({});
@@ -110,25 +116,25 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
       await api(`/api/relay/drafts/${draftId}/schedule`, { method: "DELETE" });
       setSending((m) => Object.fromEntries(Object.entries(m).filter(([id]) => id !== draftId)));
       say(`Stopped. The email to ${toLabel} is a draft again, in Review.`);
-      void load(tab);
+      void load(tabNow.current);
       return true;
     } catch (err) {
       say(err instanceof Error ? err.message : "Couldn't stop it.");
       return false;
     }
-  }, [say, load, tab]);
+  }, [say, load]);
   const startSend = useCallback(async (draftId: string, updatedAt: string, toLabel: string) => {
     try {
       const held = await api<{ undo_seconds?: number }>(`/api/relay/drafts/${draftId}/send`, { method: "POST", body: { confirm: true, updated_at: updatedAt } });
       setSending((m) => ({ ...m, [draftId]: toLabel }));
       say(`Sending to ${toLabel}`, () => void undoSend(draftId, toLabel), undefined, Date.now() + (held.undo_seconds ?? UNDO_SEND_SECONDS) * 1000);
-      void load(tab);
+      void load(tabNow.current);
       return true;
     } catch (err) {
       say(`Not sent: ${err instanceof Error ? err.message : "something went wrong"}`);
       return false;
     }
-  }, [say, load, tab, undoSend]);
+  }, [say, load, undoSend]);
   // While Matcha creates or updates a deal, check every few seconds so its result shows on the email.
   const dealBusy = !!data?.items.some(dealWorking);
   useEffect(() => {
@@ -174,27 +180,35 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
     : mailAge != null ? `Checked Gmail ${mailAge} min ago` : `Sorted ${scanned} min ago`;
   const stale = scanned != null && (scanned > 25 || (mailAge != null && mailAge > 25));
   const ring = 2 * Math.PI * 25;
+  const proposed = data?.rules.filter((r) => r.state === "proposed").length ?? 0;
+  const nav: [Page, string, number][] = fresh
+    ? [["inbox", "Inbox", counts?.action ?? 0], ["review", "Review", counts?.review ?? 0], ["follow", "Follow-ups", counts?.follow ?? 0], ["todos", "To-dos", counts?.todos ?? 0], ["rules", "Rules", proposed]]
+    : [["inbox", "Inbox", counts ? counts.action + counts.follow : 0], ["review", "Review", counts?.review ?? 0], ["todos", "To-dos", counts?.todos ?? 0], ["rules", "Rules", proposed]];
+  // A lead card and the no-reply list are opened from the inbox and belong to it.
+  const navAt: Page = page === "leads" || page === "other" ? "inbox" : page;
 
   return (
-    <div className={s.root}>
+    <div className={cx(s.root, fresh && s.fresh)}>
       <div className={s.wrap}>
         <div className={s.top}>
           <div className={s.brand}><Logo />Relay</div>
           <div className={s.tabs} role="tablist" aria-label="Relay">
-            {([["inbox", "Inbox", counts ? counts.action + counts.follow : 0], ...(leadsOn ? [["leads", "Leads", leadsReady] as const] : []), ["review", "Review", counts?.review ?? 0], ["todos", "To-dos", counts?.todos ?? 0], ["rules", "Rules", data?.rules.filter((r) => r.state === "proposed").length ?? 0]] as const).map(([key, label, n]) => (
-              <button key={key} role="tab" type="button" aria-selected={page === key} onClick={() => setPage(key)}>{label} <span className={s.n}>{n}</span></button>
+            {nav.map(([key, label, n]) => (
+              <button key={key} role="tab" type="button" aria-selected={navAt === key} onClick={() => goto(key)}>{label}{(!fresh || n > 0) && <> <span className={s.n}>{n}</span></>}</button>
             ))}
           </div>
-          <button type="button" role="switch" aria-checked={leadsOn} className={s.leadswitch} onClick={() => switchLeads(!leadsOn)} title="One prepared card per new lead, beside the inbox. Nothing is sent until you press Send.">
-            <i aria-hidden /><span>Lead cards</span>
-          </button>
+          {lanesOn === false && (
+            <button type="button" role="switch" aria-checked={false} className={s.leadswitch} onClick={() => switchLanes(true)} title="The inbox sorted into lanes: new leads with the reply ready, deal replies, and answers to pick for the rest. Nothing is sent until you press Send.">
+              <i aria-hidden /><span>New inbox</span>
+            </button>
+          )}
           <div className={s.scan} title="Relay reads new Gmail and sorts it about every 10 minutes">
             <span className={cx(s.pulse, stale && s.stale)} />
             <span>{freshness}</span>
           </div>
         </div>
 
-        {page !== "leads" && <div className={cx(s.card, s.score)}>
+        {!(fresh && (page === "inbox" || page === "leads")) && <div className={cx(s.card, s.score)}>
           <div className={s.meter}>
             <div className={s.ring}><svg viewBox="0 0 58 58"><circle cx="29" cy="29" r="25" stroke="var(--soft)" /><circle cx="29" cy="29" r="25" stroke="var(--blue)" strokeDasharray={ring} strokeDashoffset={ring * (1 - pct / 100)} /></svg><em className={s.num}>{pct}%</em></div>
             <div><b>Today</b><span>{handled} of {total} done</span></div>
@@ -207,15 +221,20 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
 
         {error && <p className={s.error} role="alert">{error}</p>}
         {!data && !error && <p className={s.muted} role="status">Loading Relay…</p>}
-        {data && page === "inbox" && <Inbox data={data} tab={tab} setTab={setTab} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenCompany={onOpenCompany} onDrafted={() => setPage("review")} />}
-        {page === "leads" && leadsOn && (
-          <LeadCards data={leads.data} error={leads.error} reload={leads.reload} say={say} onInbox={() => setPage("inbox")}
+        {data && page === "inbox" && lanesOn === false && <Inbox data={data} tab={tab} setTab={setTab} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenCompany={onOpenCompany} onDrafted={() => setPage("review")} />}
+        {data && page === "inbox" && lanesOn && (
+          <LanesInbox data={data} leads={leads} reload={() => load("action")} say={say} onOpenListing={onOpenListing} onOpenCompany={onOpenCompany} onDrafted={() => setPage("review")}
+            onLead={(cardId) => { setLeadAt(cardId); setPage("leads"); }} onGo={goto} onOld={() => switchLanes(false)} />
+        )}
+        {data && lanesOn && (page === "follow" || page === "other") && <Inbox data={data} tab={tab} setTab={setTab} only={page} onBack={() => goto("inbox")} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenCompany={onOpenCompany} onDrafted={() => setPage("review")} />}
+        {page === "leads" && lanesOn && (
+          <LeadCards data={leads.data} error={leads.error} reload={leads.reload} say={say} start={leadAt} onInbox={() => goto("inbox")}
             onReview={() => { setPage("review"); void load(tab); }}
             // The outcome watcher reads a missing draft as sent, so the draft has to be on the page before it is watched.
             onQueued={async (draftId, to) => { await load(tab); setSending((m) => ({ ...m, [draftId]: to })); }}
             onUndone={(draftId) => { setSending((m) => Object.fromEntries(Object.entries(m).filter(([id]) => id !== draftId))); void load(tab); }} />
         )}
-        {data && page === "review" && <Review data={data} reload={() => load(tab)} say={say} onBack={() => setPage("inbox")} sending={sending} startSend={startSend} undoSend={undoSend} />}
+        {data && page === "review" && <Review data={data} reload={() => load(tab)} say={say} onBack={() => goto("inbox")} sending={sending} startSend={startSend} undoSend={undoSend} />}
         {data && page === "rules" && <Rules data={data} reload={() => load(tab)} say={say} />}
         {data && page === "todos" && <Tasks tasks={data.todos} scheduled={data.scheduled ?? []} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenMailMessage={onOpenMailMessage} onDrafted={() => setPage("review")} />}
       </div>
@@ -230,27 +249,11 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
 
 // ---------------------------------------------------------------- Inbox
 
-function Inbox({ data, tab, setTab, reload, say, onOpenListing, onOpenCompany, onDrafted }: {
-  data: Summary; tab: RelayTab; setTab: (t: RelayTab) => void; reload: () => Promise<void>; say: Say;
-  onOpenListing?: (id: string, title?: string) => void; onOpenCompany?: (id: string) => void; onDrafted: () => void;
-}) {
-  const [q, setQ] = useState("");
-  const [type, setType] = useState("");
-  const [open, setOpen] = useState<string | null>(null);
-  const [notes, setNotes] = useState<Record<string, string>>({});
+/** What can be done to an email in the inbox. The lanes and the table share these, so a click does the same in both. */
+function useItemActions({ data, tab, reload, say, onDrafted }: { data: Summary; tab: RelayTab; reload: () => Promise<void>; say: Say; onDrafted: () => void }) {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [gone, setGone] = useState<Record<string, boolean>>({});
-  const items = data.tab === tab ? data.items : [];
-  const types = useMemo(() => [...new Set(items.map((i) => i.contact_type).filter((t): t is string => !!t))].sort(), [items]);
-  const shown = items.filter((i) => !gone[i.id] && (!type || i.contact_type === type)
-    && `${i.counterpart_name ?? ""} ${i.counterpart_email ?? ""} ${i.company ?? ""} ${i.headline} ${i.deal_label ?? ""}`.toLowerCase().includes(q.toLowerCase()));
-  const noteOf = (i: RelayItem) => notes[i.id] ?? i.note;
-
-  const saveNote = (i: RelayItem) => {
-    const note = notes[i.id];
-    if (note === undefined || note === i.note) return;
-    void api(`/api/relay/items/${i.id}`, { method: "PATCH", body: { note } }).catch(() => undefined);
-  };
+  const review: ToastAction = { label: "Open Review", run: onDrafted };
   const dealJob = async (i: RelayItem, action: "create" | "update") => {
     setBusy((b) => ({ ...b, [i.id]: true }));
     try {
@@ -282,24 +285,26 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onOpenCompany, o
       await api(`/api/relay/items/${i.id}/ask`, { method: "POST" });
       setGone((g) => ({ ...g, [i.id]: true }));
       await reload();
-      say(`Drafted the ask · ${firstName(i.counterpart_name)} is in Review`, onDrafted);
+      say(`Drafted the ask · ${firstName(i.counterpart_name)} is in Review`, undefined, review);
     } catch (err) {
       say(err instanceof Error ? err.message : "Couldn't draft the ask. Try again.");
     } finally {
       setBusy((b) => ({ ...b, [i.id]: false }));
     }
   };
-  const draft = async (i: RelayItem) => {
-    const note = noteOf(i).trim();
-    if (!note) { say("Add a note first: how do you want to reply?"); setOpen(i.id); return; }
+  /** Drafts the reply from a note, Alex's own or a suggested answer, and moves the email to Review. A suggested answer
+   * is words Relay wrote from the email, so it only ever gets the plain draft: never the job that can look things up. */
+  const draft = async (i: RelayItem, text: string, suggested = false) => {
+    const note = text.trim();
+    if (!note) { say("Add a note first: how do you want to reply?"); return; }
     setBusy((b) => ({ ...b, [i.id]: true }));
-    const agent = NEEDS_AGENT.test(note);
+    const agent = !suggested && NEEDS_AGENT.test(note);
     say(agent ? `Relay is on it for ${firstName(i.counterpart_name)} · follow progress in Review` : `Drafting v1 for ${firstName(i.counterpart_name)}…`);
     try {
-      await api(`/api/relay/items/${i.id}/draft`, { method: "POST", body: { note } });
+      await api(`/api/relay/items/${i.id}/draft`, { method: "POST", body: suggested ? { note, mode: "quick" } : { note } });
       setGone((g) => ({ ...g, [i.id]: true }));
       await reload();
-      say(agent ? `Working on ${firstName(i.counterpart_name)} in Review (a few minutes)` : `Drafted · ${firstName(i.counterpart_name)} is in Review`, onDrafted);
+      say(agent ? `Working on ${firstName(i.counterpart_name)} in Review (a few minutes)` : `Drafted · ${firstName(i.counterpart_name)} is in Review`, undefined, review);
     } catch (err) {
       say(err instanceof Error ? err.message : "Couldn't draft. Try again.");
     } finally {
@@ -359,17 +364,94 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onOpenCompany, o
     catch (err) { say(err instanceof Error ? err.message : "Couldn't remove it."); }
   };
 
+  return { busy, gone, dealJob, linkDeal, draftAsk, draft, moveToAction, done, dontChase, dropRule };
+}
+type ItemActions = ReturnType<typeof useItemActions>;
+
+/** The email behind a row: their latest message, its attachments, what came before, and the deal it belongs to.
+ * In a lane the row has its own answers and no avatar column, so there is no indent and no second Ask button. */
+function ThreadDetail({ item: i, tab, act, onOpenCompany, inLane }: { item: RelayItem; tab: RelayTab; act: ItemActions; onOpenCompany?: (id: string) => void; inLane?: boolean }) {
+  return (
+    <div className={cx(s.thread, inLane && s.flat)}>
+      {i.last_message && (
+        <div className={s.lastmail}>
+          <div className={s.mh}><b>{i.last_message.from_name || i.last_message.from_email}</b> · {when(i.last_message.at)} · {tab === "follow" ? "your last email, no reply since" : "their latest email"}</div>
+          <div className={s.mb}>{i.last_message.text}</div>
+        </div>
+      )}
+      {i.attachment_message_id && <div onClick={(e) => e.stopPropagation()}><AttachmentStrip messageId={i.attachment_message_id} /></div>}
+      {i.earlier.length > 0 && <div className={s.earlier}>{i.earlier.map((e, k) => <span key={k}><b>{e.who}</b> · {e.when}: {e.summary}</span>)}</div>}
+      <DealBar item={i} busy={!!act.busy[i.id]} create={inLane} onRun={(action) => void act.dealJob(i, action)} onAsk={!inLane && tab === "action" && i.can_ask ? () => void act.draftAsk(i) : undefined} onLink={(id) => void act.linkDeal(i, id)} onOpenCompany={onOpenCompany} />
+    </div>
+  );
+}
+
+/** The new inbox: the emails that need a reply, in lanes. It only arranges them; every click is one the table has too. */
+function LanesInbox({ data, leads, reload, say, onOpenListing, onOpenCompany, onDrafted, onLead, onGo, onOld }: {
+  data: Summary; leads: ReturnType<typeof useLeadCards>; reload: () => Promise<void>; say: Say;
+  onOpenListing?: (id: string, title?: string) => void; onOpenCompany?: (id: string) => void; onDrafted: () => void;
+  onLead: (cardId: string) => void; onGo: (page: Page) => void; onOld: () => void;
+}) {
+  const act = useItemActions({ data, tab: "action", reload, say, onDrafted });
+  const suggest = useSuggestions(true);
+  if (data.tab !== "action") return <p className={s.muted} role="status">Loading the inbox…</p>;
+  return (
+    <>
+      <Lanes items={data.items} counts={data.counts} cards={leads.data} cardsError={leads.error} reloadCards={leads.reload} suggest={suggest.data} act={act} say={say}
+        detail={(i) => <ThreadDetail item={i} tab="action" act={act} onOpenCompany={onOpenCompany} inLane />}
+        onLead={onLead} onOpenListing={onOpenListing} onGo={onGo} />
+      <button type="button" className={s.oldlink} onClick={onOld}>Use the old inbox</button>
+    </>
+  );
+}
+
+function Inbox({ data, tab, setTab, only, onBack, reload, say, onOpenListing, onOpenCompany, onDrafted }: {
+  data: Summary; tab: RelayTab; setTab: (t: RelayTab) => void; reload: () => Promise<void>; say: Say;
+  /** One list with no inner tabs: how the new inbox shows its follow-ups and its no-reply emails. */
+  only?: "follow" | "other"; onBack?: () => void;
+  onOpenListing?: (id: string, title?: string) => void; onOpenCompany?: (id: string) => void; onDrafted: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [type, setType] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const act = useItemActions({ data, tab, reload, say, onDrafted });
+  const { busy, gone, dealJob, moveToAction, done, dontChase, dropRule } = act;
+  const items = data.tab === tab ? data.items : [];
+  const types = useMemo(() => [...new Set(items.map((i) => i.contact_type).filter((t): t is string => !!t))].sort(), [items]);
+  const shown = items.filter((i) => !gone[i.id] && (!type || i.contact_type === type)
+    && `${i.counterpart_name ?? ""} ${i.counterpart_email ?? ""} ${i.company ?? ""} ${i.headline} ${i.deal_label ?? ""}`.toLowerCase().includes(q.toLowerCase()));
+  const noteOf = (i: RelayItem) => notes[i.id] ?? i.note;
+
+  const saveNote = (i: RelayItem) => {
+    const note = notes[i.id];
+    if (note === undefined || note === i.note) return;
+    void api(`/api/relay/items/${i.id}`, { method: "PATCH", body: { note } }).catch(() => undefined);
+  };
+  const draft = (i: RelayItem) => {
+    const note = noteOf(i);
+    if (!note.trim()) setOpen(i.id);
+    return act.draft(i, note);
+  };
+
   const heads = tab === "follow" ? ["Waiting on", "Your last email", "Deal", "No reply", "Priority"]
     : tab === "other" ? ["From", "What it is", "Deal", "Received", ""] : ["From", "What they want", "Deal", "Waiting", "Priority"];
 
   return (
     <section aria-label="Inbox">
       <div className={s.phead}>
-        <div className={s.itabs} role="tablist" aria-label="Inbox views">
-          {([["action", "Action"], ["follow", "Follow up"], ["other", "Other"]] as const).map(([key, label]) => (
-            <button key={key} role="tab" type="button" aria-selected={tab === key} onClick={() => { setTab(key); setOpen(null); }}>{label} <span className={s.n}>{data.counts[key]}</span></button>
-          ))}
-        </div>
+        {only ? (
+          <div className={s.only}>
+            <button type="button" className={s.backlink} onClick={onBack}>← Inbox</button>
+            <h2>{only === "follow" ? "Follow-ups due" : "No reply needed"} <span className={s.n}>{data.counts[only]}</span></h2>
+          </div>
+        ) : (
+          <div className={s.itabs} role="tablist" aria-label="Inbox views">
+            {([["action", "Action"], ["follow", "Follow up"], ["other", "Other"]] as const).map(([key, label]) => (
+              <button key={key} role="tab" type="button" aria-selected={tab === key} onClick={() => { setTab(key); setOpen(null); }}>{label} <span className={s.n}>{data.counts[key]}</span></button>
+            ))}
+          </div>
+        )}
         <div className={s.tools}>
           <label className={s.search}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
@@ -413,19 +495,7 @@ function Inbox({ data, tab, setTab, reload, say, onOpenListing, onOpenCompany, o
                     ? <div className={s.oacts}><button type="button" onClick={(e) => { e.stopPropagation(); void moveToAction(i); }}>Needs reply</button><button type="button" onClick={(e) => { e.stopPropagation(); void done(i); }}>Done</button></div>
                     : <div><span className={cx(s.pill, s[i.priority])}><i />{PRIORITY_LABEL[i.priority]}</span></div>}
                 </div>
-                {isOpen && (
-                  <div className={s.thread}>
-                    {i.last_message && (
-                      <div className={s.lastmail}>
-                        <div className={s.mh}><b>{i.last_message.from_name || i.last_message.from_email}</b> · {when(i.last_message.at)} · {tab === "follow" ? "your last email, no reply since" : "their latest email"}</div>
-                        <div className={s.mb}>{i.last_message.text}</div>
-                      </div>
-                    )}
-                    {i.attachment_message_id && <div onClick={(e) => e.stopPropagation()}><AttachmentStrip messageId={i.attachment_message_id} /></div>}
-                    {i.earlier.length > 0 && <div className={s.earlier}>{i.earlier.map((e, k) => <span key={k}><b>{e.who}</b> · {e.when}: {e.summary}</span>)}</div>}
-                    <DealBar item={i} busy={!!busy[i.id]} onRun={(action) => void dealJob(i, action)} onAsk={tab === "action" && i.can_ask ? () => void draftAsk(i) : undefined} onLink={(id) => void linkDeal(i, id)} onOpenCompany={onOpenCompany} />
-                  </div>
-                )}
+                {isOpen && <ThreadDetail item={i} tab={tab} act={act} onOpenCompany={onOpenCompany} />}
                 {tab !== "other" && (
                   <>
                     <div className={s.note}>
@@ -1320,7 +1390,7 @@ const dealWorking = (i: RelayItem) => !!i.deal_job && ["queued", "running", "rea
 
 /** The deal under an open email: which inbox it came to, Matcha's latest result, Create deal or Update deal from this reply,
  * and "Link to deal" for a thread Relay won't link by itself, like a supplier quoting for a buyer's request. */
-function DealBar({ item: i, busy, onRun, onAsk, onLink, onOpenCompany }: { item: RelayItem; busy: boolean; onRun: (action: "create" | "update") => void; onAsk?: () => void; onLink: (listingId: string | null) => void; onOpenCompany?: (id: string) => void }) {
+function DealBar({ item: i, busy, create, onRun, onAsk, onLink, onOpenCompany }: { item: RelayItem; busy: boolean; create?: boolean; onRun: (action: "create" | "update") => void; onAsk?: () => void; onLink: (listingId: string | null) => void; onOpenCompany?: (id: string) => void }) {
   const [picking, setPicking] = useState(false);
   const job = i.deal_job;
   // Shown for trade emails only: a deal, Matcha's run, a dismantler, a shared inbox, or a known seller or buyer.
@@ -1345,7 +1415,7 @@ function DealBar({ item: i, busy, onRun, onAsk, onLink, onOpenCompany }: { item:
         {!working && onAsk && <button type="button" className={s.btn} disabled={busy} title="Drafts the playbook's ask for what the deal is still missing, from the inbox this thread uses. You read it in Review and send." onClick={onAsk}>Draft the ask</button>}
         {!working && i.deal_action === "update" && <button type="button" className={cx(s.btn, s.pri)} disabled={busy} onClick={() => onRun("update")}>
           {job?.status === "failed" && job.action === "update" ? "Try again" : "Update deal from this reply"}</button>}
-        {!working && dismantlerOnly && i.deal_action === "create" && <button type="button" className={s.btn} disabled={busy} title="Only for a real lot, about 10 packs or €20k and up" onClick={() => onRun("create")}>{job?.status === "failed" && job.action === "create" ? "Try again: create deal" : "+ Create deal"}</button>}
+        {!working && (dismantlerOnly || create) && !i.bulk_listing_id && i.deal_action === "create" && <button type="button" className={s.btn} disabled={busy} title="Only for a real lot, about 10 packs or €20k and up" onClick={() => onRun("create")}>{job?.status === "failed" && job.action === "create" ? "Try again: create deal" : "+ Create deal"}</button>}
         {!working && !picking && <button type="button" className={s.btn} disabled={busy} title="Tie this thread to one of our open deals. Relay keeps the link; it never guesses one for a supplier." onClick={() => setPicking(true)}>{i.bulk_listing_id ? "Change deal" : "Link to deal"}</button>}
       </div>
       {picking && <DealPicker current={i.bulk_listing_id} canUnlink={!!i.relay_link} busy={busy} onPick={(id) => { setPicking(false); onLink(id); }} onCancel={() => setPicking(false)} />}

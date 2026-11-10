@@ -35,9 +35,9 @@ type Owner = { id: string; email: string };
 const READ_STATES = "('received','accepted','sent','delivered','opened','clicked','replied')";
 const WHEN = "coalesce(m.sent_at, m.accepted_at, m.created_at)";
 /** The newest email from them on the item's thread: the one a card is prepared against. */
-const NEWEST_INBOUND = `(select m.id from mail_message m where m.thread_id = i.mail_thread_id and m.direction = 'inbound' and m.state in ${READ_STATES} order by ${WHEN} desc limit 1)`;
+export const NEWEST_INBOUND = `(select m.id from mail_message m where m.thread_id = i.mail_thread_id and m.direction = 'inbound' and m.state in ${READ_STATES} order by ${WHEN} desc limit 1)`;
 /** An open Action email from a seller or buyer with nothing sent on its thread yet. `i` is relay_item, $1 the owner. */
-const ELIGIBLE = `i.owner_id = $1::uuid and i.tab = 'action' and i.status = 'open' and (i.snooze_until is null or i.snooze_until <= now())
+export const ELIGIBLE = `i.owner_id = $1::uuid and i.tab = 'action' and i.status = 'open' and (i.snooze_until is null or i.snooze_until <= now())
   and i.contact_type in ('supplier', 'buyer') and i.mail_thread_id is not null
   and not exists (select 1 from mail_message o where o.thread_id = i.mail_thread_id and o.direction = 'outbound' and o.state in ${READ_STATES})`;
 /** Everyone who sent or received mail on the item's thread, less our own mailboxes: the mail tool's --cc-thread rule. */
