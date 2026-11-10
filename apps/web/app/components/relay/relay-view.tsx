@@ -454,7 +454,7 @@ function Inbox({ data, tab, setTab, only, onBack, reload, say, onOpenListing, on
         )}
         <div className={s.tools}>
           <label className={s.search}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people or deals" aria-label="Search" />
           </label>
           <select className={s.filter} value={type} onChange={(e) => setType(e.target.value)} aria-label="Filter by type">
@@ -597,7 +597,7 @@ function Review({ data, reload, say, onBack, sending, startSend, undoSend }: {
               <div className={s.cards}>
                 {ordered.filter((d) => d.id !== draft?.id).map((d) => (
                   <button key={d.id} type="button" className={cx(s.card, s.fo, d.role === "primary" && s.primary)} onClick={() => { setViews((v) => ({ ...v, [item.id]: d.id })); }}>
-                    <div className={s.ft}><span className={s.step}>{d.role === "primary" ? "PRIMARY" : `FOLLOW-ON ${d.position}`}</span><span style={{ fontSize: 12.5, fontWeight: 500, color: d.mail?.scheduled ? "var(--blue-ink)" : isSent(d) ? "var(--green)" : "var(--muted)" }}>{d.mail?.scheduled ? (d.mail.scheduled.undo ? "Sending…" : sendLabel(d.mail.scheduled.at)) : isSent(d) ? "Sent" : d.mail ? "Draft" : "Needs a recipient"}</span></div>
+                    <div className={s.ft}><span className={s.step}>{d.role === "primary" ? "PRIMARY" : `FOLLOW-ON ${d.position}`}</span><span style={{ fontSize: 11, fontWeight: 500, color: d.mail?.scheduled ? "var(--blue-ink)" : isSent(d) ? "var(--green)" : "var(--muted)" }}>{d.mail?.scheduled ? (d.mail.scheduled.undo ? "Sending…" : sendLabel(d.mail.scheduled.at)) : isSent(d) ? "Sent" : d.mail ? "Draft" : "Needs a recipient"}</span></div>
                     <b>{d.title}</b>
                     <span className={s.to}>{d.mail?.to_emails.length ? `To ${d.mail.to_emails.join(", ")}` : d.why}</span>
                     <span className={s.pv}>{d.mail?.main.split("\n").filter(Boolean).slice(1, 2).join(" ") || d.why}</span>
@@ -700,7 +700,7 @@ function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend
   useEffect(() => { if (!holdAt) return; const t = setInterval(() => tick((n) => n + 1), 500); return () => clearInterval(t); }, [holdAt]);
 
   if (!mail || !local) {
-    return <div className={cx(s.card, s.editor)}><div className={s.ebar}><div><div className={s.lab}>Follow-on email</div><h2>{draft.title}</h2></div></div><p style={{ padding: "14px 18px" }} className={s.muted}>{draft.why} Relay didn't know who to send this to, so there's no draft yet. Ask in the panel on the right, e.g. "draft this to Rob at Qube".</p></div>;
+    return <div className={cx(s.card, s.editor)}><div className={s.ebar}><div><div className={s.lab}>Follow-on email</div><h2>{draft.title}</h2></div></div><p style={{ padding: "11px 14px" }} className={s.muted}>{draft.why} Relay didn't know who to send this to, so there's no draft yet. Ask in the panel on the right, e.g. "draft this to Rob at Qube".</p></div>;
   }
   const isDirty = (l: Local) => l.subject !== (mail.subject ?? "") || splitAddrs(l.to).join(",") !== mail.to_emails.join(",") || l.body !== mail.main || splitAddrs(l.cc).join(",") !== mail.cc_emails.join(",") || splitAddrs(l.bcc).join(",") !== mail.bcc_emails.join(",");
   const save = async (edited: Local = local): Promise<Local | null> => {
@@ -927,7 +927,7 @@ function Rules({ data, reload, say }: { data: Summary; reload: () => Promise<voi
             </div>
           </div>
         ))}
-        {run && <span className={s.muted} style={{ fontSize: 12.5 }}>Last checked {when(run.ran_at)}: {run.sent} sent, {run.unchanged} unchanged, {run.edited} edited{run.note ? ` · ${run.note}` : ""}.</span>}
+        {run && <span className={s.muted} style={{ fontSize: 11 }}>Last checked {when(run.ran_at)}: {run.sent} sent, {run.unchanged} unchanged, {run.edited} edited{run.note ? ` · ${run.note}` : ""}.</span>}
       </div>
       <div className={cx(s.card, s.rcard)}>
         <div className={s.sec}><h3>Your rules</h3><span>Always followed, ahead of everything else.</span></div>
@@ -1020,8 +1020,8 @@ function AiPanel({ item, draft, rules, reload, say }: { item: RelayReviewItem; d
       )}
       {mode === "ask" && (
         <div className={s.agent}>
-          {agentError ? <p className={s.error} style={{ padding: 16 }}>{agentError}</p>
-            : !agent ? <p className={s.muted} style={{ padding: 16 }} role="status">Opening the assistant…</p>
+          {agentError ? <p className={s.error} style={{ padding: 12 }}>{agentError}</p>
+            : !agent ? <p className={s.muted} style={{ padding: 12 }} role="status">Opening the assistant…</p>
             : <ChatPanel key={agent.conversation.key} nativeConversationKey={agent.conversation.key} nativeTransport={agent.transport} nativeAccess={agent.conversation.access} sessionTitle={agent.conversation.title}
                 fileContext={{ path: item.bulk_listing_id ? `~trades-preview/listing/${item.bulk_listing_id}` : "~crm/relay", filename: item.headline || "Relay", isDirectory: true }}
                 visible compact
@@ -1035,7 +1035,7 @@ function AiPanel({ item, draft, rules, reload, say }: { item: RelayReviewItem; d
             <input value={rule} onChange={(e) => setRule(e.target.value)} placeholder="Add a rule, e.g. sign off 'Cheers'" aria-label="New rule" />
             <button type="submit" aria-label="Add rule">+</button>
           </form>
-          <span className={s.muted} style={{ fontSize: 12.5 }}>Rules apply to every draft and edit.</span>
+          <span className={s.muted} style={{ fontSize: 11 }}>Rules apply to every draft and edit.</span>
         </div>
       )}
     </aside>
@@ -1061,7 +1061,7 @@ function StockListForm({ draftId, onClose, onDone, say }: { draftId: string; onC
       setF(filters); setMakes(filters.makes.join(", ")); setCountries(filters.countries.join(", ")); setChem(filters.chemistry.join(", "));
     }).catch(() => setF({ chemistry: [], types: [], makes: [], minKwh: null, countries: [], prices: false, currency: "GBP" }));
   }, [draftId]);
-  if (!f) return <p className={s.muted} style={{ padding: "0 16px 12px" }} role="status">Reading the email…</p>;
+  if (!f) return <p className={s.muted} style={{ padding: "0 12px 9px" }} role="status">Reading the email…</p>;
   const build = async () => {
     setBusy(true);
     try {
@@ -1088,7 +1088,7 @@ function StockListForm({ draftId, onClose, onDone, say }: { draftId: string; onC
       <label className={s.check}><input type="checkbox" checked={f.prices} onChange={(e) => setF({ ...f, prices: e.target.checked })} />Include prices
         {f.prices && <select value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value as "GBP" | "EUR" })} aria-label="Currency"><option value="GBP">£ GBP</option><option value="EUR">€ EUR</option></select>}
       </label>
-      <span className={s.muted} style={{ fontSize: 12.5 }}>Excel, one row per lot. Country only: no supplier names, towns, refs or links.</span>
+      <span className={s.muted} style={{ fontSize: 11 }}>Excel, one row per lot. Country only: no supplier names, towns, refs or links.</span>
       <div className={s.acts}>
         <button type="button" className={cx(s.btn, s.ghost)} onClick={onClose} disabled={busy}>Cancel</button>
         <button type="submit" className={cx(s.btn, s.blue)} disabled={busy}>{busy ? "Building…" : "Build and attach"}</button>
