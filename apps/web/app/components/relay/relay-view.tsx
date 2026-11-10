@@ -10,6 +10,7 @@ import { missingInstruction, type ChecklistItem, type DealChecklist } from "@/li
 import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
 import { isSenderKey, SENDERS } from "@/lib/relay-senders";
 import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
+import { LeadCards, useLeadCards } from "./relay-lead-card";
 import s from "./relay.module.css";
 
 const ChatPanel = dynamic(() => import("@/app/components/chat-panel").then((m) => m.ChatPanel), { ssr: false });
@@ -21,7 +22,9 @@ type Summary = { tab: RelayTab; counts: Counts; items: RelayItem[]; review: Rela
 type ToastAction = { label: string; run: () => void | Promise<void> };
 /** `until` (ms) keeps the toast up until then and counts the seconds down after the text: the undo window after Send. */
 type Say = (text: string, undo?: () => void, action?: ToastAction, until?: number) => void;
-type Page = "inbox" | "review" | "todos" | "rules";
+type Page = "inbox" | "leads" | "review" | "todos" | "rules";
+/** Lead cards sit beside the inbox behind a switch, remembered on this device. */
+const LEAD_CARDS_KEY = "relay.leadCards";
 type LearnRun = { ran_at: string; sent: number; unchanged: number; edited: number; proposed: number; note: string };
 type VoiceInfo = { version: number; created_at: string; source_emails: number | null; eval: { judge_after_wins?: number; judge_before_wins?: number; n?: number } | null; guide: string };
 
@@ -90,6 +93,15 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
     }
   }, []);
   useEffect(() => { void load(tab); }, [tab, load]);
+  const [leadsOn, setLeadsOn] = useState(false);
+  useEffect(() => { try { setLeadsOn(localStorage.getItem(LEAD_CARDS_KEY) === "on"); } catch { /* no storage: the switch starts off */ } }, []);
+  const switchLeads = (on: boolean) => {
+    setLeadsOn(on);
+    try { localStorage.setItem(LEAD_CARDS_KEY, on ? "on" : "off"); } catch { /* not remembered */ }
+    setPage((now) => (on ? "leads" : now === "leads" ? "inbox" : now));
+  };
+  const leads = useLeadCards(leadsOn);
+  const leadsReady = leads.data?.cards.filter((x) => x.status === "ready").length ?? 0;
   // Send holds the email on the server for 30 seconds, with Undo, then sends it. The page moves on, watches the
   // message's own state, and reports the outcome: Sent, or why not. The send does not depend on this tab staying open.
   const [sending, setSending] = useState<Record<string, string>>({});
@@ -169,17 +181,20 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
         <div className={s.top}>
           <div className={s.brand}><Logo />Relay</div>
           <div className={s.tabs} role="tablist" aria-label="Relay">
-            {([["inbox", "Inbox", counts ? counts.action + counts.follow : 0], ["review", "Review", counts?.review ?? 0], ["todos", "To-dos", counts?.todos ?? 0], ["rules", "Rules", data?.rules.filter((r) => r.state === "proposed").length ?? 0]] as const).map(([key, label, n]) => (
+            {([["inbox", "Inbox", counts ? counts.action + counts.follow : 0], ...(leadsOn ? [["leads", "Leads", leadsReady] as const] : []), ["review", "Review", counts?.review ?? 0], ["todos", "To-dos", counts?.todos ?? 0], ["rules", "Rules", data?.rules.filter((r) => r.state === "proposed").length ?? 0]] as const).map(([key, label, n]) => (
               <button key={key} role="tab" type="button" aria-selected={page === key} onClick={() => setPage(key)}>{label} <span className={s.n}>{n}</span></button>
             ))}
           </div>
+          <button type="button" role="switch" aria-checked={leadsOn} className={s.leadswitch} onClick={() => switchLeads(!leadsOn)} title="One prepared card per new lead, beside the inbox. Nothing is sent until you press Send.">
+            <i aria-hidden /><span>Lead cards</span>
+          </button>
           <div className={s.scan} title="Relay reads new Gmail and sorts it about every 10 minutes">
             <span className={cx(s.pulse, stale && s.stale)} />
             <span>{freshness}</span>
           </div>
         </div>
 
-        <div className={cx(s.card, s.score)}>
+        {page !== "leads" && <div className={cx(s.card, s.score)}>
           <div className={s.meter}>
             <div className={s.ring}><svg viewBox="0 0 58 58"><circle cx="29" cy="29" r="25" stroke="var(--soft)" /><circle cx="29" cy="29" r="25" stroke="var(--blue)" strokeDasharray={ring} strokeDashoffset={ring * (1 - pct / 100)} /></svg><em className={s.num}>{pct}%</em></div>
             <div><b>Today</b><span>{handled} of {total} done</span></div>
@@ -188,11 +203,18 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
           <div><b className={s.num}>{counts?.review ?? 0}</b><span>In review</span></div>
           <div><b className={s.num}>{duration(data?.avgReplyMinutes ?? null)}</b><span>Avg. reply time</span></div>
           <div><b className={s.num}><span className={s.dot} />{score}</b><span>Relay score</span></div>
-        </div>
+        </div>}
 
         {error && <p className={s.error} role="alert">{error}</p>}
         {!data && !error && <p className={s.muted} role="status">Loading Relay…</p>}
         {data && page === "inbox" && <Inbox data={data} tab={tab} setTab={setTab} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenCompany={onOpenCompany} onDrafted={() => setPage("review")} />}
+        {page === "leads" && leadsOn && (
+          <LeadCards data={leads.data} error={leads.error} reload={leads.reload} say={say} onInbox={() => setPage("inbox")}
+            onReview={() => { setPage("review"); void load(tab); }}
+            // The outcome watcher reads a missing draft as sent, so the draft has to be on the page before it is watched.
+            onQueued={async (draftId, to) => { await load(tab); setSending((m) => ({ ...m, [draftId]: to })); }}
+            onUndone={(draftId) => { setSending((m) => Object.fromEntries(Object.entries(m).filter(([id]) => id !== draftId))); void load(tab); }} />
+        )}
         {data && page === "review" && <Review data={data} reload={() => load(tab)} say={say} onBack={() => setPage("inbox")} sending={sending} startSend={startSend} undoSend={undoSend} />}
         {data && page === "rules" && <Rules data={data} reload={() => load(tab)} say={say} />}
         {data && page === "todos" && <Tasks tasks={data.todos} scheduled={data.scheduled ?? []} reload={() => load(tab)} say={say} onOpenListing={onOpenListing} onOpenMailMessage={onOpenMailMessage} onDrafted={() => setPage("review")} />}

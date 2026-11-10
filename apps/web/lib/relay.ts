@@ -286,7 +286,7 @@ export async function askAgent(system: string, user: string, timeoutMs = 240_000
   return ((await response.json()) as { choices?: { message?: { content?: string } }[] }).choices?.[0]?.message?.content ?? "";
 }
 
-function parseJson(content: string): Record<string, unknown> {
+export function parseJson(content: string): Record<string, unknown> {
   const match = content.match(/\{[\s\S]*\}/);
   if (!match) throw new RelayError(502, "The assistant's draft could not be read. Try again.");
   try { return JSON.parse(match[0]) as Record<string, unknown>; } catch { throw new RelayError(502, "The assistant's draft could not be read. Try again."); }
@@ -415,7 +415,7 @@ async function withDealInfo(items: RelayItem[]): Promise<RelayItem[]> {
 }
 
 /** Dismantlers among these senders, by the person's company or their company's email domain (never a personal domain). */
-async function dismantlersOf(emails: string[]): Promise<Map<string, RelayDismantler>> {
+export async function dismantlersOf(emails: string[]): Promise<Map<string, RelayDismantler>> {
   const list = [...new Set(emails.map((e) => e.toLowerCase().trim()))];
   if (!list.length) return new Map();
   const domains = list.map((e) => e.split("@")[1] ?? "").filter((d) => d && !isPersonalDomain(d));
@@ -811,10 +811,10 @@ export async function finaliseJobs(ownerId: string): Promise<void> {
   }
 }
 
-type NewDraft = { identity: ReplyIdentity; to: string[]; ccThread: boolean; thread: string | null; subject: string; body: string };
+export type NewDraft = { identity: ReplyIdentity; to: string[]; ccThread: boolean; thread: string | null; subject: string; body: string };
 
 /** Creates a mail_message draft through the mail CLI, so threading, the identity signature and content policy apply. */
-async function createMailDraft(d: NewDraft): Promise<string> {
+export async function createMailDraft(d: NewDraft): Promise<string> {
   // --sign: supply@ and buy@ sign only these one-to-one emails, never their broadcasts and notices.
   const args = ["draft", "--identity", d.identity, "--transport", "gmail", "--purpose", "personal", "--sign", "--to", d.to.join(","),
     `--subject=${d.subject}`, `--body=${d.body}`, `--html=${textToHtml(d.body)}`];  // the CLI wraps it with the signature in Gmail-native markup
@@ -836,7 +836,7 @@ async function createMailDraft(d: NewDraft): Promise<string> {
 // ---------- review ----------
 
 /** Drops an item's unsent drafts; a dropped draft's send-later is cancelled with it, so it can never go out. */
-const SKIP_DRAFTS_SQL = `with s as (update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail') returning mail_message_id)
+export const SKIP_DRAFTS_SQL = `with s as (update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail') returning mail_message_id)
   update mail_message set personalization = personalization - 'scheduled_send' where id in (select mail_message_id from s) and state = 'draft' and personalization ? 'scheduled_send'`;
 
 type DraftRow = { id: string; item_id: string; role: "primary" | "follow"; position: number; title: string; why: string; state: RelayDraftView["state"]; source_note: string; agent_log: unknown; background: unknown; mail_message_id: string | null; gmail_draft_id: string | null };

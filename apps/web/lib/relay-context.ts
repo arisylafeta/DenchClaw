@@ -33,7 +33,7 @@ const quiet = <T>(rows: Promise<T[]>) => rows.catch(() => [] as T[]);
 
 /** The text of the files on the thread's newest messages, from relay_attachments.py (read-only Gmail), and whether it
  * missed any. Null when it failed. The reader stops itself inside a minute; the timeout here is the backstop. */
-async function threadFiles(messages: PackThreadMessage[]): Promise<{ files: PackFile[]; missed: boolean } | null> {
+export async function threadFiles(messages: PackThreadMessage[]): Promise<{ files: PackFile[]; missed: boolean } | null> {
   const withFiles = messages.filter((m) => m.has_files).slice(0, 6);
   if (!withFiles.length) return { files: [], missed: false };
   try {
