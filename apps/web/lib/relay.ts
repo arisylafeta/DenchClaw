@@ -334,7 +334,7 @@ async function voiceFor(ownerId: string, item: Pick<RelayItem, "situation" | "co
   }
 }
 
-async function activeGuide(ownerId: string): Promise<string | null> {
+export async function activeGuide(ownerId: string): Promise<string | null> {
   try {
     const [row] = await queryPg<{ guide: string }>("select guide from relay_voice where owner_id = $1::uuid and active", [ownerId]);
     return row?.guide ?? null;

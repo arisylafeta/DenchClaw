@@ -10,7 +10,8 @@ import c from "./relay-lead-card.module.css";
 /**
  * Relay lead cards: one prepared card per new seller or buyer email. The card shows what they sent, what the reply asks
  * for, and the reply itself, put together from fixed parts and Alex's own answers (`assembleLead`). A blue question is
- * something they asked that only Alex can answer; Send waits for it. Nothing here writes a sentence of its own.
+ * something they asked that only Alex can answer; Send waits for it. Nothing here writes a sentence of its own, but for
+ * "Add & polish", which has Relay write out the gist he typed and shows it in the reply for him to check.
  */
 
 type Say = (text: string, undo?: () => void, action?: undefined, until?: number) => void;
@@ -53,27 +54,59 @@ export function useLeadCards(on: boolean) {
 
 // ---------------------------------------------------------------- one card
 
-/** A blue question: something they asked that only Alex can answer. He picks a wording, writes his own, or leaves it out. */
-function Question({ block, onAnswer }: { block: Extract<LeadBlock, { kind: "question" }>; onAnswer: (text: string | null, remember: boolean) => void }) {
-  const [writing, setWriting] = useState(!block.options.length);
-  const [own, setOwn] = useState("");
+type QuestionProps = {
+  block: Extract<LeadBlock, { kind: "question" }>;
+  /** What the box starts with: the answer he is changing. */
+  initial?: string;
+  onAnswer: (text: string | null, remember: boolean, polished?: boolean) => void;
+  /** His gist, written out in full in his style. Rejects with the reason when Relay can't. */
+  onPolish: (gist: string) => Promise<string>;
+};
+
+/** A blue question: something they asked that only Alex can answer. He picks a wording, writes his own, or leaves it out.
+ * "Add & polish" takes the gist he typed and puts it in the reply written out in full. */
+function Question({ block, initial, onAnswer, onPolish }: QuestionProps) {
+  const [writing, setWriting] = useState(!block.options.length || !!initial);
+  const [own, setOwn] = useState(initial ?? "");
   const [remember, setRemember] = useState(block.remember);
+  const [polishing, setPolishing] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const typed = cleanAnswer(own);
+  const polish = async () => {
+    setPolishing(true);
+    setProblem(null);
+    try {
+      const text = await onPolish(typed);
+      if (mounted.current) onAnswer(text, remember && block.remember, true);
+    } catch (err) {
+      if (mounted.current) setProblem(err instanceof Error ? err.message : "Relay couldn't polish that. Your own words are still in the box.");
+    } finally {
+      if (mounted.current) setPolishing(false);
+    }
+  };
   return (
     <div className={c.q} role="group" aria-label={block.prompt}>
       <span className={c.qprompt}>{block.prompt}</span>
       <span className={c.qquote}>“{block.quote}”</span>
       <div className={c.opts}>
         {block.options.map((o) => (
-          <button key={o.line} type="button" className={c.pill} title={o.line} onClick={() => onAnswer(o.line, remember && block.remember)}>{o.label}</button>
+          <button key={o.line} type="button" className={c.pill} title={o.line} disabled={polishing} onClick={() => onAnswer(o.line, remember && block.remember)}>{o.label}</button>
         ))}
         {!writing && <button type="button" className={cx(c.pill, c.quiet)} onClick={() => setWriting(true)}>Write my own</button>}
-        <button type="button" className={cx(c.pill, c.quiet)} onClick={() => onAnswer(null, false)}>Leave it out</button>
+        <button type="button" className={cx(c.pill, c.quiet)} disabled={polishing} onClick={() => onAnswer(null, false)}>Leave it out</button>
       </div>
       {writing && (
         <>
-          <textarea className={c.own} value={own} onChange={(e) => setOwn(e.target.value)} placeholder="Your answer, as it should read in the reply" aria-label="Your answer" />
-          <div className={c.opts}><button type="button" className={c.use} disabled={!typed} onClick={() => onAnswer(typed, remember && block.remember)}>Use this</button></div>
+          <textarea className={c.own} value={own} readOnly={polishing} onChange={(e) => { setOwn(e.target.value); setProblem(null); }} placeholder="Your answer as it should read, or just the gist of it" aria-label="Your answer" />
+          <div className={c.opts}>
+            <button type="button" className={c.use} disabled={!typed || polishing} onClick={() => onAnswer(typed, remember && block.remember)}>Use this</button>
+            <button type="button" className={c.polish} disabled={typed.length < 3 || polishing} aria-busy={polishing}
+              title="Relay writes your point out in full, in your style, and puts it in the reply. It adds nothing you didn't say. Check it before you send."
+              onClick={() => void polish()}>{polishing ? "Polishing…" : "Add & polish"}</button>
+          </div>
+          {problem && <span className={c.warnline} role="alert">{problem}</span>}
         </>
       )}
       <div className={c.qnote}>
@@ -108,12 +141,21 @@ export function LeadCard({ card, answers, state, onState, onSend, onEdit, onSkip
   const name = data.firstName ?? who.name;
 
   const toggleAsk = (key: string) => onState({ ...state, off: state.off.includes(key) ? state.off.filter((k) => k !== key) : [...state.off, key] });
-  const answer = (id: string, text: string | null, remember: boolean) => onState({ ...state, picks: { ...state.picks, [id]: { text, remember } } });
+  // A polished answer comes back after a wait: it is added to the choices as they are then, not as they were on the click.
+  const latest = useRef(state);
+  latest.current = state;
+  const answer = (id: string, text: string | null, remember: boolean, polished?: boolean) =>
+    onState({ ...latest.current, picks: { ...latest.current.picks, [id]: { text, remember, ...(text && polished ? { polished: true } : {}) } } });
+  /** The answer being changed, so the question opens with it in the box. */
+  const [changing, setChanging] = useState<Record<string, string>>({});
   /** Back to the blue question, whether the line was a saved answer or one picked on this card. */
-  const change = (id: string) => {
+  const change = (id: string, text = "") => {
     const { [id]: _dropped, ...picks } = state.picks;
+    setChanging((was) => ({ ...was, [id]: text }));
     onState({ ...state, picks, reopened: answers[id] ? [...new Set([...state.reopened, id])] : state.reopened });
   };
+  const polish = (id: string, gist: string) =>
+    api<{ text: string }>(`/api/relay/cards/${card.id}/polish`, { method: "POST", body: { question: id, text: gist } }).then((r) => r.text);
   const quoteOf = (id: string) => data.asked.find((a) => questionId(a) === id)?.quote ?? data.other.find((o) => o.id === id)?.quote ?? "";
   const leftOut = Object.entries(state.picks).filter(([, pick]) => !pick.text).map(([id]) => id);
 
@@ -159,19 +201,22 @@ export function LeadCard({ card, answers, state, onState, onSend, onEdit, onSkip
         <span className={c.label}>Your reply · from {card.identity ?? "alex"}@</span>
         <span className={c.to}>To {who.email}{card.cc.length > 0 && <> · <b>Cc {card.cc.join(", ")}</b></>}</span>
         {reply.blocks.map((block, i) => {
-          if (block.kind === "question") return <Question key={block.id} block={block} onAnswer={(text, remember) => answer(block.id, text, remember)} />;
+          if (block.kind === "question") return <Question key={block.id} block={block} initial={changing[block.id]} onAnswer={(text, remember, polished) => answer(block.id, text, remember, polished)} onPolish={(gist) => polish(block.id, gist)} />;
           if (block.kind === "asks") return <div key={`asks-${i}`}><p>{block.intro}</p>{block.bullets.length > 0 && <ul>{block.bullets.map((b) => <li key={b}>{b}</li>)}</ul>}</div>;
           const own = block.spans.filter((span) => span.answer);
           return (
             <div key={`para-${i}`} style={{ display: "contents" }}>
               <p>{block.spans.map((span) => span.text).join(" ")}</p>
-              {own.map((span) => (
-                <span key={span.answer!.id} className={c.note}>
-                  {span.answer!.saved ? "Using your saved answer" : state.picks[span.answer!.id]?.remember ? "Your answer · saved when you send" : "Your answer · this reply only"}
-                  <span aria-hidden>·</span>
-                  <button type="button" onClick={() => change(span.answer!.id)}>Change</button>
-                </span>
-              ))}
+              {own.map((span) => {
+                const pick = state.picks[span.answer!.id];
+                return (
+                  <span key={span.answer!.id} className={c.note}>
+                    {span.answer!.saved ? "Using your saved answer" : `${pick?.polished ? "Polished from your words" : "Your answer"} · ${pick?.remember ? "saved when you send" : "this reply only"}`}
+                    <span aria-hidden>·</span>
+                    <button type="button" onClick={() => change(span.answer!.id, span.text)}>Change</button>
+                  </span>
+                );
+              })}
             </div>
           );
         })}

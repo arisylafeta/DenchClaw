@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleLead, asksFor, checkLeadReply, cleanAnswer, cleanLeadState, EMPTY_STATE, leadChips, leadFirstName, numbersKnown, priceWarning, questionId, quoteIn, verifyLead,
+import { assembleLead, asksFor, checkLeadReply, cleanAnswer, cleanLeadState, EMPTY_STATE, leadChips, leadFirstName, numbersKnown, priceWarning, questionId, quoteIn, verifyLead, verifyPolish,
   type LeadData, type LeadState } from "./relay-lead-core";
 
 // A made-up seller lead in the shape of the real ones: a broker with a lot overseas, three standard questions.
@@ -316,6 +316,10 @@ describe("cleanLeadState", () => {
     expect(cleaned).toEqual({ off: ["price"], reopened: ["non_exclusive"], picks: { non_exclusive: { text: "Yes, happy to.", remember: true }, how_we_work: { text: null, remember: false } } });
     expect(cleanLeadState(null, data)).toEqual(EMPTY_STATE);
   });
+  it("keeps the mark on an answer Relay worded, and only on one that has text", () => {
+    const cleaned = cleanLeadState({ picks: { non_exclusive: { text: "Yes, that works for us.", polished: true }, how_we_work: { text: " ", polished: true } } }, data);
+    expect(cleaned.picks).toEqual({ non_exclusive: { text: "Yes, that works for us.", remember: false, polished: true }, how_we_work: { text: null, remember: false } });
+  });
   it("gives the same reply for what the page holds and what the server keeps", () => {
     const typed = { off: [], reopened: [], picks: { non_exclusive: { text: cleanAnswer("Yes,   that works\nfor us."), remember: true } } };
     expect(assembleLead(data, cleanLeadState(typed, data), {}).body).toBe(assembleLead(data, typed, {}).body);
@@ -325,5 +329,40 @@ describe("cleanLeadState", () => {
     const sender = { name: "Jordan Reyes", email: "jordan@northgate.example" };
     expect(checkLeadReply(reply, data, sender)).toContain("A blue question is still unanswered.");
     expect(checkLeadReply(reply, data, sender, true)).toEqual([]);
+  });
+});
+
+describe("verifyPolish", () => {
+  const gist = "yes can check network, nothing right now, will come back if something turns up";
+  const polish = (answer: unknown, from = gist) => verifyPolish({ answer }, from, EMAIL);
+  it("keeps a wording that says what the gist says", () => {
+    expect(polish("Yes, I can check our network.\n I have nothing that fits right now, but I will come back to you if something turns up."))
+      .toBe("Yes, I can check our network. I have nothing that fits right now, but I will come back to you if something turns up.");
+  });
+  it("takes a number from the gist or their email, and no other", () => {
+    expect(polish("We can take all 1,200 modules.")).toBe("We can take all 1,200 modules.");
+    expect(polish("We work with 40 buyers across the region.", "we have 40 buyers")).toBe("We work with 40 buyers across the region.");
+    expect(polish("We work with 40 buyers across the region.")).toBeNull();
+    expect(polish("I will come back to you within two weeks.")).toBeNull();
+    expect(polish("I will come back to you by Friday.")).toBeNull();
+    expect(polish("I will come back to you by Friday.", "will reply by friday")).toBe("I will come back to you by Friday.");
+    expect(polish("The site has to be clear by the end of March, which works for us.")).toBe("The site has to be clear by the end of March, which works for us.");
+  });
+  it("names money only when Alex did", () => {
+    expect(polish("Yes, and we would pay in pounds on collection.")).toBeNull();
+    expect(polish("Yes, we pay in pounds on collection.", "yes we pay in pounds on collection")).toBe("Yes, we pay in pounds on collection.");
+  });
+  it("drops a blank, a greeting, a sign-off and anything too short or too long", () => {
+    expect(polish("Yes, I can check with [NAME] this week.")).toBeNull();
+    expect(polish("Hi Jordan, yes, I can check our network.")).toBeNull();
+    expect(polish("Thanks for asking. Yes, I can check our network.")).toBeNull();
+    expect(polish("Yes, I can check our network. Best regards, Alex")).toBeNull();
+    expect(polish("Yes.")).toBeNull();
+    expect(polish("Yes, I can check. ".repeat(60))).toBeNull();
+    expect(verifyPolish("Yes, I can check our network.", gist, EMAIL)).toBeNull();
+    expect(verifyPolish({ answer: 7 }, gist, EMAIL)).toBeNull();
+  });
+  it("turns a dash into a comma and drops quote marks around the answer", () => {
+    expect(polish("“Yes, I can check our network — nothing fits right now.”")).toBe("Yes, I can check our network, nothing fits right now.");
   });
 });

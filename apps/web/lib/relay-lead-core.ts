@@ -1,8 +1,10 @@
 /** Relay lead cards, the pure part: what a first reply to a new seller or buyer asks for, and how the reply is put
- * together. No sentence in the reply is written by the model. It is a greeting, a fixed thanks line, Alex's own answers
+ * together. No sentence in the reply is the model's own. It is a greeting, a fixed thanks line, Alex's own answers
  * to what they asked (picked or typed once, then used word for word), one fixed bullet per deal fact still missing, and
  * the close. The model only reads their email into facts and questions, and `verifyLead` keeps a fact or a question
- * only when its quote is found in the email. The ask list follows Matcha's intake reference (the bulk deal playbook). */
+ * only when its quote is found in the email. The one exception is asked for by Alex: "Add & polish" writes the gist he
+ * typed out in full, and `verifyPolish` keeps it only when it adds no figure he did not give.
+ * The ask list follows Matcha's intake reference (the bulk deal playbook). */
 
 export type LeadSide = "seller" | "buyer";
 export type LeadUnit = "cells" | "modules" | "packs";
@@ -31,8 +33,8 @@ export type LeadData = {
   email: LeadEmail;
 };
 
-/** text null: Alex chose to leave the question out of this reply. */
-export type LeadPick = { text: string | null; remember?: boolean };
+/** text null: Alex chose to leave the question out of this reply. polished: the wording is Relay's, from his gist. */
+export type LeadPick = { text: string | null; remember?: boolean; polished?: boolean };
 export type LeadState = { off: string[]; picks: Record<string, LeadPick>; reopened: string[] };
 export const EMPTY_STATE: LeadState = { off: [], picks: {}, reopened: [] };
 
@@ -279,6 +281,29 @@ export function leadChips(facts: LeadFact[]): string[] {
 /** One of Alex's answers as it goes into the reply: a single run of text, no line breaks or control characters. */
 export const cleanAnswer = (text: string) => text.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 1200);
 
+const MONEY_WORD = /[€£$]|\b(?:eur|gbp|usd|euros?|pounds?|dollars?|quid|pence)\b/i;
+/** A number, a day or a month in words: as much a figure as one in digits. ("One" and "may" are too common as plain words.) */
+const FIGURE_WORD = /\b(?:two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|forty|fifty|hundred|thousand|million|dozen|couple|mon|tues|wednes|thurs|fri|satur|sun)(?:day)?s?\b|\b(?:january|february|march|april|june|july|august|september|october|november|december|today|tonight|tomorrow)\b/gi;
+
+/**
+ * "Add & polish": the gist Alex typed, written out by the model as the answer that goes into the reply. It is kept
+ * only when it is still his point and nothing more: every number, day and month in it is in his gist or their email, it names money
+ * only if he did, it has no blank left to fill, and it does not greet or sign off (the rest of the reply does that).
+ * Null: not usable, and his own words stay as they were.
+ */
+export function verifyPolish(raw: unknown, gist: string, emailText: string): string | null {
+  const answer = raw && typeof raw === "object" ? (raw as Record<string, unknown>).answer : null;
+  const text = cleanAnswer(typeof answer === "string" ? answer : "").replace(/\s[—–]\s|—/g, ", ").replace(/^["“]|["”]$/g, "").trim();
+  if (text.length < 8 || text.length > 700) return null;
+  if (/\[[^\]]*\]/.test(text)) return null;
+  const given = `${gist}\n${emailText}`;
+  const words = new Set(given.toLowerCase().match(/\p{L}+/gu) ?? []);
+  if (!numbersKnown(text, given) || (text.match(FIGURE_WORD) ?? []).some((word) => !words.has(word.toLowerCase()))) return null;
+  if (MONEY_WORD.test(text) && !MONEY_WORD.test(gist)) return null;
+  if (/^(?:hi|hello|hey|dear|thanks|thank you)\b/i.test(text) || /\b(?:regards|best wishes|many thanks|cheers|alex)[,.!]?$/i.test(text)) return null;
+  return text;
+}
+
 /** Alex's choices as the card can hold them: only this card's asks and questions, answers cleaned. The page and the
  * server both pass choices through this, so the reply he sees is the reply that is saved. */
 export function cleanLeadState(input: unknown, data: LeadData): LeadState {
@@ -289,8 +314,9 @@ export function cleanLeadState(input: unknown, data: LeadData): LeadState {
   const picks: Record<string, LeadPick> = {};
   for (const [id, pick] of Object.entries(raw.picks && typeof raw.picks === "object" ? raw.picks as Record<string, unknown> : {})) {
     if (!ids.has(id) || !pick || typeof pick !== "object") continue;
-    const p = pick as { text?: unknown; remember?: unknown };
-    picks[id] = { text: (typeof p.text === "string" && cleanAnswer(p.text)) || null, remember: p.remember === true };
+    const p = pick as { text?: unknown; remember?: unknown; polished?: unknown };
+    const text = (typeof p.text === "string" && cleanAnswer(p.text)) || null;
+    picks[id] = { text, remember: p.remember === true, ...(text && p.polished === true ? { polished: true } : {}) };
   }
   return { off: keys(raw.off, asks), picks, reopened: keys(raw.reopened, ids) };
 }
