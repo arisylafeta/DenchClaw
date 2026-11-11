@@ -12,6 +12,7 @@ import { isSenderKey, SENDERS } from "@/lib/relay-senders";
 import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
 import { Lanes, useSuggestions } from "./relay-lanes";
 import { LeadCards, useLeadCards } from "./relay-lead-card";
+import { JulesFlag } from "./relay-jules-flag";
 import { api, colour, cx, firstName, initials } from "./relay-ui";
 import s from "./relay.module.css";
 
@@ -373,6 +374,8 @@ type ItemActions = ReturnType<typeof useItemActions>;
 function ThreadDetail({ item: i, tab, act, onOpenCompany, inLane }: { item: RelayItem; tab: RelayTab; act: ItemActions; onOpenCompany?: (id: string) => void; inLane?: boolean }) {
   return (
     <div className={cx(s.thread, inLane && s.flat)}>
+      {/* In the lanes the row above already says it. */}
+      {!inLane && i.jules && <div style={{ marginBottom: 6 }}><JulesFlag jules={i.jules} /></div>}
       {i.last_message && (
         <div className={s.lastmail}>
           <div className={s.mh}><b>{i.last_message.from_name || i.last_message.from_email}</b> · {when(i.last_message.at)} · {tab === "follow" ? "your last email, no reply since" : "their latest email"}</div>
@@ -477,7 +480,7 @@ function Inbox({ data, tab, setTab, only, onBack, reload, say, onOpenListing, on
               <div key={i.id} className={cx(s.row, isOpen && s.open)}>
                 <div className={cx(s.grid, s.rmain)} role="button" tabIndex={0} aria-expanded={isOpen} onClick={toggle} onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggle(); } }}>
                   <div className={s.who}><div className={s.av} style={{ background: colour(name) }}>{initials(name)}</div><div style={{ minWidth: 0 }}><b>{name}</b><span>{i.company || i.counterpart_email}</span></div></div>
-                  <div className={s.sum}><b>{i.headline}</b><span>{i.context}</span></div>
+                  <div className={s.sum}><b>{i.headline}</b><span>{i.context}</span>{i.jules && <div style={{ marginTop: 3 }}><JulesFlag jules={i.jules} compact /></div>}</div>
                   <div className={s.dealc}>
                     {i.bulk_listing_id
                       ? <button type="button" className={s.deal} title={`Open deal: ${i.deal_label ?? ""}`} onClick={(e) => { e.stopPropagation(); onOpenListing?.(i.bulk_listing_id!, i.deal_label ?? undefined); }}>

@@ -1,0 +1,19 @@
+/* The "Jules reply" flag. It sits in the lanes and in the table, so it carries its own colours; the dark set mirrors the light. */
+.jules {
+  --j-tag: #5b21b6; --j-tag-bg: #f1ecff; --j-ok: #166534; --j-ok-bg: #e7f6ec; --j-amber: #92400e; --j-amber-bg: #fef3c7;
+  --j-grey: #4b5563; --j-grey-bg: #f3f4f6; --j-ink2: #4b5563; --j-link: #2449c9;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; font-family: Inter, system-ui, sans-serif;
+}
+:global(.dark) .jules {
+  --j-tag: #c9b8ff; --j-tag-bg: #241d3f; --j-ok: #6fdc9b; --j-ok-bg: #16301f; --j-amber: #f5c56b; --j-amber-bg: #33290f;
+  --j-grey: #a5abb6; --j-grey-bg: #1f232b; --j-ink2: #a5abb6; --j-link: #8eb0ff;
+}
+.compact { gap: 4px; }
+/* Two classes deep, so a row's own rule for its spans does not reach the chips. */
+.jules .chip { display: inline-block; margin: 0; overflow: visible; font-size: 11.5px; font-weight: 600; line-height: 1.35; border-radius: 999px; padding: 3px 7px; white-space: nowrap; color: var(--j-tag); background: var(--j-tag-bg); }
+.jules .chip.ok { color: var(--j-ok); background: var(--j-ok-bg); }
+.jules .chip.amber { color: var(--j-amber); background: var(--j-amber-bg); }
+.jules .chip.grey { color: var(--j-grey); background: var(--j-grey-bg); font-weight: 500; }
+.jules .line { display: block; margin: 0; overflow: visible; flex: 1 1 100%; font-size: 12px; line-height: 1.5; color: var(--j-ink2); overflow-wrap: anywhere; }
+.link { font-size: 12px; font-weight: 600; color: var(--j-link); text-decoration: none; white-space: nowrap; }
+.link:hover { text-decoration: underline; text-underline-offset: 3px; }

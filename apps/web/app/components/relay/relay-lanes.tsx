@@ -7,6 +7,7 @@ import type { LeadCards as LeadCardList, LeadCardView } from "@/lib/relay-lead";
 import { assembleLead, leadChips } from "@/lib/relay-lead-core";
 import type { Suggestions } from "@/lib/relay-suggest";
 import { api, colour, cx, initials } from "./relay-ui";
+import { JulesFlag } from "./relay-jules-flag";
 import n from "./relay-lanes.module.css";
 
 /**
@@ -107,6 +108,7 @@ function LeadRow({ card, item, first, answers, act, onLead, reloadCards, say }: 
                 {choices > 0 && <span className={cx(n.chip, n.blue)}>{choices} {choices === 1 ? "choice" : "choices"} for you</span>}
                 {card.deal_label && <span className={cx(n.chip, n.ok)}>Deal linked</span>}
                 {leadChips(named.rest).slice(0, 2).map((fact) => <span key={fact} className={cx(n.chip, n.grey)}>{fact}</span>)}
+                <JulesFlag jules={item?.jules} compact />
               </>
             ) : card.status === "preparing" ? <span className={cx(n.chip, n.grey)}>Relay is reading this email and drafting the reply</span>
               : <span className={cx(n.chip, n.amber)}>{card.error ?? "Relay couldn't read this email"}</span>}
@@ -157,6 +159,7 @@ function ReplyRow({ item: i, view, queued, act, detail, onOpenListing }: {
           <span>{i.deal_label || "Deal"}</span>
         </button>
       )}
+      <JulesFlag jules={i.jules} />
       {view?.status === "ready" && view.ask && <div className={n.sub}>{view.ask}</div>}
       <div className={n.pills}>
         {i.can_ask && <button type="button" className={n.pill} disabled={busy} title="Drafts the playbook's ask for what the deal is still missing. You read it in Review and send." onClick={() => void act.draftAsk(i)}>Ask for what the deal is missing</button>}

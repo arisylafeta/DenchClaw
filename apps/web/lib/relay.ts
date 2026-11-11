@@ -18,6 +18,8 @@ import { dealResultFits, dealSummaryText, isPersonalDomain, ownsDeal, replyIdent
 import { SENDERS, senderRefusal, type SenderKey } from "./relay-senders";
 import { contextPack, HAS_FILES_SQL } from "./relay-context";
 import { knownBackground, NO_PACK, SINCE_NOTE, sinceFrom, stripQuoted, type Pack, type PackSource } from "./relay-context-core";
+import { julesReplies } from "./relay-jules";
+import type { JulesReply } from "./relay-jules-core";
 import { askInstruction, askLabel, buildChecklist, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
 
 const run = promisify(execFile);
@@ -67,6 +69,8 @@ export type RelayItem = {
   relay_link?: boolean;
   /** The sender's dismantler company in the CRM and its listing permission. One or a few packs go to the marketplace, not a bulk deal. */
   dismantler?: RelayDismantler | null;
+  /** Their newest email is an answer to a Jules email, and what the job that reads those made of it. Set on list views only. */
+  jules?: JulesReply | null;
 };
 
 export type RelayDismantler = { phase: DismantlerPhase; company_id: string; name: string };
@@ -402,6 +406,7 @@ async function withDealInfo(items: RelayItem[]): Promise<RelayItem[]> {
     [threads, RELAY_LINK]).catch(() => []) : [];
   const handLinked = new Set(relayLinks.map((r) => `${r.thread_id} ${r.bulk_listing_id}`));
   const dismantlers = await dismantlersOf(items.map((i) => i.counterpart_email ?? "").filter(Boolean)).catch(() => new Map<string, RelayDismantler>());
+  const jules = await julesReplies(threads).catch(() => new Map<string, JulesReply>());
   return items.map((i) => {
     const box = i.mail_thread_id ? byThread.get(i.mail_thread_id) : undefined;
     const inbox = threadInbox(!!box?.supply, !!box?.buy, i.contact_type);
@@ -410,7 +415,7 @@ async function withDealInfo(items: RelayItem[]): Promise<RelayItem[]> {
     // A dismantler writing as a buyer is a buyer: the dismantler channel is for their packs, not their purchases.
     const dismantler = i.contact_type === "buyer" || inbox === "buy" ? null : dismantlers.get((i.counterpart_email ?? "").toLowerCase()) ?? null;
     const relay_link = !!i.bulk_listing_id && handLinked.has(`${i.mail_thread_id} ${i.bulk_listing_id}`);
-    return { ...i, inbox, deal_action: suggestDealAction(i, inbox, job), deal_job: job, can_ask, dismantler, relay_link };
+    return { ...i, inbox, deal_action: suggestDealAction(i, inbox, job), deal_job: job, can_ask, dismantler, relay_link, jules: (i.mail_thread_id && jules.get(i.mail_thread_id)) || null };
   });
 }
 
