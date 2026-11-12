@@ -8,6 +8,9 @@ import { PAID_CURRENCIES, PAID_FACT_LABEL, isPaidStage, missingPaidFacts } from 
 import { DetailSheet, ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "./trade-ui";
 import { MailDraftView } from "../crm/inbox/mail-draft-view";
 import { rowFocus } from "./demand-page";
+import type { OfferClose } from "@/lib/crm-postgres/bulk-offer-close";
+import type { Margin } from "@/lib/bulk-offer-close";
+import { NextStepBar, QuoteGateNote, TermsBlock } from "./offer-close";
 
 import { BusyRegion, Sh } from "./bt-shimmer";
 
@@ -104,7 +107,7 @@ function OfferList({ offers, error, base, request: requestSide, onUpdated }: {
   offers: OfferRow[] | null; error: string | null; base: string; request: boolean; onUpdated: () => void;
 }) {
   // The open email draft, shown in the side panel over the list.
-  const [draft, setDraft] = useState<{ offerId: string; draftId: string } | null>(null);
+  const [draft, setDraft] = useState<{ offerId: string; draftId: string; plain?: boolean } | null>(null);
   // A send moves the stage, so the open thread is rebuilt from fresh data once the mail is gone.
   const [sentCount, setSentCount] = useState(0);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -158,7 +161,7 @@ function OfferList({ offers, error, base, request: requestSide, onUpdated }: {
                   </span>
                   <span className="shrink-0 text-[11px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={2}>{o.messages > 0 ? `${o.messages} ${o.messages === 1 ? "message" : "messages"}${o.last_message_at ? ` · ${dateOf(o.last_message_at)}` : ""}` : "No messages"}</Sh></span>
                 </button>
-                {!loading && openId === o.id && <ThreadPanel key={`${o.id}-${sentCount}`} base={base} offerId={o.id} request={requestSide} onUpdated={onUpdated} onDraft={(draftId) => setDraft({ offerId: o.id, draftId })} />}
+                {!loading && openId === o.id && <ThreadPanel key={`${o.id}-${sentCount}`} base={base} offerId={o.id} request={requestSide} onUpdated={onUpdated} onDraft={(draftId, plain) => setDraft({ offerId: o.id, draftId, plain })} />}
               </li>
             );
           })}
@@ -169,7 +172,7 @@ function OfferList({ offers, error, base, request: requestSide, onUpdated }: {
       )}
       {draft && (
         <DetailSheet title="Email draft" onClose={() => setDraft(null)}>
-          <MailDraftView draftId={draft.draftId} sendPath={`${base}/${encodeURIComponent(draft.offerId)}/send`}
+          <MailDraftView draftId={draft.draftId} sendPath={draft.plain ? undefined : `${base}/${encodeURIComponent(draft.offerId)}/send`}
             onSent={() => { setSentCount((count) => count + 1); onUpdated(); }} />
         </DetailSheet>
       )}
@@ -179,12 +182,16 @@ function OfferList({ offers, error, base, request: requestSide, onUpdated }: {
 
 /** The open thread inside its offer row: stage, terms, next step, a composer and the messages, each an accordion item. */
 function ThreadPanel({ base, offerId, request: requestSide, onUpdated, onDraft }: {
-  base: string; offerId: string; request: boolean; onUpdated: () => void; onDraft: (draftId: string) => void;
+  base: string; offerId: string; request: boolean; onUpdated: () => void;
+  /** `plain`: a draft that is not this offer's email (the seller re-confirm), sent by the ordinary draft sender. */
+  onDraft: (draftId: string, plain?: boolean) => void;
 }) {
   const url = `${base}/${encodeURIComponent(offerId)}`;
   const [drafting, setDrafting] = useState(false);
   const [offer, setOffer] = useState<OfferRow | null>(null);
   const [thread, setThread] = useState<ThreadEntry[]>([]);
+  /** The quote gate, last day, quantity and margin, read with the offer. */
+  const [close, setClose] = useState<OfferClose | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   /** A lost or declined stage waits here until its reason is written. */
@@ -194,24 +201,25 @@ function ThreadPanel({ base, offerId, request: requestSide, onUpdated, onDraft }
   const [outcomeNote, setOutcomeNote] = useState<string | null>(null);
   /** Paid and Complete wait here until the paid facts are in; "edit" changes them on an offer already paid. */
   const [paidStage, setPaidStage] = useState<"paid" | "complete" | "edit" | null>(null);
-  const apply = (r: { offer: OfferRow; thread?: ThreadEntry[] }) => {
-    setOffer(r.offer); if (r.thread) setThread(r.thread);
+  const apply = (r: { offer: OfferRow; thread?: ThreadEntry[]; close?: OfferClose | null }) => {
+    setOffer(r.offer); if (r.thread) setThread(r.thread); if (r.close !== undefined) setClose(r.close);
   };
-  useEffect(() => { let live = true; request<{ offer: OfferRow; thread: ThreadEntry[] }>(url).then((r) => { if (live) apply(r); }).catch((e) => { if (live) setError(e instanceof Error ? e.message : "Could not load."); }); return () => { live = false; }; }, [url]);
+  const reload = useCallback(async () => apply(await request<{ offer: OfferRow; thread: ThreadEntry[]; close: OfferClose | null }>(url)), [url]);
+  useEffect(() => { let live = true; request<{ offer: OfferRow; thread: ThreadEntry[]; close: OfferClose | null }>(url).then((r) => { if (live) apply(r); }).catch((e) => { if (live) setError(e instanceof Error ? e.message : "Could not load."); }); return () => { live = false; }; }, [url]);
   async function patch(body: Record<string, unknown>) {
     setBusy(true); setError(null);
     try {
       const r = await request<{ offer: OfferRow; noStock?: { marked: string | null; suggestion: string | null } }>(url, { method: "PATCH", body: JSON.stringify(body) });
       setOffer(r.offer);
       setOutcomeNote(r.noStock?.marked ? "The linked stock line is now stale." : r.noStock?.suggestion ?? null);
-      const t = await request<{ offer: OfferRow; thread: ThreadEntry[] }>(url); apply(t); onUpdated();
+      await reload(); onUpdated();
     }
     catch (err) { setError(err instanceof Error ? err.message : "Could not save."); } finally { setBusy(false); }
   }
   /** Builds or reopens the offer email, then shows it in the side panel to edit and send. */
   async function draftEmail() {
     setDrafting(true); setError(null);
-    try { const r = await request<{ draftId: string }>(`${url}/draft`, { method: "POST" }); onDraft(r.draftId); }
+    try { const r = await request<{ draftId: string }>(`${url}/draft`, { method: "POST" }); onDraft(r.draftId); void reload().catch(() => undefined); }
     catch (err) { setError(err instanceof Error ? err.message : "Could not draft the email."); }
     finally { setDrafting(false); }
   }
@@ -222,8 +230,8 @@ function ThreadPanel({ base, offerId, request: requestSide, onUpdated, onDraft }
     <BusyRegion busy={loading} label="Loading thread" className="flex w-full flex-col gap-4 pb-4 pl-12 pr-4">
       <div className="flex items-center gap-3">
         <p className="min-w-0 flex-1 truncate text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={30}>{[current.contact, current.wants].filter(Boolean).join(" · ") || "No contact details yet"}</Sh></p>
-        {offer && (offer.stage === "candidate" || offer.stage === "offered") && (
-          <button type="button" disabled={busy || drafting} onClick={() => void draftEmail()} className={`${rowFocus} ${buttonClass} inline-flex items-center gap-1.5`} style={buttonStyle}>
+        {offer && offer.stage === "offered" && (
+          <button type="button" disabled={busy || drafting || (close?.side === "buyer" && !close.gate?.ok)} onClick={() => void draftEmail()} className={`${rowFocus} ${buttonClass} inline-flex items-center gap-1.5`} style={buttonStyle}>
             <Mail size={13} aria-hidden /> {drafting ? "Preparing…" : "Draft email"}
           </button>
         )}
@@ -241,8 +249,14 @@ function ThreadPanel({ base, offerId, request: requestSide, onUpdated, onDraft }
           {STAGES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </div>
+      {offer && close && <QuoteGateNote close={close} listingId={offer.listing_id} onDraft={(draftId) => onDraft(draftId, true)} onChanged={() => void reload().catch(() => undefined)} />}
+      {offer && !paidStage && !outcomeStage && (
+        <NextStepBar offer={offer} close={close} busy={busy} drafting={drafting} onDraft={() => void draftEmail()}
+          onMove={(to) => void patch({ stage: to })}
+          onPaid={(to) => { if (missingPaidFacts(to, offer).length) { setPaidStage(to); } else { void patch({ stage: to }); } }} />
+      )}
       {offer && paidStage && (
-        <PaidForm offer={offer} stage={paidStage} busy={busy} onCancel={() => setPaidStage(null)}
+        <PaidForm offer={offer} stage={paidStage} busy={busy} margin={close?.margin ?? null} onCancel={() => setPaidStage(null)}
           onSave={(facts) => { const stage = paidStage; setPaidStage(null); void patch(stage === "edit" ? facts : { stage, ...facts }); }} />
       )}
       {offer && !paidStage && isPaidStage(offer.stage) && (
@@ -292,7 +306,9 @@ function ThreadPanel({ base, offerId, request: requestSide, onUpdated, onDraft }
           </select>
         </label>
       )}
-      {terms && <p className="text-[13px]"><span style={{ color: "var(--bt-muted)" }}>Latest terms </span><strong>{terms}</strong></p>}
+      {offer && close ? (
+        <TermsBlock key={`${offer.updated_at}`} offer={offer} close={close} url={url} busy={busy} onSave={(body) => void patch(body)} />
+      ) : terms && <p className="text-[13px]"><span style={{ color: "var(--bt-muted)" }}>Latest terms </span><strong>{terms}</strong></p>}
       <ErrorText error={error} />
       <section aria-label="Thread">
         {offer && thread.length === 0 && <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Nothing yet. Email and WhatsApp with this person appear here once they are linked to a CRM person or email.</p>}
@@ -317,15 +333,18 @@ function paidLine(offer: Offer): string {
 }
 
 /** When it was paid, what was paid, how much was sold and our take. All five are needed for Paid and Complete. */
-function PaidForm({ offer, stage, busy, onSave, onCancel }: {
+function PaidForm({ offer, stage, busy, margin = null, onSave, onCancel }: {
   offer: Offer; stage: "paid" | "complete" | "edit"; busy: boolean;
+  /** The deal's margin: prefills the take (and what was paid), which the person can change. */
+  margin?: Margin | null;
   onSave: (facts: { paidOn: string; paidAmount: number; paidCurrency: string; quantity: number; takeGbp: number }) => void; onCancel: () => void;
 }) {
   const [paidOn, setPaidOn] = useState(offer.paid_on ?? new Date().toISOString().slice(0, 10));
-  const [amount, setAmount] = useState(offer.paid_amount?.toString() ?? "");
+  const priced = margin?.ok ? margin : null;
+  const [amount, setAmount] = useState(offer.paid_amount?.toString() ?? priced?.buyerTotal.toString() ?? "");
   const [currency, setCurrency] = useState(offer.paid_currency ?? offer.terms.currency?.toUpperCase() ?? "GBP");
-  const [quantity, setQuantity] = useState(offer.quantity?.toString() ?? "");
-  const [take, setTake] = useState(offer.take_gbp?.toString() ?? "");
+  const [quantity, setQuantity] = useState(offer.quantity?.toString() ?? priced?.quantity.toString() ?? "");
+  const [take, setTake] = useState(offer.take_gbp?.toString() ?? priced?.takeGbp.toString() ?? "");
   const number = (text: string) => (text.trim() && Number.isFinite(Number(text)) ? Number(text) : null);
   const ready = !!paidOn && number(amount) !== null && number(quantity) !== null && (number(quantity) ?? 0) > 0 && number(take) !== null;
   const field = `${inputClass} w-28 text-[12px]`;
@@ -346,7 +365,12 @@ function PaidForm({ offer, stage, busy, onSave, onCancel }: {
       <label className="flex flex-col gap-0.5 text-[11px]" style={{ color: "var(--bt-muted)" }}>Quantity{offer.terms.unit ? ` (${offer.terms.unit})` : ""}
         <input inputMode="decimal" required value={quantity} onChange={(e) => setQuantity(e.target.value)} className={field} style={inputStyle} /></label>
       <label className="flex flex-col gap-0.5 text-[11px]" style={{ color: "var(--bt-muted)" }}>Our take (£)
-        <input inputMode="decimal" required value={take} onChange={(e) => setTake(e.target.value)} className={field} style={inputStyle} /></label>
+        <input aria-label="Our take" inputMode="decimal" required value={take} onChange={(e) => setTake(e.target.value)} className={field} style={inputStyle} /></label>
+      {offer.take_gbp == null && priced && (
+        <span className="w-full text-[11px]" style={{ color: "var(--bt-muted)" }}>
+          Take prefilled from the margin{priced.approx ? " (approximate: converted at the CRM's fixed rates)" : ""}. Change it if the deal settled differently.
+        </span>
+      )}
       <button type="submit" disabled={busy || !ready} className={`${rowFocus} ${buttonClass}`} style={buttonStyle}>Save</button>
       <button type="button" disabled={busy} className={`${rowFocus} ${buttonClass}`} style={buttonStyle} onClick={onCancel}>Cancel</button>
     </form>

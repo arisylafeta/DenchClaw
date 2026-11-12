@@ -78,6 +78,19 @@ describe("sortLanes", () => {
     expect(lanes.replies.map((i) => i.id)).toEqual(["a"]);
   });
 
+  it("puts an enquiry unanswered past two working hours at the top, across a weekend", () => {
+    // Monday 16 Nov 10:30 London. Friday 17:00's lead has waited 60 + 90 working minutes; Monday 09:00's only 90.
+    const monday = Date.parse("2026-11-16T10:30:00Z");
+    const cards = [card("mon", "ready", "2026-11-16T09:00:00Z"), card("sat", "ready", "2026-11-14T10:00:00Z"), card("fri", "ready", "2026-11-13T17:00:00Z")];
+    const lanes = sortLanes([item("mon"), item("sat"), item("fri")], cards, monday);
+    expect(lanes.leads.map((c) => c.item_id)).toEqual(["fri", "sat", "mon"]);
+    // A newer lead past the goal goes above an older one that is not: Saturday's lead is not late until Monday 11:00.
+    const later = sortLanes([item("mon"), item("sat")], [card("sat", "ready", "2026-11-14T10:00:00Z"), card("mon", "ready", "2026-11-16T08:00:00Z")], Date.parse("2026-11-16T10:30:00Z"));
+    expect(later.leads.map((c) => c.item_id)).toEqual(["sat", "mon"]);
+    const late = sortLanes([item("old"), item("new")], [card("old", "ready", "2026-11-12T16:00:00Z"), card("new", "ready", "2026-11-12T09:00:00Z")], Date.parse("2026-11-12T16:30:00Z"));
+    expect(late.leads.map((c) => c.item_id)).toEqual(["new", "old"]);
+  });
+
   it("leaves out a card whose email is no longer waiting, and keeps the order the emails came in", () => {
     const lanes = sortLanes([item("z"), item("a"), item("m", "deal")], [card("gone", "ready", "2026-11-10T09:00:00Z")]);
     expect(lanes.leads).toEqual([]);
@@ -95,11 +108,13 @@ describe("waited and oldestLead", () => {
     expect(waited(null, now)).toBe("");
     expect(waited("not a date", now)).toBe("");
   });
-  it("finds the lead that has waited longest and says when it is past two hours", () => {
+  it("finds the lead that has waited longest and says when it is past two working hours", () => {
     const cards = [{ item_id: "a", status: "ready", who: { at: "2026-11-10T11:30:00Z" } }, { item_id: "b", status: "ready", who: { at: "2026-11-09T14:00:00Z" } }];
     expect(oldestLead(cards, now)).toEqual({ waited: "22 h", late: true });
     expect(oldestLead(cards.slice(0, 1), now)).toEqual({ waited: "30 min", late: false });
     expect(oldestLead([], now)).toBeNull();
+    // Friday 19:00 to Monday 10:00 is 62 hours on the clock but one working hour: not late.
+    expect(oldestLead([{ item_id: "c", status: "ready", who: { at: "2026-11-13T19:00:00Z" } }], Date.parse("2026-11-16T10:00:00Z"))).toEqual({ waited: "3 d", late: false });
   });
 });
 

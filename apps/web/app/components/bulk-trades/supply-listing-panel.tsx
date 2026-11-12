@@ -21,6 +21,7 @@ import { MatchReservation } from "./match-reservation";
 import { DocumentsTab } from "./documents-tab";
 import { MatchaTab } from "./matcha-tab";
 import { DemandActions } from "./demand-actions";
+import { DealConversation, TeamNotes } from "./deal-history";
 import css from "./demand-header.module.css";
 
 type Context = { person?: PartyPerson | null; mail: ListingMail[] };
@@ -77,6 +78,10 @@ export function SupplyListingPanel({ listing, today, onChanged, onClose, onOpenL
     <SupplyMatchesTab listingId={listing.id} active={tab === "Matches"} onOpenOffers={() => setTab("Offers")} />
     {tab === "Offers" && <OffersTab demandId={listing.id} listingId={listing.id} onChanged={onChanged} />}
     {tab === "Documents" && <DocumentsTab listingId={listing.id} />}
-    {tab === "History" && <DemandActions story section="Activity" activityEndpoint={endpoint} demand={{ id: listing.id, status: listing.status }} today={today} onChanged={onChanged} onClose={onClose} onEdit={() => {}} onOpenTrade={onOpenListing} onOpenSupply={onOpenListing} />}
+    {tab === "History" && <div className="flex w-full flex-col gap-6">
+      <TeamNotes listingId={listing.id} />
+      <DealConversation listingId={listing.id} />
+      <DemandActions story section="Activity" activityEndpoint={endpoint} demand={{ id: listing.id, status: listing.status }} today={today} onChanged={onChanged} onClose={onClose} onEdit={() => {}} onOpenTrade={onOpenListing} onOpenSupply={onOpenListing} />
+    </div>}
   </div>;
 }

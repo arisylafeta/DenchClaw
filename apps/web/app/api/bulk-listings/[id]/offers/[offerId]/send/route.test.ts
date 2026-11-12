@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
   currentUser: vi.fn(), getListing: vi.fn(), offerOutreach: vi.fn(), readMailDraft: vi.fn(),
-  sendDraft: vi.fn(), linkOfferThread: vi.fn(), markOfferSent: vi.fn(),
+  sendDraft: vi.fn(), linkOfferThread: vi.fn(), markOfferSent: vi.fn(), offerGate: vi.fn(),
 }));
+vi.mock("@/lib/crm-postgres/bulk-offer-close", () => ({ offerGate: m.offerGate }));
 vi.mock("@/lib/auth", () => ({ currentUser: m.currentUser, ALLOWED_EMAILS: new Set(["alex@rebattery.io"]) }));
 vi.mock("@/lib/crm-postgres/bulk-listings", () => ({ getListing: m.getListing }));
 vi.mock("@/lib/crm-postgres/bulk-offer-mail", () => ({
@@ -40,9 +41,19 @@ beforeEach(() => {
   m.sendDraft.mockResolvedValue({ sent: true });
   m.linkOfferThread.mockResolvedValue(undefined);
   m.markOfferSent.mockResolvedValue({ moved: true, stage: "offered" });
+  m.offerGate.mockResolvedValue({ side: "buyer", gate: { ok: true, validUntil: "2026-12-03" } });
 });
 
 describe("POST offer send", () => {
+  it("does not send to a buyer once the seller's quote has run out, even from a draft made in date", async () => {
+    m.offerGate.mockResolvedValue({ side: "buyer", gate: { ok: false, validUntil: "2026-11-03", reason: "The seller's quote ran out on 3 Nov. Ask them to confirm it." } });
+    const res = await call(sent);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ sent: false, error: "The seller's quote ran out on 3 Nov. Ask them to confirm it.", reconfirm: true });
+    expect(m.sendDraft).not.toHaveBeenCalled();
+    expect(m.markOfferSent).not.toHaveBeenCalled();
+  });
+
   it("needs an explicit confirmation and the version that was looked at", async () => {
     expect((await call({ updated_at: draft.updated_at })).status).toBe(400);
     expect((await call({ confirm: "yes", updated_at: draft.updated_at })).status).toBe(400);

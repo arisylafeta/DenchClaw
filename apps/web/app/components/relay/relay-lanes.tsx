@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { RelayItem } from "@/lib/relay";
-import { leadTitle, oldestLead, sortLanes, waited, type SuggestAnswer, type SuggestView } from "@/lib/relay-lanes-core";
+import { leadIsLate, leadTitle, oldestLead, sortLanes, waited, type SuggestAnswer, type SuggestView } from "@/lib/relay-lanes-core";
 import type { LeadCards as LeadCardList, LeadCardView } from "@/lib/relay-lead";
 import { assembleLead, leadChips } from "@/lib/relay-lead-core";
 import type { Suggestions } from "@/lib/relay-suggest";
@@ -84,7 +84,10 @@ function LeadRow({ card, item, first, answers, act, onLead, reloadCards, say }: 
   const busy = !!(item && act.busy[item.id]);
   const named = leadTitle(data?.facts ?? [], card.headline || data?.summary || "New email");
   const role = data?.role === "broker" ? "broker for the owner" : data?.role === "owner" ? "owner" : null;
-  const sub = [who(card.who.name, card.who.company), role, item?.inbox ? `to ${item.inbox}@` : null, waited(card.who.at) && `${waited(card.who.at)} ago`].filter(Boolean).join(" · ");
+  const sub = [who(card.who.name, card.who.company), role, item?.inbox ? `to ${item.inbox}@` : null].filter(Boolean).join(" · ");
+  // Past two working hours without an answer: the age shows in red (and the lane already put it on top).
+  const late = leadIsLate(card.who.at);
+  const age = waited(card.who.at);
   const retry = async () => {
     setRetrying(true);
     try { await api(`/api/relay/cards/${card.id}`, { method: "PATCH", body: { retry: true } }); say("Reading it again."); }
@@ -99,7 +102,7 @@ function LeadRow({ card, item, first, answers, act, onLead, reloadCards, say }: 
         <div className={cx(n.av, !data && n.grey)} style={data ? { background: colour(card.who.name) } : undefined} aria-hidden>{initials(card.who.name)}</div>
         <div className={n.body}>
           <div className={n.title}>{named.title}</div>
-          <div className={n.sub}>{sub}</div>
+          <div className={n.sub}>{sub}{age && <>{sub ? " · " : ""}<span className={cx(late && n.ageLate)} title={late ? "Waiting over 2 working hours (Monday to Friday, 9 to 6 London)" : undefined}>{age} ago</span></>}</div>
           <div className={n.chips}>
             {data ? (
               <>

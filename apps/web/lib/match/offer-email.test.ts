@@ -127,6 +127,19 @@ describe("what a buyer may see", () => {
   });
 });
 
+describe("a priced supply offer", () => {
+  it("carries the price sheet's lines in place of price on request, built from the offer's price", () => {
+    const email = supply({ priceLines: "40 x Samsung NMC packs at GBP 2,400 per pack: GBP 96,000\nPrice sheet PS-0a1b2c3d." });
+    expect(email.body).toContain("40 x Samsung NMC packs at GBP 2,400 per pack: GBP 96,000\nPrice sheet PS-0a1b2c3d.");
+    expect(email.body).not.toContain("Price on request.");
+    expect(email.body).toContain("Test data: BMS report supplied.");
+  });
+
+  it("still refuses copy that would carry the seller's price as written", () => {
+    expect(() => supply({ priceLines: "Seller asks EUR 40 per kWh" })).toThrow(OfferEmailRefused);
+  });
+});
+
 describe("the request stock ask", () => {
   it("asks one question about supply and never states a price", () => {
     const email = buildOfferEmail({ kind: "request_stock", key: lot, fields: [], recipientFirstName: "Cameron", location: "Leeds, United Kingdom" });

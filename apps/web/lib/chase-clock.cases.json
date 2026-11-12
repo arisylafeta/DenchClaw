@@ -1,0 +1,19 @@
+{
+  "about": "The chase clock's cases. lib/chase-clock.test.ts and scripts/rebattery/test_relay_scan.py both run every case, so the TS clock and the scan's Python mirror give the same answers. November 2026: Mon 2, Fri 6, Sat 7, Sun 8, Mon 9, Tue 10, Wed 11.",
+  "cases": [
+    { "name": "sent today: waiting for day 1", "since": "2026-11-02T09:00:00Z", "chases": 0, "now": "2026-11-02T17:00:00Z", "expect": { "state": "waiting", "waited": 0, "next": 1, "due_on": "2026-11-03" } },
+    { "name": "working day 1: first chase due", "since": "2026-11-02T09:00:00Z", "chases": 0, "now": "2026-11-03T08:00:00Z", "expect": { "state": "due", "waited": 1, "next": 1, "due_on": "2026-11-03" } },
+    { "name": "one chase sent, day 2: waiting for day 3", "since": "2026-11-02T09:00:00Z", "chases": 1, "now": "2026-11-04T12:00:00Z", "expect": { "state": "waiting", "waited": 2, "next": 2, "due_on": "2026-11-05" } },
+    { "name": "working day 3: second chase due", "since": "2026-11-02T09:00:00Z", "chases": 1, "now": "2026-11-05T09:00:00Z", "expect": { "state": "due", "waited": 3, "next": 2, "due_on": "2026-11-05" } },
+    { "name": "two chases sent, Friday is day 4: waiting", "since": "2026-11-02T09:00:00Z", "chases": 2, "now": "2026-11-06T16:00:00Z", "expect": { "state": "waiting", "waited": 4, "next": 3, "due_on": "2026-11-09" } },
+    { "name": "the weekend does not count: Monday is day 5, third chase due", "since": "2026-11-02T09:00:00Z", "chases": 2, "now": "2026-11-09T09:00:00Z", "expect": { "state": "due", "waited": 5, "next": 3, "due_on": "2026-11-09" } },
+    { "name": "sent on a Friday, Sunday is still day 0", "since": "2026-11-06T15:00:00Z", "chases": 0, "now": "2026-11-08T20:00:00Z", "expect": { "state": "waiting", "waited": 0, "next": 1, "due_on": "2026-11-09" } },
+    { "name": "sent on a Friday, Monday is day 1", "since": "2026-11-06T15:00:00Z", "chases": 0, "now": "2026-11-09T07:00:00Z", "expect": { "state": "due", "waited": 1, "next": 1, "due_on": "2026-11-09" } },
+    { "name": "a chase left unsent stays the one due", "since": "2026-11-02T09:00:00Z", "chases": 0, "now": "2026-11-11T09:00:00Z", "expect": { "state": "due", "waited": 7, "next": 1, "due_on": "2026-11-03" } },
+    { "name": "they replied: the clock stops", "since": "2026-11-02T09:00:00Z", "chases": 2, "answered": true, "now": "2026-11-09T09:00:00Z", "expect": { "state": "answered", "waited": 0, "next": null, "due_on": null } },
+    { "name": "three chases, the third sent today: wait", "since": "2026-11-02T09:00:00Z", "last": "2026-11-09T10:00:00Z", "chases": 3, "now": "2026-11-09T16:00:00Z", "expect": { "state": "waiting", "waited": 5, "next": null, "due_on": null } },
+    { "name": "three chases and a working day of silence: propose parking", "since": "2026-11-02T09:00:00Z", "last": "2026-11-09T10:00:00Z", "chases": 3, "now": "2026-11-10T09:00:00Z", "expect": { "state": "park", "waited": 6, "next": null, "due_on": null } },
+    { "name": "three chases, the third on a Friday: the weekend is not a working day of silence", "since": "2026-10-30T09:00:00Z", "last": "2026-11-06T10:00:00Z", "chases": 3, "now": "2026-11-08T10:00:00Z", "expect": { "state": "waiting", "waited": 5, "next": null, "due_on": null } },
+    { "name": "London date: 23:30 UTC in July is the next day in London", "since": "2026-07-02T23:30:00Z", "chases": 0, "now": "2026-07-06T08:00:00Z", "expect": { "state": "due", "waited": 1, "next": 1, "due_on": "2026-07-06" } }
+  ]
+}

@@ -52,6 +52,19 @@ export function WaitingBadge({ row, compact = false, large = false }: { row: Pic
   );
 }
 
+/** Ticked Qualified without a price or a date: the checklist allows it, and the card says what is still missing. */
+export function QualifyGapTags({ row }: { row: Partial<Pick<SheetRow, "no_price" | "no_date">> }) {
+  if (!row.no_price && !row.no_date) return null;
+  return (
+    <span className="inline-flex flex-wrap gap-1" data-qualify-gaps>
+      {[row.no_price && "No price", row.no_date && "No date"].filter(Boolean).map((tag) => (
+        <span key={tag as string} className="rounded-full border px-2 py-0.5 text-[11px] font-medium"
+          style={{ color: "var(--bt-amber)", background: "var(--bt-amber-bg)", borderColor: "var(--bt-amber-border)" }}>{tag}</span>
+      ))}
+    </span>
+  );
+}
+
 export function ProgressChip({ row }: { row: Pick<SheetRow, "tone" | "progress" | "held"> & Partial<Pick<SheetRow, "cant_source">> }) {
   const tone = TONE[row.tone];
   return (
@@ -134,7 +147,7 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false, showSide = 
       <span data-weighted className={num} title={weighted != null ? `Fee × chance, EUR ${Math.round(weighted).toLocaleString("en-GB")}` : "Needs a fee and a chance"}>
         <Sh on={loading} chars={5}>{weighted != null ? formatEurCompact(weighted) : <Gap>Needs fee and %</Gap>}</Sh></span>
       <span data-owner className="hidden @2xl:block">{loading ? <ShBlock on size={24}><span /></ShBlock> : <DriverAvatar owner={row.owner} />}</span>
-      <span className="flex min-w-0 flex-col items-start gap-1"><Sh on={loading} chars={11} round><ProgressChip row={row} /></Sh>{!loading && <WaitingBadge row={row} />}</span>
+      <span className="flex min-w-0 flex-col items-start gap-1"><Sh on={loading} chars={11} round><ProgressChip row={row} /></Sh>{!loading && <WaitingBadge row={row} />}{!loading && <QualifyGapTags row={row} />}</span>
       <span className="min-w-0">
         <NextActionCell loading={loading} value={row.next_action} due={row.next_due} today={today} onSave={(text) => onNext(row, text)} />
       </span>

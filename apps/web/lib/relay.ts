@@ -23,6 +23,8 @@ import type { JulesReply } from "./relay-jules-core";
 import { askInstruction, askKeys, askLabel, buildChecklist, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
 import { closeUnfitListing, DEAL_NOTE, JOB_STALE_MINUTES, queueReplyUpdates, recordSentAsks, setCheckState, setQualifiedTick, settleSentCards } from "./relay-deal";
 import { BULK_RULE_TEXT } from "./relay-front-door";
+import { cancelAnsweredChases, prepareChases, recordSentChases, type ChaseRun, type StoredChase } from "./relay-chase";
+import { markNewSupplyForStanding } from "./crm-postgres/bulk-matches";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -73,6 +75,8 @@ export type RelayItem = {
   dismantler?: RelayDismantler | null;
   /** Their newest email is an answer to a Jules email, and what the job that reads those made of it. Set on list views only. */
   jules?: JulesReply | null;
+  /** The chase clock on a thread Alex wrote last on (the scan writes it, migration 115): due, waiting, or park proposed. */
+  chase?: StoredChase | null;
 };
 
 export type RelayDismantler = { phase: DismantlerPhase; company_id: string; name: string };
@@ -86,6 +90,8 @@ export type RelayDraftView = {
   title: string;
   why: string;
   state: "draft" | "gmail" | "sent" | "skipped";
+  /** Where it came from: 'predraft' is a chase Relay prepared by itself when the chase clock fell due. */
+  origin?: "note" | "job" | "predraft" | "card";
   source_note: string;
   agent_log: string[];
   mail_message_id: string | null;
@@ -109,7 +115,7 @@ export type RelayReviewItem = RelayItem & { drafts: RelayDraftView[]; todos: Rel
 
 
 const ITEM_COLUMNS = `i.id,i.tab,i.status,i.priority,i.counterpart_name,i.counterpart_email,i.company,i.contact_type,i.headline,i.context,i.last_message,
-  i.earlier,i.bulk_listing_id,i.deal_label,i.waiting_since,i.note,i.mail_thread_id,i.gmail_thread_id,i.updated_at,i.situation,
+  i.earlier,i.bulk_listing_id,i.deal_label,i.waiting_since,i.note,i.mail_thread_id,i.gmail_thread_id,i.updated_at,i.situation,i.chase,
   (select m.id from mail_message m where m.thread_id = i.mail_thread_id and m.direction = 'inbound' and m.has_attachments
      and ${mailboxScopeSql("m", "i.owner_id")} order by m.sent_at desc nulls last, m.created_at desc limit 1) as attachment_message_id`;
 
@@ -387,10 +393,33 @@ function intakeGuide(): string {
 
 /** The front door's background work, on each inbox load: open the deals of lead cards whose reply has gone, and queue
  * "Update deal from this reply" for new replies on deal threads (relay-deal.ts). Never in the way of the inbox. */
-export async function frontDoor(ownerId: string): Promise<void> {
-  await settleSentCards(ownerId).catch((error) => console.error("relay front door: sent cards", error));
-  await queueReplyUpdates(ownerId, (itemId) => startDealJob(itemId, ownerId, "update", { auto: true }))
-    .catch((error) => console.error("relay front door: reply updates", error));
+export async function frontDoor(ownerId: string): Promise<{ sent: number; opened: string[]; queued: string[]; cancelled: number }> {
+  const cards = await settleSentCards(ownerId).catch((error) => { console.error("relay front door: sent cards", error); return { sent: 0, opened: [] as string[] }; });
+  // A deal opened from a sent card may be new supply for a standing request.
+  if (cards.opened.length) await markNewSupplyForStanding({ userId: null, email: "relay" }).catch((error) => console.error("relay front door: new supply", error));
+  const queued = await queueReplyUpdates(ownerId, (itemId) => startDealJob(itemId, ownerId, "update", { auto: true }))
+    .catch((error) => { console.error("relay front door: reply updates", error); return [] as string[]; });
+  // A reply skips the chase draft waiting for it, even while Relay is only open in a browser.
+  const cancelled = await cancelAnsweredChases(ownerId).catch((error) => { console.error("relay front door: answered chases", error); return 0; });
+  return { sent: cards.sent, opened: cards.opened, queued, cancelled };
+}
+
+/**
+ * The scan's call after each run (POST /api/relay/internal/deals): the front door's work, then due chases prepared into
+ * Review as drafts (relay-chase.ts; never sent), then new supply marked for standing requests from any path that made
+ * it (the Jules sync and Matcha write straight to the database). Each part fails on its own.
+ */
+export async function scanFollowUp(ownerId: string): Promise<{ front: Awaited<ReturnType<typeof frontDoor>>; chases: ChaseRun | { error: string }; new_supply: number | { error: string } }> {
+  const front = await frontDoor(ownerId);
+  const chases = await prepareChases(ownerId, { draft: createMailDraft }).catch((error) => {
+    console.error("relay chases", error);
+    return { error: error instanceof Error ? error.message.slice(0, 200) : "failed" };
+  });
+  const newSupply = await markNewSupplyForStanding({ userId: null, email: "relay" }).catch((error) => {
+    console.error("relay new supply", error);
+    return { error: error instanceof Error ? error.message.slice(0, 200) : "failed" };
+  });
+  return { front, chases, new_supply: newSupply };
 }
 
 /** The deal's own people: its main contact (the listing's email, else its person's) and its other contacts
@@ -625,6 +654,8 @@ export async function setChecklistState(itemId: string, owner: { id: string; ema
   if (change.qualified !== undefined) {
     const done = await setQualifiedTick(listingId, change.qualified, owner.email);
     if (!done.ok) throw new RelayError(409, `Not yet: ${done.missing.map((k) => view.checklist!.required.find((i) => i.key === k)?.label.toLowerCase() ?? k).join(", ")} still to answer or check.`);
+    // Supply just ticked Qualified may fit a standing request.
+    if (change.qualified && kind === "supply") await markNewSupplyForStanding({ userId: owner.id, email: owner.email }).catch((error) => console.error("relay new supply", error));
     return;
   }
   if (!change.key || !(await setCheckState(listingId, kind, change.key, { checked: change.checked, cannot: change.cannot }, owner.email))) throw new RelayError(400, "That one can't be checked here.");
@@ -884,7 +915,7 @@ export async function createMailDraft(d: NewDraft): Promise<string> {
 export const SKIP_DRAFTS_SQL = `with s as (update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail') returning mail_message_id)
   update mail_message set personalization = personalization - 'scheduled_send' where id in (select mail_message_id from s) and state = 'draft' and personalization ? 'scheduled_send'`;
 
-type DraftRow = { id: string; item_id: string; role: "primary" | "follow"; position: number; title: string; why: string; state: RelayDraftView["state"]; source_note: string; agent_log: unknown; background: unknown; mail_message_id: string | null; gmail_draft_id: string | null };
+type DraftRow = { id: string; item_id: string; role: "primary" | "follow"; position: number; title: string; why: string; state: RelayDraftView["state"]; origin: RelayDraftView["origin"]; source_note: string; agent_log: unknown; background: unknown; mail_message_id: string | null; gmail_draft_id: string | null };
 
 /** Items in Review with their drafts (read live from mail_message) and suggested to-dos. */
 export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
@@ -893,7 +924,7 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
   const items = await queryPg<RelayItem>(`select ${ITEM_COLUMNS} from relay_item i where i.owner_id = $1::uuid and i.status = 'review' order by i.updated_at asc`, [ownerId]);
   if (!items.length) return [];
   const ids = items.map((i) => i.id);
-  const drafts = await queryPg<DraftRow>(`select id,item_id,role,position,title,why,state,source_note,agent_log,background,mail_message_id,gmail_draft_id from relay_draft where item_id = any($1) and state <> 'skipped' order by position`, [ids]);
+  const drafts = await queryPg<DraftRow>(`select id,item_id,role,position,title,why,state,origin,source_note,agent_log,background,mail_message_id,gmail_draft_id from relay_draft where item_id = any($1) and state <> 'skipped' order by position`, [ids]);
   const mailIds = drafts.map((d) => d.mail_message_id).filter((id): id is string => !!id);
   const mails = mailIds.length ? await queryPg<{ id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null; body_text: string | null; updated_at: string; personalization: { attachments?: unknown; send_failure?: { reason: string; detail?: unknown }; scheduled_send?: { at?: string; undo?: boolean } } | null; transport: string | null; schedule_changed: boolean }>(
     `select id,state,identity_key,from_email,coalesce(to_emails,'{}') as to_emails,coalesce(cc_emails,'{}') as cc_emails,coalesce(bcc_emails,'{}') as bcc_emails,subject,body_text,updated_at,personalization,transport,
@@ -927,7 +958,7 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
       const m = d.mail_message_id ? byMail.get(d.mail_message_id) : undefined;
       const sent = m?.state === "accepted";
       return {
-        id: d.id, role: d.role, position: d.position, title: d.title, why: d.why, state: sent ? "sent" : d.state, source_note: d.source_note,
+        id: d.id, role: d.role, position: d.position, title: d.title, why: d.why, state: sent ? "sent" : d.state, origin: d.origin, source_note: d.source_note,
         agent_log: Array.isArray(d.agent_log) ? (d.agent_log as unknown[]).filter((l): l is string => typeof l === "string") : [],
         mail_message_id: d.mail_message_id, gmail_draft_id: d.gmail_draft_id,
         mail: m ? { id: m.id, state: m.state, identity_key: m.identity_key, from_email: m.from_email, to_emails: m.to_emails, cc_emails: m.cc_emails, bcc_emails: m.bcc_emails, subject: m.subject,
@@ -964,6 +995,7 @@ async function recordSent(where: string, values: unknown[]): Promise<number> {
       [r.id, copies.get(r.mail_message_id) ?? null, r.accepted_at]);
   }
   await recordSentAsks(rows.map((r) => r.id)).catch((error) => console.error("relay sent asks", error));
+  await recordSentChases(rows.map((r) => r.id)).catch((error) => console.error("relay sent chases", error));
   return rows.length;
 }
 
@@ -1212,10 +1244,10 @@ export async function saveToGmailDrafts(draftId: string, ownerId: string): Promi
   }
 }
 
-/** Done = no reply needed: marks the thread read and labels it "4 Sorted" in Gmail. It stays in the Gmail inbox. */
 /** Done (no reply needed) or, on Follow up, "Don't chase": both label it Sorted in Gmail. A dismissed chase comes back only
- * when they write again (then as Action); the scan never turns it back into a chase. */
-export async function markDone(itemId: string, ownerId: string, ownerEmail: string, reason: "user_done" | "no_chase" = "user_done"): Promise<RelayItem | null> {
+ * when they write again (then as Action); the scan never turns it back into a chase. `park` (after three unanswered
+ * chases, one click) is "Don't chase" plus a note on the linked deal's Story saying it was parked. */
+export async function markDone(itemId: string, ownerId: string, ownerEmail: string, reason: "user_done" | "no_chase" = "user_done", opts: { park?: boolean } = {}): Promise<RelayItem | null> {
   const item = await readRelayItem(itemId, ownerId);
   if (!item) throw new RelayError(404, "Not found");
   const args = ["--account", ownerEmail, "--gmail-no-send", "--enable-commands-exact", "gmail.thread.modify", "--no-input", "--json",
@@ -1226,6 +1258,12 @@ export async function markDone(itemId: string, ownerId: string, ownerEmail: stri
     throw new RelayError(502, "Gmail didn't accept the change. Try again.");
   }
   await queryPg(SKIP_DRAFTS_SQL, [itemId]);
+  if (opts.park && item.bulk_listing_id) {
+    await queryPg(
+      `insert into crm_bulk_listing_activity (bulk_listing_id, kind, title, body, data) values ($1, 'note', $2, $3, $4::jsonb)`,
+      [item.bulk_listing_id, "Parked in Relay: no answer to three chases", `${item.counterpart_name ?? item.counterpart_email ?? "They"} did not answer three chases, so Relay stops chasing this thread. It comes back if they write again.`,
+        JSON.stringify({ relay_item: itemId, parked_by: ownerEmail })]).catch((error) => console.error("relay park note", error));
+  }
   return updateRelayItem(itemId, ownerId, { status: "done", done_reason: reason });
 }
 

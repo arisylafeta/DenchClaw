@@ -205,3 +205,69 @@ describe("offer pairing labels (REB-565)", () => {
     await waitFor(() => expect(calls.some((c) => c.startsWith("PATCH"))).toBe(true));
   });
 });
+
+describe("offer to close", () => {
+  afterEach(() => { vi.unstubAllGlobals(); forgetShared(); });
+  const buyerOffer = { ...offer, listing_id: "sup_1", terms: { amount: 2400, currency: "GBP", unit: "pack", expires_on: "2026-12-03" }, quantity: 12 };
+  const margin = { ok: true, currency: "GBP", unit: "pack", buyerPrice: 2400, sellerPrice: 2000, perUnit: 400, quantity: 12, total: 4800, buyerTotal: 28800, takeGbp: 4800, feePct: 16.7, approx: false };
+  const stubClose = (o: typeof buyerOffer, close: unknown, calls: { url: string; method: string; body?: string }[] = []) => vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    calls.push({ url, method: init?.method ?? "GET", body: init?.body as string | undefined });
+    const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200 });
+    if (url.endsWith("/offers") && !init?.method) return json({ offers: [o] });
+    if (url.endsWith("/stored-matches")) return json({ draftId: "rc1" });
+    if (url.endsWith("/api/mail/drafts/rc1")) {
+      return json({
+        id: "rc1", state: "draft", identity_key: "alex", transport: "gmail", purpose: "personal", from_email: "alex@rebattery.io",
+        to_emails: ["seller@example.test"], cc_emails: [], bcc_emails: [], subject: "Still available?", body_text: "Hello,", body_html: null,
+        thread_id: null, campaign_id: null, created_at: "2026-11-12T10:00:00Z", updated_at: "2026-11-12T10:00:00Z",
+        links: [], warnings: [], approval: null, attachments: [], editable: { main: "Hello,", signature: null },
+      });
+    }
+    if (url.endsWith("/offers/bof_1")) return json({ offer: o, thread: [], close });
+    return json({});
+  }));
+
+  it("blocks a buyer offer on an expired seller quote, says why and offers the seller re-confirm", async () => {
+    const calls: { url: string; method: string; body?: string }[] = [];
+    const candidate = { ...buyerOffer, stage: "candidate" as const };
+    stubClose(candidate, { side: "buyer", gate: { ok: false, validUntil: "2026-11-03", reason: "The seller's quote ran out on 3 Nov. Ask them to confirm it." }, expiresOn: "2026-12-03", quantity: 12, margin }, calls);
+    render(<OffersTab demandId="sup_1" listingId="sup_1" onChanged={() => {}} />);
+    await userEvent.click(await screen.findByText("Attero Recycling"));
+    expect(await screen.findByText(/The seller's quote ran out on 3 Nov. Ask them to confirm it./)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Draft email" })).toBeDisabled();
+    expect(screen.getByText("Waiting on the seller's quote.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Price overview" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Draft re-confirm to seller" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url === "/api/bulk-listings/sup_1/stored-matches" && c.body === JSON.stringify({ action: "reconfirm" }))).toBe(true));
+    // The re-confirm opens as an ordinary draft to the seller, not through this buyer offer's send route.
+    expect(await screen.findByRole("region", { name: "Email draft" })).toBeInTheDocument();
+    expect((await screen.findAllByText("Still available?")).length).toBeGreaterThan(0);
+  });
+
+  it("shows the margin to staff, one next step per stage, and prefills the take when marking paid", async () => {
+    const calls: { url: string; method: string; body?: string }[] = [];
+    const invoiced = { ...buyerOffer, stage: "invoiced" as const };
+    stubClose(invoiced, { side: "buyer", gate: { ok: true, validUntil: "2026-12-03" }, expiresOn: "2026-12-03", quantity: 12, margin }, calls);
+    render(<OffersTab demandId="sup_1" listingId="sup_1" onChanged={() => {}} />);
+    await userEvent.click(await screen.findByText("Attero Recycling"));
+    expect(await screen.findByText("Seller's quote holds until 3 Dec.")).toBeInTheDocument();
+    expect(screen.getByText(/Margin GBP 4,800 \(GBP 400 per pack x 12\) · take £4,800 · 16.7% of the sale/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Mark paid" }));
+    expect(screen.getByLabelText("Our take")).toHaveValue("4800");
+    expect(screen.getByLabelText("Amount paid")).toHaveValue("28800");
+    // The person can change it; the take is stored only in take_gbp.
+    fireEvent.change(screen.getByLabelText("Our take"), { target: { value: "4500" } });
+    fireEvent.submit(screen.getByRole("form", { name: "Paid details" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH" && JSON.parse(c.body ?? "{}").takeGbp === 4500 && JSON.parse(c.body ?? "{}").stage === "paid")).toBe(true));
+  });
+
+  it("keeps the contract step back until the price, quantity and last day are on the offer", async () => {
+    const negotiating = { ...buyerOffer, stage: "negotiating" as const, terms: {}, quantity: null } as unknown as typeof buyerOffer;
+    stubClose(negotiating, { side: "buyer", gate: { ok: true, validUntil: "2026-12-03" }, expiresOn: "2026-12-03", quantity: null, margin: { ok: false, why: "No buyer price on the offer yet." } });
+    render(<OffersTab demandId="sup_1" listingId="sup_1" onChanged={() => {}} />);
+    await userEvent.click(await screen.findByText("Attero Recycling"));
+    expect(await screen.findByRole("button", { name: "Contract sent" })).toBeDisabled();
+    expect(screen.getByText("Add the buyer price, quantity first.")).toBeInTheDocument();
+    expect(screen.getByText(/No margin yet: No buyer price on the offer yet./)).toBeInTheDocument();
+  });
+});

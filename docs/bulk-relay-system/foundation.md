@@ -32,11 +32,12 @@ Stages are never stored. SQL functions compute them from the listing and its cou
 
 - `bulk_listing_has_match(id)`: a live counterparty offer (not declined or lost) on or pointing at the listing. This is the one seam for stored matching: when `crm_bulk_matches` arrives, only this function changes.
 - `bulk_listing_stage(id)`, the list stage:
-  - Requests: **Closed** when closed; **Found** once a supplier has been offered; **Sourcing** with a match, or qualified with an owner (`context.owner`); **Qualified**; **New**.
-  - Supply: **Sold** when an offer is paid or complete, or it closed as sold; **Closed** when it closed otherwise; **Reserved** while on hold (`hold_until` today or later); **Available** with a match, or qualified with an owner; **Qualified**; **New**.
+  - Requests: **Closed** when closed; **Found** once a supplier has been offered; **Sourcing** with a match, or qualified and a match run started; **Qualified**; **New**.
+  - Supply: **Sold** when an offer is paid or complete, or it closed as sold; **Closed** when it closed otherwise; **Reserved** while on hold (`hold_until` today or later) or a live reservation holds some of it; **Available** with a match, or qualified and a match run started; **Qualified**; **New**.
+  - "A match run started" (migration 115, `bulk_listing_match_started`): a person ran matching on the deal, which Alex set as marking it ready (12 Nov 2026); `runMatches` keeps the last run in `context.match_run`. Until 115 an owner (`context.owner`) moved a qualified deal on, but every new deal is now owned by Alex when it opens, so Qualified was skipped. The owner no longer moves a stage. Migration 115 re-checks every open listing once, so deals the old rule had moved on get a "back to Qualified" event from `system`.
 - `bulk_listing_deal_stage(id)`, the Deals board: the furthest live offer, as **Offered**, **Negotiating**, **Agreed** (contract out, signed or invoiced), **Paid** or **Delivered** (complete); **Lost** when every counterparty offer is declined or lost; empty until something is offered.
 
-"Qualified" is unchanged (`bulk_listing_qualified`, migration 085). Neither function reads the retired `crm_bulk_trade_*` tables. A Can't source reason is a tag on the card, not a stage.
+"Qualified" is `bulk_listing_qualified` (migration 085, the checklist rule since 112; see front-door.md). Neither function reads the retired `crm_bulk_trade_*` tables. A Can't source reason is a tag on the card, not a stage.
 
 ## How events get written
 

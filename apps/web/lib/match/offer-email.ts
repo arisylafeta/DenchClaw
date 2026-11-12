@@ -55,6 +55,11 @@ export type OfferEmailInput = {
   privateValues?: (string | null | undefined)[];
   /** A stock confirm: what the supplier holds, in our words from their own stock line ("Stellantis 50 kWh pack x 23"). */
   holds?: string | null;
+  /**
+   * A supply offer whose buyer price is recorded and whose seller quote is in date: the fixed price sheet's lines
+   * (lib/bulk-price-sheet.ts), in place of "Price on request". Built from the offer's own price, never the seller's.
+   */
+  priceLines?: string | null;
 };
 
 export type OfferEmail = { kind: OfferEmailKind; subject: string; body: string };
@@ -495,9 +500,10 @@ export function buildOfferEmail(input: OfferEmailInput): OfferEmail {
     const opening = want
       ? `You were looking for ${want}. We have ${product} available${where}.`
       : `We have ${product} available${where}.`;
-    const facts = [testStatusLine(fields), sohLine(fields), priceLine()].filter(Boolean).join(" ");
+    const priced = clean(input.priceLines) ? (input.priceLines ?? "").trim() : null;
+    const facts = [testStatusLine(fields), sohLine(fields), priced ? null : priceLine()].filter(Boolean).join(" ");
     const ask = want ? "Is it still of interest?" : "Would you like the full spec sheet?";
-    body = `${greeting(input.recipientFirstName)}\n\n${opening}\n\n${facts}\n\n${ask}\n\n${SIGN_OFF}`;
+    body = [greeting(input.recipientFirstName), opening, facts, priced, ask, SIGN_OFF].filter(Boolean).join("\n\n");
   } else if (input.kind === "request_stock") {
     // A request's own facts first: requests have no field rows, so the key alone says nothing about them.
     const asked = requestProduct(input.request);

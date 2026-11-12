@@ -145,13 +145,15 @@ def test_unsolicited_pitch_is_other():
     assert rs.classify_thread(msgs, ctx(known=False), NOW)["tab"] == "other"
 
 
-def test_follow_after_threshold_and_not_before():
-    base = [msg("inbound", 10, "Interested"), msg("outbound", dt.datetime(2026, 10, 21, 9, tzinfo=UTC), "Would you take EUR 50/kWh?")]
-    # Wed 21 Oct -> Tue 27 Oct = 4 working days
-    assert rs.classify_thread(base, ctx(contact_type="supplier", deal_linked=True), NOW)["tab"] == "follow"
-    assert rs.classify_thread(base, ctx(contact_type="supplier"), NOW)["tab"] is None  # no deal: needs 7
-    recent = [msg("inbound", 10, "Interested"), msg("outbound", dt.datetime(2026, 10, 26, 9, tzinfo=UTC), "Could you confirm?")]
-    assert rs.classify_thread(recent, ctx(contact_type="buyer", deal_linked=True), NOW)["tab"] is None  # 1 working day < 4
+def test_follow_on_the_chase_clock_day_one_for_every_thread():
+    # Mon 26 Oct -> Tue 27 Oct is working day 1: the first chase is due, deal or not.
+    base = [msg("inbound", 10, "Interested"), msg("outbound", dt.datetime(2026, 10, 26, 9, tzinfo=UTC), "Would you take EUR 50/kWh?")]
+    for linked in (True, False):
+        r = rs.classify_thread(base, ctx(contact_type="supplier", deal_linked=linked), NOW)
+        assert r["tab"] == "follow" and r["chase"]["state"] == "due" and r["chase"]["next"] == 1
+    same_day = [msg("inbound", 10, "Interested"), msg("outbound", dt.datetime(2026, 10, 27, 9, tzinfo=UTC), "Could you confirm?")]
+    r = rs.classify_thread(same_day, ctx(contact_type="buyer", deal_linked=True), NOW)
+    assert r["tab"] is None and r["chase"]["state"] == "waiting" and r["chase"]["due_on"] == "2026-10-28"
 
 
 def test_follow_needs_an_ask_and_a_conversation():
@@ -161,20 +163,90 @@ def test_follow_needs_an_ask_and_a_conversation():
     assert rs.classify_thread(one_way, ctx(), NOW)["tab"] is None
 
 
-def test_follow_thresholds():
-    assert rs.follow_threshold("buyer", True) == 4
-    assert rs.follow_threshold("partner", True) == 4
-    assert rs.follow_threshold("buyer", False) == 7
-    assert rs.follow_threshold(None, False) == 7
-    assert rs.follow_threshold("admin", False) == 7
-
-
-def test_two_nudges_stop_chasing():
-    msgs = [msg("inbound", 20, "Interested"), msg("outbound", 18, "Price?"), msg("outbound", 12, "Any news?"), msg("outbound", 6, "Still keen?")]
+def test_second_chase_waits_for_day_three():
+    # First message Thu 22 Oct, one chase sent: day 3 is Tue 27 Oct.
+    first = dt.datetime(2026, 10, 22, 9, tzinfo=UTC)
+    msgs = [msg("inbound", 20, "Interested"), msg("outbound", first, "Price?"), msg("outbound", dt.datetime(2026, 10, 23, 9, tzinfo=UTC), "Any news?")]
     r = rs.classify_thread(msgs, ctx(), NOW)
-    assert r["tab"] == "other" and "nudges" in r["reason"]
-    one_nudge = msgs[:3]
-    assert rs.classify_thread(one_nudge, ctx(), NOW)["tab"] == "follow"
+    assert r["tab"] == "follow" and r["chase"]["next"] == 2 and r["chase"]["waited"] == 3
+    r = rs.classify_thread(msgs, ctx(), dt.datetime(2026, 10, 26, 12, tzinfo=UTC))
+    assert r["tab"] is None and r["chase"]["state"] == "waiting"
+
+
+def test_three_chases_unanswered_propose_parking_and_never_chase_again():
+    msgs = [msg("inbound", 20, "Interested"), msg("outbound", 18, "Price?"), msg("outbound", 14, "Any news?"),
+            msg("outbound", 12, "Still keen?"), msg("outbound", 6, "Last one from me?")]
+    r = rs.classify_thread(msgs, ctx(), NOW)
+    assert r["tab"] == "follow" and r["chase"]["state"] == "park" and r["chase"]["next"] is None and "park" in r["reason"]
+
+
+def test_a_reply_stops_the_clock():
+    msgs = [msg("outbound", 18, "Price?"), msg("outbound", 14, "Any news?"), msg("inbound", 2, "Yes, 40 packs, will send price")]
+    r = rs.classify_thread(msgs, ctx(), NOW)
+    assert r["tab"] == "action" and "chase" not in r
+
+
+CASES = json.loads((Path(__file__).resolve().parents[2] / "apps/web/lib/chase-clock.cases.json").read_text())["cases"]
+
+
+def _at(value):
+    return dt.datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+
+
+@pytest.mark.parametrize("case", CASES, ids=[c["name"] for c in CASES])
+def test_chase_clock_agrees_with_the_ts_clock(case):
+    """The same cases as apps/web/lib/chase-clock.test.ts: the scan's mirror and chaseClock() give the same answers."""
+    got = rs.chase_clock(_at(case["since"]), case["chases"], _at(case["now"]), last=_at(case.get("last")), answered=case.get("answered", False))
+    assert {k: got[k] for k in ("state", "waited", "next", "due_on")} == case["expect"]
+
+
+def test_chase_is_written_for_follow_rows_only():
+    row = {"gmail_thread_id": "g1", "tab": "follow", "chase": {"state": "due", "next": 1}}
+    item = {"id": "i1", "status": "open", "tab": "follow", "chase": None}
+    ops = rs.plan_writes([row], {"g1": item}, NOW, {"g1"})
+    assert ops and ops[0]["values"]["chase"] == {"state": "due", "next": 1}
+
+
+class _Response:
+    def __init__(self, body):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        return self.body
+
+
+def test_deal_work_posts_with_the_secret_and_never_raises(tmp_path):
+    secret = tmp_path / "secret"
+    secret.write_text("s" * 40 + "\n")
+    seen = {}
+
+    def opener(request, timeout):
+        seen.update(url=request.full_url, auth=request.get_header("Authorization"), method=request.get_method(), timeout=timeout)
+        return _Response(b'{"ok": true, "chases": {"prepared": 1}}')
+
+    out = rs.trigger_deal_work(env={}, opener=opener, secret_file=secret, url="http://127.0.0.1:3100/api/relay/internal/deals")
+    assert out == {"ok": True, "chases": {"prepared": 1}}
+    assert seen == {"url": "http://127.0.0.1:3100/api/relay/internal/deals", "auth": "Bearer " + "s" * 40, "method": "POST", "timeout": rs.DEAL_WORK_TIMEOUT}
+
+    def down(request, timeout):
+        raise rs.urllib.error.URLError("Connection refused")
+
+    assert rs.trigger_deal_work(env={}, opener=down, secret_file=secret) == {"error": "Connection refused"}
+    assert rs.trigger_deal_work(env={}, opener=opener, secret_file=tmp_path / "missing") == {"error": "no internal secret"}
+
+
+def test_deal_work_follows_the_auto_update_switch(tmp_path):
+    calls = []
+    for value in ("off", "OFF", "false", "0", "no"):
+        assert rs.trigger_deal_work(env={"RELAY_AUTO_DEAL_UPDATE": value}, opener=lambda *a, **k: calls.append(1)) == {"skipped": "RELAY_AUTO_DEAL_UPDATE is off"}
+    assert not calls
+    assert rs.deal_work_on({}) and rs.deal_work_on({"RELAY_AUTO_DEAL_UPDATE": "on"})
 
 
 def test_follow_max_age():
@@ -186,6 +258,8 @@ def test_working_days():
     fri = dt.datetime(2026, 10, 23, 17, tzinfo=UTC)
     assert rs.working_days_between(fri, dt.datetime(2026, 10, 26, 9, tzinfo=UTC)) == 1
     assert rs.working_days_between(fri, NOW) == 2
+    # London dates: 23:30 UTC on Thu 2 July is Friday in London, so Monday is one working day on.
+    assert rs.working_days_between(dt.datetime(2026, 7, 2, 23, 30, tzinfo=UTC), dt.datetime(2026, 7, 6, 8, tzinfo=UTC)) == 1
 
 
 # ---------- promises, deadlines, priority ----------

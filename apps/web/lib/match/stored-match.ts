@@ -5,6 +5,7 @@
 import type { FitMark, MatchRow } from "../matches-types";
 import { firstLeak } from "./offer-email";
 import { londonDate, workingDaysBetween } from "./working-days";
+import { chaseClock, type ChaseState } from "../chase-clock";
 
 export const MATCH_STATES = ["proposed", "asked", "confirmed", "declined", "replaced", "offered", "expired"] as const;
 export type MatchState = typeof MATCH_STATES[number];
@@ -168,13 +169,17 @@ export function reservationLive(row: { state: string; reserved_until: string | n
   return row.state === "offered" && !!row.reserved_until && row.reserved_until.slice(0, 10) >= today;
 }
 
-/** "Asked 3 working days ago, no answer": for asked rows with no verdict yet. The chase slice drafts from this. */
-export function askedAgo(row: { state: string; asked_at: string | null; verdict: string | null }, now: Date = new Date()): { days: number; label: string } | null {
+/** "Asked 3 working days ago, no answer: chase 2 of 3 due": for asked rows with no verdict yet, on the one chase clock
+ * (lib/chase-clock.ts, day 1, 3 and 5 from the ask). `chase` is the clock's state; a due chase is drafted in Relay. */
+export function askedAgo(row: { state: string; asked_at: string | null; verdict: string | null; chases?: number | null }, now: Date = new Date()): { days: number; label: string; chase: ChaseState; next: number | null } | null {
   if (row.state !== "asked" || !row.asked_at || row.verdict) {
     return null;
   }
+  const clock = chaseClock({ since: row.asked_at, chases: row.chases ?? 0 }, now);
   const days = workingDaysBetween(row.asked_at, now);
-  return { days, label: days === 0 ? "Asked today, no answer yet" : `Asked ${days} working ${days === 1 ? "day" : "days"} ago, no answer` };
+  const base = days === 0 ? "Asked today, no answer yet" : `Asked ${days} working ${days === 1 ? "day" : "days"} ago, no answer`;
+  const label = clock.state === "due" ? `${base}: chase ${clock.next} of 3 due` : clock.state === "park" ? `${base} to 3 chases: park it?` : base;
+  return { days, label, chase: clock.state, next: clock.next };
 }
 
 /** Today in London, the day every reservation and quote date is compared with. */

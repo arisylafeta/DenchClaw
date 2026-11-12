@@ -15,6 +15,7 @@ import { buildEntryLink } from "@/lib/workspace-links";
 import { request } from "./trade-ui";
 import { SheetTabs, rowFocus } from "./demand-page";
 import { DemandActions } from "./demand-actions";
+import { DealConversation, TeamNotes } from "./deal-history";
 import { CompanyContext } from "./company-context";
 import { BuyerContext } from "./buyer-context";
 import { OffersTab } from "./offers-tab";
@@ -146,6 +147,8 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
       {tab === "Offers" && <OffersTab listingId={demand.id} demandId={demand.id} request onChanged={onChanged} />}
       {tab === "History" && (
         <div className="flex w-full flex-col gap-6">
+          <TeamNotes listingId={demand.id} />
+          <DealConversation listingId={demand.id} />
           {actions("Activity")}
         </div>
       )}

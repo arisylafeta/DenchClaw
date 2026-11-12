@@ -4,6 +4,7 @@ import { linkOfferThread, markOfferSent, offerOutreach } from "@/lib/crm-postgre
 import { readMailDraft } from "@/lib/crm-postgres/mail";
 import { DraftActionError, sameVersion, sendDraft } from "@/lib/mail-draft-actions";
 import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
+import { offerGate } from "@/lib/crm-postgres/bulk-offer-close";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -15,6 +16,9 @@ type Context = { params: Promise<{ id: string; offerId: string }> };
  * The draft is the one the panel showed, and `updated_at` must be its current version, so an edit made after
  * the person looked cannot go out. Only a definite `{sent: true}` writes anything: a refusal, a failure or an
  * unknown outcome leaves the offer and the links exactly as they were and says so.
+ *
+ * To a buyer, the seller's quote is checked again at the click: a draft made while it was in date does not go out after
+ * it ran out.
  */
 export async function POST(req: Request, { params }: Context) {
   const guard = await guardBulkTrades();
@@ -42,6 +46,13 @@ export async function POST(req: Request, { params }: Context) {
   if (!user) { return Response.json({ error: "Unauthorized" }, { status: 401 }); }
   if (!ALLOWED_EMAILS.has(user.email.toLowerCase())) {
     return Response.json({ error: "Only Ari or Alex can send from here." }, { status: 403 });
+  }
+  if (outreach.kind === "supply") {
+    const gated = await offerGate(offerId);
+    if (!gated?.gate?.ok) {
+      const reason = gated?.gate && !gated.gate.ok ? gated.gate.reason : "The seller's quote could not be read. Ask them to confirm it.";
+      return Response.json({ sent: false, error: reason, blocked: "seller_quote", reconfirm: true }, { status: 409 });
+    }
   }
 
   try {

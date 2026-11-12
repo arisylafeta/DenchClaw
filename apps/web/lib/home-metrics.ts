@@ -48,7 +48,8 @@ export const OVERVIEW_WEEKS = 13;
 export const FUNNEL_WEEKS = 13;
 /** A funnel step needs this many people entering it in the last four weeks to be called the biggest drop. */
 export const MIN_STEP_DENOMINATOR = 5;
-/** Bulk lots with no touch for this many days are quiet. */
+/** Bulk lots with no touch for this many days are quiet. A count on the home page only: it chases nothing. Chases run on
+ * the one chase clock (lib/chase-clock.ts). */
 export const QUIET_DAYS = 7;
 /** PostHog has seen about half of public visitors since the consent banner changed on this day. */
 export const POSTHOG_UNDERCOUNT_SINCE = "2026-08-27";

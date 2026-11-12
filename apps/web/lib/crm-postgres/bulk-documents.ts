@@ -16,18 +16,20 @@ async function listingExists(id: string) {
   return (await queryPg("select 1 from crm_bulk_listings where id = $1", [id])).length > 0;
 }
 
-/** Notes the change in the listing's Story, so the timeline shows documents arriving. */
-async function story(listingId: string, title: string, userId: string | null, docId: string) {
+/** Notes the change in the listing's Story, so the timeline shows documents arriving; on an offer's thread too when named. */
+async function story(listingId: string, title: string, userId: string | null, docId: string, offerId: string | null = null) {
   await queryPg(
-    `insert into crm_bulk_listing_activity (bulk_listing_id, kind, title, data, actor_user_id) values ($1, 'document', $2, $3::jsonb, $4)`,
-    [listingId, title.slice(0, 300), JSON.stringify({ document_id: docId }), userId]);
+    `insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, kind, title, data, actor_user_id) values ($1, $5, 'document', $2, $3::jsonb, $4)`,
+    [listingId, title.slice(0, 300), JSON.stringify({ document_id: docId }), userId, offerId]);
 }
 
 export async function addDocument(
   listingId: string,
   input: DocInput & { title: string },
   file: { name: string; type: string | null; content: Buffer } | null,
-  userId: string,
+  userId: string | null,
+  /** The offer the document belongs to (a price sheet), so its thread shows it as well as the listing's History. */
+  offerId: string | null = null,
 ): Promise<ListingDocument | null> {
   if (!(await listingExists(listingId))) return null;
   const id = `bdoc_${randomUUID()}`;
@@ -39,7 +41,7 @@ export async function addDocument(
     [id, listingId, input.title, input.doc_type ?? "Other", state, input.direction ?? "received", input.url ?? null, input.note ?? null,
       input.visibility ?? "never", input.source_label ?? null, input.source_date ?? null,
       file?.name ?? null, file ? (input.doc_type ?? "Other") : null, file?.type ?? null, file?.content.length ?? null, file?.content ?? null, userId]);
-  await story(listingId, state === "needed" || state === "requested" ? `Document wanted: ${input.title}` : `Document added: ${input.title}`, userId, id);
+  await story(listingId, state === "needed" || state === "requested" ? `Document wanted: ${input.title}` : `Document added: ${input.title}`, userId, id, offerId);
   const [row] = await queryPg<ListingDocument>(`select ${COLUMNS} from crm_bulk_listing_documents where id = $1`, [id]);
   return row;
 }

@@ -11,9 +11,10 @@ Tabs:
   action  the last real message is inbound from an external person and needs a reply. Gmail triage's
           "1 Action" is the strongest signal. Skipped when the owner has written to that person since,
           in any thread (the same rule as the email sprint's "waiting on Alex").
-  follow  the owner wrote last, asked something, and no reply came after N working days: 4 when the
-          thread is linked to a deal (confirmed/proposed link) or the counterpart is on an open deal, else 7. Stops after two
-          unanswered nudges in a row (then tab other). Never older than --follow-days.
+  follow  the owner wrote last, asked something, and a chase is due on the one chase clock (chase_clock, the mirror of
+          apps/web/lib/chase-clock.ts): working day 1, 3 and 5 after his first unanswered message, for every thread alike.
+          After three unanswered chases and a working day more, it stays in follow with parking proposed (relay_item.chase
+          state "park"); parking is a click, never automatic. Never older than --follow-days.
   other   recent mail that needs no reply: triage "5 Read"/"4 Sorted"/"2 Waiting", FYI, receipts,
           real-company notifications, cold pitches, "thanks" endings, or chases that ran out.
 
@@ -29,6 +30,11 @@ thread is retried next run.
 User state is respected: note is never written; review/done items are reopened only when a new
 message arrived after they were closed; snoozed items only get their content refreshed. Open items
 whose thread no longer needs anything become done (done_reason 'replied' or 'expired').
+
+After an --apply run the scan asks the CRM web app (127.0.0.1:3100, POST /api/relay/internal/deals, with the internal
+secret) to do the deal work that used to wait for the Relay page: open the deals of sent lead cards, queue "Update deal
+from this reply", and prepare due chase drafts into Review. Off with RELAY_AUTO_DEAL_UPDATE=off; a failure is reported
+in the summary's "deal_work" and never fails the scan.
 """
 
 from __future__ import annotations
@@ -42,9 +48,12 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from email.utils import parseaddr
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import psycopg2
 import psycopg2.extras
@@ -241,9 +250,20 @@ def clean_text(html: str | None, plain: str | None) -> str:
     return re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]+\n", "\n", text)).strip()
 
 
+LONDON = ZoneInfo("Europe/London")
+# The one chase clock (apps/web/lib/chase-clock.ts): chases fall due on working day 1, 3 and 5 after the first unanswered
+# message of ours, a reply stops it, and after the third (and a working day of silence) parking is proposed.
+# apps/web/lib/chase-clock.cases.json pins this mirror and the TS clock to the same answers.
+CHASE_DAYS = (1, 3, 5)
+
+
+def london_date(at: dt.datetime) -> dt.date:
+    return (at if at.tzinfo else at.replace(tzinfo=dt.timezone.utc)).astimezone(LONDON).date()
+
+
 def working_days_between(start: dt.datetime, end: dt.datetime) -> int:
-    """Whole weekdays after start's date up to and including end's date."""
-    a, b = start.date(), end.date()
+    """Whole weekdays after start's London date up to and including end's London date."""
+    a, b = london_date(start), london_date(end)
     days, d = 0, a
     while d < b:
         d += dt.timedelta(days=1)
@@ -252,9 +272,27 @@ def working_days_between(start: dt.datetime, end: dt.datetime) -> int:
     return days
 
 
-def follow_threshold(contact_type: str | None, deal_linked: bool) -> int:
-    """Alex, 27 Oct: chase deal threads after 4 working days, everyone else after 7."""
-    return 4 if deal_linked else 7
+def add_working_days(start: dt.datetime, days: int) -> dt.date:
+    d, left = london_date(start), max(0, days)
+    while left > 0:
+        d += dt.timedelta(days=1)
+        if d.weekday() < 5:
+            left -= 1
+    return d
+
+
+def chase_clock(since: dt.datetime | None, chases: int, now: dt.datetime, last: dt.datetime | None = None, answered: bool = False) -> dict:
+    """{state: answered | waiting | due | park, waited, chases, next, due_on}, exactly as chaseClock() in TS."""
+    chases = max(0, int(chases or 0))
+    if since is None or answered:
+        return {"state": "answered", "waited": 0, "chases": chases, "next": None, "due_on": None}
+    waited = working_days_between(since, now)
+    if chases >= len(CHASE_DAYS):
+        quiet = working_days_between(last or since, now)
+        return {"state": "park" if quiet >= 1 else "waiting", "waited": waited, "chases": chases, "next": None, "due_on": None}
+    day = CHASE_DAYS[chases]
+    return {"state": "due" if waited >= day else "waiting", "waited": waited, "chases": chases, "next": chases + 1,
+            "due_on": add_working_days(since, day).isoformat()}
 
 
 def asks_something(text: str | None) -> bool:
@@ -422,16 +460,18 @@ def classify_thread(msgs: list[dict], ctx: dict, now: dt.datetime, days: int = 1
     first_out = trailing[0]
     if age_days > follow_days:
         return {**out, "tab": None, "reason": "chase older than follow window", "done_reason": "expired"}
-    nudges = len(trailing) - 1
-    if nudges >= 2:
-        return {**out, "tab": "other", "reason": f"{nudges} unanswered nudges, stopped chasing", "waiting_since": first_out["at"]}
     if not any(asks_something(m.get("text")) for m in trailing):
         return {**out, "tab": None, "reason": "owner replied, nothing asked", "done_reason": "replied"}
-    need = follow_threshold(ctx.get("contact_type"), bool(ctx.get("deal_linked")))
-    waited = working_days_between(last["at"], now)
-    if waited < need:
-        return {**out, "tab": None, "reason": f"owner replied, chase due after {need} working days ({waited} so far)", "done_reason": "replied"}
-    return {**out, "tab": "follow", "reason": f"no reply for {waited} working days (threshold {need})", "waiting_since": first_out["at"]}
+    # Every message of his after the first unanswered one is a chase already sent.
+    clock = chase_clock(first_out["at"], len(trailing) - 1, now, last=last["at"])
+    chase = {**clock, "since": first_out["at"].isoformat()}
+    if clock["state"] == "park":
+        return {**out, "tab": "follow", "reason": f"{clock['chases']} chases unanswered, propose parking", "waiting_since": first_out["at"], "chase": chase}
+    if clock["state"] == "due":
+        return {**out, "tab": "follow", "reason": f"chase {clock['next']} due: no reply for {clock['waited']} working days",
+                "waiting_since": first_out["at"], "chase": chase}
+    return {**out, "tab": None, "reason": f"owner replied, chase {clock['next'] or 'none'} due on {clock['due_on'] or 'no date'} ({clock['waited']} working days so far)",
+            "done_reason": "replied", "chase": chase}
 
 
 def lot_number(raw: str) -> float | None:
@@ -841,7 +881,7 @@ def summarise(batches: list[list[dict]], model=run_hermes) -> tuple[dict[str, di
 
 CONTENT_FIELDS = ("headline", "context", "earlier", "contact_type", "situation", "last_message", "last_seen_message_id", "summary_message_id")
 STATE_FIELDS = ("tab", "priority", "counterpart_name", "counterpart_email", "company", "mail_thread_id",
-                "bulk_listing_id", "deal_label", "waiting_since")
+                "bulk_listing_id", "deal_label", "waiting_since", "chase")
 CLEAR_USER_TAB = {"user_tab": None, "user_tab_seen_id": None}
 
 
@@ -913,15 +953,25 @@ def _differs(old, new) -> bool:
 
 
 def _db_value(key: str, value):
+    if key == "chase":
+        return psycopg2.extras.Json(value, dumps=lambda v: json.dumps(v, default=str)) if value is not None else None
     if key in ("last_message", "earlier"):
         return psycopg2.extras.Json(value if value is not None else ([] if key == "earlier" else None), dumps=lambda v: json.dumps(v, default=str))
     return value
 
 
+def column_exists(cur, table: str, column: str) -> bool:
+    cur.execute("select 1 from information_schema.columns where table_name = %s and column_name = %s and table_schema = any(current_schemas(false))",
+                (table, column))
+    return cur.fetchone() is not None
+
+
 def apply_ops(conn, owner_id: str, ops: list[dict]) -> None:
     with conn.cursor() as cur:
+        # relay_item.chase arrives with migration 115; until it is applied the scan writes everything else as before.
+        has_chase = column_exists(cur, "relay_item", "chase")
         for op in ops:
-            values = {k: v for k, v in op["values"].items() if k != "note"}
+            values = {k: v for k, v in op["values"].items() if k != "note" and (has_chase or k != "chase")}
             if op["op"] == "insert":
                 values.setdefault("headline", "")
                 values.setdefault("context", "")
@@ -1006,6 +1056,8 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
             "bulk_listing_id": deal["bulk_listing_id"] if deal else None,
             "deal_label": deal_label(deal["summary"], deal["quantity"]) if deal else None,
             "waiting_since": result.get("waiting_since"),
+            # The chase clock for a thread he wrote last on; null otherwise, so a reply clears it.
+            "chase": result.get("chase") if result.get("tab") == "follow" else None,
             "last_message": {"from_name": "Alex" if last["direction"] == "outbound" else name,
                              "from_email": email_of(last.get("from_email")), "at": last["at"].isoformat(),
                              "direction": last["direction"], "text": last.get("text") or ""},
@@ -1115,6 +1167,38 @@ def record_scan(cur, owner_id: str, synced: bool, errors: list[str]) -> None:
         (owner_id, synced, owner_id, psycopg2.extras.Json(errors)))
 
 
+DEAL_WORK_URL = "http://127.0.0.1:3100/api/relay/internal/deals"
+DEAL_WORK_SECRET = Path("/root/.hermes/workspace/secrets/relay-internal.secret")
+DEAL_WORK_TIMEOUT = 150
+
+
+def deal_work_on(env=os.environ) -> bool:
+    """The RELAY_AUTO_DEAL_UPDATE switch, read as autoDealUpdateOn() reads it in the web app."""
+    return not re.match(r"^(off|false|0|no)$", (env.get("RELAY_AUTO_DEAL_UPDATE") or "").strip(), re.I)
+
+
+def trigger_deal_work(env=os.environ, opener=urllib.request.urlopen, secret_file: Path = DEAL_WORK_SECRET, url: str = DEAL_WORK_URL) -> dict:
+    """Asks the web app to do Relay's deal work now (sent lead cards, reply updates, chase drafts). Never raises: the
+    scan's own work is done by then, so a failure is only reported."""
+    if not deal_work_on(env):
+        return {"skipped": "RELAY_AUTO_DEAL_UPDATE is off"}
+    try:
+        secret = secret_file.read_text().strip()
+    except OSError:
+        return {"error": "no internal secret"}
+    request = urllib.request.Request(url, data=b"{}", method="POST",
+                                     headers={"Authorization": f"Bearer {secret}", "Content-Type": "application/json"})
+    try:
+        with opener(request, timeout=DEAL_WORK_TIMEOUT) as response:
+            body = response.read().decode("utf-8", "replace")
+        out = json.loads(body) if body.strip() else {}
+        return out if isinstance(out, dict) else {"ok": True}
+    except urllib.error.HTTPError as e:
+        return {"error": f"HTTP {e.code}"}
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return {"error": str(getattr(e, "reason", e))[:200]}
+
+
 def load_sender_rules(cur, owner_id: str) -> dict[str, str]:
     """The owner's "always treat this sender as ..." rules, keyed by email or "@domain"."""
     if not table_exists(cur, "relay_sender_rule"):
@@ -1136,6 +1220,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--schema", help="search_path schema (tests)")
     parser.add_argument("--triage-dir", default=str(TRIAGE_DIR))
     parser.add_argument("--examples", type=int, default=0, help="include N classified example threads in the summary")
+    parser.add_argument("--no-deal-work", action="store_true", help="do not ask the web app for the deal work after --apply")
     args = parser.parse_args(argv)
 
     lock_handle = open(f"/tmp/relay-scan-{re.sub(r'[^a-z0-9]', '_', args.owner_email.lower())}.lock", "w")
@@ -1202,11 +1287,15 @@ def main(argv: list[str] | None = None) -> int:
                 job["row"]["summary_message_id"] = job["row"]["newest_message_id"]
 
         ops = plan_writes(rows, existing, now, seen)
+        deal_work = None
         if args.apply:
             if ops:
                 apply_ops(conn, owner_id, ops)
             record_scan(cur, owner_id, synced, errors)
             conn.commit()
+            # The deal work runs whether or not Relay is open in a browser. Not for a test schema.
+            if not args.no_deal_work and not args.schema:
+                deal_work = trigger_deal_work()
 
         tabs: dict[str, int] = {"action": 0, "follow": 0, "other": 0}
         priorities: dict[str, int] = {}
@@ -1231,6 +1320,7 @@ def main(argv: list[str] | None = None) -> int:
             "reasons": dict(sorted(reasons.items(), key=lambda kv: -kv[1])),
             "relay_table": bool(existing) or table_exists(cur, "relay_item"),
             "errors": errors,
+            "deal_work": deal_work,
         }
         if args.examples:
             order = {"action": 0, "follow": 1, "other": 2}

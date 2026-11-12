@@ -3,6 +3,8 @@ import { markNoStock } from "@/lib/crm-postgres/bulk-offer-mail";
 import { OFFER_STAGES, OfferConflict, addThreadEntry, getOffer, linkOffer, offerThread, updateOffer, type OfferPatch, type OfferStage } from "@/lib/crm-postgres/bulk-offers";
 import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
 import { missingPaidFacts, missingPaidMessage, readPaidFacts } from "@/lib/bulk-offer-paid";
+import { offerClose, offerGate } from "@/lib/crm-postgres/bulk-offer-close";
+import { expiryProblem, priceUnit } from "@/lib/bulk-offer-close";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -16,7 +18,31 @@ export async function GET(_req: Request, { params }: Context) {
   if (!await getListing(id)) return notFound("Listing");
   const offer = await getOffer(id, offerId, guard.userId);
   if (!offer) return notFound("Offer");
-  return Response.json({ offer, thread: await offerThread(offer, guard.userId) });
+  // `close`: the quote gate, the offer's last day, its quantity and (staff only, never sent) the margin.
+  const [thread, close] = await Promise.all([offerThread(offer, guard.userId), offerClose(offerId)]);
+  return Response.json({ offer, thread, close });
+}
+
+/** Checks the offer's terms: a buyer price is a positive amount in a known currency, per a unit, with an optional date. */
+function readTerms(raw: unknown): OfferPatch["terms"] | string {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "Terms must be an object.";
+  const terms = { ...(raw as Record<string, unknown>) };
+  if (terms.amount != null) {
+    const amount = typeof terms.amount === "string" ? Number(terms.amount) : terms.amount;
+    if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) return "The price must be a number above 0.";
+    terms.amount = amount;
+    if (typeof terms.currency !== "string" || !/^[A-Za-z]{3}$/.test(terms.currency)) return "Give the price's currency, like GBP.";
+    terms.currency = terms.currency.toUpperCase();
+    if (typeof terms.unit !== "string" || !terms.unit.trim()) return "Say what the price is per, like pack or kWh.";
+  }
+  for (const key of ["unit", "currency", "firmness", "delivery_terms", "payment_terms", "expires_on"]) {
+    if (terms[key] != null && typeof terms[key] !== "string") return `${key} must be text.`;
+    if (terms[key] === "") delete terms[key];
+  }
+  if (typeof terms.unit === "string" && terms.amount != null && !priceUnit(terms.unit) && !["kg", "lot", "tonne"].includes(terms.unit.trim().toLowerCase())) {
+    return "Price per pack, module, cell, unit, kWh, MWh, kg, tonne or lot.";
+  }
+  return terms as OfferPatch["terms"];
 }
 
 export async function PATCH(req: Request, { params }: Context) {
@@ -40,7 +66,18 @@ export async function PATCH(req: Request, { params }: Context) {
     if (reason.length > 500) { return badRequest("Keep the reason under 500 characters."); }
     patch.declinedReason = reason;
   }
-  if ("terms" in body) { if (!body.terms || typeof body.terms !== "object" || Array.isArray(body.terms)) return badRequest("Terms must be an object."); patch.terms = body.terms as OfferPatch["terms"]; }
+  if ("terms" in body) {
+    const terms = readTerms(body.terms);
+    if (typeof terms === "string") return badRequest(terms);
+    // To a buyer, the offer may not outlast the seller's quote, and its last day defaults to the quote's.
+    const gated = await offerGate(offerId);
+    if (gated?.side === "buyer") {
+      const problem = expiryProblem(terms?.expires_on, gated.gate);
+      if (problem) return badRequest(problem);
+      if (terms && !terms.expires_on && gated.gate?.ok) terms.expires_on = gated.gate.validUntil;
+    }
+    patch.terms = terms;
+  }
   const paid = readPaidFacts(body);
   if (typeof paid === "string") return badRequest(paid);
   if (Object.keys(paid).length) patch.paid = paid;

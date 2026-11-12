@@ -23,8 +23,33 @@ export const SHEET_QUERY = `
     latest.kind as latest_kind, latest.title as latest_title, latest.occurred_at::text as latest_at,
     offer.stage as furthest_stage,
     case when offer.stage not in ('declined', 'lost') then offer.paired_listing_id end as paired_listing_id,
-    bulk_listing_stage(listing.id) as stage, bulk_listing_deal_stage(listing.id) as deal_stage
+    bulk_listing_stage(listing.id) as stage, bulk_listing_deal_stage(listing.id) as deal_stage,
+    listing.created_at::text as created_at, stage_event.occurred_at::text as stage_at, stage_event.note as stage_note,
+    talk.last_in_at::text as last_in_at, talk.last_out_at::text as last_out_at, talk.waiting_from::text as waiting_from,
+    -- Marked Qualified without a price or a date: the card shows "No price" / "No date" (migration 112's checklist).
+    (listing.qualified_at is not null and not bulk_listing_check_answered(listing.id, 'price')) as no_price,
+    (listing.qualified_at is not null and not bulk_listing_check_answered(listing.id, 'when')) as no_date
   from crm_bulk_listings listing
+  left join lateral (
+    select e.occurred_at, e.note from crm_bulk_stage_events e
+    where e.subject_kind = 'listing' and e.subject_id = listing.id order by e.occurred_at desc, e.id desc limit 1
+  ) stage_event on true
+  -- The real conversation: every message on the deal's email threads (its thread links, its offers' links, and the Relay
+  -- emails linked to it) and its linked WhatsApp chats. Who wrote last, and when our unanswered run of messages began.
+  left join lateral (
+    with talk as (
+      select m.direction as dir, coalesce(m.sent_at, m.accepted_at, m.created_at) as at from mail_message m
+      where m.state in ('received', 'accepted') and m.thread_id in (
+        select t.thread_id from crm_bulk_thread_links t where t.bulk_listing_id = listing.id and t.channel = 'mail' and t.state <> 'rejected'
+        union select r.mail_thread_id from relay_item r where r.bulk_listing_id = listing.id and r.mail_thread_id is not null)
+      union all
+      select w.direction, w.occurred_at from whatsapp_message w
+      where w.deleted_at is null and w.occurred_at is not null and w.direction is not null and w.thread_id in (
+        select t.thread_id from crm_bulk_thread_links t where t.bulk_listing_id = listing.id and t.channel = 'whatsapp' and t.state <> 'rejected')
+    ), last_in as (select max(at) as at from talk where dir = 'inbound')
+    select (select at from last_in) as last_in_at, (select max(at) from talk where dir = 'outbound') as last_out_at,
+      (select min(at) from talk where dir = 'outbound' and at > coalesce((select at from last_in), '-infinity'::timestamptz)) as waiting_from
+  ) talk on true
   left join lateral (
     select a.kind, a.title, a.occurred_at from crm_bulk_listing_activity a
     where a.bulk_listing_id = listing.id and a.kind <> 'status'

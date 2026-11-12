@@ -1,4 +1,5 @@
 import { numbersKnown } from "./relay-lead-core";
+import { LEAD_GOAL_WORKING_MINUTES, leadLate } from "./chase-clock";
 
 /**
  * The Relay inbox as lanes, the pure part: which lane an email sits in, the numbers on the tiles, and what is kept of
@@ -47,12 +48,15 @@ type LaneItem = { id: string; bulk_listing_id: string | null };
 type LaneCard = { item_id: string; status: string; who: { at: string } };
 export type Lanes<I, C> = { leads: C[]; deals: I[]; replies: I[] };
 
-/** New leads (a card being read, ready or failed) oldest first; then emails on a deal; then everything else that needs a
- * reply. Deals and replies keep the order they came in: most pressing first, then longest waiting. */
-export function sortLanes<I extends LaneItem, C extends LaneCard>(items: I[], cards: C[]): Lanes<I, C> {
+/** New leads (a card being read, ready or failed): the ones past two working hours first, then the rest, each oldest
+ * first; then emails on a deal; then everything else that needs a reply. Deals and replies keep the order they came in:
+ * most pressing first, then longest waiting. */
+export function sortLanes<I extends LaneItem, C extends LaneCard>(items: I[], cards: C[], now: number | Date = Date.now()): Lanes<I, C> {
   const open = new Set(items.map((i) => i.id));
+  const at = new Date(now);
+  const late = (c: C) => (leadLate(c.who.at, at) ? 0 : 1);
   const leads = cards.filter((c) => open.has(c.item_id) && ["preparing", "ready", "failed"].includes(c.status))
-    .sort((a, b) => (Date.parse(a.who.at) || 0) - (Date.parse(b.who.at) || 0));
+    .sort((a, b) => late(a) - late(b) || (Date.parse(a.who.at) || 0) - (Date.parse(b.who.at) || 0));
   const taken = new Set(leads.map((c) => c.item_id));
   const rest = items.filter((i) => !taken.has(i.id));
   return { leads, deals: rest.filter((i) => i.bulk_listing_id), replies: rest.filter((i) => !i.bulk_listing_id) };
@@ -74,13 +78,16 @@ export function waited(iso: string | null | undefined, now = Date.now()): string
   return minutes < 60 ? `${minutes} min` : minutes < 48 * 60 ? `${Math.round(minutes / 60)} h` : `${Math.round(minutes / 1440)} d`;
 }
 
-/** A new lead should have its reply within two working hours. */
-export const LEAD_GOAL_MINUTES = 120;
+/** A new lead should have its reply within two working hours (Monday to Friday, 09:00 to 18:00 London; chase-clock.ts). */
+export const LEAD_GOAL_MINUTES = LEAD_GOAL_WORKING_MINUTES;
+
+/** An enquiry unanswered past two working hours: it sorts to the top of the leads lane and its age shows in red. */
+export const leadIsLate = (at: string | null | undefined, now = Date.now()) => leadLate(at, new Date(now));
 
 /** The lead that has waited longest, for the fourth tile. */
 export function oldestLead(cards: LaneCard[], now = Date.now()): { waited: string; late: boolean } | null {
   const times = cards.map((c) => Date.parse(c.who.at)).filter((t) => !Number.isNaN(t));
   if (!times.length) return null;
-  const oldest = Math.min(...times);
-  return { waited: waited(new Date(oldest).toISOString(), now), late: now - oldest > LEAD_GOAL_MINUTES * 60_000 };
+  const oldest = new Date(Math.min(...times)).toISOString();
+  return { waited: waited(oldest, now), late: leadIsLate(oldest, now) };
 }

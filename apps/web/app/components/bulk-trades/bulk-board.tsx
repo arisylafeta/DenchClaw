@@ -4,7 +4,7 @@ import { FEE_RATE, formatEurCompact, type SheetRow, type SheetTone } from "@/lib
 import { dealTotals, weightedFee } from "@/lib/bulk-desk";
 import type { DealStage } from "@/lib/bulk-listing";
 import { BusyRegion } from "./bt-shimmer";
-import { ScoreCircle, SideChip, WaitingBadge } from "./opportunities-sheet";
+import { QualifyGapTags, ScoreCircle, SideChip, WaitingBadge } from "./opportunities-sheet";
 import { DriverAvatar, DueText, Gap } from "./desk-bits";
 
 /** Read-only pipeline of the deal stages (bulk_listing_deal_stage): a listing is here once a counterparty has been offered
@@ -45,6 +45,7 @@ function Card({ row, today, onOpen }: { row: SheetRow; today: string; onOpen: (r
               {row.company && <span className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight">{row.company}</span>}
             </span>
             <span className="text-[12px] font-medium leading-snug [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden" style={{ color: "var(--bt-muted)" }}>{row.title}</span>
+            <QualifyGapTags row={row} />
           </span>
           <span data-card-owner><DriverAvatar owner={row.owner} /></span>
         </span>

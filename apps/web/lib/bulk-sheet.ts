@@ -74,6 +74,17 @@ export type SheetRow = {
   owner: string | null;
   /** Date used to order the sheet, newest first. */
   touched: string | null;
+  /** When the listing reached its current stage (its last stage event; for a New listing older than the stage history, when
+   * it was created). Drives "Stuck in New" on Today. */
+  stage_since?: string | null;
+  /** The real conversation on the deal's linked email threads and WhatsApp chats: their newest message, ours, and the first
+   * of ours still unanswered. "Waiting on them / us" on Today reads these, never updated_at. */
+  last_in_at?: string | null;
+  last_out_at?: string | null;
+  waiting_from?: string | null;
+  /** Ticked Qualified without a price, or without a date: tags on the card. */
+  no_price?: boolean;
+  no_date?: boolean;
 };
 
 export type SheetFilters = {
@@ -112,6 +123,9 @@ export type ListingSheetInput = {
   stage: ListingStage;
   /** From bulk_listing_deal_stage(): one of BOARD_STAGES, or null. */
   deal_stage?: string | null;
+  created_at?: string | null; stage_at?: string | null; stage_note?: string | null;
+  last_in_at?: string | null; last_out_at?: string | null; waiting_from?: string | null;
+  no_price?: boolean | null; no_date?: boolean | null;
 };
 
 const positive = (value: unknown): number | null => {
@@ -193,6 +207,10 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     next_action: text(input.next_action), likelihood: likelihoodOf((input.context as Record<string, unknown> | null)?.likelihood), next_due: input.next_due, owner: dealOwner((input.context as Record<string, unknown> | null)?.owner),
     waiting_on: input.waiting_on === "us" || input.waiting_on === "them" ? input.waiting_on : null, waiting_since: input.waiting_since ?? null,
     touched: input.latest_at ?? input.observed_on ?? input.updated_at,
+    // The starting event of migration 111 is not when a listing became New: it was New from the day it was made.
+    stage_since: input.stage_note === "As of migration 111" && stage === "New" && input.created_at ? input.created_at : input.stage_at ?? input.created_at ?? null,
+    last_in_at: input.last_in_at ?? null, last_out_at: input.last_out_at ?? null, waiting_from: input.waiting_from ?? null,
+    no_price: !!input.no_price, no_date: !!input.no_date,
   };
 }
 

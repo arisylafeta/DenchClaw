@@ -21,12 +21,15 @@ describe("working days", () => {
     expect(workingDaysBetween(at("2026-11-06"), at("2026-11-02"))).toBe(0);
   });
 
-  it("chases on the third working day, not before", () => {
+  it("chases on working day 1, 3 and 5 (lib/chase-clock.ts), not on the day it was sent", () => {
     const sent = at("2026-11-02");
-    expect(chaseDue(sent, at("2026-11-04", "23:00"))).toBe(false);
-    expect(chaseDue(sent, at("2026-11-05"))).toBe(true);
-    // Friday to Monday is one working day, not three.
-    expect(chaseDue(at("2026-11-06"), at("2026-11-09"))).toBe(false);
+    expect(chaseDue(sent, at("2026-11-02", "17:00"))).toBe(false);
+    expect(chaseDue(sent, at("2026-11-03"))).toBe(true);
+    expect(chaseDue(sent, at("2026-11-04", "23:00"), 1)).toBe(false);
+    expect(chaseDue(sent, at("2026-11-05"), 1)).toBe(true);
+    // Friday to Monday is one working day: the first chase, not the second.
+    expect(chaseDue(at("2026-11-06"), at("2026-11-09"))).toBe(true);
+    expect(chaseDue(at("2026-11-06"), at("2026-11-09"), 1)).toBe(false);
   });
 
   it("uses the London date, so a late-evening send is not a day ahead", () => {

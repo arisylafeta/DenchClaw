@@ -7,6 +7,7 @@ import { queryPg, withPgTransaction } from "../postgres";
 import { buildProductKey, type FieldFact, type ProductKey } from "../match/product-key";
 import { chaseDue } from "../match/working-days";
 import { addressParts, sameName, type BuyerFacts, type RequestFacts } from "../match/offer-email";
+import type { OfferTerms } from "./bulk-offers";
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 
@@ -22,6 +23,9 @@ type OutreachRow = {
   offer_person_id: string | null;
   offer_company_id: string | null;
   offer_data: Record<string, unknown>;
+  offer_terms: OfferTerms | null;
+  /** The offer's quantity, else what the stored match's yes confirmed. */
+  offer_quantity: number | null;
   listing_party: string | null;
   listing_contact: string | null;
   listing_email: string | null;
@@ -53,6 +57,9 @@ export type OfferOutreach = {
   kind: "supply" | "demand";
   stage: string | null;
   data: Record<string, unknown>;
+  /** The price and terms recorded on the offer: to a buyer, the only price that may be quoted. */
+  terms: OfferTerms;
+  quantity: number | null;
   /** The listing's location as written, for the template to reduce to town and country. */
   location: string | null;
   /** Where the draft goes. Null when the offer holds no address; `blocked` then says why. */
@@ -77,7 +84,8 @@ const asText = (value: unknown) => (typeof value === "string" && value.trim() ? 
 async function outreachRow(listingId: string, offerId: string): Promise<OutreachRow | null> {
   const [row] = await queryPg<OutreachRow>(
     `select o.id as offer_id, o.bulk_listing_id as listing_id, l.kind, o.stage, o.name as offer_name, o.contact as offer_contact,
-       o.person_id as offer_person_id, o.company_id as offer_company_id, o.data as offer_data,
+       o.person_id as offer_person_id, o.company_id as offer_company_id, o.data as offer_data, o.terms as offer_terms,
+       coalesce(o.quantity, (select m.confirmed_qty from crm_bulk_matches m where m.offer_id = o.id))::float8 as offer_quantity,
        l.party as listing_party, l.contact as listing_contact, l.email as listing_email, l.location as listing_location,
        l.person_id as listing_person_id, l.company_id as listing_company_id,
        p.full_name as person_name, p.email as person_email, coalesce(p.email_opted_out, false) as person_opted_out,
@@ -151,6 +159,8 @@ export async function offerOutreach(listingId: string, offerId: string, now: Dat
     kind: row.kind,
     stage: row.stage,
     data: row.offer_data ?? {},
+    terms: row.offer_terms ?? {},
+    quantity: row.offer_quantity ?? null,
     location: asText(row.listing_location),
     email: contact.email,
     recipientFirstName: firstNameOf(row),
@@ -220,15 +230,29 @@ export async function markOfferSent(offerId: string, actorUserId: string | null)
     if (!offer) {
       return null;
     }
+    // The price sheet that went with this email (its send copy) is now sent, and History says so.
+    const { rows: sheets } = await client.query<{ id: string; title: string }>(
+      `update crm_bulk_listing_documents d set state = 'sent', direction = 'sent',
+         note = concat_ws(' ', nullif(btrim(replace(coalesce(d.note, ''), 'Not sent yet.', '')), ''), 'Sent ' || to_char(current_date, 'YYYY-MM-DD') || '.'),
+         updated_at = now()
+       from crm_bulk_offers o
+       where o.id = $1 and d.id = o.data->>'open_sheet_doc_id' and d.state = 'draft'
+       returning d.id, d.title`, [offerId]);
+    for (const sheet of sheets) {
+      await client.query(
+        `insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, person_id, kind, title, data, actor_user_id)
+         select bulk_listing_id, $2, $3, 'document', $4, $5::jsonb, $6 from crm_bulk_listing_documents where id = $1`,
+        [sheet.id, offerId, offer.person_id, `Document sent: ${sheet.title}`.slice(0, 300), JSON.stringify({ document_id: sheet.id }), actorUserId]);
+    }
     if (offer.stage === "candidate" || offer.stage === "offered") {
       await client.query(
         `update crm_bulk_offers set
            stage = case when stage = 'candidate' then 'offered' else stage end,
            last_touch_on = current_date, last_touch_via = 'mail',
-           data = data - 'open_draft_id', updated_at = now()
+           data = data - 'open_draft_id' - 'open_sheet_doc_id', updated_at = now()
          where id = $1`, [offerId]);
     } else {
-      await client.query(`update crm_bulk_offers set data = data - 'open_draft_id', updated_at = now() where id = $1`, [offerId]);
+      await client.query(`update crm_bulk_offers set data = data - 'open_draft_id' - 'open_sheet_doc_id', updated_at = now() where id = $1`, [offerId]);
     }
     const moved = offer.stage === "candidate";
     if (moved) {

@@ -1,14 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { dealTotals, deskCounts, EUR_PER_GBP, openDealRows, TAKE_TARGET, todayGroups, type TodayGroupKey } from "@/lib/bulk-desk";
+import { ACTIVE_DEAL_LIMIT, dealWaiting, overdueByOwner, overLimit, STUCK_NEW_DAYS, stuckInNew, waitingLabel, type Mention } from "@/lib/bulk-today";
 import { formatEurCompact, type SheetRow } from "@/lib/bulk-sheet";
 import type { DealOwner } from "@/lib/bulk-owner";
 import { BusyRegion, Sh } from "./bt-shimmer";
 import { NextActionCell } from "./next-action-cell";
 import { ProgressChip } from "./opportunities-sheet";
 import { DriverAvatar, DueText } from "./desk-bits";
-import { ErrorText } from "./trade-ui";
+import { ErrorText, request } from "./trade-ui";
 import { DossiersToReview } from "./dossiers-to-review";
 
 /** Whole thousands for the target, e.g. £15k, €17k. */
@@ -80,6 +81,7 @@ function ActionRow({ row, today, onOpen, onNext }: { row: SheetRow; today: strin
             {row.company ? `${row.company}: ` : ""}{row.title}
           </button>
           {row.likelihood != null && <><span aria-hidden="true">·</span><span>{row.likelihood}% chance</span></>}
+          <WaitingText row={row} />
         </span>
       </span>
       <span className="flex shrink-0 flex-col items-end gap-1.5">
@@ -90,6 +92,103 @@ function ActionRow({ row, today, onOpen, onNext }: { row: SheetRow; today: strin
         <ProgressChip row={row} />
       </span>
     </li>
+  );
+}
+
+/** Whose move it is, from the last real message on the deal's linked threads and chats (never updated_at). */
+function WaitingText({ row }: { row: SheetRow }) {
+  const waiting = dealWaiting(row);
+  if (!waiting) return null;
+  return <><span aria-hidden="true">·</span><span data-waiting={waiting.on} style={{ color: waiting.on === "us" && waiting.days >= 1 ? "var(--bt-amber)" : undefined }}>{waitingLabel(waiting)}</span></>;
+}
+
+/** Team notes that mention this person, until they tick them. Today shows the signed-in person's, or the chosen owner's. */
+function Mentions({ owner, onOpen }: { owner: DealOwner | "all"; onOpen: (listingId: string) => void }) {
+  const [data, setData] = useState<{ person: string | null; me: string | null; mentions: Mention[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    try {
+      const r = await request<{ person?: string | null; me?: string | null; mentions?: Mention[] }>(`/api/bulk-mentions${owner === "all" ? "" : `?for=${encodeURIComponent(owner)}`}`);
+      setData({ person: r.person ?? null, me: r.me ?? null, mentions: Array.isArray(r.mentions) ? r.mentions : [] });
+      setError(null);
+    }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not load mentions."); }
+  }, [owner]);
+  useEffect(() => { void load(); }, [load]);
+  const tick = async (id: string) => {
+    try { await request(`/api/bulk-mentions/${encodeURIComponent(id)}`, { method: "POST" }); await load(); }
+    catch (err) { setError(err instanceof Error ? err.message : "Could not tick it."); }
+  };
+  if (!data?.mentions.length && !error) return null;
+  const mine = data?.person && data.person === data.me;
+  return (
+    <section aria-label="Mentions" className="overflow-hidden rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+      <header className="border-b px-4 py-3" style={{ borderColor: "var(--bt-divider)" }}>
+        <h2 className="text-[15px] font-semibold">Mentions{data?.person && !mine ? <span className="font-normal" style={{ color: "var(--bt-muted)" }}> · for {data.person}</span> : null}</h2>
+      </header>
+      <ErrorText error={error} />
+      <ul className="divide-y divide-[var(--bt-divider)]">
+        {data?.mentions.map((m) => (
+          <li key={m.id} className="flex items-start gap-3 px-4 py-3 text-[13px]">
+            <button type="button" className="min-w-0 flex-1 text-left hover:underline" onClick={() => onOpen(m.listing_id)}>
+              <span className="block whitespace-pre-wrap">{m.text}</span>
+              <span className="block text-[12px]" style={{ color: "var(--bt-muted)" }}>{m.listing_title}{m.by ? ` · from ${m.by.split("@")[0]}` : ""}</span>
+            </button>
+            {mine && <button type="button" onClick={() => void tick(m.id)} className="shrink-0 rounded-lg border px-2.5 py-1 text-[12px] font-medium" style={{ borderColor: "var(--bt-border)" }}>Done</button>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+const REMOVE_REASONS = [["not_a_fit", "Not a fit"], ["no_longer_needed", "No longer needed"], ["duplicate", "Duplicate"], ["other", "Other"]] as const;
+
+/** Deals in New for more than a week: open one to move it on, or remove it with a reason (closed, never deleted). */
+function StuckInNew({ rows, onOpen, onChanged }: { rows: SheetRow[]; onOpen: (row: SheetRow) => void; onChanged?: () => void }) {
+  const stuck = useMemo(() => stuckInNew(rows), [rows]);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [reason, setReason] = useState<string>("not_a_fit");
+  const [why, setWhy] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  if (!stuck.length) return null;
+  const remove = async (id: string) => {
+    try {
+      await request(`/api/bulk-listings/${encodeURIComponent(id)}/stuck`, { method: "POST", body: JSON.stringify({ reason, why }) });
+      setRemoving(null); setWhy(""); setError(null); onChanged?.();
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not remove it."); }
+  };
+  return (
+    <section aria-label="Stuck in New" className="overflow-hidden rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+      <header className="border-b px-4 py-3" style={{ borderColor: "var(--bt-divider)" }}>
+        <h2 className="text-[15px] font-semibold">Stuck in New <span className="font-normal tabular-nums" style={{ color: "var(--bt-muted)" }}>({stuck.length})</span></h2>
+        <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}>In New for more than {STUCK_NEW_DAYS} days. Move each one on, or remove it with a reason.</p>
+      </header>
+      <ErrorText error={error} />
+      <ul className="divide-y divide-[var(--bt-divider)]">
+        {stuck.map(({ row, days }) => (
+          <li key={row.key} className="flex flex-col gap-2 px-4 py-3 text-[13px]">
+            <div className="flex items-start gap-3">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{row.company ? `${row.company}: ` : ""}{row.title}</span>
+                <span className="block text-[12px]" style={{ color: "var(--bt-muted)" }}>{days} days in New{row.owner ? ` · ${row.owner}` : ""}</span>
+              </span>
+              <button type="button" onClick={() => onOpen(row)} className="shrink-0 rounded-lg border px-2.5 py-1 text-[12px] font-medium" style={{ borderColor: "var(--bt-border)" }}>Move on</button>
+              <button type="button" onClick={() => setRemoving(removing === row.id ? null : row.id)} className="shrink-0 rounded-lg border px-2.5 py-1 text-[12px] font-medium" style={{ borderColor: "var(--bt-border)", color: "var(--bt-red)" }}>Remove</button>
+            </div>
+            {removing === row.id && (
+              <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); void remove(row.id); }}>
+                <select aria-label="Why it is removed" value={reason} onChange={(event) => setReason(event.target.value)} className="h-8 rounded-lg border px-2 text-[12px]" style={{ borderColor: "var(--bt-border)" }}>
+                  {REMOVE_REASONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+                <input aria-label="In a few words" required value={why} onChange={(event) => setWhy(event.target.value)} placeholder="In a few words" className="h-8 min-w-0 flex-1 rounded-lg border px-2 text-[12px]" style={{ borderColor: "var(--bt-border)" }} />
+                <button type="submit" disabled={!why.trim()} className="h-8 rounded-lg border px-3 text-[12px] font-medium" style={{ borderColor: "var(--bt-border)" }}>Remove</button>
+              </form>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -105,16 +204,24 @@ function summary(rows: SheetRow[], owner: DealOwner | "all", groups: { key: Toda
     + `${plural(actions, "next action", "next actions")}${urgent ? `: ${urgent}` : ""}.`;
 }
 
-/** Today: the take target, then every open listing's next action by when it is due. Nothing else. */
-export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, onOpenBoard, onOpenCompany }: {
+/** Today: the take target, the active deal warning, mentions, deals stuck in New, then every open listing's next action by
+ * when it is due (overdue ones by owner), each with whose move it is from the real conversation. */
+export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, onOpenBoard, onOpenCompany, onChanged }: {
   rows: SheetRow[]; owner: DealOwner | "all"; loading: boolean; error: string | null; today: string;
   onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void>; onOpenBoard: () => void;
   onOpenCompany?: (id: string) => void;
+  /** After Today changed a deal (removed one stuck in New): reload the list. */
+  onChanged?: () => void;
 }) {
   const groups = useMemo(() => todayGroups(rows, today), [rows, today]);
   // Listings closed in the last 30 days are on the sheet for the Closed, Sold and Delivered columns; Today is open work only.
   const open = useMemo(() => rows.filter((row) => !row.closed), [rows]);
   const busy = loading && !rows.length;
+  const crowded = useMemo(() => overLimit(open), [open]);
+  const openById = useCallback((listingId: string) => {
+    const row = rows.find((r) => r.id === listingId);
+    if (row) onOpen(row);
+  }, [rows, onOpen]);
   return (
     <BusyRegion busy={busy} label="Loading…" className="flex flex-col gap-4">
       <div className="flex flex-col gap-0.5">
@@ -122,6 +229,13 @@ export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, 
         {(busy || (!error && rows.length > 0)) && <p data-today-summary className="text-[13px]" style={{ color: "var(--bt-text-2)" }}><Sh on={busy} chars={48}>{summary(open, owner, groups)}</Sh></p>}
       </div>
       <TakeTarget rows={rows} owner={owner} loading={busy} onOpenBoard={onOpenBoard} />
+      {!busy && crowded.map(({ owner: who, count }) => (
+        <p key={who} role="status" data-active-warning className="rounded-xl border px-4 py-3 text-[13px]" style={{ color: "var(--bt-amber)", background: "var(--bt-amber-bg)", borderColor: "var(--bt-amber-border)" }}>
+          {who === "No owner" ? `${count} active deals have no owner` : `${who} has ${count} active deals`}. More than {ACTIVE_DEAL_LIMIT} is more than one person can work well: park some, or hand them on.
+        </p>
+      ))}
+      <Mentions owner={owner} onOpen={openById} />
+      {!busy && <StuckInNew rows={open} onOpen={onOpen} onChanged={onChanged} />}
       <DossiersToReview onOpenCompany={onOpenCompany} />
       <ErrorText error={error} />
       <section aria-label="Next actions" className="overflow-hidden rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
@@ -139,9 +253,18 @@ export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, 
             <h3 className="border-b px-4 py-1.5 text-[12px] font-semibold" style={{ background: "var(--bt-table-head)", borderColor: "var(--bt-divider)", color: GROUP_TONE[group.key] ?? "var(--bt-text-2)" }}>
               {group.label} <span className="font-normal tabular-nums" style={{ color: "var(--bt-muted)" }}>({group.rows.length})</span>
             </h3>
-            <ul className="divide-y divide-[var(--bt-divider)] border-b" style={{ borderColor: "var(--bt-divider)" }}>
-              {group.rows.map((row) => <ActionRow key={row.key} row={row} today={today} onOpen={onOpen} onNext={onNext} />)}
-            </ul>
+            {group.key === "overdue" && owner === "all" ? overdueByOwner(group.rows).map(({ owner: who, rows: list }) => (
+              <section key={who} aria-label={`Overdue: ${who}`} data-overdue-owner={who}>
+                <h4 className="border-b px-4 py-1 text-[12px] font-medium" style={{ borderColor: "var(--bt-divider)", color: "var(--bt-text-2)" }}>{who} <span className="font-normal tabular-nums" style={{ color: "var(--bt-muted)" }}>({list.length})</span></h4>
+                <ul className="divide-y divide-[var(--bt-divider)] border-b" style={{ borderColor: "var(--bt-divider)" }}>
+                  {list.map((row) => <ActionRow key={row.key} row={row} today={today} onOpen={onOpen} onNext={onNext} />)}
+                </ul>
+              </section>
+            )) : (
+              <ul className="divide-y divide-[var(--bt-divider)] border-b" style={{ borderColor: "var(--bt-divider)" }}>
+                {group.rows.map((row) => <ActionRow key={row.key} row={row} today={today} onOpen={onOpen} onNext={onNext} />)}
+              </ul>
+            )}
           </section>
         ))}
       </section>

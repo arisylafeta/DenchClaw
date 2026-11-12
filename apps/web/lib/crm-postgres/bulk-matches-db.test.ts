@@ -45,6 +45,14 @@ describe.skipIf(!TEST_URL)("stored matching (migration 113)", () => {
   const stageOf = async (listingId: string) =>
     (await pg.queryPg<{ stage: string }>("select bulk_listing_stage($1) as stage", [listingId]))[0].stage;
   const lastEvent = async (listingId: string) => (await events.listStageEvents("listing", listingId)).at(-1);
+  /** Checks a demand's what, how many and where, then ticks it Qualified, as a person does on the checklist. */
+  const qualify = async (listingId: string) => {
+    await pg.queryPg(
+      `insert into crm_bulk_listing_fields (bulk_listing_id, field_key, value, status, visibility, checked_by, checked_at)
+       select $1, k, null, 'missing', 'never', $2, now() from unnest(array['product_family', 'quantity', 'location']) k
+       on conflict (bulk_listing_id, field_key) do update set checked_by = excluded.checked_by, checked_at = excluded.checked_at`, [listingId, email]);
+    await pg.queryPg("update crm_bulk_listings set qualified_at = now(), qualified_by = $2 where id = $1", [listingId, email]);
+  };
 
   beforeAll(async () => {
     process.env.DATABASE_URL = TEST_URL;
@@ -63,12 +71,15 @@ describe.skipIf(!TEST_URL)("stored matching (migration 113)", () => {
         `insert into crm_stock_opportunities (id, person_id, company_id, status, title, quantity, details) values ($1, $2, $3, 'opportunity', 'Kona pack', $4, $5::jsonb)`,
         [id(`st${n}`), id(`pe${n}`), id(`co${n}`), n === 3 ? null : 30, JSON.stringify(n === 92 ? { availability: { state: "sold" } } : {})]);
     }
-    // Requests: qualified (a company, a quantity and a product), not owned, so a proposed match alone leaves them Qualified.
+    // Requests: qualified under the rule of migration 112 (what, how many and where answered, each checked by a person, and
+    // the Qualified tick), owned by Alex as every new deal is. They stay Qualified until a person starts a match run.
     for (const d of ["d1", "d2", "d3", "d4"]) {
       await pg.queryPg(
-        `insert into crm_bulk_listings (id, kind, party, company_id, person_id, summary, quantity, status, spec)
-         values ($1, 'demand', 'Motorgreen Ltd', $2, $3, 'Kona packs', '20 packs', 'open', '{"intent": "request", "product_family": "Hyundai Kona 64 kWh packs"}')`,
+        `insert into crm_bulk_listings (id, kind, party, company_id, person_id, summary, quantity, location, status, spec, context)
+         values ($1, 'demand', 'Motorgreen Ltd', $2, $3, 'Kona packs', '20 packs', 'Leeds, UK', 'open', '{"intent": "request", "product_family": "Hyundai Kona 64 kWh packs"}',
+           '{"owner": "Alex"}')`,
         [id(d), id("co0"), id("pe0")]);
+      await qualify(id(d));
     }
     await pg.queryPg(
       `insert into crm_bulk_listings (id, kind, party, company_id, person_id, summary, quantity, location, status, closed_reason, spec) values
@@ -105,6 +116,8 @@ describe.skipIf(!TEST_URL)("stored matching (migration 113)", () => {
         reasons: Object.fromEntries(request.candidates.map((c) => [c.id, "Same model, quantity stated."])),
       }),
     };
+    // Qualified, owned and nothing asked: still Qualified until a person starts a run.
+    expect(await stageOf(id("d1"))).toBe("Qualified");
     const stored = await matches.runMatches(id("d1"), actor, deps({ ranker: reverse }));
     const keys = stored.matches.map((m) => m.candidate_key);
     expect(keys).toEqual([`stock:${id("st6")}`, `stock:${id("st5")}`, `stock:${id("st4")}`, `stock:${id("st3")}`, `supply:${id("s1")}`]);
@@ -113,8 +126,9 @@ describe.skipIf(!TEST_URL)("stored matching (migration 113)", () => {
     expect(stored.matches[0]).toMatchObject({ state: "proposed", reason: "Same model, quantity stated.", scored_by: { model: "stub", prompt: "test" } });
     expect(stored.matches[0].checks).toMatchObject({ reason: "Model matches: Kona (6)", units: 30 });
     expect(stored.run?.count).toBe(5);
-    // A run proposes; it does not move the request on.
-    expect(await stageOf(id("d1"))).toBe("Qualified");
+    // Starting the run is marking the deal ready (Alex, 12 Nov): the request moves on to Sourcing, logged with the person.
+    expect(await stageOf(id("d1"))).toBe("Sourcing");
+    expect(await lastEvent(id("d1"))).toMatchObject({ from_stage: "Qualified", to_stage: "Sourcing", actor: email });
   });
 
   it("keeps the scorer's order and plain reasons when the model fails or names a counterparty", async () => {
@@ -137,7 +151,7 @@ describe.skipIf(!TEST_URL)("stored matching (migration 113)", () => {
     expect(String(refused.matches[0].scored_by.fallback)).toMatch(/^model answer refused: reason for c2 names/);
   });
 
-  it("asks: a draft for a person to send, the match asked, and the request now Sourcing", async () => {
+  it("asks: a draft for a person to send, the match asked, and the request stays Sourcing", async () => {
     const [first] = (await matches.listStoredMatches(id("d1"))).matches;
     const asked = await matches.askMatch(id("d1"), first.id, actor, deps());
     expect(asked).toMatchObject({ kind: "stock_confirm", reused: false });
@@ -274,6 +288,21 @@ describe.skipIf(!TEST_URL)("stored matching (migration 113)", () => {
     expect(await matches.markNewSupply(id("d5"), actor, deps({ scorer: withNew }))).toBe(0);
     // A one-off request gets no markers.
     expect(await matches.markNewSupply(id("d4"), actor, deps({ scorer: withNew }))).toBe(0);
+  });
+
+  it("marks supply that became Qualified since the last check, for every standing request at once (A3)", async () => {
+    // A supply listing made before the last check, ticked Qualified after it: new supply for d5 now.
+    await pg.queryPg(`insert into crm_bulk_listings (id, kind, party, company_id, person_id, summary, quantity, location, status, spec, created_at)
+      values ($1, 'supply', 'Seller three', $2, $3, 'Kona lot', '6 packs', 'Leeds, UK', 'open', '{}', now() - interval '2 days')`, [id("s3"), id("co9"), id("pe9")]);
+    const before = await pg.queryPg<{ checked: string }>("select context->'match_run'->>'checked_at' as checked from crm_bulk_listings where id = $1", [id("d5")]);
+    await pg.queryPg("update crm_bulk_listings set qualified_at = now(), qualified_by = $2 where id = $1", [id("s3"), email]);
+    const withS3 = async (deal: { id: string }) => result(deal.id, [...demandRows(), supplier(9), supplier(3, { key: `supply:${id("s3")}`, stockId: null, units: 6 })]);
+    expect(await matches.markNewSupplyForStanding(actor, deps({ scorer: withS3 }))).toBe(1);
+    const markers = (await matches.listStoredMatches(id("d5"))).markers.map((m) => m.candidate_key);
+    expect(markers).toContain(`supply:${id("s3")}`);
+    expect(before[0].checked).toBeTruthy();
+    // Idempotent: run again, nothing new.
+    expect(await matches.markNewSupplyForStanding(actor, deps({ scorer: withS3 }))).toBe(0);
   });
 
   describe("a supply deal", () => {

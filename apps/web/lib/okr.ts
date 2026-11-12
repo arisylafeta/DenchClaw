@@ -28,7 +28,8 @@ export const USD_GBP = 0.79;
 export const MARKETPLACE_PAID_TARGET = 12;
 /** The one bulk target, from TARGETS: take on paid bulk deals over the quarter. */
 export const BULK_TAKE_TARGET_GBP = TARGETS.bulk_take.value;
-/** An offer with no touch for this many days has gone quiet. */
+/** An offer with no touch for this many days has gone quiet. A scorecard measure only: it chases nothing. Chases run on
+ * the one chase clock (lib/chase-clock.ts: working day 1, 3 and 5, then parking proposed). */
 export const QUIET_OFFER_DAYS = 21;
 
 export type Kpi = {

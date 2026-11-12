@@ -10,6 +10,7 @@ import { missingInstruction, type ChecklistItem, type DealChecklist } from "@/li
 import { BULK_RULE_TEXT } from "@/lib/relay-front-door";
 import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
 import { isSenderKey, SENDERS } from "@/lib/relay-senders";
+import { chaseLabel } from "@/lib/chase-clock";
 import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
 import { Lanes, useSuggestions } from "./relay-lanes";
 import { LeadCards, useLeadCards } from "./relay-lead-card";
@@ -348,12 +349,13 @@ function useItemActions({ data, tab, reload, say, onDrafted }: { data: Summary; 
       await reload();
     } catch (err) { setGone((g) => ({ ...g, [i.id]: false })); say(err instanceof Error ? err.message : "Couldn't update Gmail."); }
   };
-  /** Follow up: stop suggesting a chase on this thread. It comes back only if they write again. */
-  const dontChase = async (i: RelayItem) => {
+  /** Follow up: stop suggesting a chase on this thread. It comes back only if they write again. `park`: after three
+   * unanswered chases, the same with a note on the linked deal that it was parked. */
+  const dontChase = async (i: RelayItem, park = false) => {
     setGone((g) => ({ ...g, [i.id]: true }));
     try {
-      await api(`/api/relay/items/${i.id}/done`, { method: "POST", body: { reason: "no_chase" } });
-      say(`No chase for ${firstName(i.counterpart_name)}. It comes back only if they write again.`, async () => {
+      await api(`/api/relay/items/${i.id}/done`, { method: "POST", body: { reason: park ? "park" : "no_chase" } });
+      say(`${park ? "Parked" : "No chase for"} ${firstName(i.counterpart_name)}. It comes back only if they write again.`, async () => {
         await api(`/api/relay/items/${i.id}`, { method: "PATCH", body: { status: "open", done_reason: "" } }).catch(() => undefined);
         setGone((g) => ({ ...g, [i.id]: false }));
         await reload();
@@ -516,6 +518,12 @@ function Inbox({ data, tab, setTab, only, onBack, reload, say, onOpenListing, on
                       {tab === "action" && <button type="button" className={s.doneb} title="No reply needed: marks it read and labels it Sorted in Gmail" onClick={() => void done(i)}>Done</button>}
                       {tab === "follow" && <button type="button" className={s.doneb} title="Stop suggesting a chase. It comes back only if they write again." onClick={() => void dontChase(i)}>Don&apos;t chase</button>}
                     </div>
+                    {tab === "follow" && i.chase && i.chase.state !== "waiting" && (
+                      <div className={s.hint} data-chase={i.chase.state}>
+                        {chaseLabel(i.chase)}{i.chase.state === "due" ? ". Relay prepares the chase in Review for you to send." : ""}
+                        {i.chase.state === "park" && <> <button type="button" className={s.doneb} title={i.bulk_listing_id ? "Stop chasing and note on the deal that it was parked. It comes back only if they write again." : "Stop chasing. It comes back only if they write again."} onClick={() => void dontChase(i, true)}>Park</button></>}
+                      </div>
+                    )}
                     {!isOpen && <div className={s.hint}>{busy[i.id] ? "Drafting…" : note.trim() ? (NEEDS_AGENT.test(note) ? "Relay will do the work first (research, lists, files), then draft. Takes a few minutes." : "Ready: press the arrow (or ⌘↵) to draft") : "Click to read the full email"}</div>}
                   </>
                 )}
@@ -563,11 +571,17 @@ function Review({ data, reload, say, onBack, sending, startSend, undoSend }: {
   const draft = ordered.find((d) => d.id === viewId) ?? ordered[0];
   const isSent = (d: RelayDraftView) => d.state === "sent" || d.id in sending || (!!d.mail?.scheduled && !d.mail.scheduled.changed);
   const [finishing, setFinishing] = useState(false);
-  const finish = async () => {
+  const finish = async (reason?: "no_chase") => {
     setFinishing(true);
-    try { await api(`/api/relay/items/${item.id}/done`, { method: "POST" }); say("Done · no reply. Marked read and labelled Sorted in Gmail"); await reload(); }
+    try {
+      await api(`/api/relay/items/${item.id}/done`, { method: "POST", body: reason ? { reason } : undefined });
+      say(reason ? `No chase for ${firstName(item.counterpart_name)}. It comes back only if they write again.` : "Done · no reply. Marked read and labelled Sorted in Gmail");
+      await reload();
+    }
     catch (err) { say(err instanceof Error ? err.message : "Couldn't update Gmail."); } finally { setFinishing(false); }
   };
+  // A chase Relay prepared by itself when the chase clock fell due: "Don't chase" drops it and stops chasing this thread.
+  const chasePrepared = item.drafts.some((d) => d.origin === "predraft" && d.state !== "sent");
   return (
     <section aria-label="Review">
       <div className={s.phead}><span className={s.tag}>In review</span></div>
@@ -581,6 +595,7 @@ function Review({ data, reload, say, onBack, sending, startSend, undoSend }: {
         <button className={s.navb} type="button" aria-label="Next" onClick={() => setCur((index + 1) % items.length)}>›</button>
         <span className={s.count}>{index + 1} of {items.length}</span>
         <span className={s.sp} />
+        {chasePrepared && <button type="button" className={cx(s.btn, s.ghost)} disabled={finishing} title="Drop this chase and stop chasing the thread. It comes back only if they write again." onClick={() => void finish("no_chase")}>Don&apos;t chase</button>}
         <button type="button" className={cx(s.btn, s.ghost)} disabled={finishing} title="No reply needed: marks this email read, labels it Sorted in Gmail and removes it from Review" onClick={() => void finish()}>{finishing ? "Marking…" : "Done, no reply"}</button>
       </div>
       <div className={s.rgrid}>

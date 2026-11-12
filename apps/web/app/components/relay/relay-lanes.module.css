@@ -20,6 +20,7 @@
 .stat { background: var(--n-card); border: 1px solid var(--n-line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .stat b { font-size: 21px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .stat b.late { color: var(--n-hot); }
+.ageLate { color: var(--n-hot); font-weight: 600; }
 .stat span { font-size: 12.5px; color: var(--n-ink2); }
 
 /* a lane */

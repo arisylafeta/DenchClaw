@@ -94,7 +94,10 @@ describe("dates", () => {
 
   it("says how long an ask has gone unanswered", () => {
     const now = new Date("2026-11-12T12:00:00Z");
-    expect(askedAgo({ state: "asked", asked_at: "2026-11-09T10:00:00Z", verdict: null }, now)).toEqual({ days: 3, label: "Asked 3 working days ago, no answer" });
+    // On the one chase clock: day 1, 3 and 5 from the ask (lib/chase-clock.ts).
+    expect(askedAgo({ state: "asked", asked_at: "2026-11-09T10:00:00Z", verdict: null, chases: 1 }, now)).toEqual({ days: 3, label: "Asked 3 working days ago, no answer: chase 2 of 3 due", chase: "due", next: 2 });
+    expect(askedAgo({ state: "asked", asked_at: "2026-11-10T10:00:00Z", verdict: null, chases: 1 }, now)).toEqual({ days: 2, label: "Asked 2 working days ago, no answer", chase: "waiting", next: 2 });
+    expect(askedAgo({ state: "asked", asked_at: "2026-11-02T10:00:00Z", verdict: null, chases: 3 }, now)?.label).toBe("Asked 8 working days ago, no answer to 3 chases: park it?");
     expect(askedAgo({ state: "asked", asked_at: "2026-11-12T09:00:00Z", verdict: null }, now)?.label).toBe("Asked today, no answer yet");
     expect(askedAgo({ state: "confirmed", asked_at: "2026-11-09T10:00:00Z", verdict: "yes" }, now)).toBeNull();
   });

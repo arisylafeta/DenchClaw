@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 type Context = { params: Promise<{ id: string }> };
 
-/** No reply needed, or {reason: "no_chase"} from Follow up: marks the thread read and labels it "4 Sorted" in Gmail (it stays
+/** No reply needed, or {reason: "no_chase"} from Follow up ({reason: "park"} after three unanswered chases): marks the thread read and labels it "4 Sorted" in Gmail (it stays
  * in the inbox), then hides it. */
 export async function POST(req: Request, { params }: Context) {
   const guard = await guardRelay();
@@ -13,7 +13,9 @@ export async function POST(req: Request, { params }: Context) {
   const { id } = await params;
   const body = await readBody(req);
   try {
-    return Response.json({ item: await markDone(id, guard.user.id, guard.user.email, body?.reason === "no_chase" ? "no_chase" : "user_done") });
+    // park: three chases went unanswered; it is "Don't chase" plus a note on the linked deal (never done by itself).
+    const park = body?.reason === "park";
+    return Response.json({ item: await markDone(id, guard.user.id, guard.user.email, body?.reason === "no_chase" || park ? "no_chase" : "user_done", { park }) });
   } catch (error) {
     return relayError(error);
   }

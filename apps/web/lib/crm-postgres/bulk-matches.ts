@@ -797,8 +797,9 @@ export async function recordSellerQuote(dealId: string, validUntil: string, acto
 }
 
 /**
- * Standing requests: new supply listings and stock lines added since the last run or check that the scorer fits become
- * "new supply may fit" markers (proposed, out of the five, with a note). Nothing more happens until a person acts.
+ * Standing requests: supply listings created or ticked Qualified, and stock lines added, since the last run or check
+ * that the scorer fits become "new supply may fit" markers (proposed, out of the five, with a note). Nothing more
+ * happens until a person acts. Cheap when nothing is new (one exists query) and safe to repeat: a line is marked once.
  */
 export async function markNewSupply(dealId: string, actor: MatchActor, deps: MatchDeps = {}): Promise<number> {
   const deal = await readDeal(dealId);
@@ -808,7 +809,7 @@ export async function markNewSupply(dealId: string, actor: MatchActor, deps: Mat
   }
   const since = run.checked_at ?? run.at;
   const [news] = await queryPg<{ any: boolean }>(
-    `select exists (select 1 from crm_bulk_listings where kind = 'supply' and status <> 'closed' and created_at > $1::timestamptz)
+    `select exists (select 1 from crm_bulk_listings where kind = 'supply' and status <> 'closed' and (created_at > $1::timestamptz or qualified_at > $1::timestamptz))
          or exists (select 1 from crm_stock_opportunities where created_at > $1::timestamptz) as any`, [since]);
   if (!news?.any) {
     return 0;
@@ -819,7 +820,7 @@ export async function markNewSupply(dealId: string, actor: MatchActor, deps: Mat
     .filter((item): item is { row: MatchRow; index: number; ref: CandidateRef } => !!item.ref && item.ref.kind !== "company");
   const ids = fresh.map((item) => item.ref.id);
   const created = new Set((await queryPg<{ kind: string; id: string }>(
-    `select 'listing' as kind, id from crm_bulk_listings where id = any($1::text[]) and created_at > $2::timestamptz
+    `select 'listing' as kind, id from crm_bulk_listings where id = any($1::text[]) and (created_at > $2::timestamptz or qualified_at > $2::timestamptz)
      union all select 'stock', id from crm_stock_opportunities where id = any($1::text[]) and created_at > $2::timestamptz
      union all select 'marketplace', marketplace_listing_id from crm_stock_opportunities where marketplace_listing_id = any($1::text[]) and created_at > $2::timestamptz`,
     [ids, since])).map((row) => `${row.kind}:${row.id}`));
@@ -837,4 +838,19 @@ export async function markNewSupply(dealId: string, actor: MatchActor, deps: Mat
   }
   await queryPg(`update crm_bulk_listings set context = jsonb_set(context, '{match_run,checked_at}', to_jsonb($2::text)) where id = $1`, [dealId, checkedAt]);
   return marks.length;
+}
+
+/**
+ * markNewSupply for every open standing request with a run. Called when a supply deal is opened from a lead card or
+ * ticked Qualified, and after every inbox scan, which catches supply that Matcha, the Jules sync or an accepted inbox
+ * proposal wrote straight to the database. Returns how many markers were added.
+ */
+export async function markNewSupplyForStanding(actor: MatchActor, deps: MatchDeps = {}): Promise<number> {
+  const requests = await queryPg<{ id: string }>(
+    `select id from crm_bulk_listings where kind = 'demand' and status <> 'closed' and spec->>'intent' = 'standing' and context ? 'match_run' order by id`);
+  let marked = 0;
+  for (const request of requests) {
+    marked += await markNewSupply(request.id, actor, deps).catch((error) => { console.error("new supply marker", request.id, error); return 0; });
+  }
+  return marked;
 }

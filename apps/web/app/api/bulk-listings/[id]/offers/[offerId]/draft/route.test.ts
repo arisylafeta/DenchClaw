@@ -3,7 +3,10 @@ import { buildProductKey, type FieldFact } from "@/lib/match/product-key";
 
 const m = vi.hoisted(() => ({
   currentUser: vi.fn(), getListing: vi.fn(), offerOutreach: vi.fn(), setOpenDraft: vi.fn(),
-  readMailDraft: vi.fn(), createOfferEmailDraft: vi.fn(),
+  readMailDraft: vi.fn(), createOfferEmailDraft: vi.fn(), offerGate: vi.fn(), prepareOfferSheet: vi.fn(), storeOfferSheet: vi.fn(),
+}));
+vi.mock("@/lib/crm-postgres/bulk-offer-close", () => ({
+  offerGate: m.offerGate, prepareOfferSheet: m.prepareOfferSheet, storeOfferSheet: m.storeOfferSheet,
 }));
 vi.mock("@/lib/auth", () => ({ currentUser: m.currentUser, ALLOWED_EMAILS: new Set(["alex@rebattery.io", "ari@rebattery.io"]) }));
 vi.mock("@/lib/crm-postgres/bulk-listings", () => ({ getListing: m.getListing }));
@@ -35,6 +38,7 @@ const outreach = (over: Record<string, unknown> = {}) => ({
   data: {}, location: "Rotterdam, Netherlands", email: "sam@buyer.test", recipientFirstName: "Sam",
   blocked: null, privateValues: ["Battery Partners Ltd"], product: { key: buildProductKey({ fields, title: null }), fields },
   buyer: { wants: "Samsung 50E packs", products: null }, lastSent: null, openDraftId: null, chaseDue: false,
+  terms: {}, quantity: null,
   ...over,
 });
 
@@ -47,6 +51,8 @@ beforeEach(() => {
   m.offerOutreach.mockResolvedValue(outreach());
   m.createOfferEmailDraft.mockResolvedValue("draft_1");
   m.readMailDraft.mockResolvedValue(null);
+  m.offerGate.mockResolvedValue({ side: "buyer", gate: { ok: true, validUntil: "2026-12-03" } });
+  m.storeOfferSheet.mockResolvedValue("bdoc_sheet");
 });
 
 describe("POST offer draft", () => {
@@ -130,6 +136,50 @@ describe("POST offer draft", () => {
     expect(res.status).toBe(201);
     expect((await res.json() as { kind: string; subject: string }).kind).toBe("chase");
     expect(m.createOfferEmailDraft).toHaveBeenCalledWith(expect.objectContaining({ subject: "Re: 40 x 50 kWh NMC packs" }));
+  });
+
+  it("refuses a buyer draft while the seller's quote is out of date, says why, and writes nothing", async () => {
+    m.offerGate.mockResolvedValue({ side: "buyer", gate: { ok: false, validUntil: "2026-11-03", reason: "The seller's quote ran out on 3 Nov. Ask them to confirm it." } });
+    const res = await call();
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "The seller's quote ran out on 3 Nov. Ask them to confirm it.", blocked: "seller_quote", reconfirm: true });
+    expect(m.createOfferEmailDraft).not.toHaveBeenCalled();
+    expect(m.setOpenDraft).not.toHaveBeenCalled();
+  });
+
+  it("gates a buyer chase too, but never a draft to a seller", async () => {
+    m.offerGate.mockResolvedValue({ side: "buyer", gate: { ok: false, validUntil: null, reason: "The seller has not given a price yet. Ask them to confirm it." } });
+    m.offerOutreach.mockResolvedValue(outreach({ stage: "offered", chaseDue: true, lastSent: { sent_at: "2026-10-20T09:00:00Z", subject: "x" } }));
+    expect((await call()).status).toBe(409);
+    m.offerOutreach.mockResolvedValue(outreach({ kind: "demand", stage: "candidate" }));
+    expect((await call()).status).toBe(201);
+    expect(m.offerGate).toHaveBeenCalledTimes(1);
+  });
+
+  it("with a buyer price and quantity, writes the fixed sheet's lines in place of price on request and stores the send copy", async () => {
+    m.offerOutreach.mockResolvedValue(outreach({ terms: { amount: 2400, currency: "GBP", unit: "pack" }, quantity: 12 }));
+    const prepared = { kind: "send", lines: 1, buyer: "Sam", skipped: [], sheet: { reference: "PS-0a1b2c3d", text: "12 x NMC packs at GBP 2,400 per pack: GBP 28,800\nPrice sheet PS-0a1b2c3d." } };
+    m.prepareOfferSheet.mockResolvedValue(prepared);
+    const res = await call();
+    expect(res.status).toBe(201);
+    const body = await res.json() as { body: string; sheet: unknown };
+    expect(body.body).toContain("12 x NMC packs at GBP 2,400 per pack: GBP 28,800");
+    expect(body.body).not.toContain("Price on request.");
+    expect(body.body).not.toMatch(/EUR 40|per kWh/);
+    expect(body.sheet).toEqual({ reference: "PS-0a1b2c3d", documentId: "bdoc_sheet" });
+    expect(m.prepareOfferSheet).toHaveBeenCalledWith("bof_1", "send");
+    expect(m.storeOfferSheet).toHaveBeenCalledWith("sup_1", "bof_1", prepared, "u1", "draft_1");
+  });
+
+  it("makes no sheet without a quantity, and stores none when the draft fails", async () => {
+    m.offerOutreach.mockResolvedValue(outreach({ terms: { amount: 2400, currency: "GBP", unit: "pack" }, quantity: null }));
+    expect((await call()).status).toBe(201);
+    expect(m.prepareOfferSheet).not.toHaveBeenCalled();
+    m.offerOutreach.mockResolvedValue(outreach({ terms: { amount: 2400, currency: "GBP", unit: "pack" }, quantity: 12 }));
+    m.prepareOfferSheet.mockResolvedValue({ kind: "send", lines: 1, buyer: null, skipped: [], sheet: { reference: "PS-0a1b2c3d", text: "Price sheet PS-0a1b2c3d." } });
+    m.createOfferEmailDraft.mockRejectedValue(new Error("mail CLI down"));
+    await expect(call()).rejects.toThrow("mail CLI down");
+    expect(m.storeOfferSheet).not.toHaveBeenCalled();
   });
 
   it("uses the stock ask on a request", async () => {

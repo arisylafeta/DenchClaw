@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // Runs only against a disposable database: scripts/rebattery/crm-test-db.sh up prints the URL.
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
 
-describe.skipIf(!TEST_URL)("bulk_listing_stage and bulk_listing_deal_stage (migration 111)", () => {
+describe.skipIf(!TEST_URL)("bulk_listing_stage and bulk_listing_deal_stage (migrations 111 to 115)", () => {
   let pg: typeof import("../postgres");
   const stage = async (id: string) => (await pg.queryPg<{ s: string | null }>("select bulk_listing_stage($1) as s", [id]))[0].s;
   const deal = async (id: string) => (await pg.queryPg<{ s: string | null }>("select bulk_listing_deal_stage($1) as s", [id]))[0].s;
@@ -22,10 +22,19 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage and bulk_listing_deal_stage (migr
         ('stg_new', 'supply', 'Seller', 'Bare lot', 'open', null, null, null, '{}'),
         ('stg_ready', 'supply', 'Seller', 'Ready lot', 'open', '40', 'Leeds', 'stg_company', '{}'),
         ('stg_partial', 'supply', 'Seller', 'No test data', 'open', '40', 'Leeds', 'stg_company', '{}'),
-        ('stg_demand', 'demand', 'Buyer', 'Packs', 'open', '10', null, 'stg_company', '{"intent": "request", "product_family": "Ioniq"}'),
+        ('stg_demand', 'demand', 'Buyer', 'Packs', 'open', '10', 'Leeds', 'stg_company', '{"intent": "request", "product_family": "Ioniq"}'),
         ('stg_asked', 'demand', 'Buyer', 'Packs', 'qualifying', '10', null, 'stg_company', '{"intent": "request", "product_family": "Ioniq"}');
       insert into crm_bulk_listing_fields (bulk_listing_id, field_key, value, status, visibility) values
-        ('stg_ready', 'soh', '92%', 'confirmed', 'never'), ('stg_partial', 'soh', null, 'missing', 'never');
+        ('stg_ready', 'soh', '92%', 'confirmed', 'never'), ('stg_ready', 'model', 'Kona 64 kWh', 'confirmed', 'teaser'),
+        ('stg_partial', 'soh', null, 'missing', 'never'), ('stg_partial', 'model', 'Kona 64 kWh', 'confirmed', 'teaser');
+      -- The Qualified rule of migration 112: each checklist item answered and checked by a person, then the tick.
+      -- stg_partial is ticked and checked too, but its health is not answered, so it stays New.
+      insert into crm_bulk_listing_fields (bulk_listing_id, field_key, value, status, visibility, checked_by, checked_at)
+        select l, k, null, 'missing', 'never', 'alex@rebattery.io', now()
+        from unnest(array['stg_ready', 'stg_partial']) l, unnest(array['model', 'quantity', 'location', 'soh']) k
+        union all select 'stg_demand', k, null, 'missing', 'never', 'alex@rebattery.io', now() from unnest(array['product_family', 'quantity', 'location']) k
+        on conflict (bulk_listing_id, field_key) do update set checked_by = excluded.checked_by, checked_at = excluded.checked_at;
+      update crm_bulk_listings set qualified_at = now(), qualified_by = 'alex@rebattery.io' where id in ('stg_ready', 'stg_partial', 'stg_demand');
     `);
   });
   afterAll(async () => {
@@ -52,13 +61,28 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage and bulk_listing_deal_stage (migr
     expect(n).toBe(0);
   });
 
-  it("moves a qualified listing on when it has an owner: demand to Sourcing, supply to Available", async () => {
+  it("keeps a qualified listing Qualified with an owner, and moves it on once a person starts a match run (migration 115)", async () => {
+    const lastStage = async (id: string) => (await pg.queryPg<{ to_stage: string }>(
+      "select to_stage from crm_bulk_stage_events where subject_kind = 'listing' and subject_id = $1 order by id desc limit 1", [id]))[0]?.to_stage;
+    // Every new deal is owned by Alex from the start, so an owner moves nothing.
     await pg.queryPg(`update crm_bulk_listings set context = context || '{"owner": "Sean"}' where id in ('stg_demand', 'stg_ready', 'stg_partial')`);
-    expect(await stage("stg_demand")).toBe("Sourcing");
-    expect(await stage("stg_ready")).toBe("Available");
-    expect(await stage("stg_partial")).toBe("New"); // an owner alone does not qualify a listing
-    await pg.queryPg(`update crm_bulk_listings set context = context - 'owner' where id in ('stg_demand', 'stg_ready', 'stg_partial')`);
+    expect([await stage("stg_demand"), await stage("stg_ready"), await stage("stg_partial")]).toEqual(["Qualified", "Qualified", "New"]);
+    // "A match run starts when a person marks the deal ready" (Alex, 12 Nov): runMatches keeps the last run in context.match_run.
+    await pg.queryPg(`update crm_bulk_listings set context = context || '{"match_run": {"at": "2026-11-12T10:00:00Z", "by": "alex@rebattery.io", "count": 0}}'
+      where id in ('stg_demand', 'stg_ready', 'stg_partial')`);
+    expect([await stage("stg_demand"), await stage("stg_ready"), await stage("stg_partial")]).toEqual(["Sourcing", "Available", "New"]);
+    // The stage events still fire on the write.
+    expect([await lastStage("stg_demand"), await lastStage("stg_ready")]).toEqual(["Sourcing", "Available"]);
+    await pg.queryPg(`update crm_bulk_listings set context = context - 'owner' - 'match_run' where id in ('stg_demand', 'stg_ready', 'stg_partial')`);
     expect(await stage("stg_demand")).toBe("Qualified");
+    expect(await lastStage("stg_demand")).toBe("Qualified");
+  });
+
+  it("a supply with every item answered but no Qualified tick is New", async () => {
+    await pg.queryPg("update crm_bulk_listings set qualified_at = null, qualified_by = null where id = 'stg_ready'");
+    expect(await stage("stg_ready")).toBe("New");
+    await pg.queryPg("update crm_bulk_listings set qualified_at = now(), qualified_by = 'alex@rebattery.io' where id = 'stg_ready'");
+    expect(await stage("stg_ready")).toBe("Qualified");
   });
 
   it("counts a live counterparty offer as a match (bulk_listing_has_match): Sourcing and Available before anything is offered", async () => {
