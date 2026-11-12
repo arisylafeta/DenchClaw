@@ -1,4 +1,4 @@
--- 111: Bulk stage history, paid facts on offers, and the stages agreed on 27 Oct 2026. Safe to run twice.
+-- 116: Bulk stage history, paid facts on offers, and the stages agreed on 27 Oct 2026. Safe to run twice.
 --
 -- Stages (bulk_listing_stage, still computed, never stored):
 --   Requests (demand): New, Qualified, Sourcing, Found, Closed.
@@ -14,7 +14,7 @@
 -- so app, agent and plain SQL writes are all caught by one mechanism. Whoever writes sets `bulk.actor` for the
 -- transaction (select set_config('bulk.actor', 'alex@rebattery.io', true)); without it the actor is 'system'.
 -- A listing stage is compared with the last event for that listing, so the log itself remembers the previous stage.
--- No invented history: each open listing and its staged offers get one "As of migration 111" event to start from.
+-- No invented history: each open listing and its staged offers get one "As of migration 116" event to start from.
 --
 -- A delivered deal (an offer reaching complete) closes a listing it links only when the offer's quantity covers the
 -- listing's stated quantity in the same unit: demand as bought_from_us, supply as sold. Otherwise the listing stays open
@@ -287,12 +287,12 @@ end $$;
 -- The starting point: one event per open listing and per staged offer on an open listing. Runs before the triggers
 -- exist, and only for subjects with no event yet, so a second run adds nothing.
 insert into crm_bulk_stage_events (subject_kind, subject_id, from_stage, to_stage, actor, note)
-select 'listing', l.id, null, bulk_listing_stage(l.id), 'system', 'As of migration 111'
+select 'listing', l.id, null, bulk_listing_stage(l.id), 'system', 'As of migration 116'
 from crm_bulk_listings l
 where l.status <> 'closed'
   and not exists (select 1 from crm_bulk_stage_events e where e.subject_kind = 'listing' and e.subject_id = l.id);
 insert into crm_bulk_stage_events (subject_kind, subject_id, from_stage, to_stage, actor, note)
-select 'offer', o.id, null, o.stage, 'system', 'As of migration 111'
+select 'offer', o.id, null, o.stage, 'system', 'As of migration 116'
 from crm_bulk_offers o join crm_bulk_listings l on l.id = o.bulk_listing_id
 where l.status <> 'closed' and o.stage is not null
   and not exists (select 1 from crm_bulk_stage_events e where e.subject_kind = 'offer' and e.subject_id = o.id);

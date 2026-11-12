@@ -732,7 +732,7 @@ def load_relay_links(cur, thread_ids: list[str]) -> dict[str, dict]:
 OWNED_SQL = """select b.id, b.kind, b.status, b.summary, b.quantity, b.updated_at, lower(coalesce(b.email, p.email)) as email
      from crm_bulk_listings b left join crm_people p on p.id = b.person_id
     where coalesce(b.email, p.email) is not null"""
-# A deal's other contacts (crm_bulk_offers role 'contact', migration 112): a second person at the same buyer is the
+# A deal's other contacts (crm_bulk_offers role 'contact', migration 117): a second person at the same buyer is the
 # deal's own party too, so their email links to the deal like the main contact's.
 CONTACTS_SQL = """select b.id, b.kind, b.status, b.summary, b.quantity, b.updated_at, lower(o.contact) as email
      from crm_bulk_offers o join crm_bulk_listings b on b.id = o.bulk_listing_id
@@ -1023,7 +1023,7 @@ def column_exists(cur, table: str, column: str) -> bool:
 
 def apply_ops(conn, owner_id: str, ops: list[dict]) -> None:
     with conn.cursor() as cur:
-        # relay_item.chase arrives with migration 115; until it is applied the scan writes everything else as before.
+        # relay_item.chase arrives with migration 119; until it is applied the scan writes everything else as before.
         has_chase = column_exists(cur, "relay_item", "chase")
         for op in ops:
             values = {k: v for k, v in op["values"].items() if k != "note" and (has_chase or k != "chase")}

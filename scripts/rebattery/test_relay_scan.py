@@ -724,7 +724,7 @@ def test_new_lead_is_urgent():
     assert rs.compute_priority({"tab": "action"}, replied, ctx(contact_type="supplier", first_contact=True), NOW)[0] != "urgent"
 
 
-# ---------- a deal's other contacts (migration 112) ----------
+# ---------- a deal's other contacts (migration 117) ----------
 
 class FakeCursor:
     """Answers table_exists and returns the given rows for the listing query, recording the SQL it was sent."""

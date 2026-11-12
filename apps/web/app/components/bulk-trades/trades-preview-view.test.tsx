@@ -223,7 +223,7 @@ describe("Trades Preview sheet", () => {
     go("&tab=supply&progress=Complete");
     vi.stubGlobal("fetch", mockApi());
     const first = render(<TradesPreviewView />);
-    // Complete was a supply stage before migration 111; it now means Sold.
+    // Complete was a supply stage before migration 116; it now means Sold.
     expect(await screen.findByText("0 of 2 live")).toBeInTheDocument();
     expect(within(screen.getByRole("group", { name: "Stage" })).getByRole("button", { name: /^Sold/ })).toHaveAttribute("aria-pressed", "true");
     first.unmount();

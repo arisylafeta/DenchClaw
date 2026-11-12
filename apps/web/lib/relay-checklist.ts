@@ -3,7 +3,7 @@
  * intake reference (the bulk deal playbook). Facts the CRM stores tick themselves; the rest are ticked by Alex or Matcha
  * and kept on the listing as `context.intake_ticks`.
  *
- * Each required item also carries its state for Qualified (relay-front-door.ts, migration 112): how often we asked,
+ * Each required item also carries its state for Qualified (relay-front-door.ts, migration 117): how often we asked,
  * whether they said they cannot provide it, and who checked it. A recycling deal has its own required list. */
 import { CHECK_FIELD, checklistRoute, docTooOld, qualifyView, QUALIFY_KEYS, type ChecklistRoute, type CheckState, type QualifyView } from "./relay-front-door";
 
@@ -89,8 +89,8 @@ function withState(list: DealChecklist, listing: ChecklistListing, fields: Check
   });
   const labels = Object.fromEntries(required.map((i) => [i.key, i.label]));
   const view = qualifyView(kind, route, states, !!listing.qualified_at, labels);
-  // Listings Qualified under the old rule keep it (migration 112).
-  const legacy = listing.qualified_by === "before migration 112";
+  // Listings Qualified under the old rule keep it (migration 117).
+  const legacy = listing.qualified_by === "before migration 117";
   return { ...list, required, route, asked: required.some((i) => (i.asked ?? 0) > 0),
     qualify: { ...view, qualified: view.qualified || legacy, by: listing.qualified_by ?? null, at: listing.qualified_at ?? null } };
 }
@@ -183,7 +183,7 @@ export function missingInstruction(c: DealChecklist): string | null {
   ].filter(Boolean).join(" ");
 }
 
-/** The first ask asks for everything; once anything was asked (relay-front-door, migration 112), the next asks only for
+/** The first ask asks for everything; once anything was asked (relay-front-door, migration 117), the next asks only for
  * the gaps. A deal with no ask on record goes by how much it holds, as before. */
 const firstAsk = (c: DealChecklist) => (c.asked ? false : c.required.filter((i) => i.have).length <= 2);
 

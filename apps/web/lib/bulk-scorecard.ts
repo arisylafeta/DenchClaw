@@ -161,7 +161,7 @@ export const MEASURES: Record<MeasureKey, Def> = {
   speed: { n: 8, key: "speed", name: "Match to agreed, median days", target: "14 days or less", baseline: "not recorded", better: "lower",
     how: "Offers that came from a stored match and first reached Agreed (contract out or further) in the period: calendar days from the match being stored to that stage change, the median." },
   won: { n: 9, key: "won", name: "Offered deals won", target: "30%", baseline: "not recorded", better: "higher",
-    how: "Offers that had been offered and reached a final state in the period: won is Paid or Complete, lost is Declined or Lost. Won as a share of both. Starting rows from migration 111 do not count as a change." },
+    how: "Offers that had been offered and reached a final state in the period: won is Paid or Complete, lost is Declined or Lost. Won as a share of both. Starting rows from migration 116 do not count as a change." },
   take: { n: 10, key: "take", name: "Take recorded", target: "£15,000 Dec to Feb", baseline: "not recorded", better: "higher",
     how: `Sum of take_gbp on offers paid in the period, by paid_on. The floor is £${TARGETS.bulk_take.value.toLocaleString("en-GB")} for Dec to Feb (a week's share is a ${QUARTER_WEEKS}th of it); comfortable is USD 10,000 a month (about £${Math.round(10_000 / USD_PER.GBP).toLocaleString("en-GB")} at the fixed 1.34).` },
   prepared: { n: 11, key: "prepared", name: "Deals from first email to paid, every step prepared", target: "1 by end of February", baseline: "none", better: "higher",

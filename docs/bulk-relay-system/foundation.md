@@ -1,6 +1,6 @@
 # Bulk foundation: stage history, paid facts and stages
 
-For Ari, 12 Nov 2026. What migration 111 (`apps/web/lib/crm-postgres/migrations/111_bulk_stage_events.sql`) adds, and how a stage is worked out. Nothing else in the bulk schema changed.
+For Ari, 12 Nov 2026. What migration 116 (`apps/web/lib/crm-postgres/migrations/116_bulk_stage_events.sql`) adds, and how a stage is worked out. Nothing else in the bulk schema changed.
 
 ## New table: `crm_bulk_stage_events`
 
@@ -13,7 +13,7 @@ One row each time an offer's stage or a listing's stage changes. It is the only 
 | `from_stage`, `to_stage` | the stage before and after (`from_stage` is empty on the first event) | time in each stage, and how often deals go backwards |
 | `occurred_at` | when it changed | stage timing for chases and the scorecard |
 | `actor` | the user's email, an agent name, or `system` | who moved it; writers set `bulk.actor` for their transaction, else `system` |
-| `note` | free text; `As of migration 111` on the starting rows | marks the one starting event per open listing and offer, so no history is invented |
+| `note` | free text; `As of migration 116` on the starting rows | marks the one starting event per open listing and offer, so no history is invented |
 
 ## New columns on `crm_bulk_offers`
 
@@ -24,7 +24,7 @@ One row each time an offer's stage or a listing's stage changes. It is the only 
 | `paid_amount`, `paid_currency` | what the counterparty paid, and in GBP, EUR or USD | closed value from real money; the two are set together or not at all |
 | `take_gbp` | our take on the deal in pounds | the one number the £15,000 target (Dec 2026 to Feb 2027) is measured on |
 
-Moving an offer to Paid or Complete through the app asks for all five; the API answers 400 naming what is missing. The database refuses it too (trigger `bulk_offer_paid_facts`), so an agent or plain SQL cannot set Paid or Complete without them, nor clear one from an offer already there: "To mark this offer Paid, add the paid date and take in GBP." An offer that was already Paid or Complete without them before 111 can still be edited otherwise. Any `terms.quantity` or `data.take_gbp` values were moved into these columns, so each fact lives in one place.
+Moving an offer to Paid or Complete through the app asks for all five; the API answers 400 naming what is missing. The database refuses it too (trigger `bulk_offer_paid_facts`), so an agent or plain SQL cannot set Paid or Complete without them, nor clear one from an offer already there: "To mark this offer Paid, add the paid date and take in GBP." An offer that was already Paid or Complete without them before 116 can still be edited otherwise. Any `terms.quantity` or `data.take_gbp` values were moved into these columns, so each fact lives in one place.
 
 ## How a stage is worked out
 
@@ -34,10 +34,10 @@ Stages are never stored. SQL functions compute them from the listing and its cou
 - `bulk_listing_stage(id)`, the list stage:
   - Requests: **Closed** when closed; **Found** once a supplier has been offered; **Sourcing** with a match, or qualified and a match run started; **Qualified**; **New**.
   - Supply: **Sold** when an offer is paid or complete, or it closed as sold; **Closed** when it closed otherwise; **Reserved** while on hold (`hold_until` today or later; "today" is the London date, `bulk_today()`) or a live reservation holds some of it; **Available** with a match, or qualified and a match run started; **Qualified**; **New**.
-  - "A match run started" (migration 115, `bulk_listing_match_started`): a person ran matching on the deal, which Alex set as marking it ready (12 Nov 2026); `runMatches` keeps the last run in `context.match_run`. Until 115 an owner (`context.owner`) moved a qualified deal on, but every new deal is now owned by Alex when it opens, so Qualified was skipped. The owner no longer moves a stage. Migration 115 re-checks every open listing once, so deals the old rule had moved on get a "back to Qualified" event from `system`.
+  - "A match run started" (migration 119, `bulk_listing_match_started`): a person ran matching on the deal, which Alex set as marking it ready (12 Nov 2026); `runMatches` keeps the last run in `context.match_run`. Until 119 an owner (`context.owner`) moved a qualified deal on, but every new deal is now owned by Alex when it opens, so Qualified was skipped. The owner no longer moves a stage. Migration 119 re-checks every open listing once, so deals the old rule had moved on get a "back to Qualified" event from `system`.
 - `bulk_listing_deal_stage(id)`, the Deals board: the furthest live offer, as **Offered**, **Negotiating**, **Agreed** (contract out, signed or invoiced), **Paid** or **Delivered** (complete); **Lost** when every counterparty offer is declined or lost; empty until something is offered.
 
-"Qualified" is `bulk_listing_qualified` (migration 085, the checklist rule since 112; see front-door.md). Neither function reads the retired `crm_bulk_trade_*` tables. A Can't source reason is a tag on the card, not a stage.
+"Qualified" is `bulk_listing_qualified` (migration 085, the checklist rule since 117; see front-door.md). Neither function reads the retired `crm_bulk_trade_*` tables. A Can't source reason is a tag on the card, not a stage.
 
 ## How events get written
 

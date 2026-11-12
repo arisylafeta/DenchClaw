@@ -1,6 +1,6 @@
 # Next step, always prepared
 
-For Ari, 12 Nov 2026. What slice 3 adds (migration `115_next_step.sql`, `apps/web/lib/chase-clock.ts`, `relay-chase.ts`, `relay-chase-core.ts`, `bulk-today.ts`, the Today tab and the deal's History tab).
+For Ari, 12 Nov 2026. What slice 3 adds (migration `119_next_step.sql`, `apps/web/lib/chase-clock.ts`, `relay-chase.ts`, `relay-chase-core.ts`, `bulk-today.ts`, the Today tab and the deal's History tab).
 
 ## The chase clock
 

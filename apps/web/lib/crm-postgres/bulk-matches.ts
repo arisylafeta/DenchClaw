@@ -1,6 +1,6 @@
 import "server-only";
 
-// Stored matching for one deal (crm_bulk_matches, migration 113). A person starts a run ("Find matches"); the scorer the
+// Stored matching for one deal (crm_bulk_matches, migration 118). A person starts a run ("Find matches"); the scorer the
 // live Matches tab uses narrows the candidates, the best five are stored with the scorer's order and the model's, and
 // every answer after that lands on the same row: asked, yes (an offer row at candidate), no (with a reason, and the next
 // best comes in), offered (by trigger, with a reservation of a quantity), extend and release. Nothing here sends: an ask
@@ -300,7 +300,7 @@ const matchId = () => `bmt_${randomUUID()}`;
 
 /**
  * kWh per unit of the stock a reservation would hold, when it is a single-product listing: what turns an offer quantity
- * priced per kWh into units (migration 113, bulk_match_offered). Null for stock lines, marketplace listings and mixed lots.
+ * priced per kWh into units (migration 118, bulk_match_offered). Null for stock lines, marketplace listings and mixed lots.
  */
 async function stockKwhPerUnit(tx: PgTransaction, ref: CandidateRef): Promise<number | null> {
   if (ref.stockKind !== "listing") {

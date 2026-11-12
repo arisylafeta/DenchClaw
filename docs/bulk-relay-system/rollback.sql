@@ -1,14 +1,14 @@
--- Rollback for migrations 111, 112, 113 and 115 (bulk and Relay system). Not a migration: nothing applies it by itself.
+-- Rollback for migrations 116, 117, 118 and 119 (bulk and Relay system). Not a migration: nothing applies it by itself.
 -- See rollback.md for when to use it. Safe to run twice.
 --
--- What it does: drops every trigger those migrations added, and puts back the pre-111 bodies of the two SQL functions
+-- What it does: drops every trigger those migrations added, and puts back the pre-116 bodies of the two SQL functions
 -- they replaced, bulk_listing_stage (as in migration 096) and bulk_listing_qualified (as in migration 085), taken from
 -- origin/main. The old web build then reads the stage names it knows (Offered, Negotiating, Agreed, Paid, Delivered,
 -- Available, Sourcing, Can't source).
 --
 -- What it leaves: the new tables (crm_bulk_stage_events, crm_bulk_matches), the new columns and constraints, the new
 -- helper functions (unused once the triggers are gone) and the data in them. Nothing is deleted. To go forward again,
--- apply 111, 112, 113 and 115 in order; each is safe to run twice.
+-- apply 116, 117, 118 and 119 in order; each is safe to run twice.
 begin;
 
 drop trigger if exists bulk_offer_paid_facts on crm_bulk_offers;

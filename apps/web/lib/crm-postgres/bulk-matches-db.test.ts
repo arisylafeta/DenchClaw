@@ -6,7 +6,7 @@ import type { MatchRanker } from "../match/match-ranker";
 // the mail CLI are stand-ins, so nothing here reads live stock, calls a model or makes a real draft.
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
 
-describe.skipIf(!TEST_URL)("stored matching (migration 113)", () => {
+describe.skipIf(!TEST_URL)("stored matching (migration 118)", () => {
   let pg: typeof import("../postgres");
   let matches: typeof import("./bulk-matches");
   let offers: typeof import("./bulk-offers");
@@ -71,7 +71,7 @@ describe.skipIf(!TEST_URL)("stored matching (migration 113)", () => {
         `insert into crm_stock_opportunities (id, person_id, company_id, status, title, quantity, details) values ($1, $2, $3, 'opportunity', 'Kona pack', $4, $5::jsonb)`,
         [id(`st${n}`), id(`pe${n}`), id(`co${n}`), n === 3 ? null : 30, JSON.stringify(n === 92 ? { availability: { state: "sold" } } : {})]);
     }
-    // Requests: qualified under the rule of migration 112 (what, how many and where answered, each checked by a person, and
+    // Requests: qualified under the rule of migration 117 (what, how many and where answered, each checked by a person, and
     // the Qualified tick), owned by Alex as every new deal is. They stay Qualified until a person starts a match run.
     for (const d of ["d1", "d2", "d3", "d4"]) {
       await pg.queryPg(

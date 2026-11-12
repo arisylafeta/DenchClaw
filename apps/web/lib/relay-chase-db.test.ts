@@ -13,7 +13,7 @@ vi.mock("node:child_process", async (actual) => ({
 // stand-in that writes a local draft row, so no mail tool runs and nothing can be sent.
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
 
-describe.skipIf(!TEST_URL)("chase drafts (relay-chase.ts, migration 115)", () => {
+describe.skipIf(!TEST_URL)("chase drafts (relay-chase.ts, migration 119)", () => {
   let pg: typeof import("./postgres");
   let chase: typeof import("./relay-chase");
   let relay: typeof import("./relay");
@@ -183,5 +183,18 @@ describe.skipIf(!TEST_URL)("chase drafts (relay-chase.ts, migration 115)", () =>
     expect(after.scheduled).toBe(false);
     expect((await draftsOf(t.item))[0].state).toBe("skipped");
     expect(spawned).toEqual([]);
+  });
+
+  it("gives a prepared chase no other ways to answer, so no written way replaces its checked text", async () => {
+    const ways = await import("./relay-ways");
+    const t = await waiting("ways");
+    await chase.prepareChases(owner.id, { draft, now });
+    const [row] = await draftsOf(t.item);
+    expect(await ways.prepareWays(row.id, owner.id)).toEqual({ started: false });
+    expect(await ways.prepareWays(row.id, owner.id, true)).toEqual({ started: false });
+    const [stored] = await pg.queryPg<{ ways: unknown }>("select ways from relay_draft where id = $1", [row.id]);
+    expect(stored.ways).toBeNull();
+    const [mail] = await pg.queryPg<{ updated_at: string }>("select updated_at::text from mail_message where id = $1", [row.mail_message_id]);
+    await expect(ways.pickWay(row.id, owner.id, 1, new Date(mail.updated_at).toISOString())).rejects.toThrow(/one way to answer/);
   });
 });

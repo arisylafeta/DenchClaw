@@ -6,7 +6,7 @@ import type { MatchesResult, MatchRow } from "../matches-types";
 // The scorer and the model are stand-ins; nothing here sends mail or calls a model.
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
 
-describe.skipIf(!TEST_URL)("reservations and yeses (migration 113)", () => {
+describe.skipIf(!TEST_URL)("reservations and yeses (migration 118)", () => {
   let pg: typeof import("../postgres");
   let matches: typeof import("./bulk-matches");
   let mail: typeof import("./bulk-offer-mail");

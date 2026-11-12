@@ -1,16 +1,16 @@
--- 112: The front door (bulk and Relay slice 2): each lead's route, the checklist state behind "Qualified", and the
+-- 117: The front door (bulk and Relay slice 2): each lead's route, the checklist state behind "Qualified", and the
 -- Qualified rule Alex set on 12 Nov 2026. Safe to run twice.
 --
 -- Route: every inbound lead gets one of bulk, marketplace, jules or recycling, with a one-line reason. Relay keeps it on
 -- the lead card (relay_card.data) and, where a deal exists, on the listing (crm_bulk_listings.route, route_reason).
 --
--- Qualified (bulk_listing_qualified, same name and signature, so the stage functions of 111 pick it up):
+-- Qualified (bulk_listing_qualified, same name and signature, so the stage functions of 116 pick it up):
 --   1. every item on the route's checklist (bulk_listing_check_keys) is answered, or marked "they cannot provide it";
 --   2. a person ticked each of those items as checked (crm_bulk_listing_fields.checked_at);
 --   3. a person ticked the deal Qualified (crm_bulk_listings.qualified_at).
 -- Price and when are on every checklist and asked for in both asks, but the tick does not need them; the deal then
 -- shows "No price" / "No date". Listings the old rule (migration 085) qualified keep Qualified: they get
--- qualified_by = 'before migration 112', which the new rule accepts as it is. Clear it to make one go through the new rule.
+-- qualified_by = 'before migration 117', which the new rule accepts as it is. Clear it to make one go through the new rule.
 --
 -- Checklist state lives on crm_bulk_listing_fields, one row per item under the field_key bulk_listing_check_field()
 -- names (model, quantity, location, soh, ...). A row may carry only state (value null, status 'missing') until they answer.
@@ -117,11 +117,11 @@ $$;
 
 -- Keep Qualified on the listings the old rule qualified, before the rule changes. Runs only while the old body is in
 -- place: on a second run the new rule finds no listing qualified without a tick, so nothing changes.
-update crm_bulk_listings l set qualified_at = now(), qualified_by = 'before migration 112'
+update crm_bulk_listings l set qualified_at = now(), qualified_by = 'before migration 117'
   where l.qualified_at is null and l.status <> 'closed' and bulk_listing_qualified(l.id);
 
 create or replace function bulk_listing_qualified(listing_id text) returns boolean language sql stable as $$
-  select coalesce((select l.qualified_by = 'before migration 112'
+  select coalesce((select l.qualified_by = 'before migration 117'
       or (l.qualified_at is not null
         and (l.company_id is not null or l.person_id is not null or l.email is not null)
         and not exists (select 1 from unnest(bulk_listing_check_keys(l.id)) k(key) where not bulk_listing_check_done(l.id, k.key)))

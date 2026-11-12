@@ -1,6 +1,6 @@
 # Front door: size, route, qualified
 
-For Ari, 12 Nov 2026. What slice 2 adds (migration `112_relay_front_door.sql`, `apps/web/lib/relay-front-door.ts`, `relay-deal.ts`, `relay-deal-core.ts`) and the rules as coded. The rules live in one module, `relay-front-door.ts`; the SQL twin is in 112 and a test keeps the two in step.
+For Ari, 12 Nov 2026. What slice 2 adds (migration `117_relay_front_door.sql`, `apps/web/lib/relay-front-door.ts`, `relay-deal.ts`, `relay-deal-core.ts`) and the rules as coded. The rules live in one module, `relay-front-door.ts`; the SQL twin is in 117 and a test keeps the two in step.
 
 ## The rules as coded
 
@@ -10,7 +10,7 @@ For Ari, 12 Nov 2026. What slice 2 adds (migration `112_relay_front_door.sql`, `
 
 **Deal opens on send.** When a bulk or recycling lead's first reply has actually gone (its mail row is `accepted`), Relay opens the deal from the card's facts: no model, the same writes as Matcha's Create deal. Undo inside the 30-second hold leaves the card queued with no accepted email, so nothing is opened. A deal opens on what and how many alone; under the line (unless Alex picked the route) nothing opens.
 
-**Qualified** (`bulk_listing_qualified`, same name and signature): every item on the route's checklist is answered or marked "they cannot provide it", a person checked each, and a person ticked Qualified. Items: supply resale what, how many, where, health; supply recycling what, how many, where, condition; demand what, how many, where. Price and when are asked in every ask but not needed for the tick: the checklist then shows "No price" / "No date". Test or QC documents over 12 months old are flagged. Two asks with what or how many still missing: the card proposes parking (never automatic). Listings the old rule qualified keep it, marked `qualified_by = 'before migration 112'`.
+**Qualified** (`bulk_listing_qualified`, same name and signature): every item on the route's checklist is answered or marked "they cannot provide it", a person checked each, and a person ticked Qualified. Items: supply resale what, how many, where, health; supply recycling what, how many, where, condition; demand what, how many, where. Price and when are asked in every ask but not needed for the tick: the checklist then shows "No price" / "No date". Test or QC documents over 12 months old are flagged. Two asks with what or how many still missing: the card proposes parking (never automatic). Listings the old rule qualified keep it, marked `qualified_by = 'before migration 117'`.
 
 **Auto update.** A new reply on a thread linked to an open deal (newest message from them, last 3 days; handled once: one automatic job per message, ever, its id in the job's note, and none when a person ran a deal job after it arrived; a date in the future counts as now) queues "Update deal from this reply" by itself, through the same `startDealJob`: one job per email, same advisory lock, same 25-minute stale rule. Off with `RELAY_AUTO_DEAL_UPDATE=off`. A job whose result fails `dealResultFits` and that created its listing has that listing **closed** (reason `other`, with a Story note), not deleted, if nothing else uses it.
 

@@ -3,11 +3,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // Runs only against a disposable database: scripts/rebattery/crm-test-db.sh up prints the URL.
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
 
-describe.skipIf(!TEST_URL)("bulk_listing_stage and bulk_listing_deal_stage (migrations 111 to 115)", () => {
+describe.skipIf(!TEST_URL)("bulk_listing_stage and bulk_listing_deal_stage (migrations 116 to 119)", () => {
   let pg: typeof import("../postgres");
   const stage = async (id: string) => (await pg.queryPg<{ s: string | null }>("select bulk_listing_stage($1) as s", [id]))[0].s;
   const deal = async (id: string) => (await pg.queryPg<{ s: string | null }>("select bulk_listing_deal_stage($1) as s", [id]))[0].s;
-  // Paid and complete need the five paid facts (migration 111 refuses them otherwise): 40 packs, paid.
+  // Paid and complete need the five paid facts (migration 116 refuses them otherwise): 40 packs, paid.
   const offer = (id: string, listing: string, st: string, counterpart: string | null = null) => pg.queryPg(
     `insert into crm_bulk_offers (id, bulk_listing_id, counterpart_id, role, stage, terms, quantity, paid_on, paid_amount, paid_currency, take_gbp)
      select $1, $2, $4, 'counterparty', $3, '{"unit": "pack"}'::jsonb, p.q, p.d, p.a, p.c, p.t
@@ -35,7 +35,7 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage and bulk_listing_deal_stage (migr
       insert into crm_bulk_listing_fields (bulk_listing_id, field_key, value, status, visibility) values
         ('stg_ready', 'soh', '92%', 'confirmed', 'never'), ('stg_ready', 'model', 'Kona 64 kWh', 'confirmed', 'teaser'),
         ('stg_partial', 'soh', null, 'missing', 'never'), ('stg_partial', 'model', 'Kona 64 kWh', 'confirmed', 'teaser');
-      -- The Qualified rule of migration 112: each checklist item answered and checked by a person, then the tick.
+      -- The Qualified rule of migration 117: each checklist item answered and checked by a person, then the tick.
       -- stg_partial is ticked and checked too, but its health is not answered, so it stays New.
       insert into crm_bulk_listing_fields (bulk_listing_id, field_key, value, status, visibility, checked_by, checked_at)
         select l, k, null, 'missing', 'never', 'alex@rebattery.io', now()
@@ -69,7 +69,7 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage and bulk_listing_deal_stage (migr
     expect(n).toBe(0);
   });
 
-  it("keeps a qualified listing Qualified with an owner, and moves it on once a person starts a match run (migration 115)", async () => {
+  it("keeps a qualified listing Qualified with an owner, and moves it on once a person starts a match run (migration 119)", async () => {
     const lastStage = async (id: string) => (await pg.queryPg<{ to_stage: string }>(
       "select to_stage from crm_bulk_stage_events where subject_kind = 'listing' and subject_id = $1 order by id desc limit 1", [id]))[0]?.to_stage;
     // Every new deal is owned by Alex from the start, so an owner moves nothing.

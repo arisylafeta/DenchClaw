@@ -1,6 +1,6 @@
 # Offer to close (slice 5)
 
-For Ari, 12 Nov 2026. How an offer to a buyer is priced, gated, sent with a price sheet and walked to Complete. No migration: everything below uses tables from migrations 067, 111 and 113.
+For Ari, 12 Nov 2026. How an offer to a buyer is priced, gated, sent with a price sheet and walked to Complete. No migration: everything below uses tables from migrations 067, 116 and 118.
 
 ## Schema
 

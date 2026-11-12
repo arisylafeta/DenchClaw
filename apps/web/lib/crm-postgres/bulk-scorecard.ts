@@ -64,7 +64,7 @@ const ENQUIRIES = `
 const LISTINGS = `select id, kind, source_kind, ${iso("created_at")} as created_at from crm_bulk_listings where created_at >= $1::timestamptz`;
 
 const EVENTS = `
-  select e.subject_id as listing_id, e.to_stage, ${iso("e.occurred_at")} as at, coalesce(e.note, '') = 'As of migration 111' as starting,
+  select e.subject_id as listing_id, e.to_stage, ${iso("e.occurred_at")} as at, coalesce(e.note, '') = 'As of migration 116' as starting,
     ${iso("l.created_at")} as created_at
   from crm_bulk_stage_events e join crm_bulk_listings l on l.id = e.subject_id
   where e.subject_kind = 'listing' and coalesce(l.source_kind, '') <> 'research'
@@ -85,7 +85,7 @@ const OFFERS = `
     case when o.terms->>'amount' ~ '^[0-9]+(\\.[0-9]+)?$' then (o.terms->>'amount')::float8 end as amount,
     o.quantity::float8 as quantity, o.paid_on::text as paid_on, o.paid_amount::float8 as paid_amount, o.paid_currency, o.take_gbp::float8 as take_gbp,
     ${iso("o.created_at")} as created_at, o.last_touch_on::text as last_touch_on,
-    coalesce((select jsonb_agg(jsonb_build_object('to', e.to_stage, 'at', ${iso("e.occurred_at")}, 'starting', coalesce(e.note, '') = 'As of migration 111') order by e.occurred_at, e.id)
+    coalesce((select jsonb_agg(jsonb_build_object('to', e.to_stage, 'at', ${iso("e.occurred_at")}, 'starting', coalesce(e.note, '') = 'As of migration 116') order by e.occurred_at, e.id)
       from crm_bulk_stage_events e where e.subject_kind = 'offer' and e.subject_id = o.id), '[]'::jsonb) as events,
     coalesce((select array_agg(${iso(MAIL_AT)}) from crm_bulk_thread_links t join mail_message m on m.thread_id = t.thread_id
       where t.offer_id = o.id and t.channel = 'mail' and t.state <> 'rejected' and m.state in ('received', 'accepted')), '{}') as mail_at,

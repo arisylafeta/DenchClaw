@@ -1,6 +1,7 @@
 import { ALLOWED_EMAILS, currentUser } from '@/lib/auth';
 import { readMailDraft } from '@/lib/crm-postgres/mail';
 import { DraftActionError, sameVersion, sendDraft } from '@/lib/mail-draft-actions';
+import { relayGapIn } from '@/lib/relay-ways';
 export const dynamic = 'force-dynamic';
 
 /** Sends one unsent draft. Admins only (the CLI treats the named approver as the go-ahead), and only the exact version the person confirmed. */
@@ -14,6 +15,8 @@ export async function POST(req: Request, context: {params: Promise<{id:string}>}
  const draft = await readMailDraft(id,user.id);
  if (!draft) return Response.json({error:'Not found'},{status:404});
  if (!sameVersion(draft.updated_at,body.updated_at)) return Response.json({error:'This draft changed since you looked at it. Review it again before sending.'},{status:409});
+ // A Relay draft with a gap still in it needs something only Alex knows: it is filled in on Relay first.
+ if (await relayGapIn(draft)) return Response.json({error:"There's a gap to fill in before this can go. Open it in Relay."},{status:400});
  try {
   return Response.json(await sendDraft(draft,user.displayName));
  } catch (error) {

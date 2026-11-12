@@ -29,7 +29,7 @@ describe.skipIf(!TEST_URL)("Today, team notes, one history, WhatsApp updates (sl
       ($2, 'supply', 'New seller', 'Kona packs', 'open', '{}', now() - interval '2 days'),
       ($3, 'demand', 'Buyer', 'Ioniq packs', 'open', '{"intent": "request"}', now())`, [id("old"), id("fresh"), id("talk")]);
     // The stage history began after the old listing was made: its time in New counts from when it was made.
-    await pg.queryPg("update crm_bulk_stage_events set note = 'As of migration 111', occurred_at = now() - interval '1 day' where subject_id = $1", [id("old")]);
+    await pg.queryPg("update crm_bulk_stage_events set note = 'As of migration 116', occurred_at = now() - interval '1 day' where subject_id = $1", [id("old")]);
   });
   afterAll(async () => {
     await pg.queryPg("delete from relay_item where bulk_listing_id like $1", [`%_${run}`]);

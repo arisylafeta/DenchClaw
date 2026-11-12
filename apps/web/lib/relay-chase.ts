@@ -14,7 +14,7 @@ import { leadFirstName } from "./relay-lead-core";
  *
  * - Nothing here sends. A chase is a mail draft (`draft`, the same mail CLI path every Relay draft takes) and a
  *   relay_draft row with origin 'predraft'; a person sends it from Review like any other draft.
- * - One open chase draft per thread (a unique index, migration 115), and each chase on the same unanswered message is
+ * - One open chase draft per thread (a unique index, migration 119), and each chase on the same unanswered message is
  *   prepared once (`chaseKey`), so a draft a person dropped does not come back.
  * - A reply from them skips the open chase draft and cancels a send-later on it (`cancelAnsweredChases`), and is checked
  *   again when Send is clicked (`chaseAnswered`). A reply counts when it was sent after our message the chase follows

@@ -1,4 +1,4 @@
--- 113: Stored matching for bulk deals (decisions of 12 Nov 2026, docs/bulk-relay-system/matching-design.md). Safe to run twice.
+-- 118: Stored matching for bulk deals (decisions of 12 Nov 2026, docs/bulk-relay-system/matching-design.md). Safe to run twice.
 --
 -- crm_bulk_matches: one row per deal and candidate. A person starts a run on a deal ("Find matches"); the scorer narrows,
 -- the best five are stored with the scorer's order (scorer_rank) and the model's order (rank), and every answer is kept
@@ -172,7 +172,7 @@ begin
   return n;
 end $$;
 
--- The one seam from migration 111: a live counterparty offer, or now a live stored match (asked, confirmed or offered)
+-- The one seam from migration 116: a live counterparty offer, or now a live stored match (asked, confirmed or offered)
 -- on the listing as the deal, or naming it as the candidate.
 create or replace function bulk_listing_has_match(listing_id text) returns boolean language sql stable as $$
   select exists (select 1 from crm_bulk_offers o
@@ -188,7 +188,7 @@ create or replace function bulk_listing_reserved(listing_id text) returns boolea
   select (bulk_match_reserved('listing', listing_id)).holds > 0
 $$;
 
--- As in migration 111, with supply Reserved also coming from a live reservation against the listing.
+-- As in migration 116, with supply Reserved also coming from a live reservation against the listing.
 create or replace function bulk_listing_stage(listing_id text) returns text language sql stable as $$
   select case
     when l.kind = 'demand' then case
@@ -211,7 +211,7 @@ create or replace function bulk_listing_stage(listing_id text) returns text lang
   where l.id = listing_id
 $$;
 
--- Match writes re-check every listing the row touches, the same way offer writes do (migration 111).
+-- Match writes re-check every listing the row touches, the same way offer writes do (migration 116).
 create or replace function bulk_match_stage_events() returns trigger language plpgsql as $$
 begin
   if TG_OP <> 'DELETE' then

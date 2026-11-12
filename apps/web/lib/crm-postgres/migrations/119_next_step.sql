@@ -1,4 +1,4 @@
--- 115: Next step, always prepared (bulk and Relay slice 3). Safe to run twice.
+-- 119: Next step, always prepared (bulk and Relay slice 3). Safe to run twice.
 --
 -- Stage (A2, Alex 12 Nov 2026: "a match run starts when a person marks the deal ready"). New deals get owner Alex the
 -- moment they open, so "qualified with an owner" skipped Qualified altogether. A qualified deal now stays Qualified
@@ -39,7 +39,7 @@ create or replace function bulk_listing_match_started(listing_id text) returns b
     from crm_bulk_listings l where l.id = listing_id), false)
 $$;
 
--- As in migration 113, with "qualified with an owner" replaced by "qualified and a match run started".
+-- As in migration 118, with "qualified with an owner" replaced by "qualified and a match run started".
 create or replace function bulk_listing_stage(listing_id text) returns text language sql stable as $$
   select case
     when l.kind = 'demand' then case

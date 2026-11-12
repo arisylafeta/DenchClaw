@@ -37,7 +37,7 @@ describe("sheet rows", () => {
   it("shows the list stage and preserves an explicit hold", () => {
     for (const stage of SUPPLY_STAGES)
       expect(listing({ stage }).progress).toBe(stage);
-    expect(listing({ stage: "Qualified" }).progress).toBe("Qualified"); // supply has Qualified again since 111
+    expect(listing({ stage: "Qualified" }).progress).toBe("Qualified"); // supply has Qualified again since 116
     expect(listing({ stage: "Available", spec: { trade_stage: "On hold", hold_until: "2026-11-01" } }))
       .toMatchObject({ progress: "Available", held: true, tone: "hold" });
     expect(listing({ stage: "Available" })).toMatchObject({ held: false });
@@ -217,7 +217,7 @@ describe("stages", () => {
     expect(LISTING_STAGES.map((stage) => STAGE_TONE[stage])).toEqual(["new", "new", "active", "active", "waiting", "closing", "closing", "new"]);
     expect(demand({ stage: "Mystery" as never })).toMatchObject({ progress: "Mystery", tone: "new" });
   });
-  it("reads the labels of a database before migration 111 as today's list stages", () => {
+  it("reads the labels of a database before migration 116 as today's list stages", () => {
     expect(demand({ stage: "Matched" as never })).toMatchObject({ progress: "Sourcing", tone: "active" });
     expect(demand({ stage: "Can't source" as never })).toMatchObject({ progress: "Sourcing" });
     expect(supply({ stage: "Found" as never })).toMatchObject({ progress: "Available" });

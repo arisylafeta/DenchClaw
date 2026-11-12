@@ -11,16 +11,23 @@ For Ari, 12 Nov 2026. Branch `bulk-relay-system` (DenchClaw), six slices. Detail
 5. **Offer to close** (offer-to-close.md). An offer to a buyer needs a confirmed, in-date seller quote, checked again at send and on a hand move to Offered; the next-step rules hold in the API too. A change of price or terms drops the open draft and its sheet, and an out-of-date draft is not sent. Price sheets (.xlsx) are made from CRM prices and stored with the deal. Margin shows to staff and prefills take.
 6. **Scorecard** (scorecard.md). Eleven measures for the week and the quarter: a read-only command that prints them and writes the Monday message, and a Scorecard block on Today. The "Pipeline against the take target" meter stays: it is weighted pipeline, not take banked, so it does not duplicate measure 10.
 
-## Migrations, in order (there is no 114)
+## Migrations, in order
+
+They follow main's `111_relay_draft_ways.sql` (Relay's ways to answer). They were 111, 112, 113 and 115 on this branch before main took 111; none had been applied anywhere, and the data markers they write moved with them ("As of migration 116", `qualified_by = 'before migration 117'`).
 
 | # | What it does to existing live rows when applied |
 |---|---|
-| 111 | Adds the event table and five offer columns. Moves any numeric `terms.quantity` into `quantity` and any `data.take_gbp` into `take_gbp`, removing the old keys. Writes one starting event (note "As of migration 111", actor `system`) per open listing and per staged offer on an open listing. From then on triggers log changes; an offer reaching Complete closes a listing only when it sold all the listing states in the same unit (request `bought_from_us`, supply `sold`), else notes "Part sold: N of M" or that it needs closing by hand; and no writer can set Paid or Complete without the five paid facts. Existing Paid or Complete rows without them are not touched. |
-| 112 | Adds route, Qualified tick and checklist columns. Every open listing the old rule qualified gets `qualified_at = now()`, `qualified_by = 'before migration 112'` and keeps Qualified; no stage event is written for it. Then the new Qualified rule replaces the old one. |
-| 113 | Creates `crm_bulk_matches` and its triggers, and a trigger on offers that reserves or releases a matched offer's quantity. Changes no existing rows. |
-| 115 | Adds `relay_item.chase`, `relay_draft.chase_after` and `gmail_copy_left`, the one-open-chase index and the mentions index. A qualified deal now stays Qualified until a match run starts. It then runs `bulk_stage_check_all()` once: deals the old owner rule had moved on get a "back to Qualified" event from `system`, and any other open listing whose stage drifted (for example a hold that ran out) gets its event too. |
+| 116 | Adds the event table and five offer columns. Moves any numeric `terms.quantity` into `quantity` and any `data.take_gbp` into `take_gbp`, removing the old keys. Writes one starting event (note "As of migration 116", actor `system`) per open listing and per staged offer on an open listing. From then on triggers log changes; an offer reaching Complete closes a listing only when it sold all the listing states in the same unit (request `bought_from_us`, supply `sold`), else notes "Part sold: N of M" or that it needs closing by hand; and no writer can set Paid or Complete without the five paid facts. Existing Paid or Complete rows without them are not touched. |
+| 117 | Adds route, Qualified tick and checklist columns. Every open listing the old rule qualified gets `qualified_at = now()`, `qualified_by = 'before migration 117'` and keeps Qualified; no stage event is written for it. Then the new Qualified rule replaces the old one. |
+| 118 | Creates `crm_bulk_matches` and its triggers, and a trigger on offers that reserves or releases a matched offer's quantity. Changes no existing rows. |
+| 119 | Adds `relay_item.chase`, `relay_draft.chase_after` and `gmail_copy_left`, the one-open-chase index and the mentions index. A qualified deal now stays Qualified until a match run starts. It then runs `bulk_stage_check_all()` once: deals the old owner rule had moved on get a "back to Qualified" event from `system`, and any other open listing whose stage drifted (for example a hold that ran out) gets its event too. |
 
-Rollback: there are no down migrations. `rollback.sql` (not applied by anything) drops the new triggers and restores the pre-111 stage functions for the old web build; `rollback.md` says when and how.
+Rollback: there are no down migrations. `rollback.sql` (not applied by anything) drops the new triggers and restores the pre-116 stage functions for the old web build; `rollback.md` says when and how.
+
+## Merged with main's Review rewrite
+
+- Main's one-page Review (ways to answer, gaps to fill, "say what to change", tools closed under the card) is the Review screen now; this branch's controls were fitted into it. A chase Relay prepared shows as one: its tag reads "Chase N of 3", the chase clock line sits under the reply, Don't chase (and Park, once three chases went unanswered) sit beside Done, no reply, and the "copy still in Gmail drafts" warning shows on the card as well as in Follow up. A prepared chase gets no other ways to answer: the page does not ask for them and `relay-ways.ts` refuses them, so no written way can replace a text that passed `verifyChase`.
+- The deal checklist with Mark checked, They can't provide it, Mark Qualified, the No price / No date tags and the parking suggestion is under the card's "Deal checklist" tool (closed until opened) instead of beside the draft; the deal bar stays on the inbox card. At Send and Send later the chase-answered check runs before main's gap check.
 
 ## Other changes to know before deploying
 

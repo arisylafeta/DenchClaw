@@ -159,8 +159,8 @@ describe("qualified", () => {
     expect(docTooOld(null, now)).toBe(false);
   });
 
-  it("matches the SQL in migration 112", () => {
-    const sql = readFileSync(join(__dirname, "crm-postgres/migrations/112_relay_front_door.sql"), "utf8");
+  it("matches the SQL in migration 117", () => {
+    const sql = readFileSync(join(__dirname, "crm-postgres/migrations/117_relay_front_door.sql"), "utf8");
     for (const route of ["resale", "recycling"] as const) for (const kind of ["supply", "demand"] as const) {
       expect(sql).toContain(`-- keys ${route} ${kind}: array[${QUALIFY_KEYS[route][kind].map((k) => `'${k}'`).join(", ")}]`);
     }

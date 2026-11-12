@@ -139,7 +139,7 @@ describe("checklist state for Qualified", () => {
   });
 
   it("keeps Qualified on a listing the old rule qualified", () => {
-    const c = buildChecklist({ ...supply, qualified_at: "2026-11-12T00:00:00Z", qualified_by: "before migration 112" }, [], [], now);
+    const c = buildChecklist({ ...supply, qualified_at: "2026-11-12T00:00:00Z", qualified_by: "before migration 117" }, [], [], now);
     expect(c.qualify?.qualified).toBe(true);
   });
 

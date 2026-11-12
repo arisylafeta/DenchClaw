@@ -32,7 +32,7 @@ describe("listing view", () => {
     mocks.demand.mockResolvedValue(demand);
     expect(await listingView("demand")).toMatchObject({ demand, title: "4 × Renault packs", is_trade: false });
   });
-  it("shows a pre-111 stage label as today's stage, with no deal stage", async () => {
+  it("shows a pre-116 stage label as today's stage, with no deal stage", async () => {
     mocks.query.mockResolvedValueOnce([{ id: "supply", kind: "supply", summary: "Summary", spec: {}, context: {} }]).mockResolvedValueOnce([{ stage: "candidate" }]).mockResolvedValueOnce([{ listing_stage: "Matched" }]);
     expect(await listingView("supply")).toMatchObject({ stage: "Available", deal_stage: null });
   });

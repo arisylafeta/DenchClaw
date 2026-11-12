@@ -1,4 +1,4 @@
-// Stored matching (crm_bulk_matches, migration 113): the rules that need no database. Which candidate a Matches row is,
+// Stored matching (crm_bulk_matches, migration 118): the rules that need no database. Which candidate a Matches row is,
 // what a reservation holds, the plain reason when the model step is not used, and the check every model answer must pass
 // before it is stored: the five ids in some order, one or two sentences each, no counterparty named, no figure the
 // inputs do not hold.
@@ -170,7 +170,7 @@ export const RESERVED_WHILE: readonly string[] = ["negotiating", "contract_out",
 /**
  * A reservation is live while the match is offered and holds one: at offered, while its last day is today or later (out
  * of date reads as free); once the offer is negotiating, contract_out, signed, invoiced or paid, until the offer ends.
- * A complete offer has consumed it. SQL twin: bulk_match_live (migration 113).
+ * A complete offer has consumed it. SQL twin: bulk_match_live (migration 118).
  */
 export function reservationLive(row: { state: string; reserved_until: string | null; offer_stage?: string | null }, today: string): boolean {
   if (row.state !== "offered" || !row.reserved_until || row.offer_stage === "complete") {

@@ -238,7 +238,7 @@ export type OfferPatch = {
 
 const PAID_COLUMNS = ["paid_on", "paid_amount", "paid_currency", "quantity", "take_gbp"] as const satisfies readonly (keyof PaidFacts)[];
 
-/** The one path that changes an offer from the app. Stage events are written by the trigger from migration 111;
+/** The one path that changes an offer from the app. Stage events are written by the trigger from migration 116;
  * this names the user as their actor. The Story still gets its readable status line. A change to the price, unit,
  * currency, quantity, delivery terms or last day drops the open email draft and marks its price sheet out of date, so
  * the next "Draft email" builds both again (the send refuses the old draft: offerTermsKey). */

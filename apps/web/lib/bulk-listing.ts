@@ -52,7 +52,7 @@ export type BulkListingView = {
 /** A trade is a listing on the signing and paying track or beyond: a contract is out with a counterparty. */
 export const TRADE_STAGES: readonly OfferStage[] = ["contract_out", "signed", "invoiced", "paid", "complete"];
 
-/** Every list stage, in order (team, 27 Oct 2026). Computed by bulk_listing_stage() in Postgres (migration 111); never
+/** Every list stage, in order (team, 27 Oct 2026). Computed by bulk_listing_stage() in Postgres (migration 116); never
  * stored. Requests (demand) and Supply each have their own list (DEMAND_STAGES, SUPPLY_STAGES). Closed is a demand stage,
  * and also where a supply listing that closed without a sale ends up. */
 export const LISTING_STAGES = ["New", "Qualified", "Sourcing", "Available", "Found", "Reserved", "Sold", "Closed"] as const;
@@ -68,8 +68,8 @@ export const SUPPLY_STAGES = ["New", "Qualified", "Available", "Reserved", "Sold
 export const BOARD_STAGES = ["Offered", "Negotiating", "Agreed", "Paid", "Delivered", "Lost"] as const;
 export type DealStage = (typeof BOARD_STAGES)[number];
 
-/** Labels from bulk_listing_stage() before migration 111 (and older links), mapped to today's list stages so the UI reads
- * right whichever order the UI and the migration go live in. Before 111 the deal stages and Can't source were list stages. */
+/** Labels from bulk_listing_stage() before migration 116 (and older links), mapped to today's list stages so the UI reads
+ * right whichever order the UI and the migration go live in. Before 116 the deal stages and Can't source were list stages. */
 const LEGACY_STAGE: Record<string, (kind: ListingKind) => ListingStage> = {
   Matched: (kind) => (kind === "demand" ? "Sourcing" : "Available"),
   Found: (kind) => (kind === "demand" ? "Found" : "Available"),

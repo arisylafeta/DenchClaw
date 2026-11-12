@@ -64,7 +64,7 @@ Buyer deep-research profiles, speed of reply as a ranking input, and any automat
 
 ## As built (slice 4, 12 Nov 2026)
 
-Migration `113_bulk_matches.sql`; code in `lib/crm-postgres/bulk-matches.ts`, `lib/match/stored-match.ts`, `lib/match/match-ranker.ts`; the Matches tab in `app/components/bulk-trades/stored-matches.tsx`; routes under `/api/bulk-listings/[id]/stored-matches`.
+Migration `118_bulk_matches.sql`; code in `lib/crm-postgres/bulk-matches.ts`, `lib/match/stored-match.ts`, `lib/match/match-ranker.ts`; the Matches tab in `app/components/bulk-trades/stored-matches.tsx`; routes under `/api/bulk-listings/[id]/stored-matches`.
 
 **Columns of `crm_bulk_matches`.** `id` (`bmt_…`), `deal_id`, `candidate_kind` (`listing`, `marketplace`, `stock`, `company`), `candidate_id`, `candidate_key` (the Matches row key), `name`, `company_id`, `person_id`, `contact`, `stock_kind` and `stock_id` (what a reservation holds: the candidate on a request, the deal itself on a supply deal), `candidate_qty` (the candidate's units at the run, null when not stated), `rank` (1 to 5 while in the five; the model's order), `scorer_rank`, `checks`, `reason`, `scored_by` (`scorer`, `model`, `prompt`, `fallback` when the model step was not used), `state`, `note`, `asked_at`, `chases` (0 to 3), `verdict`, `verdict_reason`, `verdict_at`, `verdict_by`, `confirmed_qty`, `quote` (`amount`, `currency`, `unit`), `quote_valid_until`, `reserved_qty`, `reserved_until`, `offer_id`, `data` (the open ask draft), `created_at`, `updated_at`. Unique on (`deal_id`, `candidate_kind`, `candidate_id`) and on `offer_id`. A no needs a reason (check constraint).
 

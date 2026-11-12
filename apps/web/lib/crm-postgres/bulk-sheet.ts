@@ -26,7 +26,7 @@ export const SHEET_QUERY = `
     bulk_listing_stage(listing.id) as stage, bulk_listing_deal_stage(listing.id) as deal_stage,
     listing.created_at::text as created_at, stage_event.occurred_at::text as stage_at, stage_event.note as stage_note,
     talk.last_in_at::text as last_in_at, talk.last_out_at::text as last_out_at, talk.waiting_from::text as waiting_from,
-    -- Marked Qualified without a price or a date: the card shows "No price" / "No date" (migration 112's checklist).
+    -- Marked Qualified without a price or a date: the card shows "No price" / "No date" (migration 117's checklist).
     (listing.qualified_at is not null and not bulk_listing_check_answered(listing.id, 'price')) as no_price,
     (listing.qualified_at is not null and not bulk_listing_check_answered(listing.id, 'when')) as no_date
   from crm_bulk_listings listing

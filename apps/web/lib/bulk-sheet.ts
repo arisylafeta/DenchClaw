@@ -199,7 +199,7 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     is_trade: TRADE_STAGES.includes(input.furthest_stage as OfferStage),
     paired_listing_id: input.paired_listing_id ?? null,
     progress: stage, held: hold, deal_stage: dealStageOf(input.deal_stage), cant_source: cantSource, closed: input.status === "closed",
-    // A stage this code does not know (a database ahead of or behind migration 111) keeps a neutral colour instead of breaking the sheet.
+    // A stage this code does not know (a database ahead of or behind migration 116) keeps a neutral colour instead of breaking the sheet.
     tone: hold ? "hold" : cantSource && stage !== "Found" && stage !== "Closed" ? "warning" : STAGE_TONE[stage] ?? "new",
     score: input.score,
     ...valueAndFee(input.kind, input.spec, input.context as Record<string, unknown> | null),
@@ -207,8 +207,8 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     next_action: text(input.next_action), likelihood: likelihoodOf((input.context as Record<string, unknown> | null)?.likelihood), next_due: input.next_due, owner: dealOwner((input.context as Record<string, unknown> | null)?.owner),
     waiting_on: input.waiting_on === "us" || input.waiting_on === "them" ? input.waiting_on : null, waiting_since: input.waiting_since ?? null,
     touched: input.latest_at ?? input.observed_on ?? input.updated_at,
-    // The starting event of migration 111 is not when a listing became New: it was New from the day it was made.
-    stage_since: input.stage_note === "As of migration 111" && stage === "New" && input.created_at ? input.created_at : input.stage_at ?? input.created_at ?? null,
+    // The starting event of migration 116 is not when a listing became New: it was New from the day it was made.
+    stage_since: input.stage_note === "As of migration 116" && stage === "New" && input.created_at ? input.created_at : input.stage_at ?? input.created_at ?? null,
     last_in_at: input.last_in_at ?? null, last_out_at: input.last_out_at ?? null, waiting_from: input.waiting_from ?? null,
     no_price: !!input.no_price, no_date: !!input.no_date,
   };

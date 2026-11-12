@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // Runs only against a disposable database: scripts/rebattery/crm-test-db.sh up prints the URL.
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
 
-describe.skipIf(!TEST_URL)("stage events (migration 111)", () => {
+describe.skipIf(!TEST_URL)("stage events (migration 116)", () => {
   let pg: typeof import("../postgres");
   let offers: typeof import("./bulk-offers");
   let events: typeof import("./bulk-stage-events");

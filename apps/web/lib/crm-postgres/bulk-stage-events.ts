@@ -1,6 +1,6 @@
 import { queryPg, withPgTransaction, type PgTransaction } from "../postgres";
 
-// Stage history for bulk listings and offers (crm_bulk_stage_events, migration 111). Triggers write every row, so a
+// Stage history for bulk listings and offers (crm_bulk_stage_events, migration 116). Triggers write every row, so a
 // change made by the app, an agent or plain SQL is logged the same way. The app's only part is to say who is writing:
 // the transaction's bulk.actor, here the signed-in user's email. Agents set it to their own name; without it the
 // actor is 'system'.

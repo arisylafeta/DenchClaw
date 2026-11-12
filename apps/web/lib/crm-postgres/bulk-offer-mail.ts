@@ -221,7 +221,7 @@ function firstNameOf(row: Pick<OutreachRow, "person_name" | "offer_name" | "offe
 /**
  * A send is a touch and, from candidate only, a move to offered. Never backwards: an offer that has already
  * moved on (negotiating, signed, declined) keeps its stage. The open draft is cleared either way. `reservation` is why
- * the stored match could not reserve its quantity on the move to offered (migration 113), so the sender is told.
+ * the stored match could not reserve its quantity on the move to offered (migration 118), so the sender is told.
  */
 export async function markOfferSent(offerId: string, actorUserId: string | null): Promise<{ moved: boolean; stage: string | null; reservation: string | null } | null> {
   return withPgTransaction(async (client) => {

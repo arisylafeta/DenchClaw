@@ -9,7 +9,7 @@
  * - QUALIFIED: the route's checklist is answered (or marked "they cannot provide it") and each item checked by a person,
  *   and a person ticked Qualified. Price and timeline are asked for every time but are not needed for the tick: the
  *   deal then shows "No price" or "No date" until they are filled. A deal opens on what and how many alone.
- *   The same rule runs in SQL as bulk_listing_qualified() (migration 112); relay-front-door.test.ts keeps the two in step.
+ *   The same rule runs in SQL as bulk_listing_qualified() (migration 117); relay-front-door.test.ts keeps the two in step.
  */
 
 export const BULK_MIN_KWH = 300;
@@ -207,7 +207,7 @@ export const checklistRoute = (route: string | null | undefined, recyclingFlag?:
   route === "recycling" || recyclingFlag === true || recyclingFlag === "true" ? "recycling" : "resale";
 
 /** The items the Qualified tick needs answered (or "they cannot provide it") and checked. Price and when are asked every
- * time but are not needed for the tick. Mirrored in SQL as bulk_listing_check_keys() (migration 112). */
+ * time but are not needed for the tick. Mirrored in SQL as bulk_listing_check_keys() (migration 117). */
 export const QUALIFY_KEYS: Record<ChecklistRoute, Record<ChecklistKind, string[]>> = {
   resale: { supply: ["what", "how_many", "where", "health"], demand: ["what", "how_many", "where"] },
   recycling: { supply: ["what", "how_many", "where", "condition"], demand: ["what", "how_many", "where"] },
@@ -218,7 +218,7 @@ export const ALWAYS_ASKED = ["price", "when"] as const;
 export const TIER_ONE = ["what", "how_many"];
 
 /** Where each checklist item's state is kept: the crm_bulk_listing_fields row with this field_key. Mirrored in SQL as
- * bulk_listing_check_field() (migration 112). */
+ * bulk_listing_check_field() (migration 117). */
 export const CHECK_FIELD: Record<ChecklistKind, Record<string, string>> = {
   supply: { what: "model", how_many: "quantity", where: "location", health: "soh", condition: "condition", price: "seller_price", when: "clear_by" },
   demand: { what: "product_family", how_many: "quantity", where: "location", condition: "condition", price: "max_price", when: "needed_by", health: "min_soh" },

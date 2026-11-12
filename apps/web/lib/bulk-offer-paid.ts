@@ -4,7 +4,7 @@
 /** The offer stages that mean the money is in. Moving an offer to either needs every paid fact. */
 export const PAID_STAGES = ["paid", "complete"] as const;
 
-/** The paid facts as stored on crm_bulk_offers (migration 111). quantity is in the price unit (terms.unit). */
+/** The paid facts as stored on crm_bulk_offers (migration 116). quantity is in the price unit (terms.unit). */
 export type PaidFacts = {
   paid_on: string | null;
   paid_amount: number | null;

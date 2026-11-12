@@ -200,7 +200,7 @@ export type BulkRows = {
     amount: number | string | null;
     unit: string | null;
     currency: string | null;
-    /** The offer's own columns (migration 111): quantity in the price unit, and the paid facts. */
+    /** The offer's own columns (migration 116): quantity in the price unit, and the paid facts. */
     quantity: number | string | null;
     paid_on?: string | null;
     paid_amount?: number | string | null;
@@ -296,7 +296,7 @@ export function bulkWeekly(rows: BulkRows, weeks: string[], now: Date): BulkWeek
       }
     }
     // A deal is closed when its offer is paid (or delivered after that), in the week it was paid. Offers paid before
-    // migration 111 have no paid date; they fall back to their last update.
+    // migration 116 have no paid date; they fall back to their last update.
     if (stage === "paid" || stage === "complete") {
       const i = slot(o.paid_on ? `${o.paid_on.slice(0, 10)}T00:00:00Z` : o.updated_at);
       const paid = num(o.paid_amount);
