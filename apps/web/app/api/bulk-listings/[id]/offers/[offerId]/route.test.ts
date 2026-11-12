@@ -60,6 +60,7 @@ describe("offer PATCH: the paid rule", () => {
   });
 
   it("leaves other stages and edits alone", async () => {
+    mocks.get.mockResolvedValue({ ...offer, quantity: 12, terms: { amount: 2400, currency: "GBP", unit: "pack", expires_on: "2026-12-03" } });
     expect((await PATCH(patch({ stage: "signed" }), context)).status).toBe(200);
     expect((await PATCH(patch({ nextStep: "Send the invoice" }), context)).status).toBe(200);
     expect((await PATCH(patch({ stage: "paid", paidOn: "soon" }), context)).status).toBe(400);
@@ -94,5 +95,41 @@ describe("offer PATCH: terms and the seller quote", () => {
     expect((await PATCH(patch({ terms: { amount: -1, currency: "EUR", unit: "kWh" } }), context)).status).toBe(400);
     expect((await PATCH(patch({ terms: { amount: 30, unit: "kWh" } }), context)).status).toBe(400);
     expect((await PATCH(patch({ terms: { amount: 30, currency: "EUR", unit: "bananas" } }), context)).status).toBe(400);
+  });
+});
+
+describe("offer PATCH: the step gates, held on the server", () => {
+  beforeEach(() => {
+    mocks.guard.mockResolvedValue({ userId: "u1", email: "alex@rebattery.io" });
+    mocks.listing.mockResolvedValue({ id: "bl_1", kind: "supply" });
+    mocks.update.mockImplementation(async (_l: string, _o: string, p: Record<string, unknown>) => ({ ...offer, ...p }));
+    mocks.gate.mockResolvedValue({ side: "buyer", gate: { ok: true, validUntil: "2026-12-03" } });
+  });
+  afterEach(() => vi.resetAllMocks());
+
+  it("refuses Offered to a buyer while the seller's quote is out of date, as Draft email and the send do", async () => {
+    mocks.get.mockResolvedValue({ ...offer, stage: "candidate", terms: {} });
+    mocks.gate.mockResolvedValue({ side: "buyer", gate: { ok: false, validUntil: "2026-11-03", reason: "The seller's quote ran out on 3 Nov. Ask them to confirm it." } });
+    const response = await PATCH(patch({ stage: "offered" }), context);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "The seller's quote ran out on 3 Nov. Ask them to confirm it.", blocked: "seller_quote", reconfirm: true });
+    expect(mocks.update).not.toHaveBeenCalled();
+    mocks.gate.mockResolvedValue({ side: "seller", gate: null });
+    expect((await PATCH(patch({ stage: "offered" }), context)).status).toBe(200);
+  });
+
+  it("refuses Contract sent without a buyer price, a quantity and a valid-until date", async () => {
+    mocks.get.mockResolvedValue({ ...offer, stage: "negotiating", terms: {} });
+    const response = await PATCH(patch({ stage: "contract_out" }), context);
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("Add the buyer price, quantity, valid-until date first.");
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("lets Contract sent through with the price, the quantity and the quote's last day as the offer's", async () => {
+    mocks.get.mockResolvedValue({ ...offer, stage: "negotiating", terms: { amount: 2400, currency: "GBP", unit: "pack" } });
+    const { offerClose } = await import("@/lib/crm-postgres/bulk-offer-close");
+    vi.mocked(offerClose).mockResolvedValue({ side: "buyer", gate: { ok: true, validUntil: "2026-12-03" }, expiresOn: "2026-12-03", quantity: 12, margin: null });
+    expect((await PATCH(patch({ stage: "contract_out" }), context)).status).toBe(200);
   });
 });

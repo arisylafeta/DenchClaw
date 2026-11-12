@@ -21,9 +21,9 @@ import { knownBackground, NO_PACK, SINCE_NOTE, sinceFrom, stripQuoted, type Pack
 import { julesReplies } from "./relay-jules";
 import type { JulesReply } from "./relay-jules-core";
 import { askInstruction, askKeys, askLabel, buildChecklist, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
-import { closeUnfitListing, DEAL_NOTE, JOB_STALE_MINUTES, queueReplyUpdates, recordSentAsks, setCheckState, setQualifiedTick, settleSentCards } from "./relay-deal";
+import { autoJobTag, closeUnfitListing, DEAL_NOTE, JOB_STALE_MINUTES, queueReplyUpdates, recordSentAsks, setCheckState, setQualifiedTick, settleSentCards } from "./relay-deal";
 import { BULK_RULE_TEXT } from "./relay-front-door";
-import { cancelAnsweredChases, prepareChases, recordSentChases, type ChaseRun, type StoredChase } from "./relay-chase";
+import { cancelAnsweredChases, chaseAnswered, prepareChases, recordSentChases, SEND_CLAIMED_SQL, type ChaseRun, type StoredChase } from "./relay-chase";
 import { markNewSupplyForStanding } from "./crm-postgres/bulk-matches";
 
 const run = promisify(execFile);
@@ -77,6 +77,8 @@ export type RelayItem = {
   jules?: JulesReply | null;
   /** The chase clock on a thread Alex wrote last on (the scan writes it, migration 115): due, waiting, or park proposed. */
   chase?: StoredChase | null;
+  /** A chase their reply dropped had been copied to Gmail drafts, and that copy is still there (Relay cannot delete it). */
+  gmail_chase_copy?: boolean;
 };
 
 export type RelayDismantler = { phase: DismantlerPhase; company_id: string; name: string };
@@ -117,7 +119,8 @@ export type RelayReviewItem = RelayItem & { drafts: RelayDraftView[]; todos: Rel
 const ITEM_COLUMNS = `i.id,i.tab,i.status,i.priority,i.counterpart_name,i.counterpart_email,i.company,i.contact_type,i.headline,i.context,i.last_message,
   i.earlier,i.bulk_listing_id,i.deal_label,i.waiting_since,i.note,i.mail_thread_id,i.gmail_thread_id,i.updated_at,i.situation,i.chase,
   (select m.id from mail_message m where m.thread_id = i.mail_thread_id and m.direction = 'inbound' and m.has_attachments
-     and ${mailboxScopeSql("m", "i.owner_id")} order by m.sent_at desc nulls last, m.created_at desc limit 1) as attachment_message_id`;
+     and ${mailboxScopeSql("m", "i.owner_id")} order by m.sent_at desc nulls last, m.created_at desc limit 1) as attachment_message_id,
+  exists (select 1 from relay_draft gd where gd.item_id = i.id and gd.origin = 'predraft' and gd.gmail_copy_left) as gmail_chase_copy`;
 
 export const PRIORITY_ORDER = `case i.priority when 'urgent' then 0 when 'overdue' then 1 when 'high' then 2 when 'medium' then 3 else 4 end`;
 
@@ -397,7 +400,7 @@ export async function frontDoor(ownerId: string): Promise<{ sent: number; opened
   const cards = await settleSentCards(ownerId).catch((error) => { console.error("relay front door: sent cards", error); return { sent: 0, opened: [] as string[] }; });
   // A deal opened from a sent card may be new supply for a standing request.
   if (cards.opened.length) await markNewSupplyForStanding({ userId: null, email: "relay" }).catch((error) => console.error("relay front door: new supply", error));
-  const queued = await queueReplyUpdates(ownerId, (itemId) => startDealJob(itemId, ownerId, "update", { auto: true }))
+  const queued = await queueReplyUpdates(ownerId, (itemId, messageId) => startDealJob(itemId, ownerId, "update", { auto: true, messageId }))
     .catch((error) => { console.error("relay front door: reply updates", error); return [] as string[]; });
   // A reply skips the chase draft waiting for it, even while Relay is only open in a browser.
   const cancelled = await cancelAnsweredChases(ownerId).catch((error) => { console.error("relay front door: answered chases", error); return 0; });
@@ -558,7 +561,7 @@ async function dealJobsFor(itemIds: string[]): Promise<Map<string, RelayDealJob>
 }
 
 /** "Create deal" or "Update deal from this reply": Matcha does the CRM work in a one-off job (relay_job.py). Nothing is sent. */
-export async function startDealJob(itemId: string, ownerId: string, action: "create" | "update", opts: { auto?: boolean } = {}): Promise<void> {
+export async function startDealJob(itemId: string, ownerId: string, action: "create" | "update", opts: { auto?: boolean; messageId?: string } = {}): Promise<void> {
   const item = await readRelayItem(itemId, ownerId);
   if (!item) throw new RelayError(404, "Not found");
   if (action === "update" && !item.bulk_listing_id) throw new RelayError(409, "This email isn't linked to a deal yet. Create the deal first.");
@@ -592,7 +595,8 @@ export async function startDealJob(itemId: string, ownerId: string, action: "cre
       and created_at > now() - ($3 || ' minutes')::interval limit 1`, [item.id, DEAL_NOTE, String(JOB_STALE_MINUTES)]);
     if (busy.length) throw new RelayError(409, "Matcha is already working on this deal.");
     const { rows: [created] } = await tx.query<{ id: string }>("insert into relay_job (item_id, owner_id, note, steps) values ($1, $2::uuid, $3, $4::jsonb) returning id",
-      [item.id, ownerId, `[deal:${action}] ${label}${opts.auto ? " (automatic: a new reply on the deal's thread)" : ""}`, JSON.stringify([opts.auto ? "Queued for Matcha by itself: they replied" : "Queued for Matcha"])]);
+      [item.id, ownerId, `[deal:${action}] ${label}${opts.auto ? " (automatic: a new reply on the deal's thread)" : ""}${opts.messageId ? ` ${autoJobTag(opts.messageId)}` : ""}`,
+        JSON.stringify([opts.auto ? "Queued for Matcha by itself: they replied" : "Queued for Matcha"])]);
     return created;
   });
   const dir = join(JOB_ROOT, job.id);
@@ -1008,9 +1012,6 @@ export async function settleSentDrafts(ownerId: string): Promise<number> {
 
 const SEND_RUNNER = "/root/denchclaw/scripts-live/scripts/rebattery/relay_send.py";
 
-/** True while the runner holds a claim on the draft's send (it is going out now). Matches relay_send.py RECLAIM_AFTER. */
-const SEND_CLAIMED_SQL = "coalesce((personalization->'scheduled_send'->>'claimed_at')::timestamptz > now() - interval '20 minutes', false)";
-
 /** Pins the exact version Alex confirmed to a send time; the scheduled-send runner (relay_send.py --due) sends it then. */
 async function pinSend(draftId: string, owner: { id: string; email: string }, updatedAt: string, sendAt: Date, undo: boolean): Promise<{ at: string }> {
   const relayDraft = await relayDraftForOwner(draftId, owner.id);
@@ -1020,6 +1021,8 @@ async function pinSend(draftId: string, owner: { id: string; email: string }, up
   if (mail.state !== "draft") throw new RelayError(409, mail.state === "accepted" ? "Already sent." : "A send is already in progress or needs checking.");
   if (!sameVersion(mail.updated_at, updatedAt)) throw new RelayError(409, "This draft changed since you opened it. Reload to see the latest.");
   if (!mail.to_emails.length) throw new RelayError(400, `Add a recipient before ${undo ? "sending" : "scheduling"}.`);
+  // A chase Relay prepared: they may have replied since it was drafted, even if the reply synced only now.
+  if (await chaseAnswered(draftId)) throw new RelayError(409, "They replied after this chase was drafted, so it was not sent and the chase is dropped. Read their reply first.");
   const [row] = await queryPg<{ at: string }>(
     `update mail_message set personalization = jsonb_set(coalesce(personalization, '{}'::jsonb) - 'send_failure', '{scheduled_send}',
        jsonb_build_object('at', $2::timestamptz, 'version', updated_at, 'attachments', coalesce(personalization->'attachments', 'null'::jsonb), 'by', $3::text, 'set_at', now(), 'undo', $5::boolean), true)

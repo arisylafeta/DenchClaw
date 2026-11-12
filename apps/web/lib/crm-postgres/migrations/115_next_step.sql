@@ -13,10 +13,18 @@
 --     unanswered message}. Null when nobody owes a chase. Read by the chase pass that prepares the draft.
 --   relay_draft origin 'predraft' (allowed since 100, unused until now): a chase draft Relay prepared by itself into
 --     Review. At most one open per thread (the index below); a reply from them skips it.
+--   relay_draft.chase_after: when our message the chase follows was sent. Any message from them later than that skips
+--     the chase, however late it synced.
+--   relay_draft.gmail_copy_left: a skipped chase that had been copied to Gmail drafts, whose copy Relay cannot delete;
+--     the email's card says so.
+-- The clock runs only on lead threads, threads linked to a deal, and match asks and offers; every other thread keeps the
+-- older rule (one nudge surfaced after 7 working days, no drafted chase).
 -- Team notes with @mentions are crm_bulk_listing_activity rows (kind 'note', data.mentions, data.ticked): no column.
 begin;
 
 alter table relay_item add column if not exists chase jsonb;
+alter table relay_draft add column if not exists chase_after timestamptz;
+alter table relay_draft add column if not exists gmail_copy_left boolean not null default false;
 
 create unique index if not exists relay_draft_one_open_chase on relay_draft (item_id)
   where origin = 'predraft' and state in ('draft', 'gmail');
@@ -43,7 +51,7 @@ create or replace function bulk_listing_stage(listing_id text) returns text lang
     else case
       when r.rank >= 5 or (l.status = 'closed' and l.closed_reason in ('sold', 'became_trade')) then 'Sold'
       when l.status = 'closed' then 'Closed'
-      when l.hold_until >= current_date or bulk_listing_reserved(l.id) then 'Reserved'
+      when l.hold_until >= bulk_today() or bulk_listing_reserved(l.id) then 'Reserved'
       when bulk_listing_has_match(l.id) then 'Available'
       when bulk_listing_qualified(l.id) then case when bulk_listing_match_started(l.id) then 'Available' else 'Qualified' end
       else 'New' end

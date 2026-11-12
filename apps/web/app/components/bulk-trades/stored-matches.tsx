@@ -27,11 +27,21 @@ const shortDay = (iso: string | null) => (iso ? new Date(`${iso.slice(0, 10)}T00
 const count = (value: number) => value.toLocaleString("en-GB", { maximumFractionDigits: 1 });
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-/** "Reserved 10 until 19 Nov" on this match, and how much of the candidate is held across deals. */
-function reservationLine(row: StoredMatchView): string | null {
+/** Offer stages past offered: the reservation then holds until the offer ends, not to a date (RESERVED_WHILE). */
+const HELD_WHILE: Record<string, string> = {
+  negotiating: "while in negotiation", contract_out: "while the contract is out", signed: "until it is delivered",
+  invoiced: "until it is delivered", paid: "until it is delivered",
+};
+
+/**
+ * "Reserved 10 until 19 Nov" or "Reserved 10 while in negotiation" on this match ("Quantity not known, whole lot held"
+ * when the reservation has no quantity in units), and how much of the candidate is held across deals.
+ */
+export function reservationLine(row: StoredMatchView): string | null {
   const parts: string[] = [];
   if (row.reservation_live && row.reserved_until) {
-    parts.push(`Reserved ${row.reserved_qty != null ? count(row.reserved_qty) : "the lot"} until ${shortDay(row.reserved_until)}`);
+    const until = (row.offer_stage && HELD_WHILE[row.offer_stage]) ?? `until ${shortDay(row.reserved_until)}`;
+    parts.push(row.reserved_qty != null ? `Reserved ${count(row.reserved_qty)} ${until}` : `Quantity not known, whole lot held ${until}`);
   } else if (row.state === "offered" && row.reserved_until) {
     parts.push(`Reservation lapsed on ${shortDay(row.reserved_until)}`);
   }

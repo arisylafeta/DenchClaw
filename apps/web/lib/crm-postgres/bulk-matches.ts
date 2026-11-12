@@ -12,7 +12,7 @@ import { addressParts, buildOfferEmail, OfferEmailRefused, type BuyerFacts, type
 import { createOfferEmailDraft, OfferDraftError } from "../match/offer-draft";
 import { modelRanker, type MatchRanker } from "../match/match-ranker";
 import {
-  askedAgo, candidateFacts, candidateRef, checkRanking, checksOf, LIVE_STATES, NO_REASON_MAX, quoteInDate, reservationLive,
+  askedAgo, candidateFacts, candidateRef, checkRanking, checksOf, LIVE_STATES, NO_REASON_MAX, quoteInDate, RESERVED_WHILE, reservationLive,
   reservationUntil, ruleReason, SCORER_VERSION, today as londonToday, TOP, unitKey,
   type CandidateRef, type MatchState,
 } from "../match/stored-match";
@@ -137,7 +137,7 @@ type Availability = { key: string; blocked: string | null; holds: number; qty: n
 
 /**
  * Why a candidate may not be matched now (closed, gone or stale, sold, contracted, excluded), and what other deals hold
- * of its stock. Out-of-date reservations count as free: only offered rows whose last day is today or later are read.
+ * of its stock. Only live reservations count (bulk_match_live): out-of-date ones at offered read as free.
  */
 async function availability(dealId: string, refs: (CandidateRef & { key: string })[]): Promise<Map<string, Availability>> {
   if (!refs.length) {
@@ -165,7 +165,7 @@ async function availability(dealId: string, refs: (CandidateRef & { key: string 
        select count(*)::int as holds, coalesce(sum(m.reserved_qty), 0) as qty, (count(*) filter (where m.reserved_qty is null))::int as whole
        from crm_bulk_matches m
        where m.stock_kind = r."stockKind" and m.stock_id = r."stockId" and m.deal_id <> $2
-         and m.state = 'offered' and m.reserved_until >= current_date) x`,
+         and bulk_match_live(m.state, m.reserved_until, m.offer_id)) x`,
     [JSON.stringify(refs), dealId]);
   return new Map(rows.map((row) => [row.key, row]));
 }
@@ -298,13 +298,31 @@ async function activity(tx: PgTransaction, dealId: string, actor: MatchActor, ti
 
 const matchId = () => `bmt_${randomUUID()}`;
 
+/**
+ * kWh per unit of the stock a reservation would hold, when it is a single-product listing: what turns an offer quantity
+ * priced per kWh into units (migration 113, bulk_match_offered). Null for stock lines, marketplace listings and mixed lots.
+ */
+async function stockKwhPerUnit(tx: PgTransaction, ref: CandidateRef): Promise<number | null> {
+  if (ref.stockKind !== "listing") {
+    return null;
+  }
+  const { rows } = await tx.query<FieldFact>(
+    `select field_key, value, status, visibility, coalesce(alternatives, '[]'::jsonb) as alternatives
+     from crm_bulk_listing_fields where bulk_listing_id = $1`, [ref.stockId]);
+  const key = buildProductKey({ fields: rows });
+  const kwh = !key.mixed && key.lines.length === 1 ? key.lines[0].kwh : null;
+  return kwh != null && kwh > 0 ? kwh : null;
+}
+
 async function upsert(tx: PgTransaction, deal: Deal, pick: Pick, values: { rank: number | null; reason: string; scoredBy: Record<string, unknown>; note?: string | null }) {
+  const kwhPerUnit = await stockKwhPerUnit(tx, pick.ref);
   await tx.query(
     `insert into crm_bulk_matches (id, deal_id, candidate_kind, candidate_id, candidate_key, name, company_id, person_id, contact,
-       stock_kind, stock_id, candidate_qty, rank, scorer_rank, checks, reason, scored_by, note)
+       stock_kind, stock_id, candidate_qty, rank, scorer_rank, checks, reason, scored_by, note, data)
      values ($1, $2, $3, $4, $5, $6, (select id from crm_companies where id = $7), (select id from crm_people where id = $8), $9,
-       $10, $11, $12, $13, $14, $15::jsonb, $16, $17::jsonb, $18)
+       $10, $11, $12, $13, $14, $15::jsonb, $16, $17::jsonb, $18, $19::jsonb)
      on conflict (deal_id, candidate_kind, candidate_id) do update set
+       data = (crm_bulk_matches.data - 'kwh_per_unit') || excluded.data,
        candidate_key = excluded.candidate_key, name = excluded.name, company_id = excluded.company_id, person_id = excluded.person_id,
        contact = coalesce(excluded.contact, crm_bulk_matches.contact),
        -- An offered row keeps the quantity its reservation was checked against.
@@ -317,7 +335,8 @@ async function upsert(tx: PgTransaction, deal: Deal, pick: Pick, values: { rank:
        updated_at = now()`,
     [matchId(), deal.id, pick.ref.kind, pick.ref.id, pick.row.key, pick.row.name, pick.row.companyId, pick.row.personId, pick.row.contact,
       pick.ref.stockKind, pick.ref.stockId, pick.qty != null && pick.qty > 0 ? pick.qty : null, values.rank, pick.scorerRank,
-      JSON.stringify(checksOf(pick.row)), values.reason, JSON.stringify(values.scoredBy), values.note ?? null]);
+      JSON.stringify(checksOf(pick.row)), values.reason, JSON.stringify(values.scoredBy), values.note ?? null,
+      JSON.stringify(kwhPerUnit != null ? { kwh_per_unit: kwhPerUnit } : {})]);
 }
 
 /**
@@ -394,13 +413,21 @@ export async function listStoredMatches(dealId: string, now: Date = new Date()):
   };
 }
 
+export type ListingReservations = {
+  holds: number; qty: number; whole: number; until: string | null; of: number | null;
+  /** True when a reservation is held because its offer moved past offered: it lasts until the offer ends, not a date. */
+  whileLive: boolean;
+};
+
 /** Live reservations held against one supply listing, for its card: how many, how much, and the last day. */
-export async function listingReservations(listingId: string): Promise<{ holds: number; qty: number; whole: number; until: string | null; of: number | null }> {
-  const [row] = await queryPg<{ holds: number; qty: number; whole: number; until: string | null; of: number | null }>(
-    `select count(*)::int as holds, coalesce(sum(reserved_qty), 0)::float8 as qty, (count(*) filter (where reserved_qty is null))::int as whole,
-            max(reserved_until)::text as until, max(candidate_qty)::float8 as of
-     from crm_bulk_matches where stock_kind = 'listing' and stock_id = $1 and state = 'offered' and reserved_until >= current_date`, [listingId]);
-  return row ?? { holds: 0, qty: 0, whole: 0, until: null, of: null };
+export async function listingReservations(listingId: string): Promise<ListingReservations> {
+  const [row] = await queryPg<ListingReservations>(
+    `select count(*)::int as holds, coalesce(sum(m.reserved_qty), 0)::float8 as qty, (count(*) filter (where m.reserved_qty is null))::int as whole,
+            max(m.reserved_until)::text as until, max(m.candidate_qty)::float8 as of,
+            coalesce(bool_or(o.stage = any($2::text[])), false) as "whileLive"
+     from crm_bulk_matches m left join crm_bulk_offers o on o.id = m.offer_id
+     where m.stock_kind = 'listing' and m.stock_id = $1 and bulk_match_live(m.state, m.reserved_until, m.offer_id)`, [listingId, RESERVED_WHILE]);
+  return row ?? { holds: 0, qty: 0, whole: 0, until: null, of: null, whileLive: false };
 }
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
@@ -551,7 +578,9 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Yes: the verdict is stored and the match becomes exactly one counterparty offer at candidate. A second yes, or a yes
- * racing the first, returns the same offer. On a request the supplier's quote must say until when it holds.
+ * racing the first, returns the same offer. On a request the supplier's quote must say until when it holds. The offer is
+ * made and linked in one transaction, so a refused yes leaves no offer behind; a second match for a counterparty that
+ * already has this deal's offer from another match is a 409 with a plain message.
  */
 export async function matchYes(dealId: string, id: string, input: YesInput, actor: MatchActor, deps: MatchDeps = {}): Promise<StoredMatchView> {
   const deal = await readDeal(dealId);
@@ -578,49 +607,59 @@ export async function matchYes(dealId: string, id: string, input: YesInput, acto
     }
     await stillAvailable(deal, first, actor);
   }
-  // One yes at a time per match: the lock is held while the offer is made, so a second click waits and then finds it.
-  await asStageActor(actor.userId, async (tx) => {
-    await tx.query(`select pg_advisory_xact_lock(hashtext('crm_bulk_matches:yes:' || $1))`, [id]);
-    const row = await readRow(dealId, id, tx);
-    if (!row || row.offer_id) {
-      return;
-    }
-    let offerId: string;
-    try {
-      const offer = await addOffer(dealId, {
-        name: row.name, contact: row.contact, personId: row.person_id, companyId: row.company_id, stage: "candidate",
-        counterpartId: row.candidate_kind === "listing" ? row.candidate_id : null,
-        data: {
-          match: { stored_match_id: row.id, rank: row.rank, reason: row.reason, at: new Date().toISOString() },
-          ...(row.candidate_kind === "stock" ? { stock_opportunity_id: row.candidate_id } : {}),
-          ...(Array.isArray(row.checks.stock_ids) ? { stock_opportunity_ids: row.checks.stock_ids } : {}),
-          ...(row.candidate_kind === "marketplace" ? { marketplace_listing_id: row.candidate_id } : {}),
-        },
-      });
-      offerId = offer.id;
-    } catch (error) {
-      if (error instanceof OfferConflict && error.existingOfferId) {
-        offerId = error.existingOfferId;
-      } else if (error instanceof OfferConflict) {
-        throw new MatchError(409, error.message);
-      } else {
-        throw error;
+  // One yes at a time per deal: the lock is held while the offer is made and linked, so a second click on this match, or a
+  // yes on another match for the same counterparty, waits and then finds the offer.
+  const taken = "This counterparty already has an offer on this deal from another match.";
+  try {
+    await asStageActor(actor.userId, async (tx) => {
+      await tx.query(`select pg_advisory_xact_lock(hashtext('crm_bulk_matches:yes:' || $1))`, [dealId]);
+      const row = await readRow(dealId, id, tx);
+      if (!row || row.offer_id) {
+        return;
       }
-    }
-    const [taken] = (await tx.query<{ id: string }>(`select id from crm_bulk_matches where offer_id = $1 and id <> $2`, [offerId, id])).rows;
-    if (taken) {
-      throw new MatchError(409, "This counterparty already has an offer on this deal from another match.");
-    }
-    await tx.query(
-      `update crm_bulk_matches set state = 'confirmed', verdict = 'yes', verdict_at = now(), verdict_by = $3, verdict_reason = null,
-         confirmed_qty = $4, quote = $5::jsonb, quote_valid_until = $6::date, offer_id = $7,
-         data = data - 'open_draft_id', updated_at = now()
-       where deal_id = $1 and id = $2`,
-      [dealId, id, actor.email ?? "system", input.quantity ?? null, input.quote ? JSON.stringify(input.quote) : null, input.validUntil ?? null, offerId]);
-    await activity(tx, dealId, actor, `Yes: ${row.name}`, {
-      match: { key: unitKey(row.candidate_key), verdict: "yes", stored_match_id: id, offer_id: offerId, quantity: input.quantity ?? null, valid_until: input.validUntil ?? null },
+      let offerId: string;
+      try {
+        const offer = await addOffer(dealId, {
+          name: row.name, contact: row.contact, personId: row.person_id, companyId: row.company_id, stage: "candidate",
+          counterpartId: row.candidate_kind === "listing" ? row.candidate_id : null,
+          data: {
+            match: { stored_match_id: row.id, rank: row.rank, reason: row.reason, at: new Date().toISOString() },
+            ...(row.candidate_kind === "stock" ? { stock_opportunity_id: row.candidate_id } : {}),
+            ...(Array.isArray(row.checks.stock_ids) ? { stock_opportunity_ids: row.checks.stock_ids } : {}),
+            ...(row.candidate_kind === "marketplace" ? { marketplace_listing_id: row.candidate_id } : {}),
+          },
+        }, tx);
+        offerId = offer.id;
+      } catch (error) {
+        if (error instanceof OfferConflict && error.existingOfferId) {
+          offerId = error.existingOfferId;
+        } else if (error instanceof OfferConflict) {
+          throw new MatchError(409, error.message);
+        } else {
+          throw error;
+        }
+      }
+      const [other] = (await tx.query<{ id: string }>(`select id from crm_bulk_matches where offer_id = $1 and id <> $2`, [offerId, id])).rows;
+      if (other) {
+        throw new MatchError(409, taken);
+      }
+      await tx.query(
+        `update crm_bulk_matches set state = 'confirmed', verdict = 'yes', verdict_at = now(), verdict_by = $3, verdict_reason = null,
+           confirmed_qty = $4, quote = $5::jsonb, quote_valid_until = $6::date, offer_id = $7,
+           data = data - 'open_draft_id', updated_at = now()
+         where deal_id = $1 and id = $2`,
+        [dealId, id, actor.email ?? "system", input.quantity ?? null, input.quote ? JSON.stringify(input.quote) : null, input.validUntil ?? null, offerId]);
+      await activity(tx, dealId, actor, `Yes: ${row.name}`, {
+        match: { key: unitKey(row.candidate_key), verdict: "yes", stored_match_id: id, offer_id: offerId, quantity: input.quantity ?? null, valid_until: input.validUntil ?? null },
+      });
     });
-  });
+  } catch (error) {
+    // The one-offer-per-match index, reached by a writer outside this lock: the same answer as above, not a 500.
+    if ((error as { code?: string; constraint?: string }).code === "23505" && (error as { constraint?: string }).constraint === "crm_bulk_matches_offer_uidx") {
+      throw new MatchError(409, taken);
+    }
+    throw error;
+  }
   const after = await readRow(dealId, id);
   if (after?.offer_id && input.quote && deal.kind === "demand" && after.verdict_at && !first.offer_id) {
     // The supplier's quote goes on the offer as its terms, firm until its last day. Internal: never sent to a seller.

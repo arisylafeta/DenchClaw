@@ -164,9 +164,19 @@ export function reservationUntil(today: string, quoteUntil: string | null | unde
   return quoteUntil && quoteUntil < standard ? quoteUntil : standard;
 }
 
-/** A reservation is live while the match is offered and its last day is today or later; out of date reads as free. */
-export function reservationLive(row: { state: string; reserved_until: string | null }, today: string): boolean {
-  return row.state === "offered" && !!row.reserved_until && row.reserved_until.slice(0, 10) >= today;
+/** Offer stages past offered: a reservation holds while its offer is at one of these, whatever its date. */
+export const RESERVED_WHILE: readonly string[] = ["negotiating", "contract_out", "signed", "invoiced", "paid"];
+
+/**
+ * A reservation is live while the match is offered and holds one: at offered, while its last day is today or later (out
+ * of date reads as free); once the offer is negotiating, contract_out, signed, invoiced or paid, until the offer ends.
+ * A complete offer has consumed it. SQL twin: bulk_match_live (migration 113).
+ */
+export function reservationLive(row: { state: string; reserved_until: string | null; offer_stage?: string | null }, today: string): boolean {
+  if (row.state !== "offered" || !row.reserved_until || row.offer_stage === "complete") {
+    return false;
+  }
+  return row.reserved_until.slice(0, 10) >= today || (!!row.offer_stage && RESERVED_WHILE.includes(row.offer_stage));
 }
 
 /** "Asked 3 working days ago, no answer: chase 2 of 3 due": for asked rows with no verdict yet, on the one chase clock

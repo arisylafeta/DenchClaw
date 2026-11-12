@@ -19,6 +19,7 @@ vi.mock("@/lib/mail-draft-actions", () => ({
 
 import { POST } from "./route";
 import { DraftActionError } from "@/lib/mail-draft-actions";
+import { offerTermsKey } from "@/lib/bulk-offer-close";
 
 process.env.CRM_DB_BACKEND = "postgres";
 
@@ -82,6 +83,37 @@ describe("POST offer send", () => {
     expect(m.sendDraft).toHaveBeenCalledWith(expect.objectContaining({ id: "draft_1" }), "Alex Polglase");
     expect(m.linkOfferThread).toHaveBeenCalledWith("sup_1", "bof_1", "thread_1", "alex@rebattery.io");
     expect(m.markOfferSent).toHaveBeenCalledWith("bof_1", "u1");
+  });
+
+  it("refuses a draft built from terms the offer no longer holds, says so plainly, and sends nothing", async () => {
+    m.offerOutreach.mockResolvedValue({
+      offerId: "bof_1", listingId: "sup_1", kind: "supply", stage: "candidate", email: "sam@buyer.test", openDraftId: null,
+      data: { draft_terms: { draft_1: offerTermsKey({ amount: 2400, currency: "GBP", unit: "pack" }, 12) } },
+      terms: { amount: 2200, currency: "GBP", unit: "pack" }, quantity: 12,
+    });
+    const res = await call(sent);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ sent: false, error: "The offer's price or terms changed after this email was drafted, so it was not sent. Draft the email again." });
+    expect(m.sendDraft).not.toHaveBeenCalled();
+    expect(m.markOfferSent).not.toHaveBeenCalled();
+  });
+
+  it("sends a draft built from the offer's current terms", async () => {
+    const terms = { amount: 2400, currency: "GBP", unit: "pack" };
+    m.offerOutreach.mockResolvedValue({
+      offerId: "bof_1", listingId: "sup_1", kind: "supply", stage: "candidate", email: "sam@buyer.test", openDraftId: "draft_1",
+      data: { draft_terms: { draft_1: offerTermsKey(terms, 12) } }, terms, quantity: 12,
+    });
+    expect((await call(sent)).status).toBe(200);
+    expect(m.sendDraft).toHaveBeenCalled();
+  });
+
+  it("says when the match could not reserve its quantity, so a refusal never passes silently", async () => {
+    m.readMailDraft.mockResolvedValueOnce(draft).mockResolvedValueOnce({ ...draft, state: "accepted", thread_id: "thread_1" });
+    m.markOfferSent.mockResolvedValue({ moved: true, stage: "offered", reservation: "Only 4 of 10 are free to reserve." });
+    const res = await call(sent);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ sent: true, reservation: "Only 4 of 10 are free to reserve.", warning: "The quantity was not reserved: Only 4 of 10 are free to reserve." });
   });
 
   it("changes nothing and warns when the send fails", async () => {

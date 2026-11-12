@@ -220,9 +220,10 @@ function firstNameOf(row: Pick<OutreachRow, "person_name" | "offer_name" | "offe
 
 /**
  * A send is a touch and, from candidate only, a move to offered. Never backwards: an offer that has already
- * moved on (negotiating, signed, declined) keeps its stage. The open draft is cleared either way.
+ * moved on (negotiating, signed, declined) keeps its stage. The open draft is cleared either way. `reservation` is why
+ * the stored match could not reserve its quantity on the move to offered (migration 113), so the sender is told.
  */
-export async function markOfferSent(offerId: string, actorUserId: string | null): Promise<{ moved: boolean; stage: string | null } | null> {
+export async function markOfferSent(offerId: string, actorUserId: string | null): Promise<{ moved: boolean; stage: string | null; reservation: string | null } | null> {
   return withPgTransaction(async (client) => {
     const { rows } = await client.query<{ stage: string | null; bulk_listing_id: string; person_id: string | null; name: string | null }>(
       `select stage, bulk_listing_id, person_id, name from crm_bulk_offers where id = $1 for update`, [offerId]);
@@ -249,10 +250,10 @@ export async function markOfferSent(offerId: string, actorUserId: string | null)
         `update crm_bulk_offers set
            stage = case when stage = 'candidate' then 'offered' else stage end,
            last_touch_on = current_date, last_touch_via = 'mail',
-           data = data - 'open_draft_id' - 'open_sheet_doc_id', updated_at = now()
+           data = data - 'open_draft_id' - 'open_sheet_doc_id' - 'draft_terms', updated_at = now()
          where id = $1`, [offerId]);
     } else {
-      await client.query(`update crm_bulk_offers set data = data - 'open_draft_id' - 'open_sheet_doc_id', updated_at = now() where id = $1`, [offerId]);
+      await client.query(`update crm_bulk_offers set data = data - 'open_draft_id' - 'open_sheet_doc_id' - 'draft_terms', updated_at = now() where id = $1`, [offerId]);
     }
     const moved = offer.stage === "candidate";
     if (moved) {
@@ -262,16 +263,25 @@ export async function markOfferSent(offerId: string, actorUserId: string | null)
         [offer.bulk_listing_id, offerId, offer.person_id, `${offer.name ?? "Offer"} · Offered`,
           JSON.stringify({ from: "candidate", stage: "offered", source: "offer_email_sent" }), actorUserId]);
     }
-    return { moved, stage: moved ? "offered" : offer.stage };
+    const { rows: refused } = moved ? await client.query<{ why: string }>(
+      `select data->>'reservation_refused' as why from crm_bulk_matches
+       where offer_id = $1 and state = 'offered' and reserved_until is null and data ? 'reservation_refused'`, [offerId]) : { rows: [] };
+    return { moved, stage: moved ? "offered" : offer.stage, reservation: refused[0]?.why ?? null };
   });
 }
 
-/** Records the draft that is open in the panel, so the same one is reopened instead of a second copy. */
-export async function setOpenDraft(offerId: string, draftId: string | null): Promise<void> {
+/**
+ * Records the draft that is open in the panel, so the same one is reopened instead of a second copy, and the terms it
+ * was built from (offerTermsKey) under data.draft_terms, so a draft built from older terms is never sent.
+ */
+export async function setOpenDraft(offerId: string, draftId: string | null, termsKey: string | null = null): Promise<void> {
   await queryPg(
     `update crm_bulk_offers set data = case when $2::text is null then data - 'open_draft_id'
-       else data || jsonb_build_object('open_draft_id', $2::text) end, updated_at = now() where id = $1`,
-    [offerId, draftId]);
+       else data || jsonb_build_object('open_draft_id', $2::text)
+         || case when $3::text is null then '{}'::jsonb
+              else jsonb_build_object('draft_terms', coalesce(data->'draft_terms', '{}'::jsonb) || jsonb_build_object($2::text, $3::text)) end
+       end, updated_at = now() where id = $1`,
+    [offerId, draftId, termsKey]);
 }
 
 /** A confirmed link between the sent thread, the listing and the offer. A proposed link is never enough. */

@@ -1,5 +1,13 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CHASE_LINES } from "./relay-chase-core";
+
+// No send runner: relay.ts's queueSend would start relay_send.py after the undo window. Here it can start nothing.
+const spawned = vi.hoisted(() => [] as string[][]);
+vi.mock("node:child_process", async (actual) => ({
+  ...(await actual<typeof import("node:child_process")>()),
+  spawn: (cmd: string, args: string[]) => { spawned.push([cmd, ...args]); return { unref: () => undefined }; },
+  execFile: () => { throw new Error("no external commands in tests"); },
+}));
 
 // Runs only against a disposable database: scripts/rebattery/crm-test-db.sh up prints the URL. The mail draft is a
 // stand-in that writes a local draft row, so no mail tool runs and nothing can be sent.
@@ -8,6 +16,7 @@ const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
 describe.skipIf(!TEST_URL)("chase drafts (relay-chase.ts, migration 115)", () => {
   let pg: typeof import("./postgres");
   let chase: typeof import("./relay-chase");
+  let relay: typeof import("./relay");
   let owner: { id: string; email: string };
   const run = `${Date.now()}`;
   const made: { to: string[]; subject: string; body: string; identity: string; thread: string | null }[] = [];
@@ -25,6 +34,7 @@ describe.skipIf(!TEST_URL)("chase drafts (relay-chase.ts, migration 115)", () =>
     process.env.DATABASE_URL = TEST_URL;
     pg = await import("./postgres");
     chase = await import("./relay-chase");
+    relay = await import("./relay");
     const [user] = await pg.queryPg<{ id: string; email: string }>(
       "insert into crm_users (email, display_name, password_hash) values ($1, 'Chase Test', 'x') returning id, email", [`relay-chase-${run}@example.test`]);
     owner = user;
@@ -118,5 +128,60 @@ describe.skipIf(!TEST_URL)("chase drafts (relay-chase.ts, migration 115)", () =>
     expect(await chase.recordSentChases([row.id])).toBe(0);
     const [m] = await pg.queryPg<{ chases: number }>("select chases from crm_bulk_matches where id = $1", [`${deal}-m`]);
     expect(m.chases).toBe(1);
+  });
+
+  /** Their reply on the thread, sent at `at`. */
+  const reply = (t: { thread: string; email: string }, key: string, at: string) => pg.queryPg(
+    `insert into mail_message (id, thread_id, direction, transport, state, from_email, to_emails, subject, body_text, sent_at)
+     values ($1, $2, 'inbound', 'gmail', 'received', $3, '{alex@rebattery.io}', 'Re: Leaf packs', 'Here are the numbers.', $4::timestamptz)`,
+    [`${key}-${t.thread}`, t.thread, t.email, at]);
+
+  it("skips a chase when their reply came after our message, even if it was sent before the chase was drafted and synced later", async () => {
+    const t = await waiting("late-sync");
+    await chase.prepareChases(owner.id, { draft, now });
+    const [row] = await draftsOf(t.item);
+    expect(row.state).toBe("draft");
+    // Sent Tuesday 3 Nov, a day after our Monday message and before the chase draft existed; it reached the CRM only now.
+    await reply(t, "late", "2026-11-03T08:00:00Z");
+    expect(await chase.cancelAnsweredChases(owner.id)).toBeGreaterThanOrEqual(1);
+    expect((await draftsOf(t.item))[0].state).toBe("skipped");
+  });
+
+  it("leaves a chase alone while the send runner has claimed it, as the unschedule path does", async () => {
+    const t = await waiting("claimed");
+    await chase.prepareChases(owner.id, { draft, now });
+    const [row] = await draftsOf(t.item);
+    await pg.queryPg(`update mail_message set personalization = jsonb_build_object('scheduled_send', jsonb_build_object('at', now(), 'claimed_at', now())) where id = $1`, [row.mail_message_id]);
+    await reply(t, "claimed", new Date(Date.now() + 60_000).toISOString()); // after the draft too: only the claim keeps it
+    await chase.cancelAnsweredChases(owner.id);
+    expect((await draftsOf(t.item))[0].state).toBe("draft");
+    const [mail] = await pg.queryPg<{ scheduled: boolean }>("select personalization ? 'scheduled_send' as scheduled from mail_message where id = $1", [row.mail_message_id]);
+    expect(mail.scheduled).toBe(true);
+  });
+
+  it("marks a skipped chase that was in Gmail drafts, so the email's card says the copy is still there", async () => {
+    const t = await waiting("gmail");
+    await chase.prepareChases(owner.id, { draft, now });
+    await pg.queryPg("update relay_draft set state = 'gmail', gmail_draft_id = 'r-gmail-1' where item_id = $1", [t.item]);
+    await reply(t, "gmail", "2026-11-03T08:00:00Z");
+    await chase.cancelAnsweredChases(owner.id);
+    const [row] = await pg.queryPg<{ state: string; left: boolean }>("select state, gmail_copy_left as left from relay_draft where item_id = $1", [t.item]);
+    expect(row).toEqual({ state: "skipped", left: true });
+    expect((await relay.readRelayItem(t.item, owner.id))?.gmail_chase_copy).toBe(true);
+  });
+
+  it("checks for a reply again at the Send click, and sends nothing when they answered", async () => {
+    const t = await waiting("click");
+    await chase.prepareChases(owner.id, { draft, now });
+    const [row] = await draftsOf(t.item);
+    await pg.queryPg("update mail_message set identity_key = 'supply' where id = $1", [row.mail_message_id]); // a shared inbox the test owner may read
+    await reply(t, "click", "2026-11-03T08:00:00Z");
+    const [mail] = await pg.queryPg<{ updated_at: string }>("select updated_at::text from mail_message where id = $1", [row.mail_message_id]);
+    spawned.length = 0;
+    await expect(relay.queueSend(row.id, owner, new Date(mail.updated_at).toISOString())).rejects.toThrow(/They replied after this chase was drafted/);
+    const [after] = await pg.queryPg<{ scheduled: boolean }>("select personalization ? 'scheduled_send' as scheduled from mail_message where id = $1", [row.mail_message_id]);
+    expect(after.scheduled).toBe(false);
+    expect((await draftsOf(t.item))[0].state).toBe("skipped");
+    expect(spawned).toEqual([]);
   });
 });

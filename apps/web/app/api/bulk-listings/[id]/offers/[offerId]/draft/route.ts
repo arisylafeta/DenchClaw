@@ -7,6 +7,7 @@ import { createOfferEmailDraft, OfferDraftError } from "@/lib/match/offer-draft"
 import { badRequest, guardBulkTrades, notFound } from "@/lib/bulk-trades-route";
 import { offerGate, prepareOfferSheet, storeOfferSheet, type PreparedSheet } from "@/lib/crm-postgres/bulk-offer-close";
 import { SheetRefused } from "@/lib/bulk-price-sheet";
+import { draftTermsKey, offerTermsKey } from "@/lib/bulk-offer-close";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -22,7 +23,8 @@ function kindFor(stage: string | null, chase: boolean, kind: "supply" | "demand"
 
 /**
  * Prepares one offer email as a draft. The copy is built from the offer, the listing and the buyer's dossier
- * only. One open draft per offer: while the stored draft is still unsent, the same one comes back.
+ * only. One open draft per offer: while the stored draft is still unsent and built from the offer's current terms
+ * (price, unit, currency, quantity, delivery terms, last day), the same one comes back; otherwise it is built again.
  *
  * To a buyer (an offer on a supply listing), only while the seller's quote is confirmed and in date: otherwise 409 with
  * the reason and `reconfirm: true`, so the card offers the seller re-confirm draft. With a buyer price and a quantity on
@@ -58,12 +60,14 @@ export async function POST(_req: Request, { params }: Context) {
     }
   }
 
+  const termsKey = offerTermsKey(outreach.terms, outreach.quantity);
   if (outreach.openDraftId) {
     const open = await readMailDraft(outreach.openDraftId, guard.userId);
-    if (open && open.state === "draft") {
+    const builtFrom = draftTermsKey(outreach.data, outreach.openDraftId);
+    if (open && open.state === "draft" && (builtFrom === null || builtFrom === termsKey)) {
       return Response.json({ draftId: open.id, kind, subject: open.subject, body: open.body_text, reused: true });
     }
-    // The stored draft was sent or deleted: drop the pointer rather than open a second copy of it.
+    // The stored draft was sent or deleted, or the offer's terms changed since: drop the pointer and build it again.
     await setOpenDraft(offerId, null);
   }
 
@@ -105,7 +109,7 @@ export async function POST(_req: Request, { params }: Context) {
 
   try {
     const draftId = await createOfferEmailDraft({ to: [outreach.email], subject: email.subject, body: email.body });
-    await setOpenDraft(offerId, draftId);
+    await setOpenDraft(offerId, draftId, termsKey);
     const sheetDocumentId = sheet ? await storeOfferSheet(id, offerId, sheet, guard.userId, draftId) : null;
     return Response.json({
       draftId, kind: email.kind, subject: email.subject, body: email.body, reused: false,

@@ -187,3 +187,23 @@ export function stepGaps(to: OfferStage, offer: { terms: { amount?: number; curr
     !offer.terms?.expires_on ? "valid-until date" : null,
   ].filter((gap): gap is string => !!gap);
 }
+
+/**
+ * The facts an offer email and its price sheet are built from: price, unit, currency, quantity, delivery terms and the
+ * last day. A draft is stored with this key; when the offer's key differs, the draft is out of date and is not sent.
+ */
+export function offerTermsKey(
+  terms: { amount?: number; unit?: string; currency?: string; delivery_terms?: string; expires_on?: string } | null | undefined,
+  quantity: number | null | undefined,
+): string {
+  const text = (value: string | undefined) => (typeof value === "string" && value.trim() ? value.trim() : null);
+  return JSON.stringify([terms?.amount ?? null, text(terms?.unit), text(terms?.currency)?.toUpperCase() ?? null, quantity ?? null,
+    text(terms?.delivery_terms), text(terms?.expires_on)?.slice(0, 10) ?? null]);
+}
+
+/** The terms key a draft of this offer was built from (offer data.draft_terms), or null when it was made before keys were kept. */
+export function draftTermsKey(data: Record<string, unknown> | null | undefined, draftId: string): string | null {
+  const keys = data?.draft_terms;
+  const key = keys && typeof keys === "object" ? (keys as Record<string, unknown>)[draftId] : null;
+  return typeof key === "string" ? key : null;
+}

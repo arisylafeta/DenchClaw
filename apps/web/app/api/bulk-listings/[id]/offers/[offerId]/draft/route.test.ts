@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildProductKey, type FieldFact } from "@/lib/match/product-key";
+import { offerTermsKey } from "@/lib/bulk-offer-close";
 
 const m = vi.hoisted(() => ({
   currentUser: vi.fn(), getListing: vi.fn(), offerOutreach: vi.fn(), setOpenDraft: vi.fn(),
@@ -82,7 +83,7 @@ describe("POST offer draft", () => {
     expect(body.body).toContain("Test data: BMS report supplied.");
     expect(body.body).not.toContain("Battery Partners");
     expect(m.createOfferEmailDraft).toHaveBeenCalledWith(expect.objectContaining({ to: ["sam@buyer.test"] }));
-    expect(m.setOpenDraft).toHaveBeenCalledWith("bof_1", "draft_1");
+    expect(m.setOpenDraft).toHaveBeenCalledWith("bof_1", "draft_1", offerTermsKey({}, null));
   });
 
   it("passes the field visibility through: no seller price, no after_nda value, the teaser place kept", async () => {
@@ -112,6 +113,20 @@ describe("POST offer draft", () => {
     expect(await res.json()).toMatchObject({ draftId: "draft_1", reused: true });
     expect(m.createOfferEmailDraft).not.toHaveBeenCalled();
     expect(m.setOpenDraft).not.toHaveBeenCalled();
+  });
+
+  it("builds again, with the new price and its sheet, when the offer's terms changed since the open draft was made", async () => {
+    const before = offerTermsKey({ amount: 2400, currency: "GBP", unit: "pack" }, 12);
+    const now = { amount: 2200, currency: "GBP", unit: "pack" };
+    m.offerOutreach.mockResolvedValue(outreach({ openDraftId: "draft_0", data: { draft_terms: { draft_0: before } }, terms: now, quantity: 12 }));
+    m.readMailDraft.mockResolvedValue({ id: "draft_0", state: "draft", subject: "40 x 50 kWh NMC packs", body_text: "GBP 2,400 per pack" });
+    m.prepareOfferSheet.mockResolvedValue({ kind: "send", lines: 1, buyer: "Sam", skipped: [], sheet: { reference: "PS-0a1b2c3d", text: "12 x NMC packs at GBP 2,200 per pack: GBP 26,400" } });
+    const res = await call();
+    expect(res.status).toBe(201);
+    expect((await res.json() as { body: string; reused: boolean })).toMatchObject({ reused: false, body: expect.stringContaining("GBP 2,200 per pack") });
+    expect(m.setOpenDraft).toHaveBeenNthCalledWith(1, "bof_1", null);
+    expect(m.prepareOfferSheet).toHaveBeenCalledWith("bof_1", "send");
+    expect(m.setOpenDraft).toHaveBeenLastCalledWith("bof_1", "draft_1", offerTermsKey(now, 12));
   });
 
   it("drops a stored draft that was already sent and writes a fresh one", async () => {

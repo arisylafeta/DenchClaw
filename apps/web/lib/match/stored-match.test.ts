@@ -90,6 +90,11 @@ describe("dates", () => {
     expect(reservationLive({ state: "offered", reserved_until: "2026-11-12" }, "2026-11-12")).toBe(true);
     expect(reservationLive({ state: "offered", reserved_until: "2026-11-11" }, "2026-11-12")).toBe(false);
     expect(reservationLive({ state: "confirmed", reserved_until: "2026-11-30" }, "2026-11-12")).toBe(false);
+    // Once the offer is past offered, the reservation holds until the offer ends; complete has consumed it.
+    expect(reservationLive({ state: "offered", reserved_until: "2026-11-11", offer_stage: "negotiating" }, "2026-11-12")).toBe(true);
+    expect(reservationLive({ state: "offered", reserved_until: "2026-11-11", offer_stage: "paid" }, "2026-11-12")).toBe(true);
+    expect(reservationLive({ state: "offered", reserved_until: "2026-11-30", offer_stage: "complete" }, "2026-11-12")).toBe(false);
+    expect(reservationLive({ state: "offered", reserved_until: null, offer_stage: "negotiating" }, "2026-11-12")).toBe(false);
   });
 
   it("says how long an ask has gone unanswered", () => {

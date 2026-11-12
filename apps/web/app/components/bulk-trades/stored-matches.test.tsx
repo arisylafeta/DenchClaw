@@ -2,7 +2,7 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { StoredMatchesView } from "./stored-matches";
+import { reservationLine, StoredMatchesView } from "./stored-matches";
 import { forgetShared } from "./trade-ui";
 import type { StoredMatches, StoredMatchView } from "@/lib/crm-postgres/bulk-matches";
 
@@ -84,5 +84,13 @@ describe("stored matches", () => {
     expect(await screen.findByText(/has not confirmed a quote/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Ask" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("button", { name: "Draft re-confirm to seller" })).toBeTruthy();
+  });
+
+  it("says a reservation holds while the deal is in negotiation, and when no quantity is known it holds the whole lot", () => {
+    const held = { state: "offered" as const, reservation_live: true, reserved_until: "2026-11-10", stock_reserved: { holds: 1, qty: 12, whole: 0 } };
+    expect(reservationLine(match({ ...held, reserved_qty: 12, offer_stage: "offered", reserved_until: "2026-11-21" }))).toBe("Reserved 12 until 21 Nov");
+    expect(reservationLine(match({ ...held, reserved_qty: 12, offer_stage: "negotiating" }))).toBe("Reserved 12 while in negotiation");
+    expect(reservationLine(match({ ...held, reserved_qty: null, offer_stage: "offered", reserved_until: "2026-11-21", stock_reserved: { holds: 1, qty: 0, whole: 1 } })))
+      .toBe("Quantity not known, whole lot held until 21 Nov");
   });
 });

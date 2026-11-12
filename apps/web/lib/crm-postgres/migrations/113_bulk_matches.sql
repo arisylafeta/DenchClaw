@@ -6,10 +6,13 @@
 --
 -- What a reservation holds (stock_kind, stock_id): the candidate on a request (a supply listing, a stock line or a
 -- marketplace listing), or the deal itself on a supply deal, where the candidates are buyers. It holds a quantity, not the
--- whole lot, and is internal only: nothing is taken off the marketplace. The rule, enforced by the trigger below rather
--- than a unique index: live reserved quantity across all deals may never exceed what the candidate has (candidate_qty);
--- when that is unknown, one live reservation only. A reservation is live while the row is offered and reserved_until is
--- today or later, so it lapses by date with no write; bulk_matches_expire() marks lapsed rows expired for the daily job.
+-- whole lot, and is internal only: nothing is taken off the marketplace. Quantities are counted in units (packs, modules,
+-- cells, as the candidate is counted). The rule, enforced by the trigger below rather than a unique index: live reserved
+-- quantity across all deals may never exceed what the candidate has (candidate_qty); when that or the reserved quantity
+-- is unknown, one live reservation only (the whole lot is held). A reservation is live (bulk_match_live) while the row is
+-- offered and either its offer has moved past offered (negotiating to paid: live until the offer ends) or, at offered,
+-- reserved_until is today (London) or later. At offered it lapses by date with no write; bulk_matches_expire() marks
+-- lapsed rows expired for the daily job. A complete offer has consumed its reservation; declined or lost releases it.
 --
 -- Stage: bulk_listing_has_match() now also counts a live stored match (asked, confirmed or offered) on the deal or on the
 -- listing it names. A merely proposed match does not count: a run proposes five on every deal it touches, and counting
@@ -65,6 +68,8 @@ create table if not exists crm_bulk_matches (
 create unique index if not exists crm_bulk_matches_candidate_uidx on crm_bulk_matches (deal_id, candidate_kind, candidate_id);
 create index if not exists crm_bulk_matches_deal_idx on crm_bulk_matches (deal_id, rank);
 create index if not exists crm_bulk_matches_stock_idx on crm_bulk_matches (stock_kind, stock_id) where reserved_until is not null;
+-- data.kwh_per_unit: the candidate's kWh per unit as the run read it (a single-product listing), so a per-kWh offer
+-- quantity can be counted in units. data.reservation_refused: why the last reservation was refused, for the send to say.
 create index if not exists crm_bulk_matches_candidate_idx on crm_bulk_matches (candidate_kind, candidate_id);
 create unique index if not exists crm_bulk_matches_offer_uidx on crm_bulk_matches (offer_id) where offer_id is not null;
 
@@ -87,13 +92,22 @@ create or replace function bulk_listing_quote_until(listing_id text) returns dat
   from crm_bulk_listings l where l.id = listing_id
 $$;
 
+-- Whether one reservation holds now. At offered, by its date; once the offer is negotiating, contract_out, signed,
+-- invoiced or paid, until the offer ends. Complete has consumed it. TS twin: reservationLive in lib/match/stored-match.ts.
+create or replace function bulk_match_live(state text, reserved_until date, offer_id text) returns boolean language sql stable as $$
+  select state = 'offered' and reserved_until is not null
+    and coalesce((select o.stage from crm_bulk_offers o where o.id = offer_id), 'offered') <> 'complete'
+    and (reserved_until >= bulk_today()
+      or exists (select 1 from crm_bulk_offers o where o.id = offer_id and o.stage in ('negotiating', 'contract_out', 'signed', 'invoiced', 'paid')))
+$$;
+
 -- Live reservations against one piece of stock, other than `except_id`: how many rows, their summed quantity, and how
 -- many hold the lot without a quantity.
 create or replace function bulk_match_reserved(kind text, stock text, except_id text default null,
   out holds int, out qty numeric, out whole int) language sql stable as $$
   select count(*)::int, coalesce(sum(m.reserved_qty), 0), (count(*) filter (where m.reserved_qty is null))::int
   from crm_bulk_matches m
-  where m.stock_kind = kind and m.stock_id = stock and m.state = 'offered' and m.reserved_until >= current_date
+  where m.stock_kind = kind and m.stock_id = stock and bulk_match_live(m.state, m.reserved_until, m.offer_id)
     and m.id is distinct from except_id
 $$;
 
@@ -103,13 +117,13 @@ create or replace function bulk_match_check_reservation() returns trigger langua
 declare
   r record;
 begin
-  if not (new.state = 'offered' and new.reserved_until is not null and new.reserved_until >= current_date) then
+  if not bulk_match_live(new.state, new.reserved_until, new.offer_id) then
     return new;
   end if;
   if TG_OP = 'UPDATE' and old.state = new.state and old.reserved_until is not distinct from new.reserved_until
      and old.reserved_qty is not distinct from new.reserved_qty and old.candidate_qty is not distinct from new.candidate_qty
      and old.stock_kind = new.stock_kind and old.stock_id = new.stock_id
-     and old.reserved_until >= current_date then
+     and bulk_match_live(old.state, old.reserved_until, old.offer_id) then
     return new;
   end if;
   perform pg_advisory_xact_lock(hashtext('crm_bulk_matches:' || new.stock_kind || ':' || new.stock_id));
@@ -121,8 +135,14 @@ begin
     end if;
     return new;
   end if;
+  -- No quantity in units (an offer priced per kWh with no kWh per unit to convert by): the whole lot is held, so no other
+  -- deal may hold any of it.
   if new.reserved_qty is null then
-    raise exception using errcode = '23P01', message = 'Say how many to reserve.';
+    if r.holds > 0 then
+      raise exception using errcode = '23P01',
+        message = 'The quantity to reserve is not known in units, so the whole lot would be held, and another deal already holds some of it.';
+    end if;
+    return new;
   end if;
   if r.whole > 0 or r.qty + new.reserved_qty > new.candidate_qty then
     raise exception using errcode = '23P01',
@@ -136,14 +156,18 @@ create trigger bulk_match_check_reservation before insert or update on crm_bulk_
   for each row execute function bulk_match_check_reservation();
 
 -- Marks lapsed reservations expired and takes them out of the five. Reads already treat them as free; this only tidies
--- the state. Called by the same daily job as bulk_stage_check_all() (not scheduled here).
+-- the state. Only reservations whose offer is still at offered lapse: one whose offer moved on is live until the offer
+-- ends, and a complete offer's is consumed, not expired. Called by the same daily job as bulk_stage_check_all() (not
+-- scheduled here).
 create or replace function bulk_matches_expire() returns int language plpgsql as $$
 declare
   n int;
 begin
   update crm_bulk_matches
     set state = 'expired', rank = null, note = concat_ws(' ', nullif(note, ''), format('Reservation lapsed on %s.', reserved_until)), updated_at = now()
-    where state = 'offered' and reserved_until is not null and reserved_until < current_date;
+    where state = 'offered' and reserved_until is not null and reserved_until < bulk_today()
+      and not bulk_match_live(state, reserved_until, offer_id)
+      and not exists (select 1 from crm_bulk_offers o where o.id = offer_id and o.stage = 'complete');
   get diagnostics n = row_count;
   return n;
 end $$;
@@ -176,7 +200,7 @@ create or replace function bulk_listing_stage(listing_id text) returns text lang
     else case
       when r.rank >= 5 or (l.status = 'closed' and l.closed_reason in ('sold', 'became_trade')) then 'Sold'
       when l.status = 'closed' then 'Closed'
-      when l.hold_until >= current_date or bulk_listing_reserved(l.id) then 'Reserved'
+      when l.hold_until >= bulk_today() or bulk_listing_reserved(l.id) then 'Reserved'
       when bulk_listing_has_match(l.id) then 'Available'
       when bulk_listing_qualified(l.id) then case when x.owned then 'Available' else 'Qualified' end
       else 'New' end
@@ -207,15 +231,20 @@ drop trigger if exists bulk_match_stage_events on crm_bulk_matches;
 create trigger bulk_match_stage_events after insert or delete or update of state, reserved_qty, reserved_until, candidate_id, stock_id
   on crm_bulk_matches for each row execute function bulk_match_stage_events();
 
--- When a matched offer moves to offered, the match is offered and reserves its quantity: what the yes confirmed, else the
--- offer's quantity, held for 5 working days or until the quote runs out if sooner (the supplier's quote on a request,
--- the seller's quote on a supply deal). A reservation the quantity rule refuses does not stop the offer: the match is
--- offered without one and its note says why, so the card shows it. When the offer is declined or lost, the match is a no
--- and its reservation ends at once.
+-- When a matched offer moves to offered, the match is offered and reserves its quantity in units: what the yes confirmed,
+-- else the offer's quantity (per pack, module, cell or unit as it is; per kWh or MWh divided by the candidate's kWh per
+-- unit; otherwise unknown, so the whole lot is held). Held for 5 working days or until the quote runs out if sooner (the
+-- supplier's quote on a request, the seller's quote on a supply deal); past offered it holds until the offer ends. A
+-- reservation the quantity rule refuses does not stop the offer: the match is offered without one, its note says why
+-- and data.reservation_refused keeps the reason, which the send reports. When the offer is declined or lost, the match is
+-- a no and its reservation ends at once.
 create or replace function bulk_match_offered() returns trigger language plpgsql as $$
 declare
   m record;
   until date;
+  qty numeric;
+  unit text;
+  per numeric;
 begin
   if new.stage in ('declined', 'lost') and old.stage is distinct from new.stage then
     update crm_bulk_matches
@@ -229,16 +258,28 @@ begin
   select x.*, d.kind as deal_kind into m from crm_bulk_matches x join crm_bulk_listings d on d.id = x.deal_id
     where x.offer_id = new.id and x.state = 'confirmed';
   if not found then return null; end if;
-  until := least(bulk_add_working_days(current_date, 5),
+  until := least(bulk_add_working_days(bulk_today(), 5),
     coalesce(m.quote_valid_until, case when m.deal_kind = 'supply' then bulk_listing_quote_until(m.deal_id) end));
+  qty := m.confirmed_qty;
+  if qty is null and new.quantity is not null then
+    unit := bulk_qty_unit(new.terms->>'unit');
+    per := case when m.data->>'kwh_per_unit' ~ '^[0-9]+(\.[0-9]+)?$' then nullif((m.data->>'kwh_per_unit')::numeric, 0) end;
+    qty := case
+      when unit in ('pack', 'module', 'cell', 'unit') then new.quantity
+      when unit = 'kwh' and per is not null then round(new.quantity / per, 3)
+      when unit = 'mwh' and per is not null then round(new.quantity * 1000 / per, 3)
+    end;
+    if qty is not null and qty <= 0 then qty := null; end if;
+  end if;
   begin
     update crm_bulk_matches
-      set state = 'offered', reserved_qty = coalesce(m.confirmed_qty, new.quantity), reserved_until = until, updated_at = now()
+      set state = 'offered', reserved_qty = qty, reserved_until = until, data = data - 'reservation_refused', updated_at = now()
       where id = m.id;
   exception when exclusion_violation then
     update crm_bulk_matches
       set state = 'offered', reserved_qty = null, reserved_until = null,
-          note = concat_ws(' ', nullif(note, ''), 'Not reserved: ' || sqlerrm), updated_at = now()
+          note = concat_ws(' ', nullif(note, ''), 'Not reserved: ' || sqlerrm),
+          data = data || jsonb_build_object('reservation_refused', sqlerrm), updated_at = now()
       where id = m.id;
   end;
   return null;

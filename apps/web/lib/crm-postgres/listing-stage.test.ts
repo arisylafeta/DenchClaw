@@ -7,9 +7,17 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage and bulk_listing_deal_stage (migr
   let pg: typeof import("../postgres");
   const stage = async (id: string) => (await pg.queryPg<{ s: string | null }>("select bulk_listing_stage($1) as s", [id]))[0].s;
   const deal = async (id: string) => (await pg.queryPg<{ s: string | null }>("select bulk_listing_deal_stage($1) as s", [id]))[0].s;
+  // Paid and complete need the five paid facts (migration 111 refuses them otherwise): 40 packs, paid.
   const offer = (id: string, listing: string, st: string, counterpart: string | null = null) => pg.queryPg(
-    `insert into crm_bulk_offers (id, bulk_listing_id, counterpart_id, role, stage) values ($1, $2, $4, 'counterparty', $3)
-     on conflict (id) do update set stage = excluded.stage`, [id, listing, st, counterpart]);
+    `insert into crm_bulk_offers (id, bulk_listing_id, counterpart_id, role, stage, terms, quantity, paid_on, paid_amount, paid_currency, take_gbp)
+     select $1, $2, $4, 'counterparty', $3, '{"unit": "pack"}'::jsonb, p.q, p.d, p.a, p.c, p.t
+     from (select case when $3 in ('paid', 'complete') then 40 end as q, case when $3 in ('paid', 'complete') then date '2026-12-03' end as d,
+             case when $3 in ('paid', 'complete') then 18000 end as a, case when $3 in ('paid', 'complete') then 'EUR' end as c,
+             case when $3 in ('paid', 'complete') then 1500 end as t) p
+     on conflict (id) do update set stage = excluded.stage, terms = excluded.terms, quantity = coalesce(excluded.quantity, crm_bulk_offers.quantity),
+       paid_on = coalesce(excluded.paid_on, crm_bulk_offers.paid_on), paid_amount = coalesce(excluded.paid_amount, crm_bulk_offers.paid_amount),
+       paid_currency = coalesce(excluded.paid_currency, crm_bulk_offers.paid_currency), take_gbp = coalesce(excluded.take_gbp, crm_bulk_offers.take_gbp)`,
+    [id, listing, st, counterpart]);
 
   beforeAll(async () => {
     process.env.DATABASE_URL = TEST_URL;
@@ -115,14 +123,64 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage and bulk_listing_deal_stage (migr
     expect(await both()).toEqual(["Sold", "Found", "Paid", "Paid"]);
   });
 
-  it("closes both listings when the offer is complete: supply as sold, demand as bought from us", async () => {
+  it("closes both listings when the offer is complete and sold all they state: supply as sold, demand as bought from us", async () => {
+    await pg.queryPg("update crm_bulk_listings set quantity = '40 packs' where id in ('stg_ready', 'stg_demand')");
     await offer("stg_o1", "stg_ready", "complete", "stg_demand");
     const rows = await pg.queryPg<{ id: string; status: string; closed_reason: string }>(
       "select id, status, closed_reason from crm_bulk_listings where id in ('stg_ready', 'stg_demand') order by id");
     expect(rows).toEqual([{ id: "stg_demand", status: "closed", closed_reason: "bought_from_us" }, { id: "stg_ready", status: "closed", closed_reason: "sold" }]);
     expect([await stage("stg_ready"), await stage("stg_demand"), await deal("stg_ready")]).toEqual(["Sold", "Closed", "Delivered"]);
     await pg.queryPg("delete from crm_bulk_offers where id = 'stg_o1'");
-    await pg.queryPg("update crm_bulk_listings set status = 'open', closed_reason = null where id in ('stg_ready', 'stg_demand')");
+    await pg.queryPg("update crm_bulk_listings set status = 'open', closed_reason = null, quantity = case kind when 'demand' then '10' else '40' end where id in ('stg_ready', 'stg_demand')");
+  });
+
+  const notes = async (id: string) => (await pg.queryPg<{ title: string }>(
+    "select title from crm_bulk_listing_activity where bulk_listing_id = $1 and kind = 'status' and data ? 'offer_id' order by id", [id])).map((r) => r.title);
+
+  it("leaves a listing open with a Part sold note when the offer sold less than it states", async () => {
+    await pg.queryPg("update crm_bulk_listings set quantity = '100 packs' where id = 'stg_ready'");
+    await pg.queryPg("update crm_bulk_listings set quantity = '40 packs' where id = 'stg_demand'");
+    await offer("stg_o2", "stg_ready", "complete", "stg_demand");
+    const rows = await pg.queryPg<{ id: string; status: string }>("select id, status from crm_bulk_listings where id in ('stg_ready', 'stg_demand') order by id");
+    expect(rows).toEqual([{ id: "stg_demand", status: "closed" }, { id: "stg_ready", status: "open" }]);
+    expect(await notes("stg_ready")).toEqual(["Part sold: 40 of 100"]);
+    // Moving it back from Complete reopens nothing and says so on the closed listing.
+    await offer("stg_o2", "stg_ready", "paid", "stg_demand");
+    expect((await pg.queryPg<{ status: string }>("select status from crm_bulk_listings where id = 'stg_demand'"))[0].status).toBe("closed");
+    expect(await notes("stg_demand")).toEqual(["Offer moved back from Complete: the listings stay closed"]);
+    await pg.queryPg("delete from crm_bulk_offers where id = 'stg_o2'; delete from crm_bulk_listing_activity where bulk_listing_id in ('stg_ready', 'stg_demand') and data ? 'offer_id'");
+    await pg.queryPg("update crm_bulk_listings set status = 'open', closed_reason = null, quantity = case kind when 'demand' then '10' else '40' end where id in ('stg_ready', 'stg_demand')");
+  });
+
+  it("leaves a listing open, to close by hand, when either quantity is unknown or in another unit", async () => {
+    await pg.queryPg("update crm_bulk_listings set quantity = 'a container' where id = 'stg_ready'");
+    await pg.queryPg("update crm_bulk_listings set quantity = '2,560 kWh' where id = 'stg_demand'");
+    await offer("stg_o3", "stg_ready", "complete", "stg_demand");
+    const rows = await pg.queryPg<{ status: string }>("select status from crm_bulk_listings where id in ('stg_ready', 'stg_demand')");
+    expect(rows.map((r) => r.status)).toEqual(["open", "open"]);
+    expect(await notes("stg_ready")).toEqual(["Offer complete: close this listing by hand if all of it is sold"]);
+    expect(await notes("stg_demand")).toEqual(["Offer complete: close this listing by hand if all of it is sold"]);
+    await pg.queryPg("delete from crm_bulk_offers where id = 'stg_o3'; delete from crm_bulk_listing_activity where bulk_listing_id in ('stg_ready', 'stg_demand') and data ? 'offer_id'");
+    await pg.queryPg("update crm_bulk_listings set quantity = case kind when 'demand' then '10' else '40' end where id in ('stg_ready', 'stg_demand')");
+  });
+
+  it("refuses paid or complete without the five paid facts from any writer, plain SQL included, and closes nothing", async () => {
+    await expect(pg.queryPg("insert into crm_bulk_offers (id, bulk_listing_id, counterpart_id, role, stage) values ('stg_raw', 'stg_ready', 'stg_demand', 'counterparty', 'complete')"))
+      .rejects.toThrow("To mark this offer Complete, add the paid date, amount paid, currency, quantity and take in GBP.");
+    await pg.queryPg("insert into crm_bulk_offers (id, bulk_listing_id, role, stage) values ('stg_raw', 'stg_ready', 'counterparty', 'invoiced')");
+    await expect(pg.queryPg("update crm_bulk_offers set stage = 'paid', paid_on = '2026-12-03', quantity = 4 where id = 'stg_raw'"))
+      .rejects.toThrow("To mark this offer Paid, add the amount paid, currency and take in GBP.");
+    await pg.queryPg("update crm_bulk_offers set stage = 'paid', paid_on = '2026-12-03', paid_amount = 1, paid_currency = 'GBP', quantity = 4, take_gbp = 1 where id = 'stg_raw'");
+    await expect(pg.queryPg("update crm_bulk_offers set take_gbp = null where id = 'stg_raw'")).rejects.toThrow(/take in GBP/);
+    expect((await pg.queryPg<{ status: string }>("select status from crm_bulk_listings where id = 'stg_ready'"))[0].status).toBe("open");
+    await pg.queryPg("delete from crm_bulk_offers where id = 'stg_raw'");
+  });
+
+  it("holds a listing Reserved through today's London date (bulk_today)", async () => {
+    expect((await pg.queryPg<{ ok: boolean }>("select bulk_today() = (now() at time zone 'Europe/London')::date as ok"))[0].ok).toBe(true);
+    await pg.queryPg("update crm_bulk_listings set hold_until = bulk_today() where id = 'stg_ready'");
+    expect(await stage("stg_ready")).toBe("Reserved");
+    await pg.queryPg("update crm_bulk_listings set hold_until = null where id = 'stg_ready'");
   });
 
   it("is Lost on the board when every counterparty offer is declined or lost, and not while one is alive", async () => {

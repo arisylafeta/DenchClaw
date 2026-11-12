@@ -142,6 +142,21 @@ describe.skipIf(!TEST_URL)("relay front door (database)", () => {
     expect(spawned).toHaveLength(1);
   });
 
+  it("queues one automatic update per reply, ever, even for a reply dated in the future", async () => {
+    const s = await sentCard("future", lead({ what: "Nissan Leaf 40kWh", how_many: "20 packs" }), { accepted: true });
+    await deal.settleSentCards(owner.id);
+    await pg.queryPg(`insert into mail_message (id, thread_id, direction, transport, state, from_email, to_emails, subject, body_text, sent_at)
+      values ($1, $2, 'inbound', 'gmail', 'received', $3, '{supply@rebattery.io}', 'Re: Leaf packs', 'Price is 2,000 per pack', now() + interval '2 days')`, [`reply-${s.thread}`, s.thread, s.email]);
+    await pg.queryPg("update relay_item set status = 'open' where id = $1", [s.item]);
+    const start = (id: string, messageId: string) => relay.startDealJob(id, owner.id, "update", { auto: true, messageId });
+    expect(await deal.queueReplyUpdates(owner.id, start, {})).toContain(s.item);
+    // The job finished; the reply still looks newer than it, by its date. It is the same reply, so nothing is queued.
+    await pg.queryPg("update relay_job set status = 'done', finished_at = now() where item_id = $1", [s.item]);
+    expect(await deal.queueReplyUpdates(owner.id, start, {})).not.toContain(s.item);
+    const jobs = await pg.queryPg<{ note: string }>("select note from relay_job where item_id = $1", [s.item]);
+    expect(jobs.map((j) => j.note)).toEqual([`[deal:update] Update deal from this reply (automatic: a new reply on the deal's thread) [msg:reply-${s.thread}]`]);
+  });
+
   it("closes a deal a failed-fit job just made, and leaves older or linked deals alone", async () => {
     const before = new Date(Date.now() - 60_000).toISOString();
     const make = async (id: string) => pg.queryPg("insert into crm_bulk_listings (id, kind, party, summary, status, email) values ($1, 'supply', 'Other Co', 'Packs', 'open', 'other@else.example')", [id]);

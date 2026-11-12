@@ -24,7 +24,7 @@ One row each time an offer's stage or a listing's stage changes. It is the only 
 | `paid_amount`, `paid_currency` | what the counterparty paid, and in GBP, EUR or USD | closed value from real money; the two are set together or not at all |
 | `take_gbp` | our take on the deal in pounds | the one number the £15,000 target (Dec 2026 to Feb 2027) is measured on |
 
-Moving an offer to Paid or Complete through the app asks for all five; the API answers 400 naming what is missing. Any `terms.quantity` or `data.take_gbp` values were moved into these columns, so each fact lives in one place.
+Moving an offer to Paid or Complete through the app asks for all five; the API answers 400 naming what is missing. The database refuses it too (trigger `bulk_offer_paid_facts`), so an agent or plain SQL cannot set Paid or Complete without them, nor clear one from an offer already there: "To mark this offer Paid, add the paid date and take in GBP." An offer that was already Paid or Complete without them before 111 can still be edited otherwise. Any `terms.quantity` or `data.take_gbp` values were moved into these columns, so each fact lives in one place.
 
 ## How a stage is worked out
 
@@ -33,7 +33,7 @@ Stages are never stored. SQL functions compute them from the listing and its cou
 - `bulk_listing_has_match(id)`: a live counterparty offer (not declined or lost) on or pointing at the listing. This is the one seam for stored matching: when `crm_bulk_matches` arrives, only this function changes.
 - `bulk_listing_stage(id)`, the list stage:
   - Requests: **Closed** when closed; **Found** once a supplier has been offered; **Sourcing** with a match, or qualified and a match run started; **Qualified**; **New**.
-  - Supply: **Sold** when an offer is paid or complete, or it closed as sold; **Closed** when it closed otherwise; **Reserved** while on hold (`hold_until` today or later) or a live reservation holds some of it; **Available** with a match, or qualified and a match run started; **Qualified**; **New**.
+  - Supply: **Sold** when an offer is paid or complete, or it closed as sold; **Closed** when it closed otherwise; **Reserved** while on hold (`hold_until` today or later; "today" is the London date, `bulk_today()`) or a live reservation holds some of it; **Available** with a match, or qualified and a match run started; **Qualified**; **New**.
   - "A match run started" (migration 115, `bulk_listing_match_started`): a person ran matching on the deal, which Alex set as marking it ready (12 Nov 2026); `runMatches` keeps the last run in `context.match_run`. Until 115 an owner (`context.owner`) moved a qualified deal on, but every new deal is now owned by Alex when it opens, so Qualified was skipped. The owner no longer moves a stage. Migration 115 re-checks every open listing once, so deals the old rule had moved on get a "back to Qualified" event from `system`.
 - `bulk_listing_deal_stage(id)`, the Deals board: the furthest live offer, as **Offered**, **Negotiating**, **Agreed** (contract out, signed or invoiced), **Paid** or **Delivered** (complete); **Lost** when every counterparty offer is declined or lost; empty until something is offered.
 
@@ -47,6 +47,6 @@ Database triggers, not app code, so a change from the app, an agent or plain SQL
 - a listing change (status, hold, owner, the facts that qualify it) and a change to its qualifying fields re-check that listing;
 - a listing event is written only when the computed stage differs from the last one logged.
 
-An offer reaching **complete** closes both listings: the request as `bought_from_us`, the supply as `sold`.
+An offer reaching **complete** with its paid facts closes a listing it links only when the offer's quantity covers what the listing states, in the same unit (`bulk_listing_stated_qty`: a request's spec volume, else the number and unit word that start `quantity`, such as "20 packs"): the request as `bought_from_us`, the supply as `sold`. Otherwise the listing stays open with a note, "Part sold: 12 of 24", or, when either quantity is unknown or the units differ, "Offer complete: close this listing by hand if all of it is sold". Moving an offer back from complete reopens nothing; a note on each closed listing says they stay closed.
 
 One gap: a hold that runs out changes the stage without any write. `bulk_stage_check_all()` re-checks every open listing and should run once a day; it is not scheduled yet.

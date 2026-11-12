@@ -524,6 +524,7 @@ function Inbox({ data, tab, setTab, only, onBack, reload, say, onOpenListing, on
                         {i.chase.state === "park" && <> <button type="button" className={s.doneb} title={i.bulk_listing_id ? "Stop chasing and note on the deal that it was parked. It comes back only if they write again." : "Stop chasing. It comes back only if they write again."} onClick={() => void dontChase(i, true)}>Park</button></>}
                       </div>
                     )}
+                    {i.gmail_chase_copy && <div className={s.hint} role="status" data-gmail-chase>A copy of this chase is still in Gmail drafts. They replied, so delete it there.</div>}
                     {!isOpen && <div className={s.hint}>{busy[i.id] ? "Drafting…" : note.trim() ? (NEEDS_AGENT.test(note) ? "Relay will do the work first (research, lists, files), then draft. Takes a few minutes." : "Ready: press the arrow (or ⌘↵) to draft") : "Click to read the full email"}</div>}
                   </>
                 )}

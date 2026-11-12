@@ -54,10 +54,11 @@ describe.skipIf(!TEST_URL)("stage events (migration 111)", () => {
     expect((await history("listing", id("sup"))).at(-1)).toEqual(["Available", "Reserved", "jules"]);
   });
 
-  it("closes both listings when the offer is complete, and logs the closes", async () => {
+  it("closes both listings when the offer is complete and sold what they state, and logs the closes", async () => {
     const [{ id: offerId }] = await pg.queryPg<{ id: string }>("select id from crm_bulk_offers where bulk_listing_id = $1", [id("sup")]);
+    await pg.queryPg("update crm_bulk_listings set quantity = '48 packs' where id in ($1, $2)", [id("sup"), id("dem")]);
     await offers.updateOffer(id("sup"), offerId, {
-      stage: "complete", paid: { paid_on: "2026-12-03", paid_amount: 18000, paid_currency: "EUR", quantity: 48, take_gbp: 1500 },
+      stage: "complete", terms: { unit: "pack" }, paid: { paid_on: "2026-12-03", paid_amount: 18000, paid_currency: "EUR", quantity: 48, take_gbp: 1500 },
     }, user);
     const rows = await pg.queryPg<{ kind: string; status: string; closed_reason: string }>(
       "select kind, status, closed_reason from crm_bulk_listings where id in ($1, $2) order by kind", [id("dem"), id("sup")]);
@@ -70,6 +71,6 @@ describe.skipIf(!TEST_URL)("stage events (migration 111)", () => {
 
   it("refuses a paid amount without its currency", async () => {
     const [{ id: offerId }] = await pg.queryPg<{ id: string }>("select id from crm_bulk_offers where bulk_listing_id = $1", [id("sup")]);
-    await expect(pg.queryPg("update crm_bulk_offers set paid_currency = null where id = $1", [offerId])).rejects.toThrow(/paid_pair/);
+    await expect(pg.queryPg("update crm_bulk_offers set paid_currency = null where id = $1", [offerId])).rejects.toThrow(/paid_pair|add the currency/);
   });
 });

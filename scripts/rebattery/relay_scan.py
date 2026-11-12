@@ -11,10 +11,12 @@ Tabs:
   action  the last real message is inbound from an external person and needs a reply. Gmail triage's
           "1 Action" is the strongest signal. Skipped when the owner has written to that person since,
           in any thread (the same rule as the email sprint's "waiting on Alex").
-  follow  the owner wrote last, asked something, and a chase is due on the one chase clock (chase_clock, the mirror of
-          apps/web/lib/chase-clock.ts): working day 1, 3 and 5 after his first unanswered message, for every thread alike.
-          After three unanswered chases and a working day more, it stays in follow with parking proposed (relay_item.chase
-          state "park"); parking is a click, never automatic. Never older than --follow-days.
+  follow  the owner wrote last, asked something, and a chase is due. Lead threads, threads linked to a deal, match asks
+          and offers run on the one chase clock (chase_clock, the mirror of apps/web/lib/chase-clock.ts): working day 1,
+          3 and 5 after his first unanswered message, counting only Relay's chase drafts as chases sent. After three
+          unanswered chases and a working day more, it stays in follow with parking proposed (relay_item.chase state
+          "park"); parking is a click, never automatic. Every other thread keeps the older rule: follow after 7 working
+          days, stop after two unanswered nudges, and no chase clock (so no drafted chase). Never older than --follow-days.
   other   recent mail that needs no reply: triage "5 Read"/"4 Sorted"/"2 Waiting", FYI, receipts,
           real-company notifications, cold pitches, "thanks" endings, or chases that ran out.
 
@@ -272,6 +274,21 @@ def working_days_between(start: dt.datetime, end: dt.datetime) -> int:
     return days
 
 
+def utc_working_days_between(start: dt.datetime, end: dt.datetime) -> int:
+    """Whole weekdays after start's UTC date up to and including end's: the count the older follow rule used."""
+    a, b = start.date(), end.date()
+    days, d = 0, a
+    while d < b:
+        d += dt.timedelta(days=1)
+        if d.weekday() < 5:
+            days += 1
+    return days
+
+
+# The older follow rule, kept for threads off the chase clock (accountant, investors, anything not a lead or a deal).
+OLD_FOLLOW_DAYS = 7
+
+
 def add_working_days(start: dt.datetime, days: int) -> dt.date:
     d, left = london_date(start), max(0, days)
     while left > 0:
@@ -409,7 +426,8 @@ def classify_thread(msgs: list[dict], ctx: dict, now: dt.datetime, days: int = 1
     """Decide tab (or None: nothing to show), reason, waiting_since and counterpart for one thread.
 
     msgs: real_messages() for the thread, oldest first, each with 'text' already cleaned.
-    ctx: triage (state entry or {}), contact_type, deal_linked, last_to {email: at}, last_from {email: at}.
+    ctx: triage (state entry or {}), contact_type, deal_linked, chase_clock (the thread runs on the chase clock),
+    last_to {email: at}, last_from {email: at}. A message with is_chase was one of Relay's chase drafts.
     """
     if not msgs:
         return {"tab": None, "reason": "no real messages", "done_reason": "gone"}
@@ -460,10 +478,21 @@ def classify_thread(msgs: list[dict], ctx: dict, now: dt.datetime, days: int = 1
     first_out = trailing[0]
     if age_days > follow_days:
         return {**out, "tab": None, "reason": "chase older than follow window", "done_reason": "expired"}
+    if not ctx.get("chase_clock"):
+        # Not a lead, a deal, a match ask or an offer: the older rule exactly, with no chase clock and so no drafted chase.
+        nudges = len(trailing) - 1
+        if nudges >= 2:
+            return {**out, "tab": "other", "reason": f"{nudges} unanswered nudges, stopped chasing", "waiting_since": first_out["at"]}
+        if not any(asks_something(m.get("text")) for m in trailing):
+            return {**out, "tab": None, "reason": "owner replied, nothing asked", "done_reason": "replied"}
+        waited = utc_working_days_between(last["at"], now)
+        if waited < OLD_FOLLOW_DAYS:
+            return {**out, "tab": None, "reason": f"owner replied, chase due after {OLD_FOLLOW_DAYS} working days ({waited} so far)", "done_reason": "replied"}
+        return {**out, "tab": "follow", "reason": f"no reply for {waited} working days (threshold {OLD_FOLLOW_DAYS})", "waiting_since": first_out["at"]}
     if not any(asks_something(m.get("text")) for m in trailing):
         return {**out, "tab": None, "reason": "owner replied, nothing asked", "done_reason": "replied"}
-    # Every message of his after the first unanswered one is a chase already sent.
-    clock = chase_clock(first_out["at"], len(trailing) - 1, now, last=last["at"])
+    # Only Relay's chase drafts count as chases sent: a second email of his the same day, or a correction, is not one.
+    clock = chase_clock(first_out["at"], sum(1 for m in trailing[1:] if m.get("is_chase")), now, last=last["at"])
     chase = {**clock, "since": first_out["at"].isoformat()}
     if clock["state"] == "park":
         return {**out, "tab": "follow", "reason": f"{clock['chases']} chases unanswered, propose parking", "waiting_since": first_out["at"], "chase": chase}
@@ -571,10 +600,14 @@ def load_threads(cur, owner_id: str, since: dt.datetime, extra_thread_ids: list[
     threads = {r["id"]: {**dict(r), "messages": []} for r in cur.fetchall()}
     if not threads:
         return threads
+    # A message that was one of Relay's chase drafts (relay_draft origin 'predraft') counts as a chase sent.
+    chase_sql = ("exists (select 1 from relay_draft d where d.mail_message_id = m.id and d.origin = 'predraft')"
+                 if column_exists(cur, "relay_draft", "origin") else "false")
     cur.execute(
         """select m.id, m.thread_id, m.direction, m.state, m.purpose, m.campaign_id, m.identity_key, m.gmail_message_id,
                   m.from_email, m.to_emails, m.cc_emails, m.subject, m.body_text, m.body_html, m.body_preview, m.labels,
-                  m.in_reply_to, m.rfc_references, coalesce(m.sent_at, m.accepted_at, m.created_at) as at, p.full_name as from_name
+                  m.in_reply_to, m.rfc_references, coalesce(m.sent_at, m.accepted_at, m.created_at) as at, p.full_name as from_name,
+                  """ + chase_sql + """ as is_chase
              from mail_message m left join crm_people p on p.id = m.from_person_id
             where m.mailbox_owner_id = %s and m.thread_id = any(%s)""",
         (owner_id, list(threads)))
@@ -658,6 +691,28 @@ def load_deals(cur, thread_ids: list[str]) -> dict[str, set[str]]:
     for r in cur.fetchall():
         out.setdefault(r["thread_id"], set()).add(r["bulk_listing_id"])
     return out
+
+
+def load_chase_threads(cur, thread_ids: list[str]) -> set[str]:
+    """Mail threads that run on the chase clock besides deal threads: lead threads (a lead card Alex did not dismiss as
+    not a lead), offer emails, and stored-match asks."""
+    if not thread_ids:
+        return set()
+    parts = []
+    if table_exists(cur, "relay_card"):
+        parts.append("""select i.mail_thread_id as thread_id from relay_card c join relay_item i on i.id = c.item_id
+                         where c.status not in ('not_lead', 'dismissed')""")
+    if table_exists(cur, "crm_bulk_offer_mail"):
+        parts.append("select thread_id from crm_bulk_offer_mail where thread_id is not null")
+    if table_exists(cur, "crm_bulk_thread_links"):
+        parts.append("select thread_id from crm_bulk_thread_links where channel = 'mail' and offer_id is not null and state = 'confirmed'")
+    if table_exists(cur, "crm_bulk_matches"):
+        parts.append("""select m.thread_id from crm_bulk_matches x join mail_message m on m.id = x.data->>'open_draft_id'
+                         where x.state = 'asked'""")
+    if not parts:
+        return set()
+    cur.execute("select distinct thread_id from (" + " union all ".join(parts) + ") t where thread_id = any(%s)", (thread_ids,))
+    return {r["thread_id"] for r in cur.fetchall()}
 
 
 def load_relay_links(cur, thread_ids: list[str]) -> dict[str, dict]:
@@ -1031,6 +1086,7 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
         deal_linked = bool(deal) or counterpart in ctx_global.get("open_deal_emails", set())
         # "Owner wrote to them since" counts only a new email from him, not a reply in another conversation.
         ctx = {"triage": tri, "contact_type": contact_type, "deal_linked": deal_linked,
+               "chase_clock": deal_linked or tid in ctx_global.get("chase_threads", set()),
                "last_to": ctx_global.get("last_new_to", ctx_global["last_to"]), "last_from": ctx_global["last_from"],
                "known": bool(person) or bool(company_row) or counterpart in ctx_global["last_to"],
                "first_contact": counterpart not in ctx_global["written_emails"] and domain_of(counterpart) not in ctx_global["written_domains"],
@@ -1263,6 +1319,7 @@ def main(argv: list[str] | None = None) -> int:
             "companies": load_companies_by_domain(cur, sorted({domain_of(e) for e in counterparts} - FREEMAIL - {""})),
             "deals": load_deals(cur, list(threads)),
             "relay_links": load_relay_links(cur, list(threads)),
+            "chase_threads": load_chase_threads(cur, list(threads)),
             "open_deal_emails": load_open_deal_emails(cur),
             "owned": load_owned_listings(cur),
             "sender_rules": load_sender_rules(cur, owner_id),

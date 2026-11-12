@@ -173,25 +173,30 @@ export async function recordSentAsks(draftIds: string[]): Promise<void> {
   });
 }
 
+/** The tag an automatic deal job carries in its note: the inbound message it was queued for. */
+export const autoJobTag = (messageId: string) => `[msg:${messageId}]`;
+
 /**
  * New replies on threads linked to a deal: "Update deal from this reply" is queued for each by itself, through `start`
  * (relay.ts startDealJob: one job per email at a time, the same advisory lock and 25-minute stale rule). Only the newest
- * message counts, it must be from them and from the last AUTO_DEAL_UPDATE_DAYS days, and no deal job may have started
- * since it arrived. Off when RELAY_AUTO_DEAL_UPDATE=off.
+ * message counts, it must be from them and from the last AUTO_DEAL_UPDATE_DAYS days, and it is handled once: one
+ * automatic job per inbound message, ever (the job's note carries the message id), and none when a person started a
+ * deal job after it arrived. A date in the future counts as now. Off when RELAY_AUTO_DEAL_UPDATE=off.
  */
-export async function queueReplyUpdates(ownerId: string, start: (itemId: string) => Promise<void>, env: Record<string, string | undefined> = process.env): Promise<string[]> {
+export async function queueReplyUpdates(ownerId: string, start: (itemId: string, messageId: string) => Promise<void>, env: Record<string, string | undefined> = process.env): Promise<string[]> {
   if (!autoDealUpdateOn(env)) return [];
-  const due = await queryPg<{ id: string }>(
-    `select i.id from relay_item i
-       join lateral (select m.direction, coalesce(m.sent_at, m.accepted_at, m.created_at) as at from mail_message m
+  const due = await queryPg<{ id: string; message_id: string }>(
+    `select i.id, n.id as message_id from relay_item i
+       join lateral (select m.id, m.direction, least(coalesce(m.sent_at, m.accepted_at, m.created_at), now()) as at from mail_message m
          where m.thread_id = i.mail_thread_id and m.state in ('received','accepted') order by coalesce(m.sent_at, m.accepted_at, m.created_at) desc limit 1) n on true
        join crm_bulk_listings b on b.id = i.bulk_listing_id and b.status <> 'closed'
       where i.owner_id = $1::uuid and i.status = 'open' and n.direction = 'inbound' and n.at > now() - interval '${AUTO_DEAL_UPDATE_DAYS} days'
-        and not exists (select 1 from relay_job j where j.item_id = i.id and left(j.note, 6) = '${DEAL_NOTE}' and j.created_at >= n.at)
+        and not exists (select 1 from relay_job j where j.item_id = i.id and left(j.note, 6) = '${DEAL_NOTE}'
+          and (strpos(j.note, '[msg:' || n.id || ']') > 0 or j.created_at >= n.at))
       order by n.at limit ${BATCH}`, [ownerId]);
   const queued: string[] = [];
-  for (const { id } of due) {
-    try { await start(id); queued.push(id); } catch { /* busy or gone: the next poll looks again */ }
+  for (const { id, message_id: messageId } of due) {
+    try { await start(id, messageId); queued.push(id); } catch { /* busy or gone: the next poll looks again */ }
   }
   return queued;
 }

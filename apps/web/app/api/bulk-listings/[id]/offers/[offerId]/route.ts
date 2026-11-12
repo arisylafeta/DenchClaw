@@ -4,7 +4,7 @@ import { OFFER_STAGES, OfferConflict, addThreadEntry, getOffer, linkOffer, offer
 import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
 import { missingPaidFacts, missingPaidMessage, readPaidFacts } from "@/lib/bulk-offer-paid";
 import { offerClose, offerGate } from "@/lib/crm-postgres/bulk-offer-close";
-import { expiryProblem, priceUnit } from "@/lib/bulk-offer-close";
+import { expiryProblem, priceUnit, stepGaps } from "@/lib/bulk-offer-close";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -81,6 +81,27 @@ export async function PATCH(req: Request, { params }: Context) {
   const paid = readPaidFacts(body);
   if (typeof paid === "string") return badRequest(paid);
   if (Object.keys(paid).length) patch.paid = paid;
+  // The card's gates, held here too so no caller skips them. To a buyer, Offered only while the seller's quote is
+  // confirmed and in date (the same check as Draft email and the send). Contract sent, Signed and Invoice sent only with
+  // a buyer price, a quantity and a valid-until date (stepGaps, as the card reads them).
+  if (patch.stage) {
+    const current = await getOffer(id, offerId, guard.userId);
+    if (!current) return notFound("Offer");
+    if (patch.stage !== current.stage) {
+      if (patch.stage === "offered") {
+        const gated = await offerGate(offerId);
+        if (gated?.side === "buyer" && !gated.gate?.ok) {
+          const reason = gated.gate && !gated.gate.ok ? gated.gate.reason : "The seller's quote could not be read. Ask them to confirm it.";
+          return Response.json({ error: reason, blocked: "seller_quote", reconfirm: true }, { status: 409 });
+        }
+      }
+      const close = await offerClose(offerId);
+      const terms = patch.terms ?? current.terms ?? {};
+      const quantity = patch.paid && "quantity" in patch.paid ? patch.paid.quantity ?? null : current.quantity;
+      const gaps = stepGaps(patch.stage, { terms: { ...terms, expires_on: terms.expires_on ?? close?.expiresOn ?? undefined }, quantity: quantity ?? close?.quantity ?? null });
+      if (gaps.length) return badRequest(`Add the ${gaps.join(", ")} first.`);
+    }
+  }
   // Paid and Complete need the paid facts, so bulk take is counted from what was really paid. Checked against what the
   // offer already holds, whenever the stage or a paid fact changes.
   if ("stage" in patch || patch.paid) {

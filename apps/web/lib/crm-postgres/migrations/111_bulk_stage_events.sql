@@ -16,7 +16,13 @@
 -- A listing stage is compared with the last event for that listing, so the log itself remembers the previous stage.
 -- No invented history: each open listing and its staged offers get one "As of migration 111" event to start from.
 --
--- A delivered deal (an offer reaching complete) closes both listings it links: demand as bought_from_us, supply as sold.
+-- A delivered deal (an offer reaching complete) closes a listing it links only when the offer's quantity covers the
+-- listing's stated quantity in the same unit: demand as bought_from_us, supply as sold. Otherwise the listing stays open
+-- with a "Part sold: N of M" note, or a note that it needs closing by hand when either quantity is unknown. Moving an
+-- offer back from complete does not reopen anything: a note says the listings stay closed.
+--
+-- Paid facts are enforced here too (bulk_offer_paid_facts), so no writer can mark an offer paid or complete without them.
+-- "Today" is the London date (bulk_today()), as in the app.
 begin;
 
 create table if not exists crm_bulk_stage_events (
@@ -31,9 +37,15 @@ create table if not exists crm_bulk_stage_events (
 );
 create index if not exists crm_bulk_stage_events_subject_idx on crm_bulk_stage_events (subject_kind, subject_id, occurred_at desc, id desc);
 
+-- Today in London, the date the app works in (lib/match/stored-match.ts today()). Holds, reservations and quotes use it.
+create or replace function bulk_today() returns date language sql stable as $$
+  select (now() at time zone 'Europe/London')::date
+$$;
+
 -- Paid facts on an offer, in one place. quantity is in the offer's price unit (terms.unit); paid_amount is what the
--- counterparty paid in paid_currency; take_gbp is our take on the deal in pounds. The API asks for all five before an
--- offer can move to paid or complete.
+-- counterparty paid in paid_currency; take_gbp is our take on the deal in pounds. All five are needed before an offer
+-- can move to paid or complete: the API asks for them, and the trigger bulk_offer_paid_facts below refuses any write
+-- without them.
 alter table crm_bulk_offers
   add column if not exists quantity numeric check (quantity is null or quantity > 0),
   add column if not exists paid_on date,
@@ -95,7 +107,7 @@ create or replace function bulk_listing_stage(listing_id text) returns text lang
     else case
       when r.rank >= 5 or (l.status = 'closed' and l.closed_reason in ('sold', 'became_trade')) then 'Sold'
       when l.status = 'closed' then 'Closed'
-      when l.hold_until >= current_date then 'Reserved'
+      when l.hold_until >= bulk_today() then 'Reserved'
       when bulk_listing_has_match(l.id) then 'Available'
       when bulk_listing_qualified(l.id) then case when x.owned then 'Available' else 'Qualified' end
       else 'New' end
@@ -140,19 +152,113 @@ begin
   return (select count(*)::int from crm_bulk_stage_events where id > before);
 end $$;
 
--- Offer writes: log the offer's own stage change, close both listings when a deal is delivered, then re-check the
--- listings the offer touches (before and after a move between listings).
+-- The paid facts, refused at the database: an offer reaches paid or complete (by insert or update) only with all five,
+-- and an offer at paid or complete cannot lose one. A row already at paid or complete without them before this rule can
+-- still be written otherwise. TS twin: missingPaidFacts and missingPaidMessage in lib/bulk-offer-paid.ts.
+create or replace function bulk_offer_paid_facts() returns trigger language plpgsql as $$
+declare
+  missing text[];
+  n int;
+begin
+  if new.stage is null or new.stage not in ('paid', 'complete') then return new; end if;
+  missing := array_remove(array[
+    case when new.paid_on is null then 'paid date' end,
+    case when new.paid_amount is null then 'amount paid' end,
+    case when new.paid_currency is null then 'currency' end,
+    case when new.quantity is null then 'quantity' end,
+    case when new.take_gbp is null then 'take in GBP' end], null);
+  n := cardinality(missing);
+  if n = 0 then return new; end if;
+  if TG_OP = 'UPDATE' and old.stage is not distinct from new.stage
+     and not ((old.paid_on is not null and new.paid_on is null) or (old.paid_amount is not null and new.paid_amount is null)
+       or (old.paid_currency is not null and new.paid_currency is null) or (old.quantity is not null and new.quantity is null)
+       or (old.take_gbp is not null and new.take_gbp is null)) then
+    return new;
+  end if;
+  raise exception using errcode = '23514', message = format('To mark this offer %s, add the %s.',
+    case when new.stage = 'complete' then 'Complete' else 'Paid' end,
+    case when n > 1 then array_to_string(missing[1:n - 1], ', ') || ' and ' || missing[n] else missing[1] end);
+end $$;
+
+-- A unit word as one key: packs and pack, tonnes and t, kWh and kwh are each one unit.
+create or replace function bulk_qty_unit(raw text) returns text language sql immutable as $$
+  select case
+    when u = '' then null
+    when u in ('t', 'ton', 'tons', 'tonne', 'tonnes') then 'tonne'
+    when u in ('kg', 'kgs') then 'kg'
+    when u in ('kwh', 'mwh') then u
+    when length(u) > 3 and u like '%s' then left(u, -1)
+    else u end
+  from (select lower(btrim(coalesce(raw, ''))) as u) x
+$$;
+
+-- "13,104" and "1.000" are thousands, "8.44" and "8,44" decimals (relay_scan.py lot_number reads them the same way).
+create or replace function bulk_qty_number(raw text) returns numeric language sql immutable as $$
+  select case
+    when v ~ '^\d{1,3}([.,]\d{3})+$' then regexp_replace(v, '[.,]', '', 'g')::numeric
+    when replace(v, ',', '.') ~ '^\d+(\.\d+)?$' then replace(v, ',', '.')::numeric
+  end
+  from (select btrim(coalesce(raw, ''), ' .,') as v) x
+$$;
+
+-- What a listing says it holds or wants: a request's spec volume and unit, else the number and unit word that start its
+-- quantity text ("20 packs", "13,104 units"). Null parts when it does not say.
+create or replace function bulk_listing_stated_qty(listing_id text, out qty numeric, out unit text) language sql stable as $$
+  select case when v.ok then (l.spec->>'volume')::numeric else bulk_qty_number(q.m[1]) end,
+         case when v.ok then bulk_qty_unit(l.spec->>'volume_unit') else bulk_qty_unit(q.m[2]) end
+  from crm_bulk_listings l
+  cross join lateral (select l.spec->>'volume' ~ '^[0-9]+(\.[0-9]+)?$' and nullif(l.spec->>'volume_unit', '') is not null as ok) v
+  cross join lateral (select regexp_match(coalesce(l.quantity, ''), '^\s*~?\s*([0-9][0-9.,]*)\s*([A-Za-z]+)?') as m) q
+  where l.id = listing_id
+$$;
+
+-- A number without trailing zeros, for notes.
+create or replace function bulk_qty_text(value numeric) returns text language sql immutable as $$
+  select case when value::text like '%.%' then regexp_replace(value::text, '\.?0+$', '') else value::text end
+$$;
+
+-- Offer writes: log the offer's own stage change, close the listings a delivered deal sold out (or note what is left),
+-- then re-check the listings the offer touches (before and after a move between listings).
 create or replace function bulk_offer_stage_events() returns trigger language plpgsql as $$
+declare
+  target record;
+  stated record;
+  sold_unit text;
 begin
   if TG_OP <> 'DELETE' then
     if (TG_OP = 'INSERT' and new.stage is not null) or (TG_OP = 'UPDATE' and new.stage is distinct from old.stage) then
       insert into crm_bulk_stage_events (subject_kind, subject_id, from_stage, to_stage, actor)
       values ('offer', new.id, case when TG_OP = 'UPDATE' then old.stage end, new.stage, bulk_stage_actor());
     end if;
-    if new.role = 'counterparty' and new.stage = 'complete' and (TG_OP = 'INSERT' or old.stage is distinct from 'complete') then
-      update crm_bulk_listings
-        set status = 'closed', closed_reason = case when kind = 'demand' then 'bought_from_us' else 'sold' end, updated_at = now()
-        where id in (new.bulk_listing_id, new.counterpart_id) and status <> 'closed';
+    if new.role = 'counterparty' and new.stage = 'complete' and (TG_OP = 'INSERT' or old.stage is distinct from 'complete')
+       and new.paid_on is not null and new.paid_amount is not null and new.paid_currency is not null
+       and new.quantity is not null and new.take_gbp is not null then
+      sold_unit := bulk_qty_unit(new.terms->>'unit');
+      for target in select l.id from crm_bulk_listings l where l.id in (new.bulk_listing_id, new.counterpart_id) and l.status <> 'closed' loop
+        select * into stated from bulk_listing_stated_qty(target.id);
+        if stated.qty is not null and sold_unit is not null and stated.unit = sold_unit and new.quantity >= stated.qty then
+          update crm_bulk_listings
+            set status = 'closed', closed_reason = case when kind = 'demand' then 'bought_from_us' else 'sold' end, updated_at = now()
+            where id = target.id;
+        elsif stated.qty is not null and sold_unit is not null and stated.unit = sold_unit then
+          insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, kind, title, body, data)
+          values (target.id, new.id, 'status', format('Part sold: %s of %s', bulk_qty_text(new.quantity), bulk_qty_text(stated.qty)),
+            format('The offer completed for %s of the %s %s this listing states, so the listing stays open.',
+              bulk_qty_text(new.quantity), bulk_qty_text(stated.qty), new.terms->>'unit'),
+            jsonb_build_object('offer_id', new.id, 'sold', new.quantity, 'of', stated.qty, 'unit', sold_unit));
+        else
+          insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, kind, title, body, data)
+          values (target.id, new.id, 'status', 'Offer complete: close this listing by hand if all of it is sold',
+            'The offer and the listing do not both state a quantity in the same unit, so the listing was left open.',
+            jsonb_build_object('offer_id', new.id, 'sold', new.quantity, 'unit', sold_unit));
+        end if;
+      end loop;
+    end if;
+    if TG_OP = 'UPDATE' and new.role = 'counterparty' and old.stage = 'complete' and new.stage is distinct from 'complete' then
+      insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, kind, title, body, data)
+      select l.id, new.id, 'status', 'Offer moved back from Complete: the listings stay closed',
+        'Reopen the listing by hand if the deal is live again.', jsonb_build_object('offer_id', new.id, 'stage', new.stage)
+      from crm_bulk_listings l where l.id in (new.bulk_listing_id, new.counterpart_id) and l.status = 'closed';
     end if;
     perform bulk_stage_check_listing(new.bulk_listing_id);
     perform bulk_stage_check_listing(new.counterpart_id);
@@ -191,6 +297,9 @@ from crm_bulk_offers o join crm_bulk_listings l on l.id = o.bulk_listing_id
 where l.status <> 'closed' and o.stage is not null
   and not exists (select 1 from crm_bulk_stage_events e where e.subject_kind = 'offer' and e.subject_id = o.id);
 
+drop trigger if exists bulk_offer_paid_facts on crm_bulk_offers;
+create trigger bulk_offer_paid_facts before insert or update on crm_bulk_offers
+  for each row execute function bulk_offer_paid_facts();
 drop trigger if exists bulk_offer_stage_events on crm_bulk_offers;
 create trigger bulk_offer_stage_events after insert or delete or update of stage, role, bulk_listing_id, counterpart_id
   on crm_bulk_offers for each row execute function bulk_offer_stage_events();

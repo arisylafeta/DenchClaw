@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { request } from "./trade-ui";
 
-type Held = { holds: number; qty: number; whole: number; until: string | null; of: number | null };
+type Held = { holds: number; qty: number; whole: number; until: string | null; of: number | null; whileLive?: boolean };
 
 const shortDay = (iso: string) => new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 const count = (value: number) => value.toLocaleString("en-GB", { maximumFractionDigits: 1 });
@@ -24,11 +24,11 @@ export function MatchReservation({ listingId, version }: { listingId: string; ve
   if (!held || held.holds === 0 || !held.until) {
     return null;
   }
-  const what = held.whole > 0 || held.qty === 0 ? "Reserved for a buyer"
+  const what = held.whole > 0 || held.qty === 0 ? "Quantity not known, whole lot held for a buyer"
     : `Reserved ${count(held.qty)}${held.of != null ? ` of ${count(held.of)}` : ""} for ${held.holds === 1 ? "a buyer" : `${held.holds} buyers`}`;
   return (
     <p className="px-1 text-[12px] font-medium" aria-label="Reserved by matches">
-      {what} until {shortDay(held.until)} <span style={{ color: "var(--color-text-muted)" }}>(internal, still on the marketplace)</span>
+      {what} {held.whileLive ? "while in negotiation" : `until ${shortDay(held.until)}`} <span style={{ color: "var(--color-text-muted)" }}>(internal, still on the marketplace)</span>
     </p>
   );
 }

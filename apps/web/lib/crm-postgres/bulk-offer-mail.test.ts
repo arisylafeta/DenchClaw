@@ -150,20 +150,20 @@ describe.skipIf(!TEST_URL)("offer outreach (matches v3, slice 2)", () => {
   it("moves candidate to offered once, stamps the touch, clears the open draft and never moves backwards", async () => {
     await offer(id("o_send"), id("sup"), "candidate", { open_draft_id: id("draft") }, id("buyer2"));
     const first = await mail.markOfferSent(id("o_send"), null);
-    expect(first).toEqual({ moved: true, stage: "offered" });
+    expect(first).toEqual({ moved: true, stage: "offered", reservation: null });
     const [row] = await pg.queryPg<{ stage: string; last_touch_via: string; open: string | null }>(
       `select stage, last_touch_via, data->>'open_draft_id' as open from crm_bulk_offers where id = $1`, [id("o_send")]);
     expect(row.stage).toBe("offered");
     expect(row.last_touch_via).toBe("mail");
     expect(row.open).toBeNull();
     const second = await mail.markOfferSent(id("o_send"), null);
-    expect(second).toEqual({ moved: false, stage: "offered" });
+    expect(second).toEqual({ moved: false, stage: "offered", reservation: null });
     const [{ count }] = await pg.queryPg<{ count: number }>(
       `select count(*)::int from crm_bulk_listing_activity where offer_id = $1 and data->>'stage' = 'offered'`, [id("o_send")]);
     expect(count).toBe(1);
 
     await offer(id("o_negotiating"), id("sup"), "negotiating", { open_draft_id: id("draft2") }, id("buyer4"));
-    expect(await mail.markOfferSent(id("o_negotiating"), null)).toEqual({ moved: false, stage: "negotiating" });
+    expect(await mail.markOfferSent(id("o_negotiating"), null)).toEqual({ moved: false, stage: "negotiating", reservation: null });
     const [kept] = await pg.queryPg<{ stage: string }>(`select stage from crm_bulk_offers where id = $1`, [id("o_negotiating")]);
     expect(kept.stage).toBe("negotiating");
   });

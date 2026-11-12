@@ -114,6 +114,27 @@ describe.skipIf(!TEST_URL)("offer to close (slice 5)", () => {
     expect((await close.offerGate(id("of2")))?.gate).toMatchObject({ ok: true });
   });
 
+  it("drops the open draft and marks its sheet out of date when the price, quantity or terms change", async () => {
+    const prepared = await close.prepareOfferSheet(id("of2"), "send");
+    const docId = await close.storeOfferSheet(id("sup2"), id("of2"), prepared, user, "draft_y");
+    await mail.setOpenDraft(id("of2"), "draft_y", "key-before");
+    const state = async () => (await pg.queryPg<{ open: string | null; sheet: string | null; note: string; terms: string | null }>(
+      `select o.data->>'open_draft_id' as open, o.data->>'open_sheet_doc_id' as sheet, d.note, o.data->'draft_terms'->>'draft_y' as terms
+       from crm_bulk_offers o, crm_bulk_listing_documents d where o.id = $1 and d.id = $2`, [id("of2"), docId]))[0];
+    expect(await state()).toMatchObject({ open: "draft_y", sheet: docId, terms: "key-before" });
+    await move(id("sup2"), id("of2"), { nextStep: "Call Sam" }); // not a term: the draft stays
+    expect((await state()).open).toBe("draft_y");
+    await move(id("sup2"), id("of2"), { terms: { amount: 2200, currency: "GBP", unit: "pack", expires_on: day(20) } });
+    const after = await state();
+    expect(after).toMatchObject({ open: null, sheet: null, terms: "key-before" });
+    expect(after.note).toMatch(/^Out of date, not sent: the offer's terms changed after it was made\./);
+    // A quantity change alone does the same.
+    await mail.setOpenDraft(id("of2"), "draft_z", "key-z");
+    await move(id("sup2"), id("of2"), { paid: { quantity: 10 } });
+    expect((await state()).open).toBeNull();
+    await move(id("sup2"), id("of2"), { paid: { quantity: null }, terms: { amount: 2400, currency: "GBP", unit: "pack" } });
+  });
+
   it("stores the send copy with the deal's documents, without the seller, and marks it sent with the email", async () => {
     const prepared = await close.prepareOfferSheet(id("of1"), "send");
     const text = prepared.sheet.rows.flat().join(" ") + prepared.sheet.text;
@@ -129,7 +150,7 @@ describe.skipIf(!TEST_URL)("offer to close (slice 5)", () => {
     expect(doc.title).toMatch(/^Price sheet \(sent copy\) PS-[0-9a-f]{8} for Buyer b1/);
 
     // The send: the offer moves to offered, the sheet is sent, History has both, and the match reserves 12 packs.
-    expect(await mail.markOfferSent(id("of1"), user)).toEqual({ moved: true, stage: "offered" });
+    expect(await mail.markOfferSent(id("of1"), user)).toEqual({ moved: true, stage: "offered", reservation: null });
     const [after] = await pg.queryPg<{ state: string; direction: string }>(`select state, direction from crm_bulk_listing_documents where id = $1`, [docId]);
     expect(after).toEqual({ state: "sent", direction: "sent" });
     const story = (await pg.queryPg<{ title: string }>(`select title from crm_bulk_listing_activity where bulk_listing_id = $1 and kind = 'document' order by id`, [id("sup1")])).map((r) => r.title);
@@ -139,7 +160,7 @@ describe.skipIf(!TEST_URL)("offer to close (slice 5)", () => {
     expect((await stageOf(id("sup1"))).s).toBe("Reserved");
   });
 
-  it("walks candidate, offered, signed, invoiced, paid, complete: take from the margin, both listings closed", async () => {
+  it("walks candidate, offered, signed, invoiced, paid, complete: take from the margin, the request closed, the lot part sold", async () => {
     await move(id("sup1"), id("of1"), { stage: "signed" });
     await move(id("sup1"), id("of1"), { stage: "invoiced" });
     expect((await stageOf(id("sup1"))).d).toBe("Agreed");
@@ -150,7 +171,10 @@ describe.skipIf(!TEST_URL)("offer to close (slice 5)", () => {
     });
     expect((await stageOf(id("sup1"))).s).toBe("Sold");
     await move(id("sup1"), id("of1"), { stage: "complete" });
-    expect(await stageOf(id("sup1"))).toMatchObject({ s: "Sold", d: "Delivered", status: "closed", reason: "sold" });
+    // 12 packs sold: all the request wanted, half the 24-pack lot, which stays open for the rest.
+    expect(await stageOf(id("sup1"))).toMatchObject({ s: "Sold", d: "Delivered", status: "open", reason: null });
+    expect((await pg.queryPg<{ title: string }>(`select title from crm_bulk_listing_activity where bulk_listing_id = $1 and offer_id = $2 and title like 'Part sold%'`, [id("sup1"), id("of1")]))
+      .map((r) => r.title)).toEqual(["Part sold: 12 of 24"]);
     expect(await stageOf(id("dem1"))).toMatchObject({ s: "Closed", status: "closed", reason: "bought_from_us" });
     const [stored] = await pg.queryPg<{ take_gbp: number }>(`select take_gbp::float8 as take_gbp from crm_bulk_offers where id = $1`, [id("of1")]);
     expect(stored.take_gbp).toBe(4800);

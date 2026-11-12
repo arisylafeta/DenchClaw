@@ -7,15 +7,18 @@ import { replyIdentity, type ReplyIdentity } from "./relay-identity";
 import { leadFirstName } from "./relay-lead-core";
 
 /**
- * Chase drafts, the server part. The scan reads the chase clock for every thread Alex wrote last on and stores it on
- * relay_item.chase; this pass (run by the scan through POST /api/relay/internal/deals, and on every inbox load) turns a
- * due chase into a draft in Review for a person to send.
+ * Chase drafts, the server part. The scan reads the chase clock for lead threads, deal threads, match asks and offers
+ * Alex wrote last on and stores it on relay_item.chase; this pass (run only by the scan, through POST
+ * /api/relay/internal/deals) turns a due chase into a draft in Review for a person to send. An inbox load only cancels
+ * chase drafts they have answered (frontDoor in relay.ts); it never prepares one.
  *
  * - Nothing here sends. A chase is a mail draft (`draft`, the same mail CLI path every Relay draft takes) and a
  *   relay_draft row with origin 'predraft'; a person sends it from Review like any other draft.
  * - One open chase draft per thread (a unique index, migration 115), and each chase on the same unanswered message is
  *   prepared once (`chaseKey`), so a draft a person dropped does not come back.
- * - A reply from them skips the open chase draft and cancels a send-later on it (`cancelAnsweredChases`).
+ * - A reply from them skips the open chase draft and cancels a send-later on it (`cancelAnsweredChases`), and is checked
+ *   again when Send is clicked (`chaseAnswered`). A reply counts when it was sent after our message the chase follows
+ *   (relay_draft.chase_after), however late it synced.
  * - "Don't chase" (markDone with no_chase) stays as it was: the scan never turns that thread back into a chase.
  */
 
@@ -24,23 +27,48 @@ export type ChaseMailDraft = (d: { identity: ReplyIdentity; to: string[]; ccThre
 export type StoredChase = { state: "waiting" | "due" | "park"; chases: number; waited: number; next: number | null; due_on: string | null; since: string };
 export type ChaseRun = { prepared: string[]; cancelled: number; refused: { item_id: string; reason: string }[] };
 
+/** True while the send runner holds a claim on a draft's send (it is going out now); 20 minutes is the runner's own
+ * reclaim time. Shared with relay.ts. Used bare against mail_message's own columns. */
+export const SEND_CLAIMED_SQL = "coalesce((personalization->'scheduled_send'->>'claimed_at')::timestamptz > now() - interval '20 minutes', false)";
+
 /** Chase drafts made per call; the next scan takes the rest. */
 const BATCH = 3;
 const KEY_SQL = `'[chase:' || (i.chase->>'next') || ' since ' || (i.chase->>'since') || ']'`;
 
-/** A reply came after the chase draft was made: the draft is skipped and any send-later on it is cancelled. */
+/** A message from them on the chase's thread sent after our message the chase follows (`d` relay_draft, `i` relay_item). */
+const ANSWERED_SQL = `exists (select 1 from mail_message m where m.thread_id = i.mail_thread_id and m.direction = 'inbound'
+  and m.state in ('received', 'accepted') and coalesce(m.sent_at, m.accepted_at, m.created_at) > coalesce(d.chase_after, d.created_at))`;
+
+/**
+ * They replied after our message the chase follows: the open chase draft is skipped and any send-later on it is
+ * cancelled, unless the send runner has already claimed it (it is going out; the runner's own reply check decides).
+ * A chase already copied to Gmail drafts is marked gmail_copy_left: Relay has no way to delete that copy, so the email's
+ * card says it is still there.
+ */
 export async function cancelAnsweredChases(ownerId: string): Promise<number> {
   const [row] = await queryPg<{ n: number }>(
     `with s as (
-       update relay_draft d set state = 'skipped', updated_at = now() from relay_item i
+       update relay_draft d set state = 'skipped', gmail_copy_left = (d.state = 'gmail'), updated_at = now() from relay_item i
         where d.item_id = i.id and i.owner_id = $1::uuid and d.origin = 'predraft' and d.state in ('draft', 'gmail')
-          and exists (select 1 from mail_message m where m.thread_id = i.mail_thread_id and m.direction = 'inbound'
-            and m.state in ('received', 'accepted') and coalesce(m.sent_at, m.created_at) > d.created_at)
+          and ${ANSWERED_SQL}
+          and not exists (select 1 from mail_message where id = d.mail_message_id and (state <> 'draft' or ${SEND_CLAIMED_SQL}))
         returning d.mail_message_id),
      u as (update mail_message set personalization = personalization - 'scheduled_send'
-        where id in (select mail_message_id from s) and state = 'draft' and personalization ? 'scheduled_send' returning 1)
+        where id in (select mail_message_id from s) and state = 'draft' and personalization ? 'scheduled_send' and not ${SEND_CLAIMED_SQL} returning 1)
      select (select count(*) from s)::int as n`, [ownerId]);
   return row?.n ?? 0;
+}
+
+/**
+ * At the Send click on a chase draft: true when they have replied since our message it follows. The draft is then
+ * skipped (as cancelAnsweredChases would) and nothing is sent. False for any other draft.
+ */
+export async function chaseAnswered(draftId: string): Promise<boolean> {
+  const rows = await queryPg<{ id: string }>(
+    `update relay_draft d set state = 'skipped', updated_at = now() from relay_item i
+      where d.id = $1 and d.item_id = i.id and d.origin = 'predraft' and d.state in ('draft', 'gmail') and ${ANSWERED_SQL}
+      returning d.id`, [draftId]);
+  return rows.length > 0;
 }
 
 type DueItem = { id: string; mail_thread_id: string | null; counterpart_name: string | null; counterpart_email: string | null; contact_type: string | null;
@@ -118,13 +146,15 @@ async function prepareOne(item: DueItem, draft: ChaseMailDraft, now: Date): Prom
       [item.id, `Chase ${clock.next} of ${MAX_CHASES}`, `Not prepared: ${check.reason}`.slice(0, 300), item.key]);
     return `refused: ${check.reason}`;
   }
-  // Claim first, so two passes at once make one draft: the unique index allows one open chase draft per thread.
+  // Claim first, so two passes at once make one draft: the unique index allows one open chase draft per thread. The draft
+  // remembers when our message it follows was sent: any reply after that skips it.
   const [claim] = await queryPg<{ id: string }>(
-    `insert into relay_draft (item_id, role, position, title, why, source_note, origin, agent_log)
-     values ($1, 'primary', 0, $2, $3, $4, 'predraft', $5::jsonb)
+    `insert into relay_draft (item_id, role, position, title, why, source_note, origin, agent_log, chase_after)
+     values ($1, 'primary', 0, $2, $3, $4, 'predraft', $5::jsonb, $6::timestamptz)
      on conflict (item_id) where origin = 'predraft' and state in ('draft', 'gmail') do nothing returning id`,
     [item.id, `Chase ${clock.next} of ${MAX_CHASES}`, `No answer for ${clock.waited} working ${clock.waited === 1 ? "day" : "days"}`, item.key,
-      JSON.stringify([`Prepared by Relay: chase ${clock.next} of ${MAX_CHASES} fell due on working day ${clock.waited}. Nothing is sent until you send it.`])]);
+      JSON.stringify([`Prepared by Relay: chase ${clock.next} of ${MAX_CHASES} fell due on working day ${clock.waited}. Nothing is sent until you send it.`]),
+      messages[0].at]);
   if (!claim) return "a chase draft is already open";
   let mailId: string;
   try {

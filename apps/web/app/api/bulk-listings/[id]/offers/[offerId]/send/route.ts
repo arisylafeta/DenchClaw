@@ -5,6 +5,7 @@ import { readMailDraft } from "@/lib/crm-postgres/mail";
 import { DraftActionError, sameVersion, sendDraft } from "@/lib/mail-draft-actions";
 import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
 import { offerGate } from "@/lib/crm-postgres/bulk-offer-close";
+import { draftTermsKey, offerTermsKey } from "@/lib/bulk-offer-close";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,7 +19,8 @@ type Context = { params: Promise<{ id: string; offerId: string }> };
  * unknown outcome leaves the offer and the links exactly as they were and says so.
  *
  * To a buyer, the seller's quote is checked again at the click: a draft made while it was in date does not go out after
- * it ran out.
+ * it ran out. A draft built from terms the offer no longer holds (price, unit, currency, quantity, delivery terms, last
+ * day) does not go out either. When the stored match could not reserve its quantity, the reply's warning says so.
  */
 export async function POST(req: Request, { params }: Context) {
   const guard = await guardBulkTrades();
@@ -37,6 +39,12 @@ export async function POST(req: Request, { params }: Context) {
   if (!draft) { return notFound("Draft"); }
   if (!sameVersion(draft.updated_at, body.updated_at)) {
     return Response.json({ error: "This draft changed since you looked at it. Review it again before sending.", sent: false }, { status: 409 });
+  }
+  const builtFrom = draftTermsKey(outreach.data, draftId);
+  if (builtFrom !== null && builtFrom !== offerTermsKey(outreach.terms, outreach.quantity)) {
+    return Response.json({
+      error: "The offer's price or terms changed after this email was drafted, so it was not sent. Draft the email again.", sent: false,
+    }, { status: 409 });
   }
   const recipient = (draft.to_emails ?? []).map((address) => address.trim().toLowerCase());
   if (outreach.email && !recipient.includes(outreach.email)) {
@@ -81,11 +89,16 @@ export async function POST(req: Request, { params }: Context) {
     threadLinked = true;
   }
   const marked = await markOfferSent(offerId, guard.userId);
+  const warnings = [
+    threadLinked ? null : "Sent, but the mail thread is not known yet. It is linked when the mail sync supplies it.",
+    marked?.reservation ? `The quantity was not reserved: ${marked.reservation}` : null,
+  ].filter((text): text is string => !!text);
   return Response.json({
     sent: true,
     threadLinked,
     moved: marked?.moved ?? false,
     stage: marked?.stage ?? null,
-    warning: threadLinked ? null : "Sent, but the mail thread is not known yet. It is linked when the mail sync supplies it.",
+    reservation: marked?.reservation ?? null,
+    warning: warnings.length ? warnings.join(" ") : null,
   });
 }

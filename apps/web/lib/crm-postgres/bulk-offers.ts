@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { queryPg } from "../postgres";
+import type { QueryResultRow } from "pg";
+import { queryPg, type PgTransaction } from "../postgres";
 import { asStageActor } from "./bulk-stage-events";
 import type { PaidFacts } from "../bulk-offer-paid";
+import { offerTermsKey } from "../bulk-offer-close";
 
 export const OFFER_STAGES = ["candidate", "offered", "negotiating", "contract_out", "signed", "invoiced", "paid", "complete", "declined", "lost"] as const;
 export type OfferStage = typeof OFFER_STAGES[number];
@@ -95,8 +97,13 @@ export async function listOffers(listingId: string, userId: string | null): Prom
      order by o.updated_at desc`, [listingId, userId]);
 }
 
-export async function getOffer(listingId: string, offerId: string, userId: string | null): Promise<Offer | null> {
-  return (await queryPg<Offer>(`${selectOffers("$3")} where (o.bulk_listing_id = $1 or o.counterpart_id = $1) and o.id = $2`, [listingId, offerId, userId]))[0] ?? null;
+/** Reads through `tx` when given (so a caller's transaction sees its own writes), else the pool. */
+async function rowsOf<T extends QueryResultRow>(tx: PgTransaction | undefined, sql: string, params: unknown[]): Promise<T[]> {
+  return tx ? (await tx.query<T>(sql, params)).rows : queryPg<T>(sql, params);
+}
+
+export async function getOffer(listingId: string, offerId: string, userId: string | null, tx?: PgTransaction): Promise<Offer | null> {
+  return (await rowsOf<Offer>(tx, `${selectOffers("$3")} where (o.bulk_listing_id = $1 or o.counterpart_id = $1) and o.id = $2`, [listingId, offerId, userId]))[0] ?? null;
 }
 
 export type OfferInput = {
@@ -112,9 +119,9 @@ export class OfferConflict extends Error {
 type LiveListing = { id: string; kind: "supply" | "demand"; label: string };
 
 /** Live listings on the opposite side of `listingId` that belong to the same company or person as the offer. */
-export async function linkCandidates(listingId: string, companyId: string | null, personId: string | null): Promise<LiveListing[]> {
+export async function linkCandidates(listingId: string, companyId: string | null, personId: string | null, tx?: PgTransaction): Promise<LiveListing[]> {
   if (!companyId && !personId) return [];
-  return queryPg<LiveListing>(
+  return rowsOf<LiveListing>(tx,
     `select c.id, c.kind, concat_ws(', ', c.party, nullif(left(coalesce(c.context->>'listing_title', c.summary), 60), '')) as label
      from crm_bulk_listings c join crm_bulk_listings me on me.id = $1
      where c.status <> 'closed' and c.kind <> me.kind and c.id <> me.id
@@ -123,8 +130,8 @@ export async function linkCandidates(listingId: string, companyId: string | null
 }
 
 /** The existing offer for this pairing, in either direction. */
-async function pairOffer(a: string, b: string): Promise<string | null> {
-  const [row] = await queryPg<{ id: string }>(
+async function pairOffer(a: string, b: string, tx?: PgTransaction): Promise<string | null> {
+  const [row] = await rowsOf<{ id: string }>(tx,
     `select id from crm_bulk_offers where role = 'counterparty'
        and ((bulk_listing_id = $1 and counterpart_id = $2) or (bulk_listing_id = $2 and counterpart_id = $1)) limit 1`, [a, b]);
   return row?.id ?? null;
@@ -135,10 +142,10 @@ async function pairOffer(a: string, b: string): Promise<string | null> {
  * (two contacts at a company are one counterparty), else the person, else the same written name. This is the key
  * crm_bulk_offers_counterparty_uidx keeps unique; the name case is not indexed and is checked here.
  */
-async function unlinkedCounterparty(listingId: string, input: { name: string; companyId?: string | null; personId?: string | null }): Promise<string | null> {
+async function unlinkedCounterparty(listingId: string, input: { name: string; companyId?: string | null; personId?: string | null }, tx?: PgTransaction): Promise<string | null> {
   const companyId = input.companyId ?? null;
   const personId = input.personId ?? null;
-  const [row] = await queryPg<{ id: string }>(
+  const [row] = await rowsOf<{ id: string }>(tx,
     `select id from crm_bulk_offers
      where bulk_listing_id = $1 and role = 'counterparty' and counterpart_id is null
        and (($2::text is not null and company_id = $2)
@@ -155,26 +162,29 @@ async function unlinkedCounterparty(listingId: string, input: { name: string; co
  *
  * Both paths insert the same way: `on conflict do nothing` covers the pairing index and the counterparty index, so a
  * second click that loses the race writes nothing and is told what it lost to instead of raising a raw 23505.
+ *
+ * With `tx`, every read and the insert run in the caller's transaction, so the offer exists only if that transaction
+ * commits (a stored match's yes makes and links its offer in one go).
  */
-export async function addOffer(listingId: string, input: OfferInput & { counterpartId?: string | null }): Promise<Offer> {
+export async function addOffer(listingId: string, input: OfferInput & { counterpartId?: string | null }, tx?: PgTransaction): Promise<Offer> {
   const id = `bof_${randomUUID()}`;
   let counterpartId = input.counterpartId ?? null;
   if (counterpartId) {
-    const [t] = await queryPg<{ ok: boolean }>(
+    const [t] = await rowsOf<{ ok: boolean }>(tx,
       `select (t.status <> 'closed' and t.kind <> me.kind) as ok from crm_bulk_listings t, crm_bulk_listings me where t.id = $2 and me.id = $1`, [listingId, counterpartId]);
     if (!t?.ok) throw new OfferConflict("Link to a live listing on the opposite side.");
   } else {
-    const found = await linkCandidates(listingId, input.companyId ?? null, input.personId ?? null);
+    const found = await linkCandidates(listingId, input.companyId ?? null, input.personId ?? null, tx);
     if (found.length === 1) counterpartId = found[0].id;
   }
   if (counterpartId) {
-    const existing = await pairOffer(listingId, counterpartId);
+    const existing = await pairOffer(listingId, counterpartId, tx);
     if (existing) throw new OfferConflict("This pairing already has an offer.", existing);
   } else {
-    const existing = await unlinkedCounterparty(listingId, input);
-    if (existing) return (await getOffer(listingId, existing, null))!;
+    const existing = await unlinkedCounterparty(listingId, input, tx);
+    if (existing) return (await getOffer(listingId, existing, null, tx))!;
   }
-  const [inserted] = await queryPg<{ id: string }>(
+  const [inserted] = await rowsOf<{ id: string }>(tx,
     `insert into crm_bulk_offers (id, bulk_listing_id, role, person_id, company_id, name, contact, wants, stage, counterpart_id, data)
      values ($1, $2, 'counterparty', $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
      on conflict do nothing
@@ -182,17 +192,17 @@ export async function addOffer(listingId: string, input: OfferInput & { counterp
     [id, listingId, input.personId ?? null, input.companyId ?? null, input.name.trim(), input.contact ?? null, input.wants ?? null,
       input.stage ?? "candidate", counterpartId, JSON.stringify(input.data ?? {})]);
   if (inserted?.id) {
-    return (await getOffer(listingId, inserted.id, null))!;
+    return (await getOffer(listingId, inserted.id, null, tx))!;
   }
   // Nothing was written: another click got there first. Name the offer that won, or say plainly that this one exists.
   if (counterpartId) {
-    throw new OfferConflict("This pairing already has an offer.", await pairOffer(listingId, counterpartId) ?? undefined);
+    throw new OfferConflict("This pairing already has an offer.", await pairOffer(listingId, counterpartId, tx) ?? undefined);
   }
-  const raced = await unlinkedCounterparty(listingId, input);
+  const raced = await unlinkedCounterparty(listingId, input, tx);
   if (raced) {
-    return (await getOffer(listingId, raced, null))!;
+    return (await getOffer(listingId, raced, null, tx))!;
   }
-  const stored = await getOffer(listingId, id, null);
+  const stored = await getOffer(listingId, id, null, tx);
   if (stored) {
     return stored;
   }
@@ -229,7 +239,9 @@ export type OfferPatch = {
 const PAID_COLUMNS = ["paid_on", "paid_amount", "paid_currency", "quantity", "take_gbp"] as const satisfies readonly (keyof PaidFacts)[];
 
 /** The one path that changes an offer from the app. Stage events are written by the trigger from migration 111;
- * this names the user as their actor. The Story still gets its readable status line. */
+ * this names the user as their actor. The Story still gets its readable status line. A change to the price, unit,
+ * currency, quantity, delivery terms or last day drops the open email draft and marks its price sheet out of date, so
+ * the next "Draft email" builds both again (the send refuses the old draft: offerTermsKey). */
 export async function updateOffer(listingId: string, offerId: string, patch: OfferPatch, actorUserId: string | null): Promise<Offer | null> {
   const current = await getOffer(listingId, offerId, actorUserId);
   if (!current) return null;
@@ -238,6 +250,8 @@ export async function updateOffer(listingId: string, offerId: string, patch: Off
   if ("nextDue" in patch) data.next_due = patch.nextDue || null;
   const paid = patch.paid ?? {};
   const has = (key: keyof PaidFacts) => key in paid;
+  const termsChanged = offerTermsKey(current.terms, current.quantity)
+    !== offerTermsKey("terms" in patch ? patch.terms : current.terms, has("quantity") ? paid.quantity ?? null : current.quantity);
   await asStageActor(actorUserId, async (tx) => {
     await tx.query(
       `update crm_bulk_offers set
@@ -256,6 +270,13 @@ export async function updateOffer(listingId: string, offerId: string, patch: Off
       [current.listing_id, offerId, "stage" in patch, patch.stage ?? null, "wants" in patch, patch.wants ?? null,
         "terms" in patch, JSON.stringify(patch.terms ?? {}), "declinedReason" in patch, patch.declinedReason ?? null, JSON.stringify(data),
         ...PAID_COLUMNS.flatMap((key) => [has(key), paid[key] ?? null])]);
+    if (termsChanged) {
+      await tx.query(
+        `update crm_bulk_listing_documents d set note = concat_ws(' ', 'Out of date, not sent: the offer''s terms changed after it was made.', nullif(btrim(d.note), '')),
+           updated_at = now()
+         from crm_bulk_offers o where o.id = $1 and d.id = o.data->>'open_sheet_doc_id' and d.state = 'draft'`, [offerId]);
+      await tx.query(`update crm_bulk_offers set data = data - 'open_draft_id' - 'open_sheet_doc_id' where id = $1`, [offerId]);
+    }
     if (patch.stage && patch.stage !== current.stage) {
       await tx.query(
         `insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, person_id, kind, title, data, actor_user_id)

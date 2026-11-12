@@ -145,15 +145,27 @@ def test_unsolicited_pitch_is_other():
     assert rs.classify_thread(msgs, ctx(known=False), NOW)["tab"] == "other"
 
 
-def test_follow_on_the_chase_clock_day_one_for_every_thread():
-    # Mon 26 Oct -> Tue 27 Oct is working day 1: the first chase is due, deal or not.
+def test_follow_on_the_chase_clock_day_one_for_lead_and_deal_threads():
+    # Mon 26 Oct -> Tue 27 Oct is working day 1: the first chase is due on a thread that runs on the clock.
     base = [msg("inbound", 10, "Interested"), msg("outbound", dt.datetime(2026, 10, 26, 9, tzinfo=UTC), "Would you take EUR 50/kWh?")]
-    for linked in (True, False):
-        r = rs.classify_thread(base, ctx(contact_type="supplier", deal_linked=linked), NOW)
-        assert r["tab"] == "follow" and r["chase"]["state"] == "due" and r["chase"]["next"] == 1
+    r = rs.classify_thread(base, ctx(contact_type="supplier", deal_linked=True, chase_clock=True), NOW)
+    assert r["tab"] == "follow" and r["chase"]["state"] == "due" and r["chase"]["next"] == 1
     same_day = [msg("inbound", 10, "Interested"), msg("outbound", dt.datetime(2026, 10, 27, 9, tzinfo=UTC), "Could you confirm?")]
-    r = rs.classify_thread(same_day, ctx(contact_type="buyer", deal_linked=True), NOW)
+    r = rs.classify_thread(same_day, ctx(contact_type="buyer", deal_linked=True, chase_clock=True), NOW)
     assert r["tab"] is None and r["chase"]["state"] == "waiting" and r["chase"]["due_on"] == "2026-10-28"
+
+
+def test_threads_off_the_clock_keep_the_older_rule():
+    # The accountant: no lead, no deal. Day 1 is not a chase; the first nudge shows after 7 working days, with no clock.
+    asked = [msg("inbound", 20, "Here are the accounts"), msg("outbound", dt.datetime(2026, 10, 26, 9, tzinfo=UTC), "Could you send the VAT figure?")]
+    r = rs.classify_thread(asked, ctx(contact_type="admin"), NOW)
+    assert r["tab"] is None and "chase" not in r and "after 7 working days" in r["reason"]
+    old = [msg("inbound", 20, "Here are the accounts"), msg("outbound", dt.datetime(2026, 10, 16, 9, tzinfo=UTC), "Could you send the VAT figure?")]
+    r = rs.classify_thread(old, ctx(contact_type="admin"), NOW)
+    assert r["tab"] == "follow" and "chase" not in r and r["reason"] == "no reply for 7 working days (threshold 7)"
+    nudged = [msg("inbound", 20, "Hi"), msg("outbound", 18, "Price?"), msg("outbound", 14, "Any news?"), msg("outbound", 12, "Still keen?")]
+    r = rs.classify_thread(nudged, ctx(), NOW)
+    assert r["tab"] == "other" and "chase" not in r and r["reason"] == "2 unanswered nudges, stopped chasing"
 
 
 def test_follow_needs_an_ask_and_a_conversation():
@@ -166,17 +178,25 @@ def test_follow_needs_an_ask_and_a_conversation():
 def test_second_chase_waits_for_day_three():
     # First message Thu 22 Oct, one chase sent: day 3 is Tue 27 Oct.
     first = dt.datetime(2026, 10, 22, 9, tzinfo=UTC)
-    msgs = [msg("inbound", 20, "Interested"), msg("outbound", first, "Price?"), msg("outbound", dt.datetime(2026, 10, 23, 9, tzinfo=UTC), "Any news?")]
-    r = rs.classify_thread(msgs, ctx(), NOW)
+    msgs = [msg("inbound", 20, "Interested"), msg("outbound", first, "Price?"), msg("outbound", dt.datetime(2026, 10, 23, 9, tzinfo=UTC), "Any news?", is_chase=True)]
+    r = rs.classify_thread(msgs, ctx(chase_clock=True), NOW)
     assert r["tab"] == "follow" and r["chase"]["next"] == 2 and r["chase"]["waited"] == 3
-    r = rs.classify_thread(msgs, ctx(), dt.datetime(2026, 10, 26, 12, tzinfo=UTC))
+    r = rs.classify_thread(msgs, ctx(chase_clock=True), dt.datetime(2026, 10, 26, 12, tzinfo=UTC))
     assert r["tab"] is None and r["chase"]["state"] == "waiting"
 
 
+def test_only_relay_chases_count_as_chases_sent():
+    # Two emails of his on Thu 22 Oct (the second adds a file): no chase has gone, so chase 1 is due, not chase 2.
+    msgs = [msg("inbound", 20, "Interested"), msg("outbound", dt.datetime(2026, 10, 22, 9, tzinfo=UTC), "Price?"),
+            msg("outbound", dt.datetime(2026, 10, 22, 9, 30, tzinfo=UTC), "Forgot the spec sheet, attached. Price?")]
+    r = rs.classify_thread(msgs, ctx(chase_clock=True), NOW)
+    assert r["tab"] == "follow" and r["chase"]["chases"] == 0 and r["chase"]["next"] == 1
+
+
 def test_three_chases_unanswered_propose_parking_and_never_chase_again():
-    msgs = [msg("inbound", 20, "Interested"), msg("outbound", 18, "Price?"), msg("outbound", 14, "Any news?"),
-            msg("outbound", 12, "Still keen?"), msg("outbound", 6, "Last one from me?")]
-    r = rs.classify_thread(msgs, ctx(), NOW)
+    msgs = [msg("inbound", 20, "Interested"), msg("outbound", 18, "Price?"), msg("outbound", 14, "Any news?", is_chase=True),
+            msg("outbound", 12, "Still keen?", is_chase=True), msg("outbound", 6, "Last one from me?", is_chase=True)]
+    r = rs.classify_thread(msgs, ctx(chase_clock=True), NOW)
     assert r["tab"] == "follow" and r["chase"]["state"] == "park" and r["chase"]["next"] is None and "park" in r["reason"]
 
 

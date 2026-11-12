@@ -133,7 +133,9 @@ export async function housekeeping(): Promise<Housekeeping> {
   return readOnly(async (tx) => {
     const { rows: [lapsed] } = await tx.query<{ count: number; oldest: string | null }>(
       `select count(*)::int as count, min(reserved_until)::text as oldest from crm_bulk_matches
-       where state = 'offered' and reserved_until is not null and reserved_until < current_date`);
+       where state = 'offered' and reserved_until is not null and reserved_until < bulk_today()
+         and not bulk_match_live(state, reserved_until, offer_id)
+         and not exists (select 1 from crm_bulk_offers o where o.id = offer_id and o.stage = 'complete')`);
     const { rows } = await tx.query<{ id: string; title: string; logged: string | null; now: string | null; hold_ended: boolean }>(
       `select l.id, coalesce(nullif(l.spec->>'listing_title', ''), l.summary) as title, e.to_stage as logged, s.stage as now,
          (l.hold_until is not null and l.hold_until < current_date and e.to_stage = 'Reserved') as hold_ended
