@@ -7,10 +7,15 @@
  *   3. make + model + one kWh figure      model:hyundai-ioniq5-77.4kwh
  *   4. cell maker + cell model            cell:samsung-sdi-inr21700-50e
  *   5. chemistry + format                 broad:lfp-packs
+ *      with a stated make and nothing more specific:   broad:stellantis-nmc-packs
  *
  * A specific key also counts as its broader keys: `broaderKeysFor` returns the chain so a seller part
  * matches a buyer's broad ask. Key shapes are mirrored in SQL by buyer_interest_product_key() (migration
  * 112) so synced lines agree with keys the app computes; the buyer-interest database test compares the two.
+ *
+ * A source that states several makes, chemistries or formats is never reduced to its first value:
+ * `expandProductFacts` returns one fact set per combination (capped), exactly as buyer_interest_fact_sets()
+ * does in SQL, so a two-make, two-chemistry ask keeps four wants.
  */
 import {
   chemistryFamilies,
@@ -39,6 +44,10 @@ export type ProductFacts = {
   kwhMin?: number | null;
   kwhMax?: number | null;
   cellMaker?: string | null;
+  /** Every make a source states, for `expandProductFacts`; `make` stays the single-value form. */
+  makes?: (string | null | undefined)[] | null;
+  chemistries?: (string | null | undefined)[] | null;
+  formats?: (string | null | undefined)[] | null;
 };
 
 export type ProductKeyLevel = "part" | "pack" | "model" | "cell" | "broad";
@@ -46,6 +55,9 @@ export type ProductKeyLevel = "part" | "pack" | "model" | "cell" | "broad";
 export type ProductKey = { key: string; level: ProductKeyLevel };
 
 const FORMAT_PLURAL: Record<string, string> = { pack: "packs", module: "modules", cell: "cells", system: "systems" };
+
+/** Lines a single source may hold. A longer list is truncated and reported, never silently dropped. */
+export const PRODUCT_FACT_COMBINATIONS = 12;
 
 /** Group and alias names the key keeps whole, mirroring buyer_interest_make() in SQL. */
 const MAKE_KEY_ALIASES: Record<string, string> = {
@@ -155,6 +167,60 @@ function broadKey(facts: ProductFacts): string {
   return `broad:${chemistry}-${format ? FORMAT_PLURAL[format] : "batteries"}`;
 }
 
+/** The broad bucket scoped to a stated make; null when no make is stated. */
+function makeScopedBroadKey(facts: ProductFacts): string | null {
+  const make = makeKey(facts.make ?? null);
+  if (!make) {return null;}
+  const chemistry = slug(chemistryOf(facts)) ?? "any";
+  const format = formatOf(facts);
+  return `broad:${make}-${chemistry}-${format ? FORMAT_PLURAL[format] : "batteries"}`;
+}
+
+/** Values in the order the SQL helper orders them: null first, then by text, de-duplicated. */
+function statedValues(values: (string | null | undefined)[] | null | undefined, single: string | null): (string | null)[] {
+  const unique = new Set<string>();
+  for (const value of values ?? []) {
+    const text = (value ?? "").trim();
+    if (text) {unique.add(text);}
+  }
+  const stated = [...unique].filter((value): value is string => Boolean(value));
+  if (stated.length) {
+    return stated.toSorted((a, b) => a.localeCompare(b));
+  }
+  const fallback = (single ?? "").trim();
+  return [fallback || null];
+}
+
+/**
+ * One fact set per stated make x chemistry x format, capped at `limit`, mirroring buyer_interest_fact_sets()
+ * in SQL. `stated` is how many combinations the facts really name, so a caller can record the truncation.
+ */
+export function expandProductFacts(facts: ProductFacts, limit = PRODUCT_FACT_COMBINATIONS): { facts: ProductFacts[]; stated: number } {
+  const makes = statedValues(facts.makes, facts.make ?? null);
+  const chemistries = statedValues(facts.chemistries, facts.chemistry ?? null);
+  const formats = statedValues(facts.formats, facts.format ?? null);
+  const expanded: ProductFacts[] = [];
+  for (const make of makes) {
+    for (const chemistry of chemistries) {
+      for (const format of formats) {
+        if (expanded.length >= Math.max(limit, 1)) {
+          return { facts: expanded, stated: makes.length * chemistries.length * formats.length };
+        }
+        expanded.push({
+          ...facts,
+          make,
+          chemistry,
+          format,
+          makes: make ? [make] : [],
+          chemistries: chemistry ? [chemistry] : [],
+          formats: format ? [format] : [],
+        });
+      }
+    }
+  }
+  return { facts: expanded, stated: makes.length * chemistries.length * formats.length };
+}
+
 /**
  * The most specific key these facts prove. Uncertain facts fall to the next broader level instead of guessing:
  * a kWh range (50 to 60) is not a model key, and an unknown model is a broad key.
@@ -177,6 +243,9 @@ export function productKeysFor(facts: ProductFacts): ProductKey[] {
   if (family) {add(`pack:${family.id}`, "pack");}
   add(modelKey(facts), "model");
   add(cellKey(facts), "cell");
+  // The make-scoped bucket is the roll-up of every specific key, so a Tesla model pack still answers a buyer
+  // who asked for "Tesla NMC packs", and the plain bucket stays the last, broadest key.
+  add(makeScopedBroadKey(facts), "broad");
   add(broadKey(facts), "broad");
   return keys;
 }
@@ -197,18 +266,21 @@ export function productKeyLevel(key: string): ProductKeyLevel {
 
 /**
  * Facts for the builder from the supply-side parser (`buildProductKey` in ./product-key.ts), so a listing's
- * first product line and a buyer's ask meet on one key without the listing readers changing.
+ * product line and a buyer's ask meet on one key without the listing readers changing. One fact set per
+ * product line: a listing that names two products is two keys, never only its first line.
  */
-export function productFactsFromKey(key: Pick<import("./product-key").ProductKey, "lines" | "partNumbers" | "chemistry" | "format">): ProductFacts {
-  const line = key.lines[0];
-  return {
+export function productFactsFromKey(key: Pick<import("./product-key").ProductKey, "lines" | "partNumbers" | "chemistry" | "format">): ProductFacts[] {
+  if (!key.lines.length) {
+    return [{ partNumbers: key.partNumbers, format: key.format, chemistry: key.chemistry }];
+  }
+  return key.lines.map((line) => ({
     partNumbers: key.partNumbers,
-    make: line?.make ?? null,
-    model: line?.model ?? null,
-    format: line?.format ?? key.format,
-    chemistry: line?.chemistry ?? key.chemistry,
-    kwh: line?.kwh ?? null,
-    kwhMin: line?.kwhMin ?? null,
-    kwhMax: line?.kwhMax ?? null,
-  };
+    make: line.make ?? null,
+    model: line.model ?? null,
+    format: line.format ?? key.format,
+    chemistry: line.chemistry ?? key.chemistry,
+    kwh: line.kwh ?? null,
+    kwhMin: line.kwhMin ?? null,
+    kwhMax: line.kwhMax ?? null,
+  }));
 }

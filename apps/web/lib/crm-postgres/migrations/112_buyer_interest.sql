@@ -1,6 +1,12 @@
 -- Buyer interest: one dated line per buyer x product key x kind (approved buyer data foundation, step 1a).
 -- Additive and idempotent. Readers are untouched: nothing in the app reads this table yet except the new Wants API.
 --
+-- BACKFILL: these triggers do not look backwards. Applying this migration leaves every existing demand row and
+-- offer unrepresented. Step 1b is required and runs the two sync functions over the existing rows
+-- (perform buyer_interest_sync_demand_row(id) / buyer_interest_sync_offer_row(id)), and re-runs the importer
+-- path for research_profile companies so their mastered lines exist. Do not switch a reader onto this table
+-- before that backfill has run and been checked.
+--
 -- Ownership decides where the fact lives:
 --   mastered  standing / interest / inferred   edited in the Buyer tab's Wants table
 --   synced    ask / saved_search / bought / declined   copies of a source row, rebuilt by trigger or importer
@@ -9,12 +15,18 @@
 -- synced lines true for every writer (app, Python importers, intake, mail index). A sync failure is recorded in
 -- buyer_interest_sync_errors and never breaks the parent write.
 --
+-- A source row states several makes, chemistries or formats: its lines fan out over every combination (cartesian
+-- product), so "Toyota or Lexus, Stellantis; NMC or LFP" keeps all four wants. The product is capped at 12 lines
+-- per source and a longer list is recorded as operation 'truncated' in buyer_interest_sync_errors, never dropped
+-- silently. Re-syncing a row also deletes the lines it no longer states, so a line never outlives its facts.
+--
 -- Product keys are the same shape the TypeScript builder (apps/web/lib/match/product-key-for.ts) produces:
 --   part:SU001B5189            an OEM part number
 --   pack:stellantis-ecmp-50kwh a reviewed pack family (TS builder only; SQL leaves the row broad until filled)
 --   model:hyundai-ioniq5-77.4kwh make + model + one kWh figure
 --   cell:samsung-sdi-inr21700-50e cell maker + cell model
 --   broad:lfp-packs            chemistry + format
+--   broad:stellantis-nmc-packs the same bucket scoped to a stated make, used when no more specific key is proven
 -- Apply only after a current backup and explicit schema approval.
 begin;
 
@@ -224,7 +236,9 @@ create or replace function buyer_interest_product_key(facts jsonb) returns text 
         || buyer_interest_kwh_text((select value from kwh)) || 'kwh' end,
     case when buyer_interest_slug(facts->>'cell_maker') is not null and buyer_interest_slug(facts->>'model') is not null
       then 'cell:' || buyer_interest_slug(facts->>'cell_maker') || '-' || buyer_interest_slug(facts->>'model') end,
-    'broad:' || coalesce(buyer_interest_slug(buyer_interest_chemistry(facts->>'chemistry')), 'any') || '-'
+    -- Broad is the last level. A stated make stays on the key, so two makes in one ask keep two lines.
+    'broad:' || coalesce(buyer_interest_make(facts->>'make') || '-', '')
+      || coalesce(buyer_interest_slug(buyer_interest_chemistry(facts->>'chemistry')), 'any') || '-'
       || case buyer_interest_format(facts->>'format')
            when 'pack' then 'packs' when 'module' then 'modules' when 'cell' then 'cells' when 'system' then 'systems'
            else 'batteries' end
@@ -240,6 +254,57 @@ create or replace function buyer_interest_key_level(key text) returns text langu
     else 'broad' end
 $$;
 
+-- Every value a row states for one fact: the array when it has one, else its single value, else one "not stated"
+-- slot. Ordered and de-duplicated so a re-sync writes the same lines every time.
+create or replace function buyer_interest_stated_list(p_list jsonb, p_first text, p_second text default null,
+  p_third text default null) returns text[] language sql immutable as $$
+  select coalesce(
+    (select array_agg(distinct btrim(value) order by btrim(value))
+       from jsonb_array_elements_text(case when jsonb_typeof(p_list) = 'array' then p_list else '[]'::jsonb end) value
+      where nullif(btrim(value), '') is not null),
+    (select array_agg(distinct btrim(value) order by btrim(value))
+       from unnest(array[p_first, p_second, p_third]) value
+      where nullif(btrim(value), '') is not null),
+    array[null]::text[])
+$$;
+
+-- One fact set per stated make x chemistry x format, so every combination of a row's facts becomes a line instead
+-- of only the first value of each list. Capped at p_limit lines; stated_total says how many the row really states.
+create or replace function buyer_interest_fact_sets(p_spec jsonb, p_context jsonb default '{}'::jsonb,
+  p_fields jsonb default '{}'::jsonb, p_limit int default 12)
+returns table (facts jsonb[], stated_total int) language plpgsql immutable as $$
+declare
+  makes text[] := buyer_interest_stated_list(p_spec->'makes', buyer_interest_first_text(p_spec->'make'),
+    buyer_interest_first_text(p_context->'make'), buyer_interest_first_text(p_fields->'make'));
+  chemists text[] := buyer_interest_stated_list(p_spec->'chemistries', buyer_interest_first_text(p_spec->'chemistry'),
+    buyer_interest_first_text(p_context->'chemistry'), buyer_interest_first_text(p_fields->'chemistry'));
+  formats text[] := buyer_interest_stated_list(p_spec->'formats', buyer_interest_first_text(p_spec->'format'),
+    buyer_interest_first_text(p_context->'format'), buyer_interest_first_text(p_fields->'format'));
+  sets jsonb[] := '{}';
+  m text;
+  c text;
+  f text;
+begin
+  for m, c, f in
+    select x.value, y.value, z.value
+    from unnest(makes) x(value)
+    cross join unnest(chemists) y(value)
+    cross join unnest(formats) z(value)
+    order by 1 nulls first, 2 nulls first, 3 nulls first
+    limit greatest(p_limit, 1)
+  loop
+    sets := sets || buyer_interest_facts(
+      p_spec || jsonb_build_object(
+        'makes', case when m is null then '[]'::jsonb else jsonb_build_array(m) end, 'make', m,
+        'chemistries', case when c is null then '[]'::jsonb else jsonb_build_array(c) end, 'chemistry', c,
+        'formats', case when f is null then '[]'::jsonb else jsonb_build_array(f) end, 'format', f),
+      p_context, p_fields);
+  end loop;
+  stated_total := cardinality(makes) * cardinality(chemists) * cardinality(formats);
+  facts := sets;
+  return next;
+end $$;
+
 -- ---------------------------------------------------------------------------
 -- Demand rows -> ask / bought / declined lines
 -- ---------------------------------------------------------------------------
@@ -247,11 +312,10 @@ $$;
 create or replace function buyer_interest_sync_demand_row(p_id text) returns void language plpgsql as $$
 declare
   row_ crm_bulk_listings%rowtype;
-  facts_base jsonb;
-  formats text[];
-  fmt text;
+  fact_sets jsonb[];
+  stated_total int;
   facts jsonb;
-  key text;
+  keys text[] := '{}';
   line_kind text;
   line_reason text;
   first_d date;
@@ -264,11 +328,14 @@ declare
   price_basis_v text;
   needed date;
   expiry date;
+  expiry_sticky boolean := false;
   refs text[];
 begin
   select * into row_ from crm_bulk_listings where id = p_id and kind = 'demand';
   if row_.id is null then
-    return;  -- deleted: the foreign key already removed its lines
+    -- Deleted, or no longer a demand row: its lines no longer describe a buyer's wish.
+    delete from buyer_interest where demand_id = p_id;
+    return;
   end if;
 
   -- A buyer we cannot name a company for cannot hold a line; the api resolves the company on write.
@@ -277,7 +344,6 @@ begin
     return;
   end if;
 
-  facts_base := buyer_interest_facts(row_.spec, row_.context);
   first_d := coalesce(row_.observed_on, row_.created_at::date, current_date);
   last_d := greatest(coalesce(buyer_interest_first_text(row_.spec->'confirmed_on')::date, first_d), first_d);
 
@@ -291,49 +357,48 @@ begin
     then (row_.spec->>'needed_by')::date end;
   refs := array_remove(array[row_.source_id, 'crm:' || row_.id]::text[], null);
 
-  -- One line per stated format, so "packs or modules" holds both; one line when no format is stated.
-  select coalesce(array_agg(distinct value), array[null]::text[]) into formats
-  from jsonb_array_elements_text(case when jsonb_typeof(row_.spec->'formats') = 'array' then row_.spec->'formats'
-    else '[]'::jsonb end) value;
-  if formats is null or cardinality(formats) = 0 then formats := array[null]::text[]; end if;
-
   if row_.status in ('open', 'qualifying') then
     line_kind := 'ask';
+    expiry := needed;
   elsif row_.status = 'closed' and row_.closed_reason = 'expired' then
-    -- An expired ask stays visible as history; expiry is applied at read.
-    update buyer_interest set expires_on = coalesce(expires_on, needed, current_date), updated_at = now()
-    where demand_id = row_.id and kind = 'ask';
-    return;
+    -- An expired ask stays visible as history with its expiry; the stale-line delete below drops an older
+    -- bought/declined outcome, so a re-staged ask never keeps a superseded decision.
+    line_kind := 'ask';
+    expiry := coalesce(needed, current_date);
+    expiry_sticky := true;  -- the day it lapsed, not the day a later edit touched the row
   elsif row_.status = 'closed' and row_.closed_reason in ('bought_from_us', 'bought_elsewhere', 'no_longer_needed') then
     line_kind := case when row_.closed_reason = 'bought_from_us' then 'bought' else 'declined' end;
     line_reason := case when line_kind = 'declined' then row_.closed_reason end;
-    needed := null;
+    expiry := null;
   else
     -- Not a buying fact (duplicate, moved to profile, converted to supply/trade, research row): drop the asks.
     delete from buyer_interest where demand_id = row_.id;
     return;
   end if;
 
-  -- Only one outcome per source row: a reopened or restaged row replaces its old line.
-  delete from buyer_interest where demand_id = row_.id and kind <> line_kind;
+  select fs.facts, fs.stated_total into fact_sets, stated_total
+  from buyer_interest_fact_sets(row_.spec, row_.context) fs;
 
-  foreach fmt in array formats loop
-    facts := buyer_interest_facts(
-      case when fmt is null then row_.spec else row_.spec || jsonb_build_object('formats', jsonb_build_array(fmt)) end,
-      row_.context);
-    key := buyer_interest_product_key(facts);
-    expiry := case when line_kind = 'ask' then needed else null end;
+  -- The key set this row states now. Anything else on this source is stale: an old chemistry, a dropped make,
+  -- or an outcome the row has since superseded.
+  select coalesce(array_agg(distinct buyer_interest_product_key(fact)), '{}') into keys
+  from unnest(fact_sets) fact;
+  delete from buyer_interest
+  where demand_id = row_.id and not (kind = line_kind and product_key = any(keys));
 
+  foreach facts in array fact_sets loop
     insert into buyer_interest (id, company_id, person_id, kind, ownership, product_key, product_key_level,
       make, model, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit, quantity_basis,
       price, price_currency, price_unit, price_basis, source_refs, expires_on, demand_id, decline_reason)
-    values ('bi_' || replace(gen_random_uuid()::text, '-', ''), row_.company_id, row_.person_id, line_kind, 'synced', key,
-      buyer_interest_key_level(key), facts->>'make', facts->>'model', buyer_interest_format(facts->>'format'),
+    values ('bi_' || replace(gen_random_uuid()::text, '-', ''), row_.company_id, row_.person_id, line_kind, 'synced',
+      buyer_interest_product_key(facts), buyer_interest_key_level(buyer_interest_product_key(facts)),
+      facts->>'make', facts->>'model', buyer_interest_format(facts->>'format'),
       buyer_interest_chemistry(facts->>'chemistry'), buyer_interest_number(facts->'kwh_min'),
       buyer_interest_number(facts->'kwh_max'), first_d, last_d, qty, unit,
       case when qty is null then 'not_stated' else 'stated' end,
       price_v, currency_v, price_unit_v, price_basis_v, refs, expiry, row_.id, line_reason)
     on conflict (kind, demand_id, product_key) where demand_id is not null do update set
+      company_id = excluded.company_id,
       person_id = coalesce(excluded.person_id, buyer_interest.person_id),
       product_key_level = excluded.product_key_level,
       make = coalesce(excluded.make, buyer_interest.make),
@@ -352,14 +417,16 @@ begin
       price_unit = coalesce(excluded.price_unit, buyer_interest.price_unit),
       price_basis = coalesce(excluded.price_basis, buyer_interest.price_basis),
       source_refs = (select array_agg(distinct ref order by ref) from unnest(buyer_interest.source_refs || excluded.source_refs) ref),
-      expires_on = coalesce(excluded.expires_on, buyer_interest.expires_on),
+      expires_on = case when expiry_sticky then coalesce(buyer_interest.expires_on, excluded.expires_on)
+        else excluded.expires_on end,
       decline_reason = coalesce(excluded.decline_reason, buyer_interest.decline_reason),
       updated_at = now();
   end loop;
 
-  -- A closed ask is history: bought and declined replace it.
-  if line_kind <> 'ask' then
-    delete from buyer_interest where demand_id = row_.id and kind = 'ask';
+  if stated_total > cardinality(fact_sets) then
+    insert into buyer_interest_sync_errors (source_table, source_id, operation, message)
+    values ('crm_bulk_listings', row_.id, 'truncated',
+      format('kept %s of %s stated combinations', cardinality(fact_sets), stated_total));
   end if;
 end $$;
 
@@ -378,9 +445,16 @@ begin
   return null;
 end $$;
 
+-- Fires for a demand row, and for a row that stops being one (its lines are then removed). A supply row's own
+-- edits never call it. Postgres refuses OLD in an INSERT trigger's WHEN, so insert and update are separate.
 drop trigger if exists buyer_interest_demand_sync on crm_bulk_listings;
-create trigger buyer_interest_demand_sync after insert or update on crm_bulk_listings
+drop trigger if exists buyer_interest_demand_sync_insert on crm_bulk_listings;
+drop trigger if exists buyer_interest_demand_sync_update on crm_bulk_listings;
+create trigger buyer_interest_demand_sync_insert after insert on crm_bulk_listings
   for each row when (new.kind = 'demand') execute function buyer_interest_sync_demand();
+create trigger buyer_interest_demand_sync_update after update on crm_bulk_listings
+  for each row when (old.kind = 'demand' or new.kind = 'demand')
+  execute function buyer_interest_sync_demand();
 
 -- A demand row can be written through the crm_bulk_demand view; that view writes the table, so the trigger above sees it.
 
@@ -393,9 +467,10 @@ declare
   offer crm_bulk_offers%rowtype;
   listing crm_bulk_listings%rowtype;
   fields jsonb;
-  facts_base jsonb;
+  fact_sets jsonb[];
+  stated_total int;
   facts jsonb;
-  key text;
+  keys text[] := '{}';
   line_kind text;
   line_reason text;
   first_d date;
@@ -410,35 +485,40 @@ declare
 begin
   select * into offer from crm_bulk_offers where id = p_id;
   if offer.id is null then
-    return;  -- deleted: the foreign key already removed its lines
+    delete from buyer_interest where offer_id = p_id;
+    return;
   end if;
 
   -- Only a counterparty (a buyer) on a supply listing describes a purchase. Our own contacts do not.
   select * into listing from crm_bulk_listings where id = offer.bulk_listing_id;
-  if offer.role <> 'counterparty' or offer.company_id is null or listing.id is null or listing.kind <> 'supply' then
+  if coalesce(offer.role, '') <> 'counterparty' or offer.company_id is null or listing.id is null
+      or listing.kind <> 'supply' then
     delete from buyer_interest where offer_id = offer.id;
     return;
   end if;
 
-  if offer.stage in ('paid', 'complete') then
+  -- Signed is a committed purchase, so it counts as bought; contract_out alone does not.
+  if offer.stage in ('signed', 'invoiced', 'paid', 'complete') then
     line_kind := 'bought';
   elsif offer.stage in ('declined', 'lost') then
     line_kind := 'declined';
     line_reason := nullif(btrim(coalesce(offer.declined_reason, '')), '');
   else
-    delete from buyer_interest where offer_id = offer.id;  -- moved back to an open stage
+    delete from buyer_interest where offer_id = offer.id;  -- no committed purchase: no line
     return;
   end if;
 
   select coalesce(jsonb_object_agg(lower(field_key), value), '{}'::jsonb) into fields
   from crm_bulk_listing_fields where bulk_listing_id = listing.id and value is not null and status <> 'conflict';
 
-  -- Only one outcome per offer: paid then declined (or a reopen) replaces the previous line.
-  delete from buyer_interest where offer_id = offer.id and kind <> line_kind;
+  select fs.facts, fs.stated_total into fact_sets, stated_total
+  from buyer_interest_fact_sets(listing.spec, listing.context, fields) fs;
 
-  facts_base := buyer_interest_facts(listing.spec, listing.context, fields);
-  facts := facts_base;
-  key := buyer_interest_product_key(facts);
+  -- The product the listing states now; a line for another product or outcome on this offer is stale.
+  select coalesce(array_agg(distinct buyer_interest_product_key(fact)), '{}') into keys
+  from unnest(fact_sets) fact;
+  delete from buyer_interest
+  where offer_id = offer.id and not (kind = line_kind and product_key = any(keys));
 
   first_d := coalesce(listing.observed_on, offer.created_at::date, current_date);
   last_d := greatest(coalesce(offer.last_touch_on, offer.updated_at::date, current_date), first_d);
@@ -455,33 +535,44 @@ begin
     || case when offer.counterpart_id is not null then array['crm:' || offer.counterpart_id]::text[] else '{}'::text[] end,
     null);
 
-  insert into buyer_interest (id, company_id, person_id, kind, ownership, product_key, product_key_level,
-    make, model, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit, quantity_basis,
-    price, price_currency, price_unit, price_basis, source_refs, expires_on, offer_id, decline_reason)
-  values ('bi_' || replace(gen_random_uuid()::text, '-', ''), offer.company_id, offer.person_id, line_kind, 'synced', key,
-    buyer_interest_key_level(key), facts->>'make', facts->>'model', buyer_interest_format(facts->>'format'),
-    buyer_interest_chemistry(facts->>'chemistry'), buyer_interest_number(facts->'kwh_min'),
-    buyer_interest_number(facts->'kwh_max'), first_d, last_d, qty, unit,
-    case when qty is null then 'not_stated' else 'stated' end,
-    price_v, currency_v, price_unit_v, price_basis_v, refs, null, offer.id, line_reason)
-  on conflict (kind, offer_id, product_key) where offer_id is not null do update set
-    person_id = coalesce(excluded.person_id, buyer_interest.person_id),
-    make = coalesce(excluded.make, buyer_interest.make),
-    model = coalesce(excluded.model, buyer_interest.model),
-    format = coalesce(excluded.format, buyer_interest.format),
-    chemistry = coalesce(excluded.chemistry, buyer_interest.chemistry),
-    kwh_min = coalesce(excluded.kwh_min, buyer_interest.kwh_min),
-    kwh_max = coalesce(excluded.kwh_max, buyer_interest.kwh_max),
-    first_seen = least(buyer_interest.first_seen, excluded.first_seen),
-    last_seen = greatest(buyer_interest.last_seen, excluded.last_seen),
-    quantity = coalesce(excluded.quantity, buyer_interest.quantity),
-    price = coalesce(excluded.price, buyer_interest.price),
-    price_currency = coalesce(excluded.price_currency, buyer_interest.price_currency),
-    price_unit = coalesce(excluded.price_unit, buyer_interest.price_unit),
-    price_basis = coalesce(excluded.price_basis, buyer_interest.price_basis),
-    source_refs = (select array_agg(distinct ref order by ref) from unnest(buyer_interest.source_refs || excluded.source_refs) ref),
-    decline_reason = coalesce(excluded.decline_reason, buyer_interest.decline_reason),
-    updated_at = now();
+  foreach facts in array fact_sets loop
+    insert into buyer_interest (id, company_id, person_id, kind, ownership, product_key, product_key_level,
+      make, model, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit, quantity_basis,
+      price, price_currency, price_unit, price_basis, source_refs, expires_on, offer_id, decline_reason)
+    values ('bi_' || replace(gen_random_uuid()::text, '-', ''), offer.company_id, offer.person_id, line_kind, 'synced',
+      buyer_interest_product_key(facts), buyer_interest_key_level(buyer_interest_product_key(facts)),
+      facts->>'make', facts->>'model', buyer_interest_format(facts->>'format'),
+      buyer_interest_chemistry(facts->>'chemistry'), buyer_interest_number(facts->'kwh_min'),
+      buyer_interest_number(facts->'kwh_max'), first_d, last_d, qty, unit,
+      case when qty is null then 'not_stated' else 'stated' end,
+      price_v, currency_v, price_unit_v, price_basis_v, refs, null, offer.id, line_reason)
+    on conflict (kind, offer_id, product_key) where offer_id is not null do update set
+      company_id = excluded.company_id,
+      person_id = coalesce(excluded.person_id, buyer_interest.person_id),
+      product_key_level = excluded.product_key_level,
+      make = coalesce(excluded.make, buyer_interest.make),
+      model = coalesce(excluded.model, buyer_interest.model),
+      format = coalesce(excluded.format, buyer_interest.format),
+      chemistry = coalesce(excluded.chemistry, buyer_interest.chemistry),
+      kwh_min = coalesce(excluded.kwh_min, buyer_interest.kwh_min),
+      kwh_max = coalesce(excluded.kwh_max, buyer_interest.kwh_max),
+      first_seen = least(buyer_interest.first_seen, excluded.first_seen),
+      last_seen = greatest(buyer_interest.last_seen, excluded.last_seen),
+      quantity = coalesce(excluded.quantity, buyer_interest.quantity),
+      price = coalesce(excluded.price, buyer_interest.price),
+      price_currency = coalesce(excluded.price_currency, buyer_interest.price_currency),
+      price_unit = coalesce(excluded.price_unit, buyer_interest.price_unit),
+      price_basis = coalesce(excluded.price_basis, buyer_interest.price_basis),
+      source_refs = (select array_agg(distinct ref order by ref) from unnest(buyer_interest.source_refs || excluded.source_refs) ref),
+      decline_reason = coalesce(excluded.decline_reason, buyer_interest.decline_reason),
+      updated_at = now();
+  end loop;
+
+  if stated_total > cardinality(fact_sets) then
+    insert into buyer_interest_sync_errors (source_table, source_id, operation, message)
+    values ('crm_bulk_offers', offer.id, 'truncated',
+      format('kept %s of %s stated combinations', cardinality(fact_sets), stated_total));
+  end if;
 end $$;
 
 create or replace function buyer_interest_sync_offer() returns trigger language plpgsql as $$
@@ -498,9 +589,23 @@ begin
   return null;
 end $$;
 
+-- Only the fields a line is built from. A note or a touch date change must not re-sync the line. Postgres refuses
+-- OLD in an INSERT trigger's WHEN, so insert and update are separate.
 drop trigger if exists buyer_interest_offer_sync on crm_bulk_offers;
-create trigger buyer_interest_offer_sync after insert or update on crm_bulk_offers
+drop trigger if exists buyer_interest_offer_sync_insert on crm_bulk_offers;
+drop trigger if exists buyer_interest_offer_sync_update on crm_bulk_offers;
+create trigger buyer_interest_offer_sync_insert after insert on crm_bulk_offers
   for each row execute function buyer_interest_sync_offer();
+create trigger buyer_interest_offer_sync_update after update on crm_bulk_offers
+  for each row when (new.stage is distinct from old.stage
+    or new.role is distinct from old.role
+    or new.company_id is distinct from old.company_id
+    or new.person_id is distinct from old.person_id
+    or new.terms is distinct from old.terms
+    or new.bulk_listing_id is distinct from old.bulk_listing_id
+    or new.declined_reason is distinct from old.declined_reason
+    or new.counterpart_id is distinct from old.counterpart_id)
+  execute function buyer_interest_sync_offer();
 
 do $$ begin
   insert into crm_data_migrations (id) values ('112_buyer_interest') on conflict do nothing;

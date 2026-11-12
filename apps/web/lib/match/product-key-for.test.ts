@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { broaderKeysFor, kwhKeyText, makeKey, packFamilyFor, productFactsFromKey, productKeyFor, productKeyLevel, productKeysFor } from "./product-key-for";
+import {
+  broaderKeysFor,
+  expandProductFacts,
+  kwhKeyText,
+  makeKey,
+  packFamilyFor,
+  productFactsFromKey,
+  productKeyFor,
+  productKeyLevel,
+  productKeysFor,
+} from "./product-key-for";
 
 describe("productKeyFor", () => {
   it("uses an OEM part number above every other fact", () => {
@@ -35,7 +45,10 @@ describe("productKeyFor", () => {
 
   it("does not guess a model key from a kWh range", () => {
     const key = productKeyFor({ make: "Hyundai", model: "Ioniq 5", kwhMin: 50, kwhMax: 60, format: "Packs" });
-    expect(key).toBe("broad:any-packs");
+    // The range is not a pack, but the stated make still scopes the bucket rather than being dropped.
+    expect(key).toBe("broad:hyundai-any-packs");
+    expect(broaderKeysFor({ make: "Hyundai", model: "Ioniq 5", kwhMin: 50, kwhMax: 60, format: "Packs" }))
+      .toEqual(["broad:hyundai-any-packs", "broad:any-packs"]);
     // An equal range is one figure, so it still names the pack.
     expect(productKeyFor({ make: "Nissan", model: "Leaf", kwhMin: 40, kwhMax: 40 })).toBe("pack:nissan-leaf-40kwh");
   });
@@ -54,7 +67,9 @@ describe("productKeyFor", () => {
 
   it("rolls a specific key up to every broader key it counts as", () => {
     const keys = broaderKeysFor({ make: "Vauxhall", model: "Corsa-e", chemistry: "NMC", format: "packs", kwh: 50 });
-    expect(keys).toEqual(["pack:stellantis-ecmp-50kwh", "model:vauxhall-corsae-50kwh", "broad:nmc-packs"]);
+    expect(keys).toEqual([
+      "pack:stellantis-ecmp-50kwh", "model:vauxhall-corsae-50kwh", "broad:vauxhall-nmc-packs", "broad:nmc-packs",
+    ]);
     const part = broaderKeysFor({ partNumbers: ["37501-Q4052"], make: "Kia", model: "Niro", kwh: 64.8, chemistry: "NMC", format: "packs" });
     expect(part[0]).toBe("part:37501Q4052");
     expect(part).toContain("pack:kia-niro-64kwh");
@@ -74,14 +89,51 @@ describe("productKeyFor", () => {
       .toBe("pack:vw-meb-77kwh");
   });
 
-  it("takes the facts from the supply parser's product key", () => {
+  it("takes the facts from the supply parser's product key, one fact set per product line", () => {
     const facts = productFactsFromKey({
       lines: [{ format: "Packs", chemistry: "NMC", kwh: 77.4, kwhMin: null, kwhMax: null, units: 10, partNumber: null,
         make: "Hyundai", makeGroup: "Hyundai or Kia", model: "Hyundai Ioniq 5", platform: "E-GMP", moduleSeries: null,
         unknown: { kwh: false, format: false, chemistry: false }, basis: "77.4 kWh per pack" }],
       partNumbers: [], chemistry: "NMC", format: "Packs",
     });
-    expect(productKeyFor(facts)).toBe("pack:hyundai-kia-egmp-77kwh");
+    expect(facts).toHaveLength(1);
+    expect(productKeyFor(facts[0])).toBe("pack:hyundai-kia-egmp-77kwh");
+
+    // Two product lines are two products: the second is not dropped.
+    const two = productFactsFromKey({
+      lines: [
+        { format: "Packs", chemistry: "NMC", kwh: 50, kwhMin: null, kwhMax: null, units: 4, partNumber: null,
+          make: "Vauxhall", makeGroup: null, model: "Corsa-e", platform: null, moduleSeries: null,
+          unknown: { kwh: false, format: false, chemistry: false }, basis: null },
+        { format: "Modules", chemistry: "LFP", kwh: null, kwhMin: null, kwhMax: null, units: 20, partNumber: null,
+          make: null, makeGroup: null, model: null, platform: null, moduleSeries: null,
+          unknown: { kwh: true, format: false, chemistry: false }, basis: null },
+      ],
+      partNumbers: [], chemistry: null, format: null,
+    });
+    expect(two.map(productKeyFor)).toEqual(["pack:stellantis-ecmp-50kwh", "broad:lfp-modules"]);
+  });
+
+  it("fans every stated make and chemistry out instead of keeping only the first", () => {
+    const { facts, stated } = expandProductFacts({
+      makes: ["Toyota or Lexus", "Stellantis"], chemistries: ["NMC", "LFP"], formats: ["Packs"], kwhMin: 50, kwhMax: 60,
+    });
+    expect(stated).toBe(4);
+    expect(facts.map(productKeyFor)).toEqual([
+      "broad:stellantis-lfp-packs",
+      "broad:stellantis-nmc-packs",
+      "broad:toyota-or-lexus-lfp-packs",
+      "broad:toyota-or-lexus-nmc-packs",
+    ]);
+  });
+
+  it("caps the fan-out and reports how many combinations the source stated", () => {
+    const makes = ["Toyota", "Stellantis", "Hyundai", "Kia", "BMW"];
+    const chemistries = ["NMC", "LFP", "NCA"];
+    const { facts, stated } = expandProductFacts({ makes, chemistries, formats: ["Packs"] });
+    expect(stated).toBe(15);
+    expect(facts).toHaveLength(12);
+    expect(new Set(facts.map(productKeyFor)).size).toBe(12);
   });
 
   it("reports the level of a key from its prefix", () => {
@@ -94,6 +146,12 @@ describe("productKeyFor", () => {
     expect(packFamilyFor({ make: "Kia", model: "e-Niro", kwh: 67.5 })?.id).toBe("kia-niro-64kwh");
     // A different capacity under the same model is not the family's pack.
     expect(packFamilyFor({ make: "Kia", model: "Niro", kwh: 39 })).toBeNull();
-    expect(packFamilyFor({ make: "Tesla", model: "Model 3", kwh: 78 })?.id).toBe("tesla-model3y-75kwh");
+    // Tesla 75/78/82 kWh are different packs by generation, so the list stays out of it and the key stops at model.
+    expect(packFamilyFor({ make: "Tesla", model: "Model 3", kwh: 78 })).toBeNull();
+    expect(productKeyFor({ make: "Tesla", model: "Model 3", kwh: 78, chemistry: "NMC", format: "Packs" }))
+      .toBe("model:tesla-model3-78kwh");
+    // The EV9 is a 99.8 kWh pack, not the 77 kWh E-GMP one.
+    expect(packFamilyFor({ make: "Kia", model: "EV9", kwh: 99.8 })).toBeNull();
+    expect(packFamilyFor({ make: "Kia", model: "EV6", kwh: 77.4 })?.id).toBe("hyundai-kia-egmp-77kwh");
   });
 });
