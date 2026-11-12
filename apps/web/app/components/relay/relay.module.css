@@ -406,6 +406,11 @@
 .cmiss .cval { color: var(--muted); }
 .cmiss > span:nth-child(2) { font-weight: 600; }
 .cwarn { color: var(--amber); }
+.citem { display: flex; flex-direction: column; gap: 1px; }
+.cstate { display: flex; gap: 10px; justify-content: flex-end; font-size: 11px; color: var(--ink2); }
+.cqual { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; font-size: 11.5px; border-top: 1px solid var(--line); padding-top: 6px; }
+.cqual > span { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.cqual .btn { padding: 5px 8px; font-size: 11px; }
 .cfoot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; }
 .cfoot .btn { padding: 5px 8px; font-size: 11px; }
 .dism { display: inline-flex; font-size: 11px; font-weight: 600; color: var(--ink2); background: var(--soft); border-radius: 6px; padding: 3px 6px; white-space: nowrap; border: 0; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }

@@ -628,3 +628,38 @@ def test_new_lead_is_urgent():
     assert rs.compute_priority({"tab": "action"}, msgs, ctx(contact_type="logistics", first_contact=True), NOW)[0] != "urgent"
     replied = [msg("outbound", 2, "Which packs?"), msgs[0]]
     assert rs.compute_priority({"tab": "action"}, replied, ctx(contact_type="supplier", first_contact=True), NOW)[0] != "urgent"
+
+
+# ---------- a deal's other contacts (migration 112) ----------
+
+class FakeCursor:
+    """Answers table_exists and returns the given rows for the listing query, recording the SQL it was sent."""
+    def __init__(self, rows, tables=("crm_bulk_listings", "crm_bulk_offers")):
+        self.rows, self.tables, self.sql, self._next = rows, set(tables), [], None
+
+    def execute(self, sql, params=None):
+        self.sql.append(sql)
+        self._next = [{"ok": params[0] in self.tables}] if "to_regclass" in sql else self.rows
+
+    def fetchone(self):
+        return self._next[0]
+
+    def fetchall(self):
+        return self._next
+
+
+def test_owned_listings_include_the_deals_other_contacts():
+    at = NOW - dt.timedelta(days=1)
+    row = {"id": "btd_1", "kind": "demand", "status": "open", "summary": "Kona packs", "quantity": "20 packs", "updated_at": at}
+    cur = FakeCursor([{**row, "email": "main@buyer.example"}, {**row, "email": "second@buyer.example"}])
+    owned = rs.load_owned_listings(cur)
+    assert "role = 'contact'" in cur.sql[-1]
+    assert [r["id"] for r in owned["second@buyer.example"]] == ["btd_1"]
+    # The second contact's email now links their thread to the same deal.
+    assert rs.choose_deal("second@buyer.example", "buyer", set(), "Re: Kona packs", owned)["bulk_listing_id"] == "btd_1"
+
+
+def test_owned_listings_without_the_offers_table_reads_listings_only():
+    cur = FakeCursor([], tables=("crm_bulk_listings",))
+    rs.load_owned_listings(cur)
+    assert "crm_bulk_offers" not in cur.sql[-1]

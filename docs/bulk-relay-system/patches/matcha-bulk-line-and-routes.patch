@@ -1,0 +1,96 @@
+--- a/profiles/matcha/skills/bulk-trade-development/references/intake.md	2026-11-12 12:38:52.822903890 +0000
++++ b/profiles/matcha/skills/bulk-trade-development/references/intake.md	2026-11-12 12:39:02.377888238 +0000
+@@ -6,17 +6,24 @@
+ 
+ Every deal is an email thread that includes supply@rebattery.io (sellers) or buy@rebattery.io (buyers). Both are send-as addresses on Alex's Gmail, so their mail reaches Relay within about 10 minutes. A founder CCs the right inbox on a direct email, forwards an old thread with one line, or sends a written recap after a call or WhatsApp. Website sourcing requests already email supply@.
+ 
+-Alex runs steps 1 to 6 in Relay. Sean takes the deal over at step 7: when the card is full and the deal is €20k or more, set `context.owner = 'Sean'`.
++Alex runs steps 1 to 6 in Relay. Sean takes the deal over at step 7: when the card is full and the deal is bulk, set `context.owner = 'Sean'`.
++
++## Bulk, route and qualified (Alex, 12 Nov 2026)
++
++- **Bulk** is 300 kWh or more, or a deal value over USD 20,000 (EUR at 1.16 and GBP at 1.34 to USD). Either is enough. When the facts do not settle it, the size is "unknown": ask, never guess. Relay's code holds the rule (`apps/web/lib/relay-front-door.ts`).
++- **Route.** Every lead gets one: a bulk deal; the marketplace (small: single packs; buyers also get a demand alert); Jules (medium: the guided listing or commercial buyer flow); or recycling. Relay stores it with a one-line reason on the lead card and on the listing (`route`, `route_reason`).
++- **A bulk lead's deal opens when Alex's first reply has gone**, from the card's facts (Relay does it; no job). A lead under the line opens none.
++- **Qualified**: every item on the route's checklist (resale or recycling) is answered or marked "they cannot provide it", a person checked each, and a person ticked Qualified. Price and when are asked for in both asks but the tick does not need them; the deal then shows "No price" / "No date". A deal opens on what and how many alone. Test or QC documents older than 12 months are flagged.
+ 
+ ## Steps 1 to 6
+ 
+ | # | Step | Who | What happens |
+ |---|---|---|---|
+ | 1 | Relay picks it up | Relay | The thread shows in Relay's Action tab. Relay replies as supply@ or buy@ when the thread is addressed to it. |
+-| 2 | Create the deal | Alex presses "Create deal", Matcha does it | Matcha creates the listing, fills the card from the email and attachments, links the thread as `proposed`. |
+-| 3 | Size check | Matcha, Alex can overrule | Value = how many × price, or an estimate (`creating-listings.md`). Under €20k Matcha creates nothing and says so; the reply points them to the marketplace or Jules. Alex can still ask for a bulk deal. |
+-| 4 | First reply | Relay drafts, Alex sends | Ask for every document they have, and list the must-haves. Within 2 working hours. |
+-| 5 | Their reply | Alex presses "Update deal from this reply", Matcha does it | Matcha reads the reply and attachments, fills the card, files documents with their dates, lists the gaps. |
++| 2 | Size and route | Relay, Alex can overrule on the card | Bulk is 300 kWh or more, or over USD 20,000; unknown means ask. Under the line the reply points them to the marketplace or Jules. Alex can still make it a bulk deal. |
++| 3 | First reply | Relay drafts, Alex sends | Ask for every document they have, and list the must-haves, price and when included. Within 2 working hours. |
++| 4 | The deal opens | Relay, once the first reply has gone | From the lead card's facts, linked to the thread, owner Alex, next action set. Undo inside the hold opens nothing. Without a card, Alex presses "Create deal" and Matcha does it. |
++| 5 | Their reply | Relay queues "Update deal from this reply" by itself, Matcha does it | Matcha reads the reply and attachments, fills the card, files documents with their dates, lists the gaps. |
+ | 6 | Second reply | Relay drafts, Alex sends | Only the gaps. After two emails still missing a tier 1 fact: propose parking it with a reason. |
+ 
+ ## The card
+@@ -43,12 +50,12 @@
+ 
+ ### Seller, EV packs
+ 1. Who (name, company, email); what exactly (make, model, kWh: Leaf 40 and Leaf 62 are different products); how many.
+-2. Asking price with unit; where they are; health (a reading per pack, or a clear "untested"); when they need them gone.
++2. Asking price with unit; where they are; health (a reading per pack, or a clear "untested"); "When do you need it gone by?" (`clear_by`).
+ 3. Health list with tag or VIN; test report and its date; label and condition photos; in the car or out, any damage; whole lot or split; do they own it or sell for someone.
+ 4. More each month; where they sell today; WhatsApp or email; OK to list publicly.
+ 
+ ### Seller, a dismantler with one or a few packs
+-Not a bulk deal, even when it answers our request for a buyer. Their packs go through their channel (`crm_dismantlers.stock_phase`): `marketplace` lists them on their own account, `stock_only` adds them to the stock list they send us, `none` is pointed to onboarding. Never quote blind: ask for health readings, photos and their asking price. Relay links an email only to the sender's own deal by itself. When a supplier quotes against a buyer's request, Alex ties the thread to that deal with Relay's "Link to deal"; "Update deal from this reply" then records the quote as the supplier's offer on that deal and never edits the buyer's card. A real lot from a dismantler (about 10 packs or €20k and up) can still be a bulk deal. Alex writes the reply from his note.
++Not a bulk deal, even when it answers our request for a buyer. Their packs go through their channel (`crm_dismantlers.stock_phase`): `marketplace` lists them on their own account, `stock_only` adds them to the stock list they send us, `none` is pointed to onboarding. Never quote blind: ask for health readings, photos and their asking price. Relay links an email only to the sender's own deal by itself. When a supplier quotes against a buyer's request, Alex ties the thread to that deal with Relay's "Link to deal"; "Update deal from this reply" then records the quote as the supplier's offer on that deal and never edits the buyer's card. A real lot from a dismantler (300 kWh or more, or over USD 20,000) can still be a bulk deal. Alex writes the reply from his note.
+ 
+ ### Seller, cells or modules
+ 1. Who, and who owns the stock (advisers relay other people's); maker, model and chemistry from the label; how many, and of what: cells, modules or packs.
+@@ -62,7 +69,7 @@
+ 3. Minimum health; tests they need; alternatives ranked; technical limits (voltage, size, minimum kWh); mix rules; payment and who collects.
+ 4. What they build; volumes for 12 months and 5 years; where they buy today; who decides.
+ 
+-### Buyer, small (under €20k, about 1 to 9 packs)
++### Buyer, small (under the bulk line: under 300 kWh and at most USD 20,000)
+ No bulk listing. One reply: links to matching marketplace listings and a demand alert with their max price, Jules for a few packs. A founder can still make a strategic account a bulk deal.
+ 
+ ### Came in through a form (Jules or the website)
+@@ -88,7 +95,7 @@
+ **Create deal.**
+ 1. Classify: seller (supply) or buyer (demand); the case from the sections above.
+ 2. Check it is new: an open listing for the same company and product means update that one instead (`adding-listings.md`). Never count stock twice (`CRM-TABLES.md`).
+-3. Size it. Under €20k, or one to a few units: do not create a listing; report `"action": "none"` and the marketplace route.
++3. Size it: bulk is 300 kWh or more, or over USD 20,000. Under the line: do not create a listing; report `"action": "none"` and the route (marketplace for single packs, Jules for more). When the email does not settle the size, report `"size": "unknown"` and still create the deal if it gives what and how many.
+ 4. Otherwise create it per `RECIPE.md` step 2 and `creating-listings.md`: party, an existing company and person if the CRM has them (never create a company or person in this job; note that one is needed), the listing's `email` set to the sender's address, title, the card, location, health facts with source and date, `next_action`, `next_due`, `waiting_on`, one Story row, and the thread linked in `crm_bulk_thread_links` as `proposed`.
+ 
+ **Update deal from this reply.**
+@@ -97,7 +104,7 @@
+ 3. File documents per `documents.md` and note each document's date ("test report dated March 2023").
+ 4. Set `next_action` to the second reply's ask, or to step 7 when the card is full. Not for a supplier answering a buyer's request: leave the buyer's `next_action`, `next_due`, `waiting_on` and owner alone, put the next step in `next`, and report as `gaps` only what their offer still lacks (quantity, price with unit, valid-until).
+ 
+-**Both.** When the sender is the listing's own party, the card is full and the value is €20k or more, set `context.owner = 'Sean'` with `context = context || jsonb_build_object('owner', 'Sean')` and a Story row. Never send, draft or edit email; Relay drafts. Never close, merge or move an offer stage without a person's yes. Finish with only this JSON:
++**Both.** When the sender is the listing's own party, the card is full and the deal is bulk, set `context.owner = 'Sean'` with `context = context || jsonb_build_object('owner', 'Sean')` and a Story row. Never send, draft or edit email; Relay drafts. Never close, merge or move an offer stage without a person's yes. Finish with only this JSON:
+ 
+ ```json
+ {"action": "created" | "updated" | "none", "listing_id": "btd_… or null", "kind": "supply" | "demand" | null,
+--- a/profiles/matcha/skills/bulk-trade-development/references/creating-listings.md	2026-11-12 12:38:52.827903882 +0000
++++ b/profiles/matcha/skills/bulk-trade-development/references/creating-listings.md	2026-11-12 12:38:52.853903839 +0000
+@@ -130,7 +130,7 @@
+ - **Main contact.** `crm_bulk_listings.person_id` is the seller or buyer contact shown on the listing, and it should equal the `contact` offer of whoever actually does the talking. Judge from the mail, not the card: count inbound senders at the company across the linked threads (`mail_message.from_email` joined through `mail_thread` on `id` or `gmail_thread_id`, filtered to the linked `thread_id`s). Someone who is only ever copied is not the main contact. Update `person_id` (the `email` column usually already shows the right person), keep the others as `contact` offers, and add a `status` Story row with the counts.
+ - **Fresh inbound beats stored last touch.** Before reporting `waiting_on` or a stage, read the newest message of each live counterparty's linked WhatsApp and mail threads (`rebattery-whatsapp.py thread <id> --limit 200`, messages carry `occurred_at`, `direction`, `body`). A reply can post-date every CRM field; log it as a Story row with its `source_ref`, refresh `last_touch_on/via`, and propose (never apply) `declined`/`lost` when it reads as a pass. A `waiting_since` equal to today on an untouched offer is a reconciler artifact, not evidence.
+ 
+-Triage tiny or stale demand in the same pass and propose, never apply, unless the user has stated a rule or said to remove them (then apply the rule to every match, name the ones closed, and offer to reopen): marketplace self-serve for one-to-few units from anonymous requests or old surveys (`closed_reason` `not_a_fit`), fulfilled batches (`no_longer_needed` or `bought_elsewhere`), duplicates (`duplicate`). Keep small rows that belong to a live buyer relationship and real senders whose size or price is unknown, and ask about those. Before closing, check for active offers and recent contact. Demand closes through the `crm_bulk_demand` view, supply through `crm_bulk_listings`; add one `note` Story row per listing naming the rule, and read back status, reason and the remaining live count. The founders' standing supply floor is a total stock value of EUR 20,000.
++Triage tiny or stale demand in the same pass and propose, never apply, unless the user has stated a rule or said to remove them (then apply the rule to every match, name the ones closed, and offer to reopen): marketplace self-serve for one-to-few units from anonymous requests or old surveys (`closed_reason` `not_a_fit`), fulfilled batches (`no_longer_needed` or `bought_elsewhere`), duplicates (`duplicate`). Keep small rows that belong to a live buyer relationship and real senders whose size or price is unknown, and ask about those. Before closing, check for active offers and recent contact. Demand closes through the `crm_bulk_demand` view, supply through `crm_bulk_listings`; add one `note` Story row per listing naming the rule, and read back status, reason and the remaining live count. The founders' standing floor is the bulk line: 300 kWh or more, or a deal value over USD 20,000 (Alex, 12 Nov 2026).
+ 
+ Only an explicit instruction or a stated rule counts as a yes to close: agreeing with your proposal list, saying "go with the smaller ones first" or asking for a sort view does not. A close on a loose reading has to be reversed (reopen to the prior status, clear `closed_reason`, delete your own notes that claim an instruction), so when the wording is ambiguous do the unambiguous parts and ask which rows to close.
+ 
+--- a/profiles/matcha/RECIPE.md	2026-11-12 12:38:52.831903876 +0000
++++ b/profiles/matcha/RECIPE.md	2026-11-12 12:38:52.854903838 +0000
+@@ -85,7 +85,7 @@
+ | Rename a title a person wrote by hand | |
+ | Mark a document `sent` or `signed` | |
+ 
+-Do without asking, because it is the job and easy to reverse: set `context.owner = 'Sean'` once a deal's card is full and it is worth €20k or more (Alex, 7 Nov), add a listing you were asked for, fill facts and Story rows from sources you read, save matches, add `candidate` offers, record links as `proposed`, write `draft` documents, set `next_action` and `next_due`, tidy a title you created. Say what you did.
++Do without asking, because it is the job and easy to reverse: set `context.owner = 'Sean'` once a deal's card is full and it is bulk: 300 kWh or more, or over USD 20,000 (Alex, 12 Nov), add a listing you were asked for, fill facts and Story rows from sources you read, save matches, add `candidate` offers, record links as `proposed`, write `draft` documents, set `next_action` and `next_due`, tidy a title you created. Say what you did.
+ 
+ ## Every write
+ 

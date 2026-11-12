@@ -7,6 +7,8 @@ import { ownText } from "./relay-context-core";
 import { isPersonalDomain, replyIdentity, type ReplyIdentity } from "./relay-identity";
 import { readMailDraft } from "./crm-postgres/mail";
 import { UNDO_SEND_SECONDS } from "./relay-send-time";
+import { routeLead } from "./relay-front-door";
+import { settleSentCards } from "./relay-deal";
 import { assembleLead, checkLeadReply, cleanAnswer, cleanLeadState, EMPTY_STATE, FACT_KEYS, leadFirstName, questionId, quoteIn, REGIONS, verifyLead, verifyPolish,
   type LeadData, type LeadSide, type LeadState } from "./relay-lead-core";
 
@@ -18,6 +20,9 @@ import { assembleLead, checkLeadReply, cleanAnswer, cleanLeadState, EMPTY_STATE,
  * model's only job is `readLead`: the email into facts and questions, each kept only when its quote is in the email.
  * The reply itself is put together by `assembleLead` from fixed parts and Alex's own answers. Only when he asks
  * ("Add & polish") does the model word one of those answers, from the gist he typed (`polishLeadAnswer`).
+ *
+ * Each card carries its route (relay-front-door.ts): a bulk or recycling lead's reply asks for the checklist, a small
+ * or medium one's points them to the marketplace or Jules. When a bulk reply has gone, relay-deal.ts opens the deal.
  */
 
 export type LeadWho = { name: string; company: string | null; email: string; at: string };
@@ -86,6 +91,8 @@ async function logChoices(card: { id: string; item_id: string }, ownerId: string
 /** The lead cards to work through, newest email first, and Alex's saved answers. Asking for the list is also what gets
  * new emails read: up to MAX_PREPARING at a time, in the background; the page asks again while any is preparing. */
 export async function listLeadCards(owner: Owner): Promise<LeadCards> {
+  // Cards whose reply has gone are settled first: a bulk lead's deal opens now (relay-deal.ts).
+  await settleSentCards(owner.id).catch((error) => console.error("relay lead cards: sent cards", error));
   // A card whose send was undone in Review, or whose draft was dropped there, is a card again. A card with no draft yet
   // is in the middle of its own Send and is left alone, unless that Send died and left it there.
   await queryPg(
@@ -148,12 +155,15 @@ Return only a JSON object:
  "role": "owner" | "broker" | "unknown",
  "role_quote": "the words that show the role, or null",
  "summary": "one plain sentence under 22 words: what they have or need, and where",
+ "recycling": true | false,
+ "recycling_quote": "the words that make it a recycling lead, or null",
  "facts": [{"key": "...", "value": "...", "quote": "..."}],
  "asked": [{"topic": "...", "region": "... or null", "quote": "..."}],
  "other_questions": [{"quote": "..."}]}
 
 kind: seller_lead when the sender offers batteries for sale or wants them taken away; buyer_lead when the sender wants to buy batteries; other for anything else (someone selling us a service, a newsletter, an order already under way, a job application, a reply to something we sent, or an email too unclear to tell).
 lot: bulk for a trade lot (roughly ten units or more, a pallet, 50 kWh and up, or a company with ongoing volume); small for one or a few units for personal use; unclear when the email does not say.
+recycling: true when the sender wants batteries recycled or disposed of, or describes them as scrap, waste, end of life, or damaged beyond reuse; false otherwise.
 role (sellers only): owner when the sender says the stock is theirs or their company's; broker when they say they act for the owner or a client; unknown otherwise.
 facts: only these keys, at most one of each, and only when the email or an attached file states it:
 ${Object.entries(FACT_KEYS).map(([key, what]) => `- ${key}: ${what}`).join("\n")}
@@ -204,7 +214,7 @@ export async function buildLead(item: Pick<RelayItem, "id" | "contact_type" | "c
 
   const { reading, company } = await readLead({ from: newest.from_header || sender, subject: newest.subject ?? "", text, files: files.map((a) => a.filename ?? ""), attached });
   if (reading.kind === "other") return { status: "not_lead", why: reading.why || "Not a new seller or buyer lead." };
-  if (reading.lot === "small") return { status: "not_lead", why: reading.why || "A small lot, not a trade lead." };
+  // A small lot is still a lead: its route points it to the marketplace or Jules (Alex, 12 Nov 2026).
 
   const side: LeadSide = reading.kind === "seller_lead" ? "seller" : "buyer";
   const have = new Set(reading.facts.map((f) => f.key));
@@ -217,6 +227,7 @@ export async function buildLead(item: Pick<RelayItem, "id" | "contact_type" | "c
     summary: reading.summary ?? item.headline ?? "", facts: reading.facts, asked: reading.asked, other: reading.other, have: [...have],
     sent: !files.length ? null : files.every((a) => IMAGE.test(a.mediaType ?? "")) ? "photos" : "files", deal: !!item.bulk_listing_id,
     email: { subject: newest.subject ?? "", text: text.slice(0, 8000), at: newest.at_iso, files: files.map((a) => a.filename ?? "") },
+    route: routeLead({ facts: reading.facts, recycling: reading.recycling }), recycling: reading.recycling,
   };
   const who: LeadWho = { name: fromName || sender, company: company ?? item.company, email: sender, at: newest.at_iso };
   return { status: "ready", stored: { lead, who, identity: replyIdentity(messages, item.contact_type) } };

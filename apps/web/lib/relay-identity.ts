@@ -39,7 +39,13 @@ export function ownsDeal(ownerEmail: string | null | undefined, counterpartEmail
   return !!domain && domain === domainOf(other) && !isBundledPersonalDomain(domain) && !MORE_PERSONAL.has(domain);
 }
 
-type DealRow = Record<string, unknown> & { owner_email?: string | null };
+/** True when the person on the thread is one of the deal's own people: its main contact or another contact on it
+ * (crm_bulk_offers role 'contact'), by address or company domain as `ownsDeal`. */
+export function ownsDealAny(ownerEmails: (string | null | undefined)[], counterpartEmail: string | null | undefined): boolean {
+  return ownerEmails.some((owner) => ownsDeal(owner, counterpartEmail));
+}
+
+type DealRow = Record<string, unknown> & { owner_email?: string | null; owner_emails?: string[] | null };
 
 const OWNER_NOTE = "Private to this deal's owner: never put their name, price, budget, notes or site into an email to anyone else, including follow-on emails.";
 
@@ -47,9 +53,9 @@ const OWNER_NOTE = "Private to this deal's owner: never put their name, price, b
  * buyer's request) sees only the listing title, quantity and kind: never the summary or notes, which can carry the
  * buyer's price, site or people. */
 export function dealSummaryText(row: DealRow, counterpartEmail: string | null | undefined): string {
-  if (ownsDeal(row.owner_email, counterpartEmail)) {
+  if (ownsDealAny([row.owner_email, ...(Array.isArray(row.owner_emails) ? row.owner_emails : [])], counterpartEmail)) {
     const keep = Object.entries(row)
-      .filter(([key, value]) => key !== "owner_email" && value !== null && value !== "" && !/(_at|_id|^id|match_hash)$/.test(key) && !(value instanceof Date))
+      .filter(([key, value]) => key !== "owner_email" && key !== "owner_emails" && value !== null && value !== "" && !/(_at|_id|^id|match_hash)$/.test(key) && !(value instanceof Date))
       .slice(0, 40);
     return [OWNER_NOTE, ...keep.map(([key, value]) => `${key}: ${(typeof value === "object" ? JSON.stringify(value) : String(value)).slice(0, 400)}`)].join("\n");
   }
@@ -94,6 +100,6 @@ export function suggestDealAction(
 
 /** A deal Matcha names may be linked to the email only when it is this email's deal already, the thread is tagged with it,
  * or the person writing owns it. A made-up or someone else's listing is refused. */
-export function dealResultFits(d: { listingId: string; currentListingId: string | null; threadLinked: boolean; ownerEmail: string | null; counterpartEmail: string | null }): boolean {
-  return d.listingId === d.currentListingId || d.threadLinked || ownsDeal(d.ownerEmail, d.counterpartEmail);
+export function dealResultFits(d: { listingId: string; currentListingId: string | null; threadLinked: boolean; ownerEmail: string | null; contactEmails?: string[]; counterpartEmail: string | null }): boolean {
+  return d.listingId === d.currentListingId || d.threadLinked || ownsDealAny([d.ownerEmail, ...(d.contactEmails ?? [])], d.counterpartEmail);
 }

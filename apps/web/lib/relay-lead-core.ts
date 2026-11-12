@@ -4,7 +4,10 @@
  * the close. The model only reads their email into facts and questions, and `verifyLead` keeps a fact or a question
  * only when its quote is found in the email. The one exception is asked for by Alex: "Add & polish" writes the gist he
  * typed out in full, and `verifyPolish` keeps it only when it adds no figure he did not give.
- * The ask list follows Matcha's intake reference (the bulk deal playbook). */
+ * The ask list follows Matcha's intake reference (the bulk deal playbook). Which reply a lead gets follows its route
+ * (relay-front-door.ts): a bulk or recycling lead is asked for the route's checklist; a small or medium one is pointed
+ * to the marketplace or Jules in fixed words. */
+import { chooseRoute, POINTERS, ROUTE_LABEL, ROUTES, type LeadRoute, type RouteKey } from "./relay-front-door";
 
 export type LeadSide = "seller" | "buyer";
 export type LeadUnit = "cells" | "modules" | "packs";
@@ -31,11 +34,16 @@ export type LeadData = {
   sent: "photos" | "files" | null;
   deal: boolean;
   email: LeadEmail;
+  /** Relay's suggested route and why (relay-front-door routeLead). Cards prepared before routes have none: bulk. */
+  route?: LeadRoute;
+  /** Their words that make it a recycling lead, when they do. */
+  recycling?: string | null;
 };
 
 /** text null: Alex chose to leave the question out of this reply. polished: the wording is Relay's, from his gist. */
 export type LeadPick = { text: string | null; remember?: boolean; polished?: boolean };
-export type LeadState = { off: string[]; picks: Record<string, LeadPick>; reopened: string[] };
+/** route: the route Alex picked on the card, when he changed Relay's suggestion. */
+export type LeadState = { off: string[]; picks: Record<string, LeadPick>; reopened: string[]; route?: RouteKey };
 export const EMPTY_STATE: LeadState = { off: [], picks: {}, reopened: [] };
 
 export type LeadAsk = { key: string; label: string; on: boolean; card: boolean };
@@ -53,15 +61,29 @@ export type LeadReply = {
   open: string[];
   asks: LeadAsk[];
   cover: { text: string; tone: "ok" | "warn" };
+  /** The route this reply is written for: Relay's suggestion, or Alex's pick. */
+  route: LeadRoute;
 };
 
 type AskDef = { key: string; label: string; bullet?: string; doc?: string; card?: boolean };
 
 const ONE: Record<LeadUnit, string> = { cells: "cell", modules: "module", packs: "pack" };
 
-/** What a first reply asks for, in order. `card` marks the facts the deal cannot go to the other side without. */
-export function asksFor(side: LeadSide, unit: LeadUnit, role: LeadRole): AskDef[] {
+/** What a first reply asks for, in order. `card` marks the facts the deal cannot go to the other side without. Price
+ * and when are on every list (Alex, 12 Nov 2026). A recycling lead gets the recycling list. */
+export function asksFor(side: LeadSide, unit: LeadUnit, role: LeadRole, route: RouteKey = "bulk"): AskDef[] {
   const one = ONE[unit];
+  if (route === "recycling" && side === "seller") {
+    return [
+      { key: "what", label: "Chemistry, format", bullet: "The chemistry and format: cells, modules or packs, and their make if known", card: true },
+      { key: "how_many", label: "Quantity", bullet: "How many there are, or their total weight", card: true },
+      { key: "condition", label: "Condition", bullet: "Their condition: damaged, swollen or leaking, or end of life but intact", card: true },
+      { key: "where", label: "Location", bullet: "Where they are", card: true },
+      { key: "price", label: "Price", bullet: "Any price you have in mind, and per what (kg, pack or the lot)", card: true },
+      { key: "when", label: "Clear-by date", bullet: "When do you need them gone by?", card: true },
+      { key: "docs", label: "Photos", doc: "photos of the labels and of their condition" },
+    ];
+  }
   if (side === "buyer") {
     return [
       { key: "what", label: "What they need", bullet: "What you need: maker, model or chemistry", card: true },
@@ -82,7 +104,7 @@ export function asksFor(side: LeadSide, unit: LeadUnit, role: LeadRole): AskDef[
       { key: "price", label: "Price", bullet: price, card: true },
       { key: "where", label: "Location", bullet: "Where they are", card: true },
       { key: "health", label: "Health per pack", bullet: "A health reading per pack, or which ones are untested", card: true },
-      { key: "when", label: "Clear-by date", bullet: "When they need to go", card: true },
+      { key: "when", label: "Clear-by date", bullet: "When do you need them gone by?", card: true },
       { key: "state", label: "In the car or out", bullet: "Whether they are in the car or out, and any damage" },
       { key: "docs", label: "Health list, photos", doc: "the health list with tag or VIN, and photos of the labels" },
     ];
@@ -94,7 +116,7 @@ export function asksFor(side: LeadSide, unit: LeadUnit, role: LeadRole): AskDef[
     { key: "price", label: "Price", bullet: price, card: true },
     { key: "where", label: "Location", bullet: "Where they are", card: true },
     { key: "health", label: `Health per ${one}`, bullet: `Health per ${one}, or which ones are untested`, card: true },
-    { key: "when", label: "Clear-by date", bullet: "When the lot needs to be cleared", card: true },
+    { key: "when", label: "Clear-by date", bullet: "When do you need the lot gone by?", card: true },
     { key: "storage", label: "Storage", bullet: "How they have been stored, and their charge level" },
     { key: "un38", label: "UN38.3", bullet: "The UN38.3 summary, and how they will be packed" },
     { key: "docs", label: "Datasheet, tests", doc: "the datasheet and any test reports with their dates" },
@@ -232,7 +254,9 @@ export function leadFirstName(fromName: string | null | undefined, fromEmail: st
 }
 
 export type LeadReading = { kind: "seller_lead" | "buyer_lead" | "other"; lot: "bulk" | "small" | "unclear"; why: string; unit: LeadUnit; role: LeadRole;
-  summary: string | null; facts: LeadFact[]; asked: LeadAsked[]; other: LeadOther[] };
+  summary: string | null; facts: LeadFact[]; asked: LeadAsked[]; other: LeadOther[];
+  /** Their words that make it a recycling lead (scrap, end of life, damaged, disposal), kept only when found in the email. */
+  recycling: string | null };
 
 const str = (v: unknown, max = 200) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
 const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === "object") : []);
@@ -268,8 +292,9 @@ export function verifyLead(raw: Record<string, unknown>, email: string, attached
   const other = [...asked.filter((a) => !fits(a.topic)), ...list(raw.other_questions).filter((q) => quoteIn(q.quote, email) && str(q.quote, 300).length >= 8).slice(0, 4)]
     .map((q) => str(q.quote, 300)).filter((quote) => !quotes.has(quote) && !!quotes.add(quote)).map((quote, i) => ({ id: `other:${i + 1}`, quote }));
   const summary = str(raw.summary, 160);
+  const recycling = raw.recycling === true && quoteIn(raw.recycling_quote, all) ? str(raw.recycling_quote, 160) : null;
   return { kind, lot: raw.lot === "bulk" || raw.lot === "small" ? raw.lot : "unclear", why: str(raw.why, 120), unit, role,
-    summary: summary && numbersKnown(summary, all) ? summary : null, facts, asked: asked.filter((a) => fits(a.topic)), other };
+    summary: summary && numbersKnown(summary, all) ? summary : null, facts, asked: asked.filter((a) => fits(a.topic)), other, recycling };
 }
 
 /** The facts for the "We have" row, most telling first. */
@@ -308,7 +333,8 @@ export function verifyPolish(raw: unknown, gist: string, emailText: string): str
  * server both pass choices through this, so the reply he sees is the reply that is saved. */
 export function cleanLeadState(input: unknown, data: LeadData): LeadState {
   const raw = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
-  const asks = new Set(asksFor(data.side, data.unit, data.role).map((a) => a.key));
+  const route = typeof raw.route === "string" && (ROUTES as readonly string[]).includes(raw.route) ? raw.route as RouteKey : undefined;
+  const asks = new Set(asksFor(data.side, data.unit, data.role, route ?? data.route?.route).map((a) => a.key));
   const ids = new Set([...data.asked.map(questionId), ...data.other.map((o) => o.id)]);
   const keys = (v: unknown, allowed: Set<string>) => [...new Set(Array.isArray(v) ? v.filter((k): k is string => typeof k === "string" && allowed.has(k)) : [])];
   const picks: Record<string, LeadPick> = {};
@@ -318,8 +344,13 @@ export function cleanLeadState(input: unknown, data: LeadData): LeadState {
     const text = (typeof p.text === "string" && cleanAnswer(p.text)) || null;
     picks[id] = { text, remember: p.remember === true, ...(text && p.polished === true ? { polished: true } : {}) };
   }
-  return { off: keys(raw.off, asks), picks, reopened: keys(raw.reopened, ids) };
+  return { off: keys(raw.off, asks), picks, reopened: keys(raw.reopened, ids), ...(route && route !== suggestedRoute(data).route ? { route } : {}) };
 }
+
+/** Relay's suggestion for the card; a card prepared before routes existed is a bulk lead, as it was then. */
+export const suggestedRoute = (data: LeadData): LeadRoute => data.route ?? { route: "bulk", size: "unknown", reason: "Prepared before routes" };
+/** The route the reply is written for: Alex's pick on the card, else Relay's suggestion. */
+export const leadRoute = (data: LeadData, state: Pick<LeadState, "route">): LeadRoute => chooseRoute(suggestedRoute(data), state.route);
 
 const join = (labels: string[]) => labels.join(", ");
 
@@ -369,8 +400,12 @@ export function assembleLead(data: LeadData, state: LeadState, answers: Record<s
   para(...topic("collection"));
   for (const q of data.other) para(resolve(q.id, `${name} asked:`, q.quote, [], false));
 
+  const route = leadRoute(data, state);
+  const pointer = POINTERS[data.side][route.route];
+  if (pointer) para({ text: pointer });
   const have = new Set(data.have);
-  const missing = asksFor(data.side, data.unit, data.role).filter((a) => !have.has(a.key));
+  // A small or medium lead is pointed elsewhere: its reply asks for nothing.
+  const missing = pointer ? [] : asksFor(data.side, data.unit, data.role, route.route).filter((a) => !have.has(a.key));
   const asks = missing.map((a) => ({ key: a.key, label: a.label, on: !off.has(a.key), card: !!a.card }));
   const on = missing.filter((a) => !off.has(a.key));
   const bullets = on.flatMap((a) => (a.bullet ? [a.bullet] : []));
@@ -382,14 +417,15 @@ export function assembleLead(data: LeadData, state: LeadState, answers: Record<s
   para({ text: "Best,\nAlex" });
 
   const dropped = asks.filter((a) => !a.on), droppedCard = dropped.filter((a) => a.card);
-  const cover: LeadReply["cover"] = !missing.length ? { text: "✓ They sent everything the deal card needs", tone: "ok" }
+  const cover: LeadReply["cover"] = pointer ? { text: `✓ Pointing them to ${ROUTE_LABEL[route.route]}: no deal for a lead this size`, tone: "ok" }
+    : !missing.length ? { text: "✓ They sent everything the deal card needs", tone: "ok" }
     : droppedCard.length ? { text: `! Not asking ${join(droppedCard.map((a) => a.label.toLowerCase()))}: the deal can't go to ${data.side === "seller" ? "buyers" : "sellers"} without it`, tone: "warn" }
     : dropped.length ? { text: `✓ Deal card covered · not asking ${join(dropped.map((a) => a.label))}`, tone: "ok" }
     : { text: "✓ Nothing missing for the deal card is left unasked", tone: "ok" };
 
   const body = blocks.flatMap((b) => (b.kind === "para" ? [b.spans.map((s) => s.text).join(" ")]
     : b.kind === "asks" ? [[b.intro, ...b.bullets.map((x) => `- ${x}`)].join("\n")] : [])).join("\n\n");
-  return { blocks, body, open, asks, cover };
+  return { blocks, body, open, asks, cover, route };
 }
 
 /**

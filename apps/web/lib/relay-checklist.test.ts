@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { askInstruction, askLabel, buildChecklist, missingInstruction, type ChecklistListing } from "./relay-checklist";
+import { askInstruction, askKeys, askLabel, buildChecklist, missingInstruction, type ChecklistListing } from "./relay-checklist";
 
 const now = new Date("2026-11-07T12:00:00Z");
 const supply: ChecklistListing = {
@@ -27,7 +27,7 @@ describe("buildChecklist for a seller", () => {
   it("dates the test report, flags it as old and counts photos", () => {
     const test = c.helpful.find((i) => i.key === "test_report")!;
     expect(test.value).toBe("Dated March 2024");
-    expect(test.warn).toBe("over a year old");
+    expect(test.warn).toBe("over 12 months old");
     expect(c.helpful.find((i) => i.key === "photos")!.value).toBe("2 on file");
   });
   it("uses hand ticks only for facts the CRM has no field for", () => {
@@ -39,7 +39,7 @@ describe("buildChecklist for a seller", () => {
   it("turns the gaps into one instruction for Relay AI, including what to confirm", () => {
     const text = missingInstruction(c)!;
     expect(text).toContain("Ask them for, or to confirm, what we still need: price, what (kWh not stated), health (unverified).");
-    expect(text).toContain("test report (over a year old)");
+    expect(text).toContain("test report (over 12 months old)");
     expect(text).toContain("health per pack with tag");
     expect(text).not.toContain("whole lot or split");
   });
@@ -110,5 +110,43 @@ describe("askInstruction", () => {
     const buyer = buildChecklist({ ...supply, kind: "demand", quantity: null, location: null, context: {}, product_family: "Zoe packs" }, [], [], now);
     expect(askInstruction(buyer)).toContain("their spec sheet");
     expect(askLabel(buyer)).toBe("Draft the ask: first ask, everything they have");
+  });
+});
+
+describe("checklist state for Qualified", () => {
+  const checked = { checked_by: "alex@rebattery.io", checked_at: "2026-11-12T10:00:00Z" };
+  const fields = [
+    { field_key: "model", value: "Nissan Leaf 40kWh", status: "confirmed", ...checked },
+    { field_key: "quantity", value: null, status: "missing", ...checked },
+    { field_key: "location", value: null, status: "missing", ...checked },
+    { field_key: "soh", value: null, status: "missing", cannot_provide: true, ...checked },
+    { field_key: "seller_price", value: null, status: "missing", asked_count: 2, asked_at: "2026-11-10T10:00:00Z" },
+  ];
+
+  it("carries each required item's asks, checks and cannot-provide, and the Qualified rule", () => {
+    const c = buildChecklist({ ...supply, qualified_at: "2026-11-12T11:00:00Z", qualified_by: "alex@rebattery.io" }, fields, [], now);
+    expect(c.required.find((i) => i.key === "price")).toMatchObject({ have: false, asked: 2, forTick: false, checkedAt: null });
+    expect(c.required.find((i) => i.key === "health")).toMatchObject({ have: false, cannot: true, forTick: true });
+    expect(c.qualify).toMatchObject({ qualified: true, ready: true, noPrice: true, noDate: true, by: "alex@rebattery.io" });
+    expect(c.asked).toBe(true);
+  });
+
+  it("asks only for the gaps once something was asked, never for what they cannot provide", () => {
+    const c = buildChecklist(supply, fields, [], now);
+    expect(c.qualify?.qualified).toBe(false);
+    expect(askLabel(c)).not.toMatch(/first ask/);
+    expect(askKeys(c)).toEqual(["what", "price", "when"]);
+  });
+
+  it("keeps Qualified on a listing the old rule qualified", () => {
+    const c = buildChecklist({ ...supply, qualified_at: "2026-11-12T00:00:00Z", qualified_by: "before migration 112" }, [], [], now);
+    expect(c.qualify?.qualified).toBe(true);
+  });
+
+  it("uses the recycling list on a recycling deal", () => {
+    const c = buildChecklist({ ...supply, route: "recycling" }, [{ field_key: "condition", value: "Swollen", status: "unverified" }], [], now);
+    expect(c.route).toBe("recycling");
+    expect(c.required.map((i) => i.key)).toEqual(["what", "how_many", "condition", "where", "price", "when"]);
+    expect(c.required.find((i) => i.key === "condition")?.have).toBe(true);
   });
 });

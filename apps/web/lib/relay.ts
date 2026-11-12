@@ -14,13 +14,15 @@ import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 import { sendAtProblem, UNDO_SEND_SECONDS } from "./relay-send-time";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
-import { dealResultFits, dealSummaryText, isPersonalDomain, ownsDeal, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
+import { dealResultFits, dealSummaryText, isPersonalDomain, ownsDealAny, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
 import { SENDERS, senderRefusal, type SenderKey } from "./relay-senders";
 import { contextPack, HAS_FILES_SQL } from "./relay-context";
 import { knownBackground, NO_PACK, SINCE_NOTE, sinceFrom, stripQuoted, type Pack, type PackSource } from "./relay-context-core";
 import { julesReplies } from "./relay-jules";
 import type { JulesReply } from "./relay-jules-core";
-import { askInstruction, askLabel, buildChecklist, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
+import { askInstruction, askKeys, askLabel, buildChecklist, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
+import { closeUnfitListing, DEAL_NOTE, JOB_STALE_MINUTES, queueReplyUpdates, recordSentAsks, setCheckState, setQualifiedTick, settleSentCards } from "./relay-deal";
+import { BULK_RULE_TEXT } from "./relay-front-door";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -116,6 +118,7 @@ export const PRIORITY_ORDER = `case i.priority when 'urgent' then 0 when 'overdu
 /** Items waiting on the owner, by tab, most important first. Snoozed items stay hidden until their time comes. */
 export async function listRelayItems(ownerId: string, tab: RelayTab): Promise<RelayItem[]> {
   await finaliseDealJobs(ownerId);
+  await frontDoor(ownerId);
   return withDealInfo(await queryPg<RelayItem>(
     `select ${ITEM_COLUMNS} from relay_item i
      where i.owner_id = $1::uuid and i.status = 'open' and i.tab = $2 and (i.snooze_until is null or i.snooze_until <= now())
@@ -269,7 +272,7 @@ async function threadMessages(mailThreadId: string | null): Promise<ThreadMessag
 async function dealSummary(listingId: string | null, counterpartEmail: string | null): Promise<string> {
   if (!listingId) return "";
   const [row] = await queryPg<Record<string, unknown>>(
-    `select b.*, lower(coalesce(b.email, p.email)) as owner_email from crm_bulk_listings b left join crm_people p on p.id = b.person_id where b.id = $1`,
+    `select b.*, lower(coalesce(b.email, p.email)) as owner_email, ${DEAL_EMAILS} as owner_emails from crm_bulk_listings b left join crm_people p on p.id = b.person_id where b.id = $1`,
     [listingId]).catch(() => []);
   return row ? dealSummaryText(row, counterpartEmail) : "";
 }
@@ -382,7 +385,19 @@ function intakeGuide(): string {
   } catch { return ""; }
 }
 
-const DEAL_NOTE = "[deal:";
+/** The front door's background work, on each inbox load: open the deals of lead cards whose reply has gone, and queue
+ * "Update deal from this reply" for new replies on deal threads (relay-deal.ts). Never in the way of the inbox. */
+export async function frontDoor(ownerId: string): Promise<void> {
+  await settleSentCards(ownerId).catch((error) => console.error("relay front door: sent cards", error));
+  await queueReplyUpdates(ownerId, (itemId) => startDealJob(itemId, ownerId, "update", { auto: true }))
+    .catch((error) => console.error("relay front door: reply updates", error));
+}
+
+/** The deal's own people: its main contact (the listing's email, else its person's) and its other contacts
+ * (crm_bulk_offers with role 'contact'). `b` is crm_bulk_listings, `p` its person. */
+const DEAL_EMAILS = `array_remove(array[lower(coalesce(b.email, p.email))] || array(select lower(o.contact) from crm_bulk_offers o
+  where o.bulk_listing_id = b.id and o.role = 'contact' and o.contact like '%@%'), null)`;
+
 export type RelayDealResult = { action?: string; listing_id?: string | null; title?: string; stage?: string; size?: string; gaps?: string[]; owner?: string; next?: string };
 export type RelayDealJob = { id: string; item_id: string; status: RelayJob["status"]; action: "create" | "update"; error: string | null; result: RelayDealResult | null; steps: string[]; created_at: string };
 
@@ -397,9 +412,9 @@ async function withDealInfo(items: RelayItem[]): Promise<RelayItem[]> {
      from mail_message m where m.thread_id::text = any($1) group by 1`, [threads]).catch(() => []) : [];
   const byThread = new Map(inboxes.map((r) => [r.thread_id, r]));
   const listingIds = [...new Set(items.map((i) => i.bulk_listing_id).filter((id): id is string => !!id))];
-  const owners = listingIds.length ? await queryPg<{ id: string; owner_email: string | null }>(
-    "select b.id, lower(coalesce(b.email, p.email)) as owner_email from crm_bulk_listings b left join crm_people p on p.id = b.person_id where b.id = any($1)", [listingIds]).catch(() => []) : [];
-  const ownerOf = new Map(owners.map((o) => [o.id, o.owner_email]));
+  const owners = listingIds.length ? await queryPg<{ id: string; owner_emails: string[] }>(
+    `select b.id, ${DEAL_EMAILS} as owner_emails from crm_bulk_listings b left join crm_people p on p.id = b.person_id where b.id = any($1)`, [listingIds]).catch(() => []) : [];
+  const ownerOf = new Map(owners.map((o) => [o.id, o.owner_emails]));
   const jobs = await dealJobsFor(items.map((i) => i.id));
   const relayLinks = threads.length ? await queryPg<{ thread_id: string; bulk_listing_id: string }>(
     "select thread_id, bulk_listing_id from crm_bulk_thread_links where channel = 'mail' and thread_id = any($1) and labelled_by = $2 and state = 'confirmed'",
@@ -411,7 +426,7 @@ async function withDealInfo(items: RelayItem[]): Promise<RelayItem[]> {
     const box = i.mail_thread_id ? byThread.get(i.mail_thread_id) : undefined;
     const inbox = threadInbox(!!box?.supply, !!box?.buy, i.contact_type);
     const job = jobs.get(i.id) ?? null;
-    const can_ask = !!i.bulk_listing_id && ownsDeal(ownerOf.get(i.bulk_listing_id), i.counterpart_email);
+    const can_ask = !!i.bulk_listing_id && ownsDealAny(ownerOf.get(i.bulk_listing_id) ?? [], i.counterpart_email);
     // A dismantler writing as a buyer is a buyer: the dismantler channel is for their packs, not their purchases.
     const dismantler = i.contact_type === "buyer" || inbox === "buy" ? null : dismantlers.get((i.counterpart_email ?? "").toLowerCase()) ?? null;
     const relay_link = !!i.bulk_listing_id && handLinked.has(`${i.mail_thread_id} ${i.bulk_listing_id}`);
@@ -514,7 +529,7 @@ async function dealJobsFor(itemIds: string[]): Promise<Map<string, RelayDealJob>
 }
 
 /** "Create deal" or "Update deal from this reply": Matcha does the CRM work in a one-off job (relay_job.py). Nothing is sent. */
-export async function startDealJob(itemId: string, ownerId: string, action: "create" | "update"): Promise<void> {
+export async function startDealJob(itemId: string, ownerId: string, action: "create" | "update", opts: { auto?: boolean } = {}): Promise<void> {
   const item = await readRelayItem(itemId, ownerId);
   if (!item) throw new RelayError(404, "Not found");
   if (action === "update" && !item.bulk_listing_id) throw new RelayError(409, "This email isn't linked to a deal yet. Create the deal first.");
@@ -522,14 +537,16 @@ export async function startDealJob(itemId: string, ownerId: string, action: "cre
   const inbox = replyIdentity(messages, item.contact_type);
   const latest = messages.find((m) => m.direction === "inbound");
   const sender = latest?.from_email ?? item.counterpart_email;
-  const [owner] = item.bulk_listing_id ? await queryPg<{ owner_email: string | null }>(
-    "select lower(coalesce(b.email, p.email)) as owner_email from crm_bulk_listings b left join crm_people p on p.id = b.person_id where b.id = $1", [item.bulk_listing_id]) : [];
-  const counterparty = !!item.bulk_listing_id && !ownsDeal(owner?.owner_email, sender);
+  const [owner] = item.bulk_listing_id ? await queryPg<{ owner_emails: string[] }>(
+    `select ${DEAL_EMAILS} as owner_emails from crm_bulk_listings b left join crm_people p on p.id = b.person_id where b.id = $1`, [item.bulk_listing_id]) : [];
+  const counterparty = !!item.bulk_listing_id && !ownsDealAny(owner?.owner_emails ?? [], sender);
   const label = action === "create" ? "Create deal" : "Update deal from this reply";
   const fence = `email-${randomUUID()}`;
   const prompt = [
     `Relay button: ${label}.`,
     `Follow ${MATCHA_RECIPE} and ${INTAKE_GUIDE}, section "Relay buttons". Finish with only the JSON that section describes.`,
+    // Alex, 12 Nov 2026. Until intake.md says the same, this line wins over its EUR 20k rule.
+    `Size rule (Alex, 12 Nov 2026), in place of any EUR 20k rule: bulk is ${BULK_RULE_TEXT} (EUR at 1.16 and GBP at 1.34 to USD); either is enough. Under the line: create nothing and report the route (marketplace for single packs, Jules for more). When the email does not settle the size, report size "unknown" and still create the deal if it gives what and how many.`,
     `Write only to ${item.bulk_listing_id ? `listing ${item.bulk_listing_id}` : "the one listing you create for this email"} and its child rows. Never change another listing, never create a company or person, never send or draft email.`,
     counterparty ? "The sender is not this listing's own party: they are answering it (a supplier on a buyer's request). Record what they offer on their offer in crm_bulk_offers and a Story row. Never change the listing's own card, next_action, next_due, waiting_on or context.owner, and report as gaps only what their offer still lacks." : "",
     `Mail thread: ${item.mail_thread_id ?? "not in the mail log"}; Gmail thread ${item.gmail_thread_id}. Read it with rebattery-mail thread.`,
@@ -546,7 +563,7 @@ export async function startDealJob(itemId: string, ownerId: string, action: "cre
       and created_at > now() - ($3 || ' minutes')::interval limit 1`, [item.id, DEAL_NOTE, String(JOB_STALE_MINUTES)]);
     if (busy.length) throw new RelayError(409, "Matcha is already working on this deal.");
     const { rows: [created] } = await tx.query<{ id: string }>("insert into relay_job (item_id, owner_id, note, steps) values ($1, $2::uuid, $3, $4::jsonb) returning id",
-      [item.id, ownerId, `[deal:${action}] ${label}`, JSON.stringify(["Queued for Matcha"])]);
+      [item.id, ownerId, `[deal:${action}] ${label}${opts.auto ? " (automatic: a new reply on the deal's thread)" : ""}`, JSON.stringify([opts.auto ? "Queued for Matcha by itself: they replied" : "Queued for Matcha"])]);
     return created;
   });
   const dir = join(JOB_ROOT, job.id);
@@ -565,16 +582,18 @@ export async function dealChecklistFor(itemId: string, ownerId: string): Promise
   const item = await readRelayItem(itemId, ownerId);
   if (!item) throw new RelayError(404, "Not found");
   if (!item.bulk_listing_id) return { checklist: null, counterparty: false };
-  const [listing] = await queryPg<ChecklistListing & { owner_email: string | null }>(
+  const [listing] = await queryPg<ChecklistListing & { owner_emails: string[] }>(
     `select b.id, b.kind, b.summary as title, b.quantity, b.location, b.clear_by::text as clear_by, b.context, b.spec,
        d.volume, d.volume_unit, d.max_price, d.price_currency, d.price_unit, d.needed_by::text as needed_by, d.product_family,
-       lower(coalesce(b.email, p.email)) as owner_email
+       b.route, b.qualified_at::text as qualified_at, b.qualified_by, ${DEAL_EMAILS} as owner_emails
      from crm_bulk_listings b left join crm_bulk_demand d on d.id = b.id left join crm_people p on p.id = b.person_id where b.id = $1`, [item.bulk_listing_id]);
   if (!listing) return { checklist: null, counterparty: false };
   const messages = await threadMessages(item.mail_thread_id);
   const sender = messages.find((m) => m.direction === "inbound")?.from_email ?? item.counterpart_email;
-  if (!ownsDeal(listing.owner_email, sender)) return { checklist: null, counterparty: true };
-  const fields = await queryPg<ChecklistField>("select field_key, value, status from crm_bulk_listing_fields where bulk_listing_id = $1", [listing.id]);
+  if (!ownsDealAny(listing.owner_emails, sender)) return { checklist: null, counterparty: true };
+  const fields = await queryPg<ChecklistField>(
+    `select field_key, value, status, asked_at::text as asked_at, asked_count, cannot_provide, checked_by, checked_at::text as checked_at
+     from crm_bulk_listing_fields where bulk_listing_id = $1`, [listing.id]);
   const docs = await queryPg<ChecklistDoc>(
     `select file_name, title, doc_type, source_date::text as source_date, created_at::text as created_at from crm_bulk_listing_documents
      where bulk_listing_id = $1 and state = 'received'`, [listing.id]);  // documents they sent, not ones we made or still want
@@ -596,6 +615,21 @@ export async function setChecklistTick(itemId: string, ownerId: string, key: str
     [item.bulk_listing_id, key, have]);
 }
 
+/** On the checklist: a person checked an item, or marked that they cannot provide it; or ticks the deal Qualified.
+ * Qualified is refused, naming what is open, until every item the rule needs is answered or marked and checked. */
+export async function setChecklistState(itemId: string, owner: { id: string; email: string }, change: { key?: string; checked?: boolean; cannot?: boolean; qualified?: boolean }): Promise<void> {
+  const view = await dealChecklistFor(itemId, owner.id);
+  if (view.counterparty) throw new RelayError(409, "This email answers someone else's deal, so its checklist can't be changed from here.");
+  if (!view.checklist) throw new RelayError(404, "This email isn't linked to a deal.");
+  const { listingId, kind } = view.checklist;
+  if (change.qualified !== undefined) {
+    const done = await setQualifiedTick(listingId, change.qualified, owner.email);
+    if (!done.ok) throw new RelayError(409, `Not yet: ${done.missing.map((k) => view.checklist!.required.find((i) => i.key === k)?.label.toLowerCase() ?? k).join(", ")} still to answer or check.`);
+    return;
+  }
+  if (!change.key || !(await setCheckState(listingId, kind, change.key, { checked: change.checked, cannot: change.cannot }, owner.email))) throw new RelayError(400, "That one can't be checked here.");
+}
+
 /** "Draft the ask": drafts the playbook's ask for what the deal is still missing, straight from the checklist, with no note from Alex. */
 export async function draftAsk(itemId: string, ownerId: string): Promise<RelayItem> {
   const view = await dealChecklistFor(itemId, ownerId);
@@ -609,27 +643,34 @@ export async function draftAsk(itemId: string, ownerId: string): Promise<RelayIt
   const ctx = await draftContext(item, ownerId, instruction);
   const parsed = parseJson(await askAgent(DRAFT_SYSTEM(ctx.rules, ctx.guide), ctx.prompt));
   await saveDraftOutputs(item, ownerId, askLabel(view.checklist), ctx, parsed, []);
+  // What it asks for counts as asked once it is sent (recordSentAsks).
+  await queryPg("update relay_draft set ask_keys = $2 where item_id = $1 and role = 'primary' and state = 'draft'", [itemId, askKeys(view.checklist)]);
   return (await readRelayItem(itemId, ownerId))!;
 }
 
 /** Applies finished deal jobs: links the email to the deal Matcha made or updated, if it is this email's deal, and records what it found. */
 async function finaliseDealJobs(ownerId: string): Promise<void> {
-  const claimed = await queryPg<{ id: string; item_id: string; result: RelayDealResult }>(
-    `update relay_job set status = 'finalising' where owner_id = $1::uuid and status = 'ready' and left(note, 6) = $2 returning id, item_id, result`, [ownerId, DEAL_NOTE]);
+  const claimed = await queryPg<{ id: string; item_id: string; result: RelayDealResult; created_at: string }>(
+    `update relay_job set status = 'finalising' where owner_id = $1::uuid and status = 'ready' and left(note, 6) = $2 returning id, item_id, result, created_at::text`, [ownerId, DEAL_NOTE]);
   for (const job of claimed) {
     try {
       const r = job.result ?? {};
       if (r.listing_id && (r.action === "created" || r.action === "updated")) {
         const item = await readRelayItem(job.item_id, ownerId);
         if (!item) throw new Error("Email no longer in Relay");
-        const [listing] = await queryPg<{ id: string; title: string | null; owner_email: string | null; has_owner: boolean; linked: boolean }>(
-          `select b.id, coalesce(b.context->>'listing_title', b.summary) as title, lower(coalesce(b.email, p.email)) as owner_email,
+        const [listing] = await queryPg<{ id: string; title: string | null; owner_email: string | null; owner_emails: string[]; has_owner: boolean; linked: boolean }>(
+          `select b.id, coalesce(b.context->>'listing_title', b.summary) as title, lower(coalesce(b.email, p.email)) as owner_email, ${DEAL_EMAILS} as owner_emails,
              (b.email is not null or b.person_id is not null) as has_owner,
              exists (select 1 from crm_bulk_thread_links l where l.bulk_listing_id = b.id and l.channel = 'mail' and l.thread_id::text = $2) as linked
            from crm_bulk_listings b left join crm_people p on p.id = b.person_id where b.id = $1`, [r.listing_id, item.mail_thread_id ?? ""]);
         if (!listing) throw new Error("Matcha named a deal that isn't in the CRM");
-        if (!dealResultFits({ listingId: listing.id, currentListingId: item.bulk_listing_id, threadLinked: listing.linked, ownerEmail: listing.owner_email, counterpartEmail: item.counterpart_email }))
-          throw new Error("Matcha named a deal that isn't linked to this email. Nothing was linked.");
+        if (!dealResultFits({ listingId: listing.id, currentListingId: item.bulk_listing_id, threadLinked: listing.linked, ownerEmail: listing.owner_email, contactEmails: listing.owner_emails, counterpartEmail: item.counterpart_email })) {
+          // A deal this job made for the wrong email is closed, not left behind unlinked (relay-deal closeUnfitListing).
+          const closed = r.action === "created" && await closeUnfitListing(listing.id, job.created_at, job.id).catch(() => false);
+          throw new Error(`Matcha named a deal that isn't linked to this email. Nothing was linked${closed ? "; the deal it had just made was closed" : ""}.`);
+        }
+        if (r.action === "created") await queryPg("update crm_bulk_listings set route = 'bulk', route_reason = $2 where id = $1 and route is null",
+          [listing.id, `Opened with Create deal (Matcha's size: ${r.size ?? "not given"})`]);
         // A deal created from this email belongs to its sender, so the next scan keeps the link even before a CRM person exists.
         if (r.action === "created" && !listing.has_owner && item.counterpart_email)
           await queryPg("update crm_bulk_listings set email = $2, updated_at = now() where id = $1 and email is null and person_id is null", [listing.id, item.counterpart_email.toLowerCase()]);
@@ -722,7 +763,6 @@ async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, 
 
 const JOB_ROOT = "/srv/rebattery-data/relay-jobs";
 const JOB_RUNNER = "/root/denchclaw/scripts-live/scripts/rebattery/relay_job.py";
-const JOB_STALE_MINUTES = 25;
 const BACKGROUND_FILE = "background.json";
 
 /** The background a job's prompt was written with, as startJob saved it. */
@@ -923,6 +963,7 @@ async function recordSent(where: string, values: unknown[]): Promise<number> {
       updated_at = case when state = 'sent' then updated_at else now() end, state = 'sent' where id = $1`,
       [r.id, copies.get(r.mail_message_id) ?? null, r.accepted_at]);
   }
+  await recordSentAsks(rows.map((r) => r.id)).catch((error) => console.error("relay sent asks", error));
   return rows.length;
 }
 

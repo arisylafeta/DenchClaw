@@ -1,0 +1,169 @@
+--- a/scripts/jules_ready_supply_sync.py	2026-11-12 12:37:42.261019192 +0000
++++ b/scripts/jules_ready_supply_sync.py	2026-11-12 12:38:01.055988532 +0000
+@@ -34,6 +34,57 @@
+     return row
+ 
+ 
++def lot_key(row):
++    """One lot is one seller, one product and one quantity, however many Jules chats it came through. None when the
++    lead lacks the seller's email, the quantity or any product detail: then it cannot be told apart and stays its own row."""
++    spec = row['spec']
++    product = tuple(str(spec.get(k) or '').strip().lower() for k in ('manufacturer', 'model', 'packKwh', 'chemistry', 'format'))
++    if not row.get('email') or not row.get('quantity') or not any(product):
++        return None
++    return (row['email'], product, str(row['quantity']).strip())
++
++
++def fold_repeats(cur, rows):
++    """A lead for a lot that is already open in the CRM (or earlier in this run) updates that listing instead of adding
++    one: it takes the listing's source_id, so the upsert lands on it, and its own Jules chat is kept in
++    context.jules_also_from. A lead whose own source_id is already a listing updates that listing as before. Existing
++    duplicates are left as they are. Mutates rows in place; returns how many were folded."""
++    out, first, folded = [], {}, 0
++    for row in rows:
++        key = lot_key(row)
++        if key is None:
++            out.append(row)
++            continue
++        own = row['source_id']
++        if key in first:
++            target = first[key]
++            target['context']['jules_also_from'] = sorted(set(target['context'].get('jules_also_from') or []) | {own})
++            folded += 1
++            continue
++        cur.execute("SELECT 1 FROM crm_bulk_listings WHERE kind='supply' AND source_kind='jules' AND source_id=%s", (own,))
++        if not cur.fetchone():
++            email, product, quantity = key
++            cur.execute(
++                """SELECT source_id, context->'jules_also_from' AS also FROM crm_bulk_listings
++                    WHERE kind='supply' AND source_kind='jules' AND status <> 'closed' AND lower(email)=%s AND btrim(quantity)=%s
++                      AND lower(coalesce(spec->>'manufacturer',''))=%s AND lower(coalesce(spec->>'model',''))=%s
++                      AND lower(coalesce(spec->>'packKwh',''))=%s AND lower(coalesce(spec->>'chemistry',''))=%s
++                      AND lower(coalesce(spec->>'format',''))=%s
++                    ORDER BY created_at, id LIMIT 1""", (email, quantity, *product))
++            found = cur.fetchone()
++            if found:
++                # The open listing keeps its own chat as the main one; this chat is recorded beside it.
++                for k in ('jules_conversation_id', 'jules_preview_key', 'listing_id', 'submitted_at'):
++                    row['context'].pop(k, None)
++                row['context']['jules_also_from'] = sorted(set(found['also'] or []) | {own})
++                row['source_id'] = found['source_id']
++                folded += 1
++        first[key] = row
++        out.append(row)
++    rows[:] = out
++    return folded
++
++
+ def write_rows(rows, rollback, scripts_dir=CRM_SCRIPTS):
+     import psycopg2
+     import psycopg2.extras
+@@ -42,6 +93,8 @@
+     try:
+         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+             cur.execute("SET LOCAL lock_timeout='5s'; SET LOCAL statement_timeout='60s'; SELECT pg_advisory_xact_lock(hashtext('jules_ready_supply_sync'))")
++            # Same seller, product and quantity already open: update it, never a second row (29 rows for one 80-unit lot, Nov 2026).
++            folded = fold_repeats(cur, rows)
+             for row in rows:
+                 link_supplier(cur, row, ensure_lead, internal)
+             for offset in range(0, len(rows), 100):
+@@ -56,6 +109,7 @@
+             conn.rollback()
+         else:
+             conn.commit()
++        return folded
+     except BaseException:
+         conn.rollback()
+         raise
+@@ -180,14 +234,15 @@
+             return
+         if not supported:
+             raise RuntimeError("CRM source_kind='jules' is not allowed; no rows written")
++        folded = write_rows(rows, args.crm_test_transaction, args.crm_scripts_dir)
++        # After write_rows: a repeat now carries the source_id of the listing it updated.
+         ids = ','.join(sql_literal(r['source_id']) for r in rows)
+-        write_rows(rows, args.crm_test_transaction, args.crm_scripts_dir)
+         if not args.crm_test_transaction:
+             checked = sql_rows("SELECT source_id,context->'jules_sync_snapshot' AS snapshot FROM crm_bulk_listings WHERE kind='supply' AND source_kind='jules' AND source_id IN (" + ids + ')') if rows else []
+             if {r['source_id']: r['snapshot'] for r in checked} != {r['source_id']: r['context']['jules_sync_snapshot'] for r in rows}:
+                 raise RuntimeError('CRM exact-target read-back failed; cursor not advanced')
+             save(state_path, {'cursor': upper})
+-        print(json.dumps({'upserts': len(rows), 'rolled_back': args.crm_test_transaction}))
++        print(json.dumps({'upserts': len(rows), 'repeats_folded': folded, 'rolled_back': args.crm_test_transaction}))
+ 
+ 
+ if __name__ == '__main__':
+--- /dev/null
++++ b/scripts/tests/test_jules_supply_repeats.py
+@@ -0,0 +1,71 @@
++import sys
++import unittest
++from pathlib import Path
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
++import jules_ready_supply_sync as sync
++
++
++class FakeCursor:
++    """Answers the two lookups fold_repeats makes from a list of existing CRM listings."""
++    def __init__(self, existing):
++        self.existing, self.result = existing, None
++
++    def execute(self, sql, params):
++        if 'source_id=%s' in sql:
++            self.result = {'x': 1} if any(e['source_id'] == params[0] for e in self.existing) else None
++        else:
++            email, quantity, *product = params
++            hits = [e for e in self.existing if e['open'] and e['email'] == email and e['quantity'] == quantity and e['product'] == tuple(product)]
++            self.result = {'source_id': hits[0]['source_id'], 'also': hits[0].get('also')} if hits else None
++
++    def fetchone(self):
++        return self.result
++
++
++def lead(cid, key='p1', email='seller@example.com', quantity=80, model='Leaf'):
++    return sync.listing({'conversation_id': cid, 'preview_key': key, 'contact_email': email,
++                         'draft': {'quantity': quantity, 'manufacturer': 'Nissan', 'model': model, 'packKwh': 40, 'format': 'Pack'}}, False)
++
++
++PRODUCT = ('nissan', 'leaf', '40', '', 'pack')
++
++
++class RepeatTests(unittest.TestCase):
++    def test_same_lot_open_in_the_crm_updates_that_listing(self):
++        rows = [lead('c-new')]
++        cur = FakeCursor([{'source_id': 'c-old:p1', 'open': True, 'email': 'seller@example.com', 'quantity': '80', 'product': PRODUCT}])
++        self.assertEqual(sync.fold_repeats(cur, rows), 1)
++        self.assertEqual(rows[0]['source_id'], 'c-old:p1')
++        self.assertEqual(rows[0]['context']['jules_also_from'], ['c-new:p1'])
++        self.assertNotIn('jules_conversation_id', rows[0]['context'])
++
++    def test_repeats_in_one_run_become_one_row(self):
++        rows = [lead(f'c{i}') for i in range(29)]
++        self.assertEqual(sync.fold_repeats(FakeCursor([]), rows), 28)
++        self.assertEqual(len(rows), 1)
++        self.assertEqual(len(rows[0]['context']['jules_also_from']), 28)
++        self.assertEqual(len(sync.upsert_sql(rows).split('),(')), 1)
++
++    def test_a_different_quantity_product_seller_or_a_closed_lot_is_a_new_row(self):
++        existing = [{'source_id': 'c-old:p1', 'open': True, 'email': 'seller@example.com', 'quantity': '80', 'product': PRODUCT},
++                    {'source_id': 'c-shut:p1', 'open': False, 'email': 'other@example.com', 'quantity': '80', 'product': PRODUCT}]
++        rows = [lead('a', quantity=40), lead('b', model='Ariya'), lead('c', email='other@example.com')]
++        self.assertEqual(sync.fold_repeats(FakeCursor(existing), rows), 0)
++        self.assertEqual([r['source_id'] for r in rows], ['a:p1', 'b:p1', 'c:p1'])
++
++    def test_a_lead_already_in_the_crm_updates_its_own_row(self):
++        existing = [{'source_id': 'c-old:p1', 'open': True, 'email': 'seller@example.com', 'quantity': '80', 'product': PRODUCT},
++                    {'source_id': 'c-dup:p1', 'open': True, 'email': 'seller@example.com', 'quantity': '80', 'product': PRODUCT}]
++        rows = [lead('c-dup')]
++        self.assertEqual(sync.fold_repeats(FakeCursor(existing), rows), 0)
++        self.assertEqual(rows[0]['source_id'], 'c-dup:p1')
++
++    def test_no_email_or_no_product_is_never_folded(self):
++        rows = [lead('a', email=None), lead('b', email=None)]
++        self.assertEqual(sync.fold_repeats(FakeCursor([]), rows), 0)
++        self.assertEqual(len(rows), 2)
++
++
++if __name__ == '__main__':
++    unittest.main()

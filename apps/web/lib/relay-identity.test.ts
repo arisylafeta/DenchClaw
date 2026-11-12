@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dealResultFits, dealSummaryText, ownsDeal, replyIdentity, suggestDealAction, threadInbox } from "./relay-identity";
+import { dealResultFits, dealSummaryText, ownsDeal, ownsDealAny, replyIdentity, suggestDealAction, threadInbox } from "./relay-identity";
 
 const inbound = (to: string[], cc: string[] = [], identity_key: string | null = null) => ({ direction: "inbound", to_emails: to, cc_emails: cc, identity_key });
 const outbound = (identity_key: string | null) => ({ direction: "outbound", to_emails: ["x@seller.com"], cc_emails: [], identity_key });
@@ -126,5 +126,19 @@ describe("isPersonalDomain", () => {
     const { isPersonalDomain } = await import("./relay-identity");
     for (const d of ["gmail.com", "btinternet.com", "sky.com", "virginmedia.com", "BTINTERNET.COM"]) expect(isPersonalDomain(d)).toBe(true);
     expect(isPersonalDomain("donkersvagparts.nl")).toBe(false);
+  });
+});
+
+describe("a deal's other contacts", () => {
+  it("count as the deal's own people, by address or company domain", () => {
+    expect(ownsDealAny(["buyer@acme.example", "second@acme.example"], "second@acme.example")).toBe(true);
+    expect(ownsDealAny([null, "ops@acme.example"], "lead@acme.example")).toBe(true);
+    expect(ownsDealAny(["jo@gmail.com"], "sam@gmail.com")).toBe(false);
+    expect(ownsDealAny([], "sam@acme.example")).toBe(false);
+  });
+  it("let a Matcha result fit when the sender is another contact on the deal", () => {
+    const base = { listingId: "bt_1", currentListingId: null, threadLinked: false, ownerEmail: "main@buyer.example", counterpartEmail: "colleague@other.example" };
+    expect(dealResultFits(base)).toBe(false);
+    expect(dealResultFits({ ...base, contactEmails: ["colleague@other.example"] })).toBe(true);
   });
 });

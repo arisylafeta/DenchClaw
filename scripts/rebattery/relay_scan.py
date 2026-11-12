@@ -634,14 +634,23 @@ def load_relay_links(cur, thread_ids: list[str]) -> dict[str, dict]:
     return {r["thread_id"]: {"bulk_listing_id": r["id"], "summary": r["summary"], "quantity": r["quantity"]} for r in cur.fetchall()}
 
 
+OWNED_SQL = """select b.id, b.kind, b.status, b.summary, b.quantity, b.updated_at, lower(coalesce(b.email, p.email)) as email
+     from crm_bulk_listings b left join crm_people p on p.id = b.person_id
+    where coalesce(b.email, p.email) is not null"""
+# A deal's other contacts (crm_bulk_offers role 'contact', migration 112): a second person at the same buyer is the
+# deal's own party too, so their email links to the deal like the main contact's.
+CONTACTS_SQL = """select b.id, b.kind, b.status, b.summary, b.quantity, b.updated_at, lower(o.contact) as email
+     from crm_bulk_offers o join crm_bulk_listings b on b.id = o.bulk_listing_id
+    where o.role = 'contact' and o.contact like '%%@%%'"""
+
+
 def load_owned_listings(cur) -> dict[str, list[dict]]:
-    """Bulk Trades listings keyed by the owner's email and by their company domain ("@domain")."""
+    """Bulk Trades listings keyed by their own people's emails (the main contact and the deal's other contacts) and by
+    their company domain ("@domain")."""
     if not table_exists(cur, "crm_bulk_listings"):
         return {}
-    cur.execute(
-        """select b.id, b.kind, b.status, b.summary, b.quantity, b.updated_at, lower(coalesce(b.email, p.email)) as email
-             from crm_bulk_listings b left join crm_people p on p.id = b.person_id
-            where coalesce(b.email, p.email) is not null""")
+    contacts = table_exists(cur, "crm_bulk_offers")
+    cur.execute(OWNED_SQL + (" union all " + CONTACTS_SQL if contacts else ""))
     out: dict[str, list[dict]] = {}
     for r in cur.fetchall():
         email = email_of(r["email"])
@@ -695,13 +704,16 @@ def choose_deal(counterpart: str | None, contact_type: str | None, linked: set[s
 
 
 def load_open_deal_emails(cur) -> set[str]:
-    """Counterpart emails on open or qualifying bulk deals (the listing's email or its person's email)."""
+    """Counterpart emails on open or qualifying bulk deals (the listing's email or its person's email, and its other contacts)."""
     if not table_exists(cur, "crm_bulk_listings"):
         return set()
+    contacts = table_exists(cur, "crm_bulk_offers")
     cur.execute(
         """select lower(coalesce(b.email, p.email)) as email from crm_bulk_listings b
              left join crm_people p on p.id = b.person_id
-            where b.status in ('open', 'qualifying') and coalesce(b.email, p.email) is not null""")
+            where b.status in ('open', 'qualifying') and coalesce(b.email, p.email) is not null"""
+        + ("""  union all select lower(o.contact) from crm_bulk_offers o join crm_bulk_listings b on b.id = o.bulk_listing_id
+            where b.status in ('open', 'qualifying') and o.role = 'contact' and o.contact like '%%@%%'""" if contacts else ""))
     return {email_of(r["email"]) for r in cur.fetchall()}
 
 

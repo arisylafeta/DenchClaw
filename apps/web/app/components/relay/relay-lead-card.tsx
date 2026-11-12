@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { assembleLead, cleanAnswer, cleanLeadState, leadChips, priceWarning, questionId, type LeadBlock, type LeadData, type LeadState } from "@/lib/relay-lead-core";
 import type { LeadCards as LeadCardList, LeadCardView } from "@/lib/relay-lead";
 import { undoSecondsLeft } from "@/lib/relay-send-time";
+import { ROUTE_LABEL, ROUTES, type RouteKey } from "@/lib/relay-front-door";
 import { api, cx } from "./relay-ui";
 import c from "./relay-lead-card.module.css";
 
@@ -168,6 +169,14 @@ export function LeadCard({ card, answers, state, onState, onSend, onEdit, onSkip
         </div>
         <h1 className={c.h1}>{card.headline}</h1>
         <div className={c.rows}>
+          <div className={c.row}>
+            <span className={c.rowlabel}>Route</span>
+            <select className={c.routepick} value={reply.route.route} aria-label="Route for this lead"
+              onChange={(e) => onState({ ...state, route: e.target.value as RouteKey })}>
+              {ROUTES.map((r) => <option key={r} value={r}>{ROUTE_LABEL[r]}</option>)}
+            </select>
+            <span className={cx(c.routewhy, reply.route.size === "unknown" && !reply.route.chosen && c.warn)}>{reply.route.reason}</span>
+          </div>
           {chips.length > 0 && (
             <div className={c.row}>
               <span className={c.rowlabel}>We have</span>

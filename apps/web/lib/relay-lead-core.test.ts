@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { assembleLead, asksFor, checkLeadReply, cleanAnswer, cleanLeadState, EMPTY_STATE, leadChips, leadFirstName, numbersKnown, priceWarning, questionId, quoteIn, verifyLead, verifyPolish,
   type LeadData, type LeadState } from "./relay-lead-core";
+import { POINTERS, routeLead } from "./relay-front-door";
 
 // A made-up seller lead in the shape of the real ones: a broker with a lot overseas, three standard questions.
 const EMAIL = `Hi Alex,
@@ -364,5 +365,64 @@ describe("verifyPolish", () => {
   });
   it("turns a dash into a comma and drops quote marks around the answer", () => {
     expect(polish("“Yes, I can check our network — nothing fits right now.”")).toBe("Yes, I can check our network, nothing fits right now.");
+  });
+});
+
+describe("routes on the card", () => {
+  const SMALL = { what: "Leaf 40kWh", how_many: "1 pack", price: "£3,000 per pack" };
+  const withRoute = (facts: Record<string, string>, over: Partial<LeadData> = {}) => {
+    const list = Object.entries(facts).map(([key, value]) => ({ key, value }));
+    return dataFrom(READ, EMAIL, { facts: list, have: list.map((f) => f.key), route: routeLead({ facts: list, recycling: null }), ...over });
+  };
+
+  it("points a small seller to the marketplace and asks for nothing", () => {
+    const data = withRoute(SMALL);
+    const reply = assembleLead(data, state(), ANSWERS);
+    expect(reply.route.route).toBe("marketplace");
+    expect(reply.body).toContain(POINTERS.seller.marketplace!);
+    expect(reply.asks).toEqual([]);
+    expect(reply.cover.text).toBe("✓ Pointing them to Marketplace: no deal for a lead this size");
+    expect(checkLeadReply(reply, data, SENDER)).toEqual([]);
+  });
+
+  it("points a small buyer to the marketplace and a demand alert, and a medium one to Jules", () => {
+    const buyer = withRoute(SMALL, { side: "buyer" });
+    expect(assembleLead(buyer, state(), ANSWERS).body).toContain("set up a demand alert");
+    const medium = withRoute({ ...SMALL, how_many: "3 packs" }, { side: "buyer" });
+    expect(assembleLead(medium, state(), ANSWERS).body).toContain(POINTERS.buyer.jules!);
+  });
+
+  it("lets Alex make it a bulk deal on the card, and the reply asks again", () => {
+    const data = withRoute(SMALL);
+    const picked = cleanLeadState({ route: "bulk" }, data);
+    expect(picked.route).toBe("bulk");
+    const reply = assembleLead(data, picked, ANSWERS);
+    expect(reply.route).toMatchObject({ route: "bulk", chosen: true });
+    expect(reply.body).not.toContain("rebattery.io");
+    expect(reply.asks.map((a) => a.key)).toContain("when");
+    // Picking the suggestion again is no pick at all.
+    expect(cleanLeadState({ route: "marketplace" }, data).route).toBeUndefined();
+    expect(cleanLeadState({ route: "elsewhere" }, data).route).toBeUndefined();
+  });
+
+  it("asks a seller when they need it gone by, and a recycling lead the recycling list", () => {
+    expect(asksFor("seller", "packs", "owner").find((a) => a.key === "when")?.bullet).toBe("When do you need them gone by?");
+    const recycling = asksFor("seller", "packs", "owner", "recycling").map((a) => a.key);
+    expect(recycling).toEqual(["what", "how_many", "condition", "where", "price", "when", "docs"]);
+    for (const side of ["seller", "buyer"] as const) for (const unit of ["packs", "modules", "cells"] as const) {
+      const keys = asksFor(side, unit, "unknown").map((a) => a.key);
+      expect(keys).toEqual(expect.arrayContaining(["price", "when"]));
+    }
+  });
+
+  it("keeps a recycling reading only when its words are in the email", () => {
+    expect(verifyLead({ ...READ, recycling: true, recycling_quote: "still operational" }, EMAIL).recycling).toBe("still operational");
+    expect(verifyLead({ ...READ, recycling: true, recycling_quote: "scrap batteries" }, EMAIL).recycling).toBeNull();
+    expect(verifyLead(READ, EMAIL).recycling).toBeNull();
+  });
+
+  it("treats a card prepared before routes as a bulk lead", () => {
+    const reply = assembleLead(dataFrom(READ), state(), ANSWERS);
+    expect(reply.route).toMatchObject({ route: "bulk" });
   });
 });

@@ -7,6 +7,7 @@ import { describeWhen, parseWhen } from "@/lib/relay-when";
 import { londonInputValue, londonWallToUtc, sendAtProblem, sendLabel, sendSlots, undoSecondsLeft, UNDO_SEND_SECONDS } from "@/lib/relay-send-time";
 import type { RelayDealOption, RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayRule, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
 import { missingInstruction, type ChecklistItem, type DealChecklist } from "@/lib/relay-checklist";
+import { BULK_RULE_TEXT } from "@/lib/relay-front-door";
 import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
 import { isSenderKey, SENDERS } from "@/lib/relay-senders";
 import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
@@ -1418,7 +1419,7 @@ function DealBar({ item: i, busy, create, onRun, onAsk, onLink, onOpenCompany }:
         {!working && onAsk && <button type="button" className={s.btn} disabled={busy} title="Drafts the playbook's ask for what the deal is still missing, from the inbox this thread uses. You read it in Review and send." onClick={onAsk}>Draft the ask</button>}
         {!working && i.deal_action === "update" && <button type="button" className={cx(s.btn, s.pri)} disabled={busy} onClick={() => onRun("update")}>
           {job?.status === "failed" && job.action === "update" ? "Try again" : "Update deal from this reply"}</button>}
-        {!working && (dismantlerOnly || create) && !i.bulk_listing_id && i.deal_action === "create" && <button type="button" className={s.btn} disabled={busy} title="Only for a real lot, about 10 packs or €20k and up" onClick={() => onRun("create")}>{job?.status === "failed" && job.action === "create" ? "Try again: create deal" : "+ Create deal"}</button>}
+        {!working && (dismantlerOnly || create) && !i.bulk_listing_id && i.deal_action === "create" && <button type="button" className={s.btn} disabled={busy} title={`Only for a bulk lot: ${BULK_RULE_TEXT}`} onClick={() => onRun("create")}>{job?.status === "failed" && job.action === "create" ? "Try again: create deal" : "+ Create deal"}</button>}
         {!working && !picking && <button type="button" className={s.btn} disabled={busy} title="Tie this thread to one of our open deals. Relay keeps the link; it never guesses one for a supplier." onClick={() => setPicking(true)}>{i.bulk_listing_id ? "Change deal" : "Link to deal"}</button>}
       </div>
       {picking && <DealPicker current={i.bulk_listing_id} canUnlink={!!i.relay_link} busy={busy} onPick={(id) => { setPicking(false); onLink(id); }} onCancel={() => setPicking(false)} />}
@@ -1474,12 +1475,14 @@ function DealChecklistCard({ item, draft, reload, say }: { item: RelayReviewItem
   if (list === undefined) return <div className={cx(s.card, s.check)}><span className={s.muted}>Loading the deal…</span></div>;
   if (counterparty) return <div className={cx(s.card, s.check)}><b>Answering someone else&apos;s deal</b><span className={s.muted}>{firstName(item.counterpart_name)} is quoting on another party&apos;s request, so that deal&apos;s checklist isn&apos;t shown here. Update deal from this reply records their quote on their offer.</span></div>;
   if (!list) return null;
-  const tick = async (row: ChecklistItem) => {
+  const post = async (body: Record<string, unknown>) => {
     setBusy(true);
-    try { setList((await api<{ checklist: DealChecklist | null }>(`/api/relay/items/${item.id}/checklist`, { method: "POST", body: { key: row.key, have: !row.have } })).checklist); }
+    try { setList((await api<{ checklist: DealChecklist | null }>(`/api/relay/items/${item.id}/checklist`, { method: "POST", body })).checklist); }
     catch (err) { say(err instanceof Error ? err.message : "Couldn't save that."); }
     finally { setBusy(false); }
   };
+  const tick = (row: ChecklistItem) => post({ key: row.key, have: !row.have });
+  const q = list.qualify;
   const instruction = missingInstruction(list);
   const addMissing = async () => {
     if (!instruction || !draft?.mail || draft.state === "sent") return;
@@ -1493,11 +1496,19 @@ function DealChecklistCard({ item, draft, reload, say }: { item: RelayReviewItem
     <div className={s.cgroup}>
       <div className={s.chead}><span>{name}</span><span>{rows.filter((r) => r.have).length} of {rows.length}</span></div>
       {rows.map((r) => (
-        <label key={r.key} className={cx(s.crow, !r.have && s.cmiss)}>
-          <input type="checkbox" checked={r.have} disabled={!r.manual || busy} onChange={() => void tick(r)} />
-          <span>{r.label}</span>
-          <span className={cx(s.cval, r.warn && s.cwarn)}>{r.have ? [r.value, r.warn].filter(Boolean).join(" · ") || "Yes" : r.manual ? "Tick if you know" : "Missing"}</span>
-        </label>
+        <div key={r.key} className={s.citem}>
+          <label className={cx(s.crow, !r.have && !r.cannot && s.cmiss)}>
+            <input type="checkbox" checked={r.have} disabled={!r.manual || busy} onChange={() => void tick(r)} />
+            <span>{r.label}</span>
+            <span className={cx(s.cval, r.warn && s.cwarn)}>{r.have ? [r.value, r.warn].filter(Boolean).join(" · ") || "Yes" : r.cannot ? "They can't provide it" : r.manual ? "Tick if you know" : r.asked ? `Missing · asked ${r.asked}x` : "Missing"}</span>
+          </label>
+          {r.forTick !== undefined && (
+            <span className={s.cstate}>
+              {(r.have || r.cannot) && <button type="button" className={s.linkish} disabled={busy} onClick={() => void post({ key: r.key, checked: !r.checkedAt })}>{r.checkedAt ? "✓ Checked" : "Mark checked"}</button>}
+              {!r.have && <button type="button" className={s.linkish} disabled={busy} onClick={() => void post({ key: r.key, cannot: !r.cannot })}>{r.cannot ? "They can provide it" : "They can't provide it"}</button>}
+            </span>
+          )}
+        </div>
       ))}
     </div>
   );
@@ -1506,6 +1517,18 @@ function DealChecklistCard({ item, draft, reload, say }: { item: RelayReviewItem
       <div className={s.ctitle}><b>What we have from {who}</b><span>{list.kind === "demand" ? "buyer" : "seller"}</span></div>
       {group("Required", list.required)}
       {group("Helpful", list.helpful)}
+      {q && (
+        <div className={s.cqual}>
+          <span>
+            <b>{q.qualified ? "Qualified" : q.ready ? "Ready to qualify" : "Not qualified yet"}</b>
+            {q.noPrice && <span className={s.dism}>No price</span>}
+            {q.noDate && <span className={s.dism}>No date</span>}
+            {!q.ready && <span className={s.muted}> · {q.missing.join(", ")}</span>}
+          </span>
+          {(q.ticked || q.ready) && <button type="button" className={s.btn} disabled={busy} onClick={() => void post({ qualified: !q.ticked })}>{q.ticked ? "Untick Qualified" : "Mark Qualified"}</button>}
+          {q.park && <span className={s.cwarn}>{q.park}</span>}
+        </div>
+      )}
       <div className={s.cfoot}>
         <span className={s.muted}>Matcha ticks these from their emails. Tick the ones without a field yourself.</span>
         {instruction && draft?.mail && draft.state !== "sent" && <button type="button" className={s.btn} disabled={busy} onClick={() => void addMissing()}>Add missing to draft</button>}
