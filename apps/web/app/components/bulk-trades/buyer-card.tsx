@@ -13,7 +13,7 @@ function Stat({ label, value, sub, loading }: { label: string; value: string | n
     <div className="min-w-0 pr-3 [&+&]:border-l [&+&]:pl-3.5" style={divider}>
       <div className="text-[11px]" style={muted}>{label}</div>
       {loading ? <div className="mt-1 h-[26px]"><Sh on chars={5} /></div>
-        : value ? <div className="mt-0.5 text-[22px] font-semibold leading-[1.15] tracking-[-0.02em] tabular-nums">{value}</div>
+        : value ? <div className="mt-0.5 whitespace-nowrap text-[18px] font-semibold leading-[1.15] tracking-[-0.02em] tabular-nums sm:text-[22px]">{value}</div>
           : <div className="mt-0.5 py-1 text-[15px] font-medium" style={muted}>None yet</div>}
       {sub && !loading && <div className="mt-px text-[11px]" style={muted}>{sub}</div>}
     </div>
@@ -36,8 +36,8 @@ function Track({ card }: { card: BuyerCardData }) {
   const rail = "absolute inset-x-0 top-2 h-1.5 rounded-full";
   return (
     <div className="mx-1 mt-1.5">
-      <div className="relative h-[88px]" role="img" aria-label={`€/kWh: ${label}`}>
-        <div className="absolute inset-x-0 top-4 h-7">
+      <div className={`relative ${card.target || card.paid ? "h-[88px]" : "h-[44px]"}`} role="img" aria-label={`€/kWh: ${label}`}>
+        {(card.target || card.paid) && <div className="absolute inset-x-0 top-4 h-7">
           <div className={rail} style={{ background: "var(--bt-divider)" }} />
           {card.target && (
             <div className="absolute top-[7px] h-2 rounded-full" style={{ left: at(card.target.low), width: width(card.target.low, card.target.high), background: "var(--bt-accent)", boxShadow: "inset 0 0 0 1px rgba(104,112,0,.45)" }}>
@@ -50,9 +50,9 @@ function Track({ card }: { card: BuyerCardData }) {
               <span className="block h-2.5 w-2.5 rounded-full border-2 border-white" style={{ background: "var(--bt-green)", boxShadow: "0 0 0 1px var(--bt-green)" }} />
             </div>
           ))}
-        </div>
+        </div>}
         {card.others && (
-          <div className="absolute inset-x-0 top-[50px] h-7">
+          <div className={`absolute inset-x-0 h-7 ${card.target || card.paid ? "top-[50px]" : "top-0"}`}>
             <div className={rail} style={{ background: "var(--bt-divider)" }} />
             <div className="absolute top-[7px] h-2 rounded-full bg-white" style={{ left: at(card.others.low), width: width(card.others.low, card.others.high), boxShadow: "inset 0 0 0 1.5px var(--bt-text-2)" }}>
               <span className="absolute left-0 top-[11px] whitespace-nowrap text-[10.5px]" style={muted}>others · {card.others.count}</span>
