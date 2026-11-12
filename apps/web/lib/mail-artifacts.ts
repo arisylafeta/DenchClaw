@@ -5,13 +5,19 @@
  * direction. The block only carries the reference, never the copy.
  */
 
-export type ArtifactRef = { kind: "mail_draft"; id: string; title?: string } | { kind: "mail_message"; id: string; title?: string };
+export type ArtifactRef =
+  | { kind: "mail_draft"; id: string; title?: string }
+  | { kind: "mail_message"; id: string; title?: string }
+  /** A workspace-relative text or markdown file (a CV, a letter). Opens in the file editor; the card offers a PDF. */
+  | { kind: "document"; path: string; title?: string };
 
 export type ArtifactSegment =
   | { type: "text"; text: string }
   | { type: "artifact"; artifact: ArtifactRef };
 
 const FENCE = /```artifact\s*\n([\s\S]*?)```/g;
+/** Workspace-relative, no leading slash or `~`, markdown or plain text only. */
+const DOCUMENT_PATH = /^[A-Za-z0-9][A-Za-z0-9 _.\-\/]{0,198}\.(?:md|markdown|txt)$/;
 const ID = /^[A-Za-z0-9_-]{1,80}$/;
 export const MAIL_DRAFT_PATH_PREFIX = "~mail/draft/";
 export const MAIL_MESSAGE_PATH_PREFIX = "~mail/message/";
@@ -22,7 +28,12 @@ export function hasArtifactBlocks(text: string): boolean {
 
 export function parseArtifactRef(raw: string): ArtifactRef | null {
   try {
-    const value = JSON.parse(raw) as { kind?: unknown; id?: unknown; title?: unknown };
+    const value = JSON.parse(raw) as { kind?: unknown; id?: unknown; path?: unknown; title?: unknown };
+    if (value.kind === "document") {
+      if (typeof value.path !== "string" || !DOCUMENT_PATH.test(value.path) || value.path.split("/").some(part => part === ".." || part === ".")) {return null;}
+      const docTitle = typeof value.title === "string" ? value.title.trim().slice(0, 120) : "";
+      return { kind: "document", path: value.path, ...(docTitle ? { title: docTitle } : {}) };
+    }
     if ((value.kind !== "mail_draft" && value.kind !== "mail_message") || typeof value.id !== "string" || !ID.test(value.id)) {return null;}
     const title = typeof value.title === "string" ? value.title.trim().slice(0, 120) : "";
     return { kind: value.kind, id: value.id, ...(title ? { title } : {}) };

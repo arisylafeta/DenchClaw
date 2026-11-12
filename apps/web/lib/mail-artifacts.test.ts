@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mailDraftPath, mailMessagePath, parseMailDraftPath, parseMailMessagePath, splitArtifactBlocks } from "./mail-artifacts";
+import { mailDraftPath, mailMessagePath, parseMailDraftPath, parseMailMessagePath, parseArtifactRef, splitArtifactBlocks } from "./mail-artifacts";
 
 describe("splitArtifactBlocks", () => {
   it("extracts a mail draft reference between prose", () => {
@@ -38,5 +38,14 @@ describe("mail message artifacts", () => {
     expect(parseMailMessagePath(mailMessagePath("gmail_msg_1"))).toBe("gmail_msg_1");
     expect(parseMailMessagePath("~mail/message/../x")).toBeNull();
     expect(parseMailMessagePath("~mail/draft/abc")).toBeNull();
+  });
+});
+
+describe("document artifacts", () => {
+  it("accepts a workspace-relative markdown path", () => {
+    expect(parseArtifactRef('{"kind":"document","path":"cv/arianit-sylafeta-fde.md","title":"CV"}')).toEqual({ kind: "document", path: "cv/arianit-sylafeta-fde.md", title: "CV" });
+  });
+  it.each(["/etc/passwd.md", "../x.md", "cv/../../x.md", "~crm/x.md", "cv/x.sh", "cv/x"])("rejects %s", (path) => {
+    expect(parseArtifactRef(JSON.stringify({ kind: "document", path }))).toBeNull();
   });
 });
