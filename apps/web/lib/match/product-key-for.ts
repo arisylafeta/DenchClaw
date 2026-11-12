@@ -100,7 +100,7 @@ export function splitMakes(values: (string | null | undefined)[] | null | undefi
       if (make) {makes.add(make);}
     }
   }
-  return [...makes].sort((a, b) => a.localeCompare(b));
+  return [...makes].toSorted((a, b) => a.localeCompare(b));
 }
 
 /**

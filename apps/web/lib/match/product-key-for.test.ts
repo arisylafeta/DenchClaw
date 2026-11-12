@@ -131,9 +131,9 @@ describe("productKeyFor", () => {
   it("splits a compound make into one want per make, never one slugged phrase", () => {
     const split = expandProductFacts({ makes: ["BMW / Volvo"], formats: ["Packs"] });
     expect(split.stated).toBe(2);
-    expect(split.facts.map(productKeyFor).sort()).toEqual(["broad:bmw-any-packs", "broad:volvo-any-packs"]);
+    expect(split.facts.map(productKeyFor).toSorted()).toEqual(["broad:bmw-any-packs", "broad:volvo-any-packs"]);
     expect(expandProductFacts({ makes: ["MG, Stellantis, Tesla"], chemistries: ["LFP"], formats: ["Packs"] })
-      .facts.map(productKeyFor).sort()).toEqual([
+      .facts.map(productKeyFor).toSorted()).toEqual([
       "broad:mg-lfp-packs", "broad:stellantis-lfp-packs", "broad:tesla-lfp-packs",
     ]);
     // A group name stays one demand: "Hyundai or Kia" is not two makes.
