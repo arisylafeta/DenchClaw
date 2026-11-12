@@ -116,6 +116,12 @@ def _clear_truncations(cur, source_ids):
                         where operation in ('truncated', 'no_product_facts') and source_id = any(%s)""", (ids,))
 
 
+def _clear_notes(cur, source_id):
+    """One source id keeps one note per operation: a re-run rewrites what it says, never appends a second."""
+    cur.execute("""delete from buyer_interest_sync_errors
+                    where source_id = %s and operation in ('truncated', 'no_product_facts')""", (str(source_id),))
+
+
 def _ids(cur, sql, params=()):
     cur.execute(sql, params)
     return [row["id"] for row in cur.fetchall()]
@@ -431,6 +437,7 @@ def sync_dossier_rows(cur, companies):
             kind, ownership = mapping
             cur.execute("savepoint bi_row")
             try:
+                _clear_notes(cur, f"{company['id']}:{index}")
                 # One line per stated combination, exactly as a demand row fans out: "BMW, Volvo" is two makes.
                 fact_sets, stated = _fact_sets(cur, product_facts(product))
                 keyed_lines = [keyed for keyed in (_keyed(cur, fact) for fact in fact_sets) if keyed and keyed["stated"]]
@@ -438,7 +445,7 @@ def sync_dossier_rows(cur, companies):
                     cur.execute("release savepoint bi_row")
                     no_facts += 1
                     _record_error(cur, "crm_companies", f"{company['id']}:{index}", "no_product_facts",
-                                  "dossier product states no product fact: "
+                                  "dossier product states no product fact (make, chemistry, format, part or kWh): "
                                   + json.dumps(product, ensure_ascii=False)[:160])
                     continue
                 if stated > len(keyed_lines):
@@ -499,13 +506,14 @@ def sync_buy_box_rows(cur, companies):
         profile = company["buyer_profile"] or {}
         cur.execute("savepoint bi_row")
         try:
+            _clear_notes(cur, company["id"])
             fact_sets, stated = _fact_sets(cur, buy_box_spec(profile))
             keyed_lines = [keyed for keyed in (_keyed(cur, fact) for fact in fact_sets) if keyed and keyed["stated"]]
             if not keyed_lines:
                 cur.execute("release savepoint bi_row")
                 skipped += 1
                 _record_error(cur, "crm_companies", company["id"], "no_product_facts",
-                              "buy box states no product fact: " + json.dumps(profile, ensure_ascii=False)[:160])
+                              "buy box states no product fact (make, chemistry, format, part or kWh): " + json.dumps(profile, ensure_ascii=False)[:160])
                 continue
             if stated > len(keyed_lines):
                 truncated += 1

@@ -477,8 +477,8 @@ begin
     delete from buyer_interest where demand_id = row_.id;
     insert into buyer_interest_sync_errors (source_table, source_id, operation, message)
     values ('crm_bulk_listings', row_.id, 'no_product_facts',
-      format('states no product fact: %s', left(coalesce(nullif(btrim(coalesce(row_.summary, '')), ''), row_.source_id,
-        row_.id), 120)));
+      format('states no product fact (make, chemistry, format, part or kWh): %s',
+        left(coalesce(nullif(btrim(coalesce(row_.summary, '')), ''), row_.source_id, row_.id), 120)));
     return;
   end if;
 
@@ -630,7 +630,7 @@ begin
     delete from buyer_interest where offer_id = offer.id;
     insert into buyer_interest_sync_errors (source_table, source_id, operation, message)
     values ('crm_bulk_offers', offer.id, 'no_product_facts',
-      format('listing %s states no product fact: %s', listing.id,
+      format('listing %s states no product fact (make, chemistry, format, part or kWh): %s', listing.id,
         left(coalesce(nullif(btrim(coalesce(listing.summary, '')), ''), listing.id), 100)));
     return;
   end if;
