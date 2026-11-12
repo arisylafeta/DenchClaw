@@ -1,3 +1,5 @@
+import { hasGap } from "./relay-ways-core";
+
 /** "Before you send": plain checks on a Relay draft, shared by the page and its tests. No AI, no network. */
 
 const MONEY = /[£€$]\s?\d[\d,]*(?:\.\d+)?\s?k?\b/gi;
@@ -20,6 +22,9 @@ export type CheckFacts = { amounts: string[]; participants: string[]; unit: "cel
 export type CheckDraft = { to: string[]; body: string; attachments: number };
 export type Issue = { level: "block" | "check"; text: string; fix?: { label: string; to: string } };
 export type Verdict = { state: "ok" | "check" | "stop"; issues: Issue[]; good: string[] };
+
+/** The block on a draft that still has a gap. Review shows the gaps as fields, so it leaves this line out. */
+export const GAP_ISSUE = "There's a gap to fill in.";
 
 const display = (amount: string) => `${amount[0]}${Number(amount.slice(1)).toLocaleString("en-GB")}`;
 
@@ -44,7 +49,7 @@ export function beforeYouSend(draft: CheckDraft, facts: CheckFacts): Verdict {
   if (facts.unit === "kwh" && /per cell|\/\s?cell/i.test(draft.body)) issues.push({ level: "check", text: "Units: this deal is priced per kWh, the draft says per cell." });
   if (/\b(attached|enclosed|attaching)\b/i.test(draft.body) && !draft.attachments) issues.push({ level: "block", text: "Says 'attached' but nothing is attached. Attach the file or change the wording." });
   else if (draft.attachments) good.push(draft.attachments === 1 ? "the attachment is there" : "the attachments are there");
-  if (/\[BLANK\]|\[[A-Z ]{3,}\]/.test(draft.body)) issues.push({ level: "block", text: "There's a blank to fill in." });
+  if (hasGap(draft.body)) issues.push({ level: "block", text: GAP_ISSUE });
   const state = issues.some((i) => i.level === "block") ? "stop" : issues.length ? "check" : "ok";
   return { state, issues, good };
 }

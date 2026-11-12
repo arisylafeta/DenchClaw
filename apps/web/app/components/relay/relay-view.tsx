@@ -1,20 +1,24 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { HermesConversation } from "@/lib/hermes-conversations";
 import { describeWhen, parseWhen } from "@/lib/relay-when";
 import { londonInputValue, londonWallToUtc, sendAtProblem, sendLabel, sendSlots, undoSecondsLeft, UNDO_SEND_SECONDS } from "@/lib/relay-send-time";
 import type { RelayDealOption, RelayDraftView, RelayItem, RelayJob, RelayReviewItem, RelayRule, RelayTab, RelayTask, RelayTodo } from "@/lib/relay";
 import { missingInstruction, type ChecklistItem, type DealChecklist } from "@/lib/relay-checklist";
-import { beforeYouSend, NEEDS_AGENT, promisesIn, senderRuleMatch, type Issue } from "@/lib/relay-checks";
+import { beforeYouSend, GAP_ISSUE, NEEDS_AGENT, promisesIn, senderRuleMatch } from "@/lib/relay-checks";
 import { isSenderKey, SENDERS } from "@/lib/relay-senders";
+import { fillGaps, gapCount } from "@/lib/relay-ways-core";
 import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
 import { Lanes, useSuggestions } from "./relay-lanes";
 import { LeadCards, useLeadCards } from "./relay-lead-card";
 import { JulesFlag } from "./relay-jules-flag";
+import { GapBody, WayTabs, waysBusy } from "./relay-ways";
 import { api, colour, cx, firstName, initials } from "./relay-ui";
 import s from "./relay.module.css";
+import c from "./relay-lead-card.module.css";
+import r from "./relay-review.module.css";
 
 const ChatPanel = dynamic(() => import("@/app/components/chat-panel").then((m) => m.ChatPanel), { ssr: false });
 
@@ -51,7 +55,6 @@ function duration(minutes: number | null): string {
   return minutes < 60 ? `${minutes}m` : minutes < 60 * 48 ? `${(minutes / 60).toFixed(1)}h` : `${Math.round(minutes / 1440)}d`;
 }
 
-const Clock = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>;
 const Arrow = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M5 12h14M13 6l6 6-6 6" /></svg>;
 const Logo = () => <span className={s.logo}><i /></span>;
 
@@ -79,14 +82,17 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
   // The list now on show. An answer for a list Alex has since left is dropped, and a late refresh loads this one.
   const tabNow = useRef(tab);
   tabNow.current = tab;
+  const asked = useRef(0);
   const load = useCallback(async (which: RelayTab) => {
+    const mine = ++asked.current;
     try {
       const next = await api<Summary>(`/api/relay/summary?tab=${which}`);
-      if (which !== tabNow.current) return;
+      // An older answer never replaces a newer one, whichever lands last.
+      if (which !== tabNow.current || mine !== asked.current) return;
       setData(next);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't load Relay.");
+      if (mine === asked.current) setError(err instanceof Error ? err.message : "Couldn't load Relay.");
     }
   }, []);
   useEffect(() => { void load(tab); }, [tab, load]);
@@ -209,7 +215,7 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
           </div>
         </div>
 
-        {!(fresh && (page === "inbox" || page === "leads")) && <div className={cx(s.card, s.score)}>
+        {!(page === "review" || (fresh && (page === "inbox" || page === "leads"))) && <div className={cx(s.card, s.score)}>
           <div className={s.meter}>
             <div className={s.ring}><svg viewBox="0 0 58 58"><circle cx="29" cy="29" r="25" stroke="var(--soft)" /><circle cx="29" cy="29" r="25" stroke="var(--blue)" strokeDasharray={ring} strokeDashoffset={ring * (1 - pct / 100)} /></svg><em className={s.num}>{pct}%</em></div>
             <div><b>Today</b><span>{handled} of {total} done</span></div>
@@ -538,85 +544,584 @@ function Inbox({ data, tab, setTab, only, onBack, reload, say, onOpenListing, on
 
 // ---------------------------------------------------------------- Review
 
-type Local = { subject: string; body: string; to: string; cc: string; bcc: string; updated_at: string };
-const splitAddrs = (v: string) => v.replace(/;/g, ",").split(",").map((a) => a.trim()).filter(Boolean);
+type Copy = { subject: string; body: string; to: string; cc: string; bcc: string };
+type Saved = Copy & { updated_at: string };
+type MailView = NonNullable<RelayDraftView["mail"]>;
+/** Where the page goes once an email is sent or scheduled. home: nothing is left to do, so it is the inbox. */
+type NextStep = { label: string; run: () => void; home: boolean };
+type Sends = { startSend: (draftId: string, updatedAt: string, toLabel: string) => Promise<boolean>; undoSend: (draftId: string, toLabel: string) => Promise<boolean> };
 
+const splitAddrs = (v: string) => v.replace(/;/g, ",").split(",").map((a) => a.trim()).filter(Boolean);
+const copyOf = (mail: MailView): Copy => ({ subject: mail.subject ?? "", body: mail.main, to: mail.to_emails.join(", "), cc: mail.cc_emails.join(", "), bcc: mail.bcc_emails.join(", ") });
+// An address list and a body as the server stores them (lib/mail-draft-actions), so an unchanged draft is not saved again.
+const addrKey = (v: string) => [...new Set(splitAddrs(v).map((a) => a.toLowerCase()))].sort().join(",");
+const bodyKey = (v: string) => v.replace(/\r\n/g, "\n").replace(/^\n+|\s+$/g, "");
+const newer = (a: string, b: string) => new Date(a).getTime() > new Date(b).getTime();
+const JOB_BUSY = ["queued", "running", "ready", "finalising"];
+const SITUATION: Record<string, string> = {
+  chase: "Chase", scheduling: "Meeting", logistics: "Logistics", documents: "Documents", supplier_price: "Supplier price", buyer_price: "Buyer price",
+  supplier_offer: "Supplier offer", buyer_needs: "Buyer needs", listing: "Listing", partner: "Partner", admin: "Admin", intro: "Intro",
+};
+const gapWords = (n: number) => `${n} gap${n === 1 ? "" : "s"} to fill before it can go`;
+/** A key press that belongs to a field or a control, or carries a modifier: not a page shortcut. */
+const notShortcut = (e: KeyboardEvent, controls: string[]) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented || e.repeat) return true;
+  const el = e.target as HTMLElement | null;
+  return !!el && (el.isContentEditable || controls.includes(el.tagName));
+};
+
+/**
+ * Review: one page per email. What they said and what Relay knows, the ways to answer, the reply with a field wherever
+ * it needs something only Alex has, and Send. The less-used tools sit closed under the card.
+ */
 function Review({ data, reload, say, onBack, sending, startSend, undoSend }: {
-  data: Summary; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void; onBack: () => void;
-  sending: Record<string, string>; startSend: (draftId: string, updatedAt: string, toLabel: string) => Promise<boolean>; undoSend: (draftId: string, toLabel: string) => Promise<boolean>;
-}) {
+  data: Summary; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void; onBack: () => void; sending: Record<string, string>;
+} & Sends) {
   const items = data.review;
-  const [cur, setCur] = useState(0);
-  const working = items.some((x) => x.job && ["queued", "running", "ready", "finalising"].includes(x.job.status));
-  useEffect(() => {
-    if (!working) return;
-    const t = setInterval(() => void reload(), 8000);
-    return () => clearInterval(t);
-  }, [working, reload]);
+  // The email on show is held by id, so the page stays put when a send lands and another email leaves the list.
+  const [at, setAt] = useState<{ id: string | null; index: number }>({ id: null, index: 0 });
   const [views, setViews] = useState<Record<string, string>>({});
-  const index = Math.min(cur, Math.max(0, items.length - 1));
-  const item = items[index];
+  const [waysOff, setWaysOff] = useState<Record<string, "failed" | "none">>({});
+  const [asking, setAsking] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const asked = useRef(new Set<string>());
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
+
+  const found = items.findIndex((x) => x.id === at.id);
+  const index = found >= 0 ? found : Math.min(at.index, Math.max(0, items.length - 1));
+  const item = items[index] as RelayReviewItem | undefined;
+  useEffect(() => { if (item && (item.id !== at.id || index !== at.index)) setAt({ id: item.id, index }); }, [item?.id, index]); // eslint-disable-line react-hooks/exhaustive-deps
+  const go = (k: number) => { if (!items.length) return; const n = ((k % items.length) + items.length) % items.length; setAt({ id: items[n].id, index: n }); };
+
+  const working = items.some((x) => x.job && JOB_BUSY.includes(x.job.status));
+  const waysWriting = items.some((x) => x.drafts.some((d) => d.role === "primary" && d.state === "draft" && waysBusy(d.ways)));
+  useEffect(() => {
+    if (!working && !waysWriting) return;
+    const t = setInterval(() => void reloadRef.current(), waysWriting ? 4000 : 8000);
+    return () => clearInterval(t);
+  }, [working, waysWriting]);
+
+  // The other ways to answer are written when an email is first opened, one email at a time: this one, then the next.
+  const main = (x: RelayReviewItem | undefined) => x?.drafts.find((d) => d.role === "primary");
+  const wantsWays = (d: RelayDraftView | undefined) => !!d && d.state === "draft" && !d.ways && d.mail?.state === "draft" && !d.mail.scheduled && !(d.id in sending) && !asked.current.has(d.id);
+  const want = [main(item), main(items[(index + 1) % Math.max(1, items.length)])].find(wantsWays)?.id;
+  useEffect(() => {
+    if (!want || asking || waysWriting) return;
+    asked.current.add(want);
+    setAsking(true);
+    api<{ started: boolean }>(`/api/relay/drafts/${want}/ways`, { method: "POST", body: {} })
+      .then((out) => { if (!out.started) setWaysOff((o) => ({ ...o, [want]: "none" })); })
+      .catch(() => setWaysOff((o) => ({ ...o, [want]: "failed" })))
+      .finally(() => { setAsking(false); void reloadRef.current(); });
+  }, [want, asking, waysWriting]);
+  const retryWays = async (draftId: string) => {
+    try {
+      const out = await api<{ started: boolean }>(`/api/relay/drafts/${draftId}/ways`, { method: "POST", body: { retry: true } });
+      if (out.started) setWaysOff((o) => Object.fromEntries(Object.entries(o).filter(([id]) => id !== draftId)));
+      else say("Couldn't write other ways.");
+    } catch (err) { say(err instanceof Error ? err.message : "Couldn't write other ways."); }
+    await reload();
+  };
+
+  const keys = useRef({ go, index, many: false });
+  keys.current = { go, index, many: items.length > 1 };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key !== "ArrowRight" && e.key !== "ArrowLeft") || !keys.current.many || notShortcut(e, ["INPUT", "TEXTAREA", "SELECT"])) return;
+      keys.current.go(keys.current.index + (e.key === "ArrowRight" ? 1 : -1));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   if (!item) return <div className={cx(s.card, s.empty)}><b>Nothing in review</b><span className={s.muted}>Add a note to an email in your Inbox and press the arrow. Relay drafts it here.</span></div>;
   const ordered = [...item.drafts].sort((a, b) => a.position - b.position);
-  const viewId = views[item.id] && ordered.some((d) => d.id === views[item.id]) ? views[item.id] : ordered[0]?.id;
-  const draft = ordered.find((d) => d.id === viewId) ?? ordered[0];
+  const draft = ordered.find((d) => d.id === views[item.id]) ?? ordered[0];
   const isSent = (d: RelayDraftView) => d.state === "sent" || d.id in sending || (!!d.mail?.scheduled && !d.mail.scheduled.changed);
-  const [finishing, setFinishing] = useState(false);
+  const show = (draftId: string) => setViews((v) => ({ ...v, [item.id]: draftId }));
+  const primary = main(item);
+  const onMain = draft?.role === "follow" && primary ? () => show(primary.id) : undefined;
+  const skip = items.length > 1 ? () => go(index + 1) : undefined;
+  // After this email: its next unsent email, else the next person with something still to send, else the inbox.
+  const nextStep = (from: RelayDraftView): NextStep => {
+    const other = ordered.find((d) => d.id !== from.id && d.mail && !isSent(d));
+    if (other) return { label: other.role === "primary" ? "Next: the main reply →" : `Also send: ${other.title} →`, run: () => show(other.id), home: false };
+    for (let k = 1; k < items.length; k++) {
+      const x = items[(index + k) % items.length];
+      const theirs = main(x);
+      if (!theirs || !isSent(theirs)) return { label: `Next: ${x.counterpart_name ? firstName(x.counterpart_name) : x.counterpart_email || "the next email"} →`, run: () => go(index + k), home: false };
+    }
+    return { label: "Back to the inbox →", run: onBack, home: true };
+  };
   const finish = async () => {
     setFinishing(true);
     try { await api(`/api/relay/items/${item.id}/done`, { method: "POST" }); say("Done · no reply. Marked read and labelled Sorted in Gmail"); await reload(); }
     catch (err) { say(err instanceof Error ? err.message : "Couldn't update Gmail."); } finally { setFinishing(false); }
   };
+  const others = ordered.filter((d) => d.id !== draft?.id);
+  const also = others.length > 0 && (
+    <div className={r.also}>
+      <span className={c.label}>{draft?.role === "primary" ? "Also send" : "Other emails in this plan"}</span>
+      {others.map((d) => (
+        <button key={d.id} type="button" className={r.alsorow} onClick={() => show(d.id)}>
+          <span><b>{d.role === "primary" ? "The main reply" : d.title}</b><span>{d.mail?.to_emails.length ? `To ${d.mail.to_emails.join(", ")}` : d.why}</span></span>
+          <em className={cx(d.mail?.scheduled ? r.due : isSent(d) && r.done)}>{d.mail?.scheduled ? (d.mail.scheduled.undo ? "Sending…" : sendLabel(d.mail.scheduled.at)) : isSent(d) ? "Sent" : d.mail ? "Draft" : "Needs a recipient"}</em>
+        </button>
+      ))}
+    </div>
+  );
+
   return (
-    <section aria-label="Review">
-      <div className={s.phead}><span className={s.tag}>In review</span></div>
-      <div className={s.pager}>
-        <button className={s.navb} type="button" aria-label="Previous" onClick={() => setCur((index - 1 + items.length) % items.length)}>‹</button>
-        {items.map((x, k) => {
-          const name = x.counterpart_name || x.counterpart_email || "?";
-          const busyJob = !x.drafts.length && x.job && ["queued", "running", "ready", "finalising"].includes(x.job.status);
-          return <button key={x.id} type="button" className={s.chip} aria-current={k === index} onClick={() => setCur(k)}><span className={s.av} style={{ background: colour(name) }}>{initials(name)}</span>{firstName(name)}<span className={cx(s.st, (busyJob || x.drafts.some((d) => d.id in sending)) && s.work, !busyJob && x.drafts.length > 0 && x.drafts.filter((d) => d.role === "primary").every((d) => d.state === "sent") && s.sent, !busyJob && x.drafts.some((d) => d.role === "primary" && d.mail?.scheduled) && s.sched)} /></button>;
-        })}
-        <button className={s.navb} type="button" aria-label="Next" onClick={() => setCur((index + 1) % items.length)}>›</button>
-        <span className={s.count}>{index + 1} of {items.length}</span>
-        <span className={s.sp} />
-        <button type="button" className={cx(s.btn, s.ghost)} disabled={finishing} title="No reply needed: marks this email read, labels it Sorted in Gmail and removes it from Review" onClick={() => void finish()}>{finishing ? "Marking…" : "Done, no reply"}</button>
+    <section className={cx(c.lead, r.review)} aria-label="Review">
+      <div className={c.toprow}>
+        <button type="button" className={c.back} onClick={onBack}>← Inbox</button>
+        <div className={r.nav}>
+          <div className={c.progress} aria-label={`Email ${index + 1} of ${items.length}`}>
+            {items.length <= 10 && items.map((x, k) => <i key={x.id} className={cx(k === index && c.on)} />)}
+            <span>{index + 1} of {items.length}</span>
+          </div>
+          <button type="button" className={r.navb} aria-label="Previous email" disabled={!skip} onClick={() => go(index - 1)}>‹</button>
+          <button type="button" className={r.navb} aria-label="Next email" disabled={!skip} onClick={() => go(index + 1)}>›</button>
+        </div>
       </div>
-      <div className={s.rgrid}>
-        <div className={s.col}>
-          {!draft && item.job ? <JobCard job={item.job} itemId={item.id} reload={reload} say={say} />
-            : draft ? <Editor key={draft.id} item={item} draft={draft} reload={reload} say={say} onBack={onBack} sendingTo={sending[draft.id]}
-            startSend={startSend} undoSend={undoSend}
-            onNext={() => {
-              // The draft just confirmed counts as sent: go to its next unsent email, else the next person.
-              const next = ordered.find((d) => d.id !== draft.id && !isSent(d));
-              if (next) setViews((v) => ({ ...v, [item.id]: next.id }));
-              else if (items.length > 1) setCur((index + 1) % items.length);
-            }} />
-            : <div className={cx(s.card, s.empty)}><span className={s.muted}>No draft on this email.</span></div>}
-          {ordered.length > 1 && (
-            <div>
-              <div className={s.sec}><h3>{draft?.role === "primary" ? "Follow-on emails" : "Other emails in this plan"}</h3><span>{draft?.role === "primary" ? "Suggested from the primary email. Click one to open it here." : "Click to switch."}</span></div>
-              <div className={s.cards}>
-                {ordered.filter((d) => d.id !== draft?.id).map((d) => (
-                  <button key={d.id} type="button" className={cx(s.card, s.fo, d.role === "primary" && s.primary)} onClick={() => { setViews((v) => ({ ...v, [item.id]: d.id })); }}>
-                    <div className={s.ft}><span className={s.step}>{d.role === "primary" ? "PRIMARY" : `FOLLOW-ON ${d.position}`}</span><span style={{ fontSize: 11, fontWeight: 500, color: d.mail?.scheduled ? "var(--blue-ink)" : isSent(d) ? "var(--green)" : "var(--muted)" }}>{d.mail?.scheduled ? (d.mail.scheduled.undo ? "Sending…" : sendLabel(d.mail.scheduled.at)) : isSent(d) ? "Sent" : d.mail ? "Draft" : "Needs a recipient"}</span></div>
-                    <b>{d.title}</b>
-                    <span className={s.to}>{d.mail?.to_emails.length ? `To ${d.mail.to_emails.join(", ")}` : d.why}</span>
-                    <span className={s.pv}>{d.mail?.main.split("\n").filter(Boolean).slice(1, 2).join(" ") || d.why}</span>
-                  </button>
-                ))}
+      {draft?.mail ? (
+        <ReplyCard key={draft.id} item={item} draft={draft} mail={draft.mail} also={also} next={nextStep(draft)} skip={skip} onMain={onMain}
+          onDone={() => void finish()} finishing={finishing} waysOff={waysOff[draft.id]} retryWays={() => void retryWays(draft.id)}
+          reload={reload} say={say} sendingTo={sending[draft.id]} startSend={startSend} undoSend={undoSend} />
+      ) : draft ? (
+        <article className={c.card} aria-label={draft.title}>
+          <ReviewHead key={item.id} item={item} draft={draft} onMain={onMain} />
+          <div className={c.reply}>
+            <span className={c.label}>The email</span>
+            <p>Relay didn&apos;t know who to send this to, so there&apos;s no draft yet. Open Ask Relay below and say who, e.g. &ldquo;draft this to Rob at Qube&rdquo;.</p>
+          </div>
+          {also}
+          <div className={c.actions}><div className={c.left}><button type="button" className={c.ghost} disabled={!skip} onClick={skip}>Skip <kbd>→</kbd></button></div></div>
+        </article>
+      ) : item.job ? (
+        <>
+          <article className={c.card} aria-label={item.headline || "Email"}><ReviewHead key={item.id} item={item} /></article>
+          <JobCard key={item.id} job={item.job} itemId={item.id} reload={reload} say={say} />
+        </>
+      ) : (
+        <div className={c.panel}>
+          <h2>No draft on this email.</h2>
+          <p>Add a note to it in the Inbox and Relay drafts a reply here, or mark it done.</p>
+          <div className={c.btns}>
+            {skip && <button type="button" className={c.next} onClick={skip}>Skip →</button>}
+            <button type="button" className={c.plainbtn} disabled={finishing} onClick={() => void finish()}>{finishing ? "Marking…" : "Done, no reply"}</button>
+          </div>
+        </div>
+      )}
+      <ReviewTools key={item.id} item={item} draft={draft} rules={data.rules} reload={reload} say={say} />
+    </section>
+  );
+}
+
+/** The top of the card: what kind of email it is, who sent it, one line on what they want, and their email on request. */
+function ReviewHead({ item, draft, onMain }: { item: RelayReviewItem; draft?: RelayDraftView; onMain?: () => void }) {
+  const [email, setEmail] = useState(false);
+  const [log, setLog] = useState(false);
+  const follow = draft?.role === "follow";
+  const last = item.last_message;
+  const who = [item.counterpart_name || item.counterpart_email, item.company].filter(Boolean).join(", ");
+  const from = [who, when(last?.at ?? item.waiting_since)].filter(Boolean).join(" · ");
+  const situation = item.situation ? SITUATION[item.situation] : undefined;
+  const theirs = last?.direction === "outbound" ? "the last email" : "their email";
+  const context = follow ? draft.why : item.context;
+  const note = follow ? "" : draft?.source_note;
+  return (
+    <>
+      <div className={c.head}>
+        <div className={c.tagrow}>
+          {follow ? <span className={cx(c.tag, c.plain)}>Also send</span> : <span className={cx(c.tag, !item.deal_label && r.tagreply)}>{item.deal_label ? "Deal reply" : "Needs a reply"}</span>}
+          {!follow && situation && <span className={cx(c.tag, c.plain)}>{situation}</span>}
+          {from && <span className={c.from}>{from}</span>}
+        </div>
+        <h1 className={c.h1}>{follow ? draft.title : item.headline || `Reply to ${firstName(item.counterpart_name ?? item.counterpart_email)}`}</h1>
+        {context && <p className={r.context}>{context}</p>}
+        {(item.deal_label || note) && (
+          <div className={c.rows}>
+            {item.deal_label && <div className={c.row}><span className={c.rowlabel}>Deal</span><span className={r.chip}>{item.deal_label}</span></div>}
+            {note && <div className={c.row}><span className={c.rowlabel}>Your note</span><span className={r.chip}>{note}</span></div>}
+          </div>
+        )}
+        <div className={r.links}>
+          {onMain && <button type="button" className={c.linkbtn} onClick={onMain}>← Back to the main reply</button>}
+          {last && <button type="button" className={c.linkbtn} aria-expanded={email} onClick={() => setEmail((v) => !v)}>{email ? "Hide" : "See"} {theirs}</button>}
+          {draft && draft.agent_log.length > 0 && <button type="button" className={c.linkbtn} aria-expanded={log} onClick={() => setLog((v) => !v)}>How Relay wrote it</button>}
+        </div>
+        {log && draft && <div className={r.log}>{draft.agent_log.map((line, k) => <span key={k}>{line}</span>)}</div>}
+      </div>
+      {email && last && (
+        <div className={c.email}>
+          <b>{[last.from_name || last.from_email, when(last.at)].filter(Boolean).join(" · ")}</b>
+          {last.text.split(/\n{2,}/).map((part, k) => <p key={k}>{part.trim()}</p>)}
+          {item.attachment_message_id && <AttachmentStrip messageId={item.attachment_message_id} />}
+          {item.earlier.length > 0 && <div className={cx(s.earlier, r.earlier)}>{item.earlier.map((e, k) => <span key={k}><b>{e.who}</b> · {e.when}: {e.summary}</span>)}</div>}
+        </div>
+      )}
+    </>
+  );
+}
+
+type Busy = "send" | "later" | "check" | "sender" | "way" | "change" | "gmail" | "undo";
+
+/**
+ * One email, ready to send. The draft Relay wrote is a template: where it needs a fact only Alex has, it carries a gap,
+ * shown as a field in the sentence. `local.body` is that template and `values` what Alex typed into each gap; the two
+ * together are the text that is saved and sent, and nothing with a gap left in it can go.
+ */
+function ReplyCard({ item, draft, mail, also, next, skip, onMain, onDone, finishing, waysOff, retryWays, reload, say, sendingTo, startSend, undoSend }: {
+  item: RelayReviewItem; draft: RelayDraftView; mail: MailView; also: ReactNode; next: NextStep; skip?: () => void; onMain?: () => void;
+  onDone: () => void; finishing: boolean; waysOff?: "failed" | "none"; retryWays: () => void;
+  reload: () => Promise<void>; say: (t: string, undo?: () => void) => void; sendingTo?: string;
+} & Sends) {
+  const follow = draft.role === "follow";
+  const [local, setLocal] = useState<Copy>(() => copyOf(mail));
+  const [values, setValues] = useState<string[]>([]);
+  const [busy, setBusy] = useState<Busy | null>(null);
+  const [fields, setFields] = useState(() => mail.to_emails.length === 0);
+  const [editing, setEditing] = useState(false);
+  const [later, setLater] = useState(false);
+  const [custom, setCustom] = useState("");
+  const [stock, setStock] = useState(false);
+  const [ask, setAsk] = useState("");
+  const [note, setNote] = useState("");
+  const [heldUntil, setHeldUntil] = useState<string | null>(null);
+  const [resync, setResync] = useState(0);
+  const [, tick] = useState(0);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const born = useRef(Date.now());
+  // The version the server holds, what is on screen now, and the saves waiting their turn.
+  const server = useRef<Saved>({ ...copyOf(mail), updated_at: mail.updated_at });
+  const live = useRef({ local, values });
+  live.current = { local, values };
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const pending = useRef(0);
+  const acting = useRef(false);
+
+  /** Saves what is on screen, one save at a time, and returns the version the server now holds; null when it could not save. */
+  const save = (over?: Partial<Copy>): Promise<Saved | null> => {
+    if (over) { live.current = { ...live.current, local: { ...live.current.local, ...over } }; setLocal(live.current.local); }
+    pending.current++;
+    const run = queue.current.then(async (): Promise<Saved | null> => {
+      const { local: copy, values: typed } = live.current;
+      const body = fillGaps(copy.body, typed);
+      const was = server.current;
+      if (copy.subject === was.subject && bodyKey(body) === bodyKey(was.body) && addrKey(copy.to) === addrKey(was.to) && addrKey(copy.cc) === addrKey(was.cc) && addrKey(copy.bcc) === addrKey(was.bcc)) return was;
+      try {
+        const updated = await api<{ updated_at: string; subject: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; editable: { main: string } }>(`/api/mail/drafts/${mail.id}`, { method: "PATCH", body: { subject: copy.subject, body, to: splitAddrs(copy.to), cc: splitAddrs(copy.cc), bcc: splitAddrs(copy.bcc), updated_at: was.updated_at } });
+        const saved: Saved = { subject: updated.subject ?? "", body: updated.editable.main, to: updated.to_emails.join(", "), cc: updated.cc_emails.join(", "), bcc: updated.bcc_emails.join(", "), updated_at: updated.updated_at };
+        server.current = saved;
+        // Show the server's form of whatever has not been touched since this save began. The gaps stay as fields.
+        const now = live.current;
+        const shown = { ...now.local };
+        for (const k of ["subject", "to", "cc", "bcc"] as const) if (now.local[k] === copy[k]) shown[k] = saved[k];
+        const sameBody = now.local.body === copy.body && now.values === typed;
+        if (sameBody && bodyKey(body) !== bodyKey(saved.body)) { shown.body = saved.body; setValues([]); }
+        setLocal(shown);
+        void reload();
+        return saved;
+      } catch (err) { say(err instanceof Error ? err.message : "Couldn't save."); void reload(); return null; }
+    }).finally(() => { if (--pending.current === 0) setResync((n) => n + 1); });
+    queue.current = run.catch(() => null);
+    return run;
+  };
+  // A rewrite, another way or a new sender is saved by the server: take that copy when the draft's version moves on.
+  useEffect(() => {
+    if (pending.current || !newer(mail.updated_at, server.current.updated_at)) return;
+    const fresh = copyOf(mail);
+    const now = live.current;
+    const keep = bodyKey(fillGaps(now.local.body, now.values)) === bodyKey(fresh.body);
+    server.current = { ...fresh, updated_at: mail.updated_at };
+    setLocal(keep ? { ...fresh, body: now.local.body } : fresh);
+    if (!keep) setValues([]);
+  }, [mail.updated_at, resync]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { const el = bodyRef.current; if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight + 2}px`; } }, [local.body, editing]);
+
+  const sent = draft.state === "sent" || mail.state === "accepted";
+  const scheduled = mail.scheduled;
+  // Send holds the email for 30 seconds. The server gives the exact time once the page has reloaded.
+  const serverHold = mail.state === "draft" && scheduled?.undo ? scheduled.at : null;
+  const holdAt = serverHold ?? (sendingTo ? heldUntil : null);
+  const going = !sent && (!!sendingTo || mail.state === "sending" || !!serverHold);
+  const left = holdAt ? undoSecondsLeft(holdAt) : 0;
+  useEffect(() => { if (!going) return; const t = setInterval(() => tick((n) => n + 1), 500); return () => clearInterval(t); }, [going]);
+  // A sender switch re-signs the saved copy; the card holds still until that version is back.
+  const locked = sent || going || !!scheduled || busy === "sender" || mail.state !== "draft";
+
+  const to = splitAddrs(local.to);
+  const filled = fillGaps(local.body, values);
+  const gapsLeft = gapCount(filled);
+  const verdict = beforeYouSend({ to, body: filled, attachments: mail.attachments.length }, item.facts);
+  // The gaps show as fields and on the Send button, so the check line leaves them out.
+  const issues = verdict.issues.filter((issue) => issue.text !== GAP_ISSUE);
+  const blocked = issues.some((issue) => issue.level === "block");
+  const lead = blocked ? "Fix this before sending." : issues.length === 1 ? "One thing to check." : `${issues.length} things to check.`;
+  const good = verdict.good.join(", ").replace(/, ([^,]*)$/, " and $1");
+  const okLine = !good ? "" : issues.length ? `Otherwise ${good}.` : `${good[0].toUpperCase()}${good.slice(1)}.`;
+  const hasPromise = !follow && (promisesIn(filled).length > 0 || item.todos.some((t) => t.kind === "promise"));
+  const canSend = !locked && !busy && to.length > 0 && gapsLeft === 0 && !blocked;
+  // Another way or a rewrite is replacing the draft: what is typed meanwhile would be lost, so the fields wait.
+  const swapping = busy === "way" || busy === "change";
+  const toName = to[0] && item.counterpart_name && to[0].toLowerCase() === item.counterpart_email?.toLowerCase() ? firstName(item.counterpart_name) : to[0] ?? "";
+  const whom = `${toName}${to.length > 1 ? ` +${to.length - 1}` : ""}`;
+  const canWays = !follow && draft.state === "draft" && !locked;
+
+  /** One server action at a time. A failure is said in plain words and the page reloads to show what is true. */
+  const act = async (what: Busy, run: () => Promise<void>, failed: string) => {
+    if (acting.current) return;
+    acting.current = true;
+    setBusy(what);
+    try { await run(); } catch (err) { say(err instanceof Error ? err.message : failed); void reload(); } finally { acting.current = false; setBusy(null); }
+  };
+  // From: saves the copy first, then the server re-signs that version as the new sender.
+  const changeSender = (identity: string) => act("sender", async () => {
+    const version = await save();
+    if (!version) return;
+    await api(`/api/relay/drafts/${draft.id}/sender`, { method: "POST", body: { identity, updated_at: version.updated_at } });
+    await reload();
+  }, "Couldn't change who it is from.");
+  // Send: one click. The server holds it for 30 seconds so it can be undone, then sends this exact version.
+  const send = () => act("send", async () => {
+    const version = await save();
+    if (!version) return;
+    setHeldUntil(new Date(Date.now() + UNDO_SEND_SECONDS * 1000).toISOString());
+    await startSend(draft.id, version.updated_at, splitAddrs(version.to).join(", "));
+  }, "Couldn't send it.");
+  // Send later: saves the copy, pins that version and the time; the server sends it then, unless they reply first.
+  const scheduleAt = (sendAt: string) => act("later", async () => {
+    const version = await save();
+    if (!version) return;
+    await api(`/api/relay/drafts/${draft.id}/schedule`, { method: "POST", body: { confirm: true, updated_at: version.updated_at, send_at: sendAt } });
+    say(`Scheduled for ${sendLabel(sendAt)} to ${firstName(splitAddrs(version.to)[0])}`);
+    setLater(false);
+    await reload();
+    if (!next.home) next.run();
+  }, "Couldn't schedule it.");
+  const scheduleCustom = () => {
+    if (!custom) return;
+    const [date, time] = custom.split("T");
+    const sendAt = londonWallToUtc(date, time);
+    if (londonInputValue(sendAt) !== custom) { say("That time doesn't exist in London: the clocks change then. Pick another."); return; }
+    const problem = sendAtProblem(sendAt);
+    if (problem) { say(problem); return; }
+    void scheduleAt(sendAt.toISOString());
+  };
+  const cancelSchedule = () => act("later", async () => {
+    await api(`/api/relay/drafts/${draft.id}/schedule`, { method: "DELETE" });
+    say("Schedule cancelled. It's a draft again.");
+    await reload();
+  }, "Couldn't cancel.");
+  const sendNow = () => act("send", async () => {
+    setHeldUntil(new Date(Date.now() + UNDO_SEND_SECONDS * 1000).toISOString());
+    await startSend(draft.id, mail.updated_at, mail.to_emails.join(", "));
+  }, "Couldn't send it.");
+  const undo = () => act("undo", async () => { await undoSend(draft.id, sendingTo ?? mail.to_emails.join(", ")); }, "Couldn't stop it.");
+  const checkSent = () => act("check", async () => {
+    const out = await api<{ outcome: string; retry_after_seconds?: number }>(`/api/relay/drafts/${draft.id}/release`, { method: "POST" });
+    say(out.outcome === "sent" ? "It did go: found in Gmail Sent. Marked as sent." : out.outcome === "released" ? "It didn't go. Back to a draft, ready to send again." : `Still settling. Try again in ${Math.ceil((out.retry_after_seconds ?? 60) / 60)} min.`);
+    await reload();
+  }, "Couldn't check.");
+  const toGmail = () => act("gmail", async () => {
+    const version = await save();
+    if (!version) return;
+    const out = await api<{ url: string }>(`/api/relay/drafts/${draft.id}/gmail`, { method: "POST" });
+    say("Saved to Gmail drafts in alex@rebattery.io", () => window.open(out.url, "_blank", "noopener"));
+    await reload();
+  }, "Couldn't reach Gmail.");
+  // Say what to change: Relay rewrites this draft and keeps any gap it still cannot fill.
+  const change = (instruction: string) => act("change", async () => {
+    const version = await save();
+    if (!version) return;
+    const out = await api<{ note: string }>(`/api/relay/drafts/${draft.id}/rewrite`, { method: "POST", body: { instruction } });
+    setNote(out.note);
+    setAsk("");
+    await reload();
+  }, "That didn't work. Try again.");
+  // Another way to answer: the server keeps this one as it stands and puts the picked one in the draft.
+  const pick = (way: number) => act("way", async () => {
+    const version = await save();
+    if (!version) return;
+    await api(`/api/relay/drafts/${draft.id}/ways`, { method: "POST", body: { pick: way, updated_at: version.updated_at } });
+    setNote("");
+    setEditing(false);
+    await reload();
+  }, "Couldn't switch.");
+  const detach = async (sha256: string, filename: string) => {
+    try { await api(`/api/relay/drafts/${draft.id}/attachments`, { method: "DELETE", body: { sha256 } }); say(`Removed ${filename}`); await reload(); }
+    catch (err) { say(err instanceof Error ? err.message : "Couldn't remove it."); }
+  };
+  // Edit: the whole reply as plain text. What was typed into the gaps becomes part of it.
+  const toggleEdit = () => {
+    if (editing) { setEditing(false); void save(); return; }
+    setLocal((l) => ({ ...l, body: fillGaps(l.body, values) }));
+    setValues([]);
+    setEditing(true);
+  };
+
+  // Enter sends, or moves on once it has gone; E edits. A new card ignores Enter for a moment, so holding it down
+  // after one send cannot send the next email unread.
+  const keys = useRef<{ enter?: () => void; edit?: () => void }>({});
+  keys.current = {
+    enter: going || sent ? next.run : canSend && !editing && !later ? () => void send() : undefined,
+    edit: locked || busy ? undefined : toggleEdit,
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (notShortcut(e, ["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"])) return;
+      const run = e.key === "Enter" ? (Date.now() - born.current > 800 ? keys.current.enter : undefined) : e.key === "e" || e.key === "E" ? keys.current.edit : undefined;
+      if (run) { e.preventDefault(); run(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  if (going || sent) {
+    return (
+      <div className={c.panel} role="status">
+        <h2>{sent ? `Sent to ${whom}.` : left > 0 ? `Sending to ${whom} in ${left} s.` : `On its way to ${whom}.`}</h2>
+        <p>{sent ? "Relay brings this back to Follow up if there's no reply." : "Relay tells you when it has gone. A reply from them comes back to your inbox; if they stay quiet, the thread moves to Follow up."}</p>
+        <div className={c.btns}>
+          <button type="button" className={c.next} onClick={next.run}>{next.label}</button>
+          {!sent && left > 0 && <button type="button" className={c.plainbtn} disabled={!!busy} onClick={() => void undo()}>Undo ({left} s)</button>}
+        </div>
+      </div>
+    );
+  }
+
+  const stuck = mail.state === "failed" || mail.state === "unknown";
+  return (
+    <article className={c.card} aria-label={follow ? draft.title : `Reply to ${item.counterpart_name || item.counterpart_email || "this email"}`}>
+      <ReviewHead item={item} draft={draft} onMain={onMain} />
+      {canWays && <WayTabs ways={draft.ways} current={filled} off={draft.ways ? undefined : waysOff} busy={!!busy} onPick={(way) => void pick(way)} onRetry={retryWays} />}
+      <div className={c.reply}>
+        <div className={r.tohead}>
+          <span className={c.label}>{follow ? "The email" : "Your reply"}</span>
+          <span className={r.meta}>To {to.length ? to.join(", ") : <b>nobody yet</b>}{local.cc.trim() ? ` · Cc ${splitAddrs(local.cc).join(", ")}` : ""} · From {mail.from_email ?? "alex@rebattery.io"}</span>
+          {!locked && <button type="button" aria-expanded={fields} onClick={() => setFields((v) => !v)}>{fields ? "Hide" : "Change"}</button>}
+        </div>
+        {fields && !locked ? (
+          <div className={r.fields}>
+            <div className={r.field}>
+              <label htmlFor={`from-${draft.id}`}>From</label>
+              {isSenderKey(mail.identity_key) && mail.transport === "gmail"
+                ? <select id={`from-${draft.id}`} value={mail.identity_key} disabled={!!busy} onChange={(e) => void changeSender(e.target.value)}>{SENDERS.map((sender) => <option key={sender.key} value={sender.key}>{sender.address}</option>)}</select>
+                : <span className={r.ro}>{mail.from_email}</span>}
+            </div>
+            <div className={r.field}><label htmlFor={`to-${draft.id}`}>To</label><input id={`to-${draft.id}`} value={local.to} disabled={swapping} placeholder="Add an address" onChange={(e) => setLocal({ ...local, to: e.target.value })} onBlur={() => void save()} /></div>
+            {(["cc", "bcc"] as const).map((k) => <div key={k} className={r.field}><label htmlFor={`${k}-${draft.id}`}>{k === "cc" ? "Cc" : "Bcc"}</label><input id={`${k}-${draft.id}`} value={local[k]} disabled={swapping || mail.transport !== "gmail"} placeholder="Add addresses, separated by commas" onChange={(e) => setLocal({ ...local, [k]: e.target.value })} onBlur={() => void save()} /></div>)}
+            <div className={r.field}><label htmlFor={`sj-${draft.id}`}>Subject</label><input id={`sj-${draft.id}`} value={local.subject} disabled={swapping} onChange={(e) => setLocal({ ...local, subject: e.target.value })} onBlur={() => void save()} /></div>
+          </div>
+        ) : follow && <span className={c.to}>Subject: {local.subject}</span>}
+        {editing && !locked
+          ? <textarea ref={bodyRef} className={r.textarea} value={local.body} readOnly={swapping} autoFocus aria-label="Email body" onChange={(e) => setLocal({ ...local, body: e.target.value })} onBlur={() => void save()} />
+          : <GapBody template={local.body} values={values} disabled={locked || swapping} onChange={(index, value) => setValues((v) => { const typed = [...v]; typed[index] = value; return typed; })} onCommit={() => void save()} />}
+        {!locked && (gapsLeft > 0 || gapCount(local.body) > 0) && <span className={cx(r.gapline, !gapsLeft && r.ok)}>{gapsLeft ? gapWords(gapsLeft) : "Nothing left to fill."}</span>}
+        {mail.attachments.length > 0 && (
+          <div className={r.files}>
+            {mail.attachments.map((a) => (
+              <div key={a.sha256} className={s.att}>
+                <a className={s.attlink} href={`/api/mail/drafts/${mail.id}/attachments/${a.sha256}`} target="_blank" rel="noopener noreferrer">
+                  <span className={cx(s.ic, /xlsx?$/i.test(a.filename) && s.xl)}>{(a.filename.split(".").pop() ?? "").toUpperCase().slice(0, 4)}</span>
+                  <div><b>{a.filename}</b><span>{a.sizeBytes ? `${Math.max(1, Math.round(a.sizeBytes / 1024))} KB · open` : "open"}</span></div>
+                </a>
+                {!locked && <button type="button" className={s.attx} aria-label={`Remove ${a.filename}`} onClick={() => void detach(a.sha256, a.filename)}>×</button>}
               </div>
+            ))}
+          </div>
+        )}
+        {!locked && !editing && (
+          <div className={r.change}>
+            <label htmlFor={`ask-${draft.id}`}>Not quite right? Say what to change.</label>
+            <form className={r.changerow} onSubmit={(e) => { e.preventDefault(); if (ask.trim()) void change(ask.trim()); }}>
+              <input id={`ask-${draft.id}`} value={ask} maxLength={1000} disabled={busy === "change"} placeholder="e.g. firmer on price, offer a call this week, mention the current order" onChange={(e) => setAsk(e.target.value)} />
+              <button type="submit" className={c.pill} disabled={!!busy || !ask.trim()}>{busy === "change" ? "Rewriting…" : "Change it"}</button>
+            </form>
+            <div className={r.chips}>
+              {["Shorter", "Firmer", "Warmer", "Offer a call"].map((q) => <button key={q} type="button" className={c.pill} disabled={!!busy} onClick={() => void change(q)}>{q}</button>)}
+              <button type="button" className={c.pill} disabled={!!busy} aria-expanded={stock} onClick={() => setStock((v) => !v)}>Attach stock list</button>
+              <button type="button" className={cx(c.pill, c.quiet)} disabled={!!busy} onClick={toggleEdit}>Write it myself</button>
+            </div>
+            {note && <span className={r.small} role="status">{note}</span>}
+          </div>
+        )}
+        {stock && !locked && !editing && <div className={r.stock}><StockListForm draftId={draft.id} onClose={() => setStock(false)} onDone={async (text) => { setStock(false); setNote(text); await reload(); }} say={say} /></div>}
+        {mail.warnings.map((w) => <div key={w} role="alert" className={r.amber}><b>Check the conversation:</b> {w}</div>)}
+        {mail.state === "draft" && mail.failure && <div className={r.amber}><b>Last try didn&apos;t send:</b> {failureText(mail.failure, mail.state)}</div>}
+        {!locked && issues.length > 0 && (
+          <div className={cx(r.amber, blocked && r.stop)} aria-live="polite">
+            <b>{lead}</b> {issues.map((issue, k) => <span key={k}>{issue.text}{issue.fix && <> <button type="button" onClick={() => void save({ to: issue.fix!.to })}>{issue.fix.label}</button></>} </span>)}
+          </div>
+        )}
+        {!locked && (okLine || hasPromise) && <span className={r.small}>{okLine}{hasPromise ? " Any promise in this email is in your to-dos below." : ""}</span>}
+      </div>
+      {also}
+      {stuck ? (
+        <div className={cx(r.strip, r.warn)}>
+          <span><b>Not sent{mail.state === "unknown" ? " (unconfirmed)" : ""}:</b> {failureText(mail.failure, mail.state)}</span>
+          <div className={r.right}>
+            {skip && <button type="button" className={c.ghost} onClick={skip}>Skip <kbd>→</kbd></button>}
+            <button type="button" className={r.laterbtn} disabled={!!busy} onClick={() => void checkSent()}>{busy === "check" ? "Checking Gmail…" : "Check if it went"}</button>
+          </div>
+        </div>
+      ) : scheduled ? (
+        <div className={cx(r.strip, scheduled.changed && r.warn)}>
+          {scheduled.changed
+            ? <span><b>Won&apos;t send {sendLabel(scheduled.at)}:</b> this draft changed after you scheduled it. Send it now or cancel and schedule again.</span>
+            : <span>Sends <b>{sendLabel(scheduled.at)}</b> to {mail.to_emails.join(", ")}. If they reply before then, it waits for you.</span>}
+          <div className={r.right}>
+            {skip && <button type="button" className={c.ghost} onClick={skip}>Skip <kbd>→</kbd></button>}
+            <button type="button" className={c.ghost} disabled={!!busy} onClick={() => void cancelSchedule()}>Cancel</button>
+            <button type="button" className={r.laterbtn} disabled={!!busy} onClick={() => void sendNow()}>Send now</button>
+          </div>
+        </div>
+      ) : mail.state === "draft" && (
+        <>
+          {later && (
+            <div className={r.later} role="group" aria-label="Send later">
+              {sendSlots().map((slot) => <button key={slot.at} type="button" className={c.pill} disabled={!canSend} onClick={() => void scheduleAt(slot.at)}>{slot.label}</button>)}
+              <input type="datetime-local" aria-label="Pick a time (London)" value={custom} min={londonInputValue(new Date())} onChange={(e) => setCustom(e.target.value)} />
+              {custom && <button type="button" className={c.pill} disabled={!canSend} onClick={scheduleCustom}>Schedule</button>}
             </div>
           )}
-          <Todos.Suggested item={item} draft={draft} reload={reload} say={say} />
-        </div>
-        <div className={s.aicol}>
-          <AiPanel key={item.id} item={item} draft={draft} rules={data.rules} reload={reload} say={say} />
-          <DealChecklistCard key={`check-${item.id}`} item={item} draft={draft} reload={reload} say={say} />
-        </div>
+          <div className={c.actions}>
+            <div className={c.left}>
+              <button type="button" className={c.ghost} disabled={!!busy} onClick={toggleEdit}>{editing ? "Done editing" : <>Edit <kbd>E</kbd></>}</button>
+              <button type="button" className={c.ghost} disabled={!skip} onClick={skip}>Skip <kbd>→</kbd></button>
+              {!follow && <button type="button" className={c.ghost} disabled={finishing || !!busy} title="No reply needed after all: marks it read and labels it Sorted in Gmail; the draft is dropped" onClick={onDone}>{finishing ? "Marking…" : "Done, no reply"}</button>}
+              <button type="button" className={c.ghost} disabled={!!busy || gapsLeft > 0} title={gapsLeft ? "Fill the gaps first" : "Saves this draft to Gmail drafts in alex@rebattery.io"} onClick={() => void toGmail()}>{draft.state === "gmail" ? "✓ In Gmail drafts" : "To Gmail drafts"}</button>
+            </div>
+            <div className={r.right}>
+              <button type="button" className={r.laterbtn} aria-expanded={later} disabled={!canSend} onClick={() => setLater((v) => !v)}>Send later</button>
+              <button type="button" className={c.send} title="Sends in 30 seconds. You can undo until then." disabled={!canSend} onClick={() => void send()}>
+                {busy === "send" ? "Sending…" : !to.length ? "Add who this goes to" : gapsLeft ? `Fill ${gapsLeft === 1 ? "the gap" : `${gapsLeft} gaps`} to send` : blocked ? "Fix the point above to send" : `Send to ${whom}  ↵`}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </article>
+  );
+}
+
+/** Under the card: the to-dos from this email, and the tools that are rarely needed, closed until asked for. */
+function ReviewTools({ item, draft, rules, reload, say }: { item: RelayReviewItem; draft: RelayDraftView | undefined; rules: RelayRule[]; reload: () => Promise<void>; say: (t: string) => void }) {
+  const [open, setOpen] = useState<"ask" | "rules" | "deal" | null>(null);
+  const tool = (key: "ask" | "rules" | "deal", label: string) => <button type="button" aria-expanded={open === key} onClick={() => setOpen(open === key ? null : key)}>{label}</button>;
+  return (
+    <div className={r.under}>
+      <Todos.Suggested item={item} draft={draft} reload={reload} say={say} />
+      <div className={r.tools}>
+        {tool("ask", "Ask Relay")}
+        {tool("rules", "Writing rules")}
+        {(item.bulk_listing_id || item.contact_type === "buyer" || item.contact_type === "supplier") && tool("deal", "Deal checklist")}
       </div>
-    </section>
+      {(open === "ask" || open === "rules") && <div className={s.aicol}><AiPanel item={item} rules={rules} mode={open} reload={reload} say={say} /></div>}
+      {open === "deal" && <DealChecklistCard item={item} draft={draft} reload={reload} say={say} />}
+    </div>
   );
 }
 
@@ -678,222 +1183,6 @@ function failureText(failure: { reason: string; detail?: unknown } | null, state
     schedule_invalid: "the schedule was incomplete. Schedule it again.",
   };
   return words[reason] ?? `${reason.replace(/_/g, " ")}.`;
-}
-
-function Editor({ item, draft, reload, say, onBack, onNext, sendingTo, startSend, undoSend }: {
-  item: RelayReviewItem; draft: RelayDraftView; reload: () => Promise<void>; say: (t: string, undo?: () => void) => void; onBack: () => void; onNext: () => void;
-  sendingTo?: string; startSend: (draftId: string, updatedAt: string, toLabel: string) => Promise<boolean>; undoSend: (draftId: string, toLabel: string) => Promise<boolean>;
-}) {
-  const mail = draft.mail;
-  const [local, setLocal] = useState<Local | null>(mail ? { subject: mail.subject ?? "", body: mail.main, to: mail.to_emails.join(", "), cc: mail.cc_emails.join(", "), bcc: mail.bcc_emails.join(", "), updated_at: mail.updated_at } : null);
-  const [saving, setSaving] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [, tick] = useState(0);
-  const [later, setLater] = useState(false);
-  const [custom, setCustom] = useState("");
-  const [scheduling, setScheduling] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const [switching, setSwitching] = useState(false);
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
-  // A rewrite from the AI panel saves server-side; pick up the new copy when the draft's version moves on.
-  useEffect(() => { if (mail && local && mail.updated_at !== local.updated_at && !saving) setLocal({ subject: mail.subject ?? "", body: mail.main, to: mail.to_emails.join(", "), cc: mail.cc_emails.join(", "), bcc: mail.bcc_emails.join(", "), updated_at: mail.updated_at }); }, [mail?.updated_at]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { const el = bodyRef.current; if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; } }, [local?.body]);
-  // While Send holds the email, count the seconds down.
-  const holdAt = mail?.state === "draft" && mail.scheduled?.undo ? mail.scheduled.at : null;
-  useEffect(() => { if (!holdAt) return; const t = setInterval(() => tick((n) => n + 1), 500); return () => clearInterval(t); }, [holdAt]);
-
-  if (!mail || !local) {
-    return <div className={cx(s.card, s.editor)}><div className={s.ebar}><div><div className={s.lab}>Follow-on email</div><h2>{draft.title}</h2></div></div><p style={{ padding: "11px 14px" }} className={s.muted}>{draft.why} Relay didn't know who to send this to, so there's no draft yet. Ask in the panel on the right, e.g. "draft this to Rob at Qube".</p></div>;
-  }
-  const isDirty = (l: Local) => l.subject !== (mail.subject ?? "") || splitAddrs(l.to).join(",") !== mail.to_emails.join(",") || l.body !== mail.main || splitAddrs(l.cc).join(",") !== mail.cc_emails.join(",") || splitAddrs(l.bcc).join(",") !== mail.bcc_emails.join(",");
-  const save = async (edited: Local = local): Promise<Local | null> => {
-    if (!isDirty(edited)) return edited;
-    setSaving(true);
-    try {
-      const updated = await api<{ updated_at: string; subject: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; editable: { main: string } }>(`/api/mail/drafts/${mail.id}`, { method: "PATCH", body: { subject: edited.subject, body: edited.body, to: splitAddrs(edited.to), cc: splitAddrs(edited.cc), bcc: splitAddrs(edited.bcc), updated_at: edited.updated_at } });
-      const next = { subject: updated.subject ?? "", body: updated.editable.main, to: updated.to_emails.join(", "), cc: updated.cc_emails.join(", "), bcc: updated.bcc_emails.join(", "), updated_at: updated.updated_at };
-      setLocal(next);
-      void reload();
-      return next;
-    } catch (err) { say(err instanceof Error ? err.message : "Couldn't save."); return null; } finally { setSaving(false); }
-  };
-  const useTo = async (address: string) => { await save({ ...local, to: address }); };
-  // From: saves the copy first, then the server re-signs that version as the new sender.
-  const changeSender = async (identity: string) => {
-    setSwitching(true);
-    try {
-      const version = await save();
-      if (!version) return;
-      await api(`/api/relay/drafts/${draft.id}/sender`, { method: "POST", body: { identity, updated_at: version.updated_at } });
-      await reload();
-    } catch (err) { say(err instanceof Error ? err.message : "Couldn't change who it is from."); } finally { setSwitching(false); }
-  };
-  const sent = draft.state === "sent";
-  const scheduled = mail.scheduled;
-  // A sender switch re-signs the saved copy; the editor holds still until that version is back.
-  const locked = sent || !!scheduled || switching;
-  const to = splitAddrs(local.to);
-  const verdict = beforeYouSend({ to, body: local.body, attachments: mail.attachments.length }, item.facts);
-  const blocked = verdict.state === "stop";
-  // Send: one click. The server holds it for 30 seconds so it can be undone, then sends this exact version.
-  const send = async () => {
-    setSending(true);
-    try {
-      const version = await save();
-      if (!version) return;
-      if (await startSend(draft.id, version.updated_at, splitAddrs(version.to).join(", "))) onNext();
-    } finally { setSending(false); }
-  };
-  // Send later: saves the copy, pins that version and the time; the server sends it then, unless they reply first.
-  const scheduleAt = async (at: string) => {
-    setScheduling(true);
-    try {
-      const version = await save();
-      if (!version) return;
-      await api(`/api/relay/drafts/${draft.id}/schedule`, { method: "POST", body: { confirm: true, updated_at: version.updated_at, send_at: at } });
-      say(`Scheduled for ${sendLabel(at)} to ${firstName(splitAddrs(version.to)[0])}`);
-      setLater(false);
-      await reload();
-      onNext();
-    } catch (err) { say(err instanceof Error ? err.message : "Couldn't schedule it."); } finally { setScheduling(false); }
-  };
-  const scheduleCustom = () => {
-    if (!custom) return;
-    const [date, time] = custom.split("T");
-    const at = londonWallToUtc(date, time);
-    if (londonInputValue(at) !== custom) { say("That time doesn't exist in London: the clocks change then. Pick another."); return; }
-    const problem = sendAtProblem(at);
-    if (problem) { say(problem); return; }
-    void scheduleAt(at.toISOString());
-  };
-  const cancelSchedule = async () => {
-    setScheduling(true);
-    try { await api(`/api/relay/drafts/${draft.id}/schedule`, { method: "DELETE" }); say("Schedule cancelled. It's a draft again."); await reload(); }
-    catch (err) { say(err instanceof Error ? err.message : "Couldn't cancel."); } finally { setScheduling(false); }
-  };
-  const undoHold = async () => {
-    setScheduling(true);
-    try { await undoSend(draft.id, mail.to_emails.join(", ")); } finally { setScheduling(false); }
-  };
-  const holdLeft = holdAt ? undoSecondsLeft(holdAt) : 0;
-  const sendNow = async () => {
-    setScheduling(true);
-    try { if (await startSend(draft.id, mail.updated_at, mail.to_emails.join(", "))) onNext(); } finally { setScheduling(false); }
-  };
-  const checkSent = async () => {
-    setChecking(true);
-    try {
-      const r = await api<{ outcome: string; retry_after_seconds?: number }>(`/api/relay/drafts/${draft.id}/release`, { method: "POST" });
-      say(r.outcome === "sent" ? "It did go: found in Gmail Sent. Marked as sent." : r.outcome === "released" ? "It didn't go. Back to a draft, ready to send again." : `Still settling. Try again in ${Math.ceil((r.retry_after_seconds ?? 60) / 60)} min.`);
-      await reload();
-    } catch (err) { say(err instanceof Error ? err.message : "Couldn't check."); } finally { setChecking(false); }
-  };
-  const markDone = async () => {
-    try { await api(`/api/relay/items/${item.id}/done`, { method: "POST" }); say("Done · no reply. Marked read and labelled Sorted in Gmail"); await reload(); }
-    catch (err) { say(err instanceof Error ? err.message : "Couldn't update Gmail."); }
-  };
-  const toGmail = async () => {
-    const version = await save();
-    if (!version) return;
-    try {
-      const r = await api<{ url: string }>(`/api/relay/drafts/${draft.id}/gmail`, { method: "POST" });
-      say("Saved to Gmail drafts in alex@rebattery.io", () => window.open(r.url, "_blank", "noopener"));
-      await reload();
-    } catch (err) { say(err instanceof Error ? err.message : "Couldn't reach Gmail."); }
-  };
-  const detach = async (sha256: string, filename: string) => {
-    try { await api(`/api/relay/drafts/${draft.id}/attachments`, { method: "DELETE", body: { sha256 } }); say(`Removed ${filename}`); await reload(); }
-    catch (err) { say(err instanceof Error ? err.message : "Couldn't remove it."); }
-  };
-  const issueText = (issue: Issue, k: number) => (
-    <span key={k}>{issue.text}{issue.fix && <> <button type="button" className={s.fixl} onClick={() => void useTo(issue.fix!.to)}>{issue.fix.label}</button></>} </span>
-  );
-  const lead = verdict.state === "stop" ? "Fix this before sending." : verdict.state === "check" ? (verdict.issues.length === 1 ? "One thing to check." : `${verdict.issues.length} things to check.`) : "Ready to send.";
-  const okLine = verdict.good.length ? `${verdict.state === "ok" ? "" : "Otherwise "}${verdict.good.join(", ").replace(/, ([^,]*)$/, " and $1")}.` : "";
-  const hasPromise = draft.role === "primary" && (promisesIn(local.body).length > 0 || item.todos.some((t) => t.kind === "promise"));
-
-  return (
-    <div className={cx(s.card, s.editor)}>
-      <div className={s.ebar}>
-        <div><div className={s.lab}>{draft.role === "primary" ? "Primary email" : "Follow-on email"} · {(mail.from_email ?? "alex@").split("@")[0]}@</div><h2>{draft.title}</h2></div>
-        <span className={cx(s.pill, sent ? s.ok : scheduled ? s.sched : s.warn)}><i />{sent ? "Sent" : scheduled ? (scheduled.undo ? "Sending" : "Scheduled") : draft.state === "gmail" ? "In Gmail drafts" : saving ? "Saving…" : "Draft"}</span>
-      </div>
-      {draft.role === "primary" && draft.source_note && <div className={s.fromnote}>Drafted from your note: <b>&ldquo;{draft.source_note}&rdquo;</b></div>}
-      {draft.agent_log.length > 0 && <div className={s.log}>{draft.agent_log.map((l, k) => <span key={k}>{l}</span>)}</div>}
-      <div className={s.field} style={{ marginTop: 6 }}>
-        <label htmlFor={`from-${draft.id}`}>From</label>
-        {isSenderKey(mail.identity_key) && mail.transport === "gmail"
-          ? <select id={`from-${draft.id}`} value={mail.identity_key} disabled={locked || saving} onChange={(e) => void changeSender(e.target.value)}>{SENDERS.map((sender) => <option key={sender.key} value={sender.key}>{sender.address}</option>)}</select>
-          : <div className={s.ro}>{mail.from_email}</div>}
-      </div>
-      <div className={s.field}><label htmlFor={`to-${draft.id}`}>To</label><input id={`to-${draft.id}`} value={local.to} disabled={locked} placeholder="Add an address" onChange={(e) => setLocal({ ...local, to: e.target.value })} onBlur={() => void save()} /></div>
-      {(["cc", "bcc"] as const).map((k) => <div key={k} className={s.field}><label htmlFor={`${k}-${draft.id}`}>{k === "cc" ? "Cc" : "Bcc"}</label><input id={`${k}-${draft.id}`} value={local[k]} disabled={locked || mail.transport !== "gmail"} placeholder="Add addresses, separated by commas" onChange={(e) => setLocal({ ...local, [k]: e.target.value })} onBlur={() => void save()} /></div>)}
-      <div className={s.field}><label htmlFor={`sj-${draft.id}`}>Subject</label><input id={`sj-${draft.id}`} value={local.subject} disabled={locked} onChange={(e) => setLocal({ ...local, subject: e.target.value })} onBlur={() => void save()} /></div>
-      <textarea ref={bodyRef} className={s.body} value={local.body} disabled={locked} aria-label="Email body" onChange={(e) => setLocal({ ...local, body: e.target.value })} onBlur={() => void save()} />
-      {mail.attachments.length > 0 && (
-        <div className={s.atts}>
-          {mail.attachments.map((a) => (
-            <div key={a.sha256} className={s.att}>
-              <a className={s.attlink} href={`/api/mail/drafts/${mail.id}/attachments/${a.sha256}`} target="_blank" rel="noopener noreferrer">
-                <span className={cx(s.ic, /xlsx?$/i.test(a.filename) && s.xl)}>{(a.filename.split(".").pop() ?? "").toUpperCase().slice(0, 4)}</span>
-                <div><b>{a.filename}</b><span>{a.sizeBytes ? `${Math.max(1, Math.round(a.sizeBytes / 1024))} KB · open` : "open"}</span></div>
-              </a>
-              {!locked && <button type="button" className={s.attx} aria-label={`Remove ${a.filename}`} onClick={() => void detach(a.sha256, a.filename)}>×</button>}
-            </div>
-          ))}
-        </div>
-      )}
-      {!sent && mail.warnings.map((w) => <div key={w} role="alert" className={s.sentbox} style={{ background: "var(--amber-soft)", color: "var(--ink)", marginBottom: 0 }}><b>Check the conversation:</b> {w}</div>)}
-      {mail.state === "draft" && mail.failure && !sendingTo && <div className={s.sentbox} style={{ background: "var(--amber-soft)", color: "var(--ink)", marginBottom: 0 }}><b>Last try didn&apos;t send:</b> {failureText(mail.failure, mail.state)}</div>}
-      {!sent && (
-        <div className={cx(s.bys, verdict.state === "check" && s.check, verdict.state === "stop" && s.stop)} aria-live="polite">
-          <div className={s.bysh}><span className={s.spark} aria-hidden>✦</span><b>Before you send</b><span className={s.state}>{verdict.state === "ok" ? "All clear" : verdict.state === "check" ? "Check" : "Blocked"}</span></div>
-          <p><strong>{lead}</strong> {verdict.issues.map(issueText)}{okLine}{hasPromise ? " Any promise in this email is in your to-dos below." : ""}</p>
-        </div>
-      )}
-      {holdLeft > 0 ? (
-          <div className={cx(s.sentbox, s.schedbox)} role="status">
-            <span>Sending to {mail.to_emails.join(", ")} in <b className={s.count}>{holdLeft} s</b>.</span>
-            <span className={s.sp} />
-            <button type="button" className={s.btn} disabled={scheduling} onClick={() => void undoHold()}>Undo send</button>
-          </div>)
-        : (sendingTo || mail.state === "sending" || holdAt) ? <div className={s.sentbox} style={{ background: "var(--blue-soft)", color: "var(--blue-ink)" }}>Sending to {sendingTo ?? to.join(", ")}… You can carry on; Relay tells you when it lands.</div>
-        : (mail.state === "failed" || mail.state === "unknown") ? (
-          <div className={s.sentbox} style={{ background: "var(--amber-soft)", color: "var(--ink)" }}>
-            <b>Not sent{mail.state === "unknown" ? " (unconfirmed)" : ""}:</b> {failureText(mail.failure, mail.state)}{" "}
-            <button type="button" className={s.fixl} disabled={checking} onClick={() => void checkSent()}>{checking ? "Checking Gmail…" : "Check if it went"}</button>
-          </div>)
-        : sent ? <div className={s.sentbox}>✓ Sent. Relay brings this back to Follow up if there&apos;s no reply.</div>
-        : scheduled ? (
-          <div className={cx(s.sentbox, s.schedbox, scheduled.changed && s.schedwarn)}>
-            {scheduled.changed
-              ? <span><b>Won&apos;t send {sendLabel(scheduled.at)}:</b> this draft changed after you scheduled it. Send it now or cancel and schedule again.</span>
-              : <span>Sends <b>{sendLabel(scheduled.at)}</b> to {mail.to_emails.join(", ")}. If they reply before then, it waits for you.</span>}
-            <span className={s.sp} />
-            <button type="button" className={s.btn} disabled={scheduling} onClick={() => void sendNow()}>Send now</button>
-            <button type="button" className={cx(s.btn, s.ghost)} disabled={scheduling} onClick={() => void cancelSchedule()}>Cancel</button>
-          </div>
-        ) : (
-        <>
-        <div className={s.eact}>
-          <button className={cx(s.btn, s.pri)} type="button" title="Sends in 30 seconds. You can undo until then." disabled={blocked || sending || saving || switching || scheduling} onClick={() => void send()}>{sending ? "Sending…" : "Send"} <Arrow /></button>
-          <button className={s.btn} type="button" aria-expanded={later} disabled={blocked || sending || saving || switching || scheduling} onClick={() => setLater((v) => !v)}><Clock /> Send later</button>
-          <button className={s.btn} type="button" disabled={saving} onClick={() => void toGmail()}>{draft.state === "gmail" ? "✓ In Gmail drafts" : "Add to Gmail drafts"}</button>
-          <span className={s.sp} />
-          {draft.role === "primary" && <button className={cx(s.btn, s.ghost)} type="button" title="No reply needed after all: marks it read and labels it Sorted in Gmail; the draft is dropped" onClick={() => void markDone()}>Done, no reply</button>}
-          <button className={cx(s.btn, s.ghost)} type="button" onClick={onBack}>Back to inbox</button>
-        </div>
-        {later && (
-          <div className={s.later} role="group" aria-label="Send later">
-            {sendSlots().map((slot) => <button key={slot.at} type="button" className={s.btn} disabled={scheduling} onClick={() => void scheduleAt(slot.at)}>{slot.label}</button>)}
-            <input type="datetime-local" aria-label="Pick a time (London)" value={custom} min={londonInputValue(new Date())} onChange={(e) => setCustom(e.target.value)} />
-            {custom && <button type="button" className={cx(s.btn, s.pri)} disabled={scheduling} onClick={scheduleCustom}>Schedule</button>}
-          </div>
-        )}
-        </>
-      )}
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------- Rules
@@ -959,68 +1248,27 @@ function Rules({ data, reload, say }: { data: Summary; reload: () => Promise<voi
 
 // ---------------------------------------------------------------- AI panel
 
-type Bubble = { who: "bot" | "me" | "work"; text: string };
-
-function AiPanel({ item, draft, rules, reload, say }: { item: RelayReviewItem; draft: RelayDraftView | undefined; rules: RelayRule[]; reload: () => Promise<void>; say: (t: string) => void }) {
-  const [mode, setMode] = useState<"edit" | "ask" | "rules">("edit");
-  const [stock, setStock] = useState(false);
-  const [chat, setChat] = useState<Bubble[]>([{ who: "bot", text: draft?.source_note ? `Drafted v1 from your note: "${draft.source_note}". Edit it directly, or tell me what to change.` : "Tell me what to change in this email." }]);
-  const [input, setInput] = useState("");
+/** Ask Relay about this email, or see and change the writing rules. Changing the draft itself is on the card. */
+function AiPanel({ item, rules, mode, reload, say }: { item: RelayReviewItem; rules: RelayRule[]; mode: "ask" | "rules"; reload: () => Promise<void>; say: (t: string) => void }) {
   const [rule, setRule] = useState("");
-  const [busy, setBusy] = useState(false);
   const [agent, setAgent] = useState<{ conversation: HermesConversation; transport: "gateway" | "sse" } | null>(null);
   const [agentError, setAgentError] = useState<string | null>(null);
-  const chatRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight }); }, [chat]);
   useEffect(() => {
     if (mode !== "ask" || agent) return;
     api<{ conversation: HermesConversation; transport: "gateway" | "sse" }>(`/api/relay/items/${item.id}/chat`, { method: "POST" })
       .then(setAgent).catch((err) => setAgentError(err instanceof Error ? err.message : "Couldn't open the assistant."));
   }, [mode, agent, item.id]);
 
-  const edit = async (instruction: string) => {
-    if (!draft?.mail || draft.state === "sent" || busy) return;
-    setChat((c) => [...c, { who: "me", text: instruction }, { who: "work", text: "Rewriting…" }]);
-    setInput(""); setBusy(true);
-    try {
-      const r = await api<{ note: string }>(`/api/relay/drafts/${draft.id}/rewrite`, { method: "POST", body: { instruction } });
-      setChat((c) => [...c.slice(0, -1), { who: "bot", text: r.note }]);
-      await reload();
-    } catch (err) {
-      setChat((c) => [...c.slice(0, -1), { who: "bot", text: err instanceof Error ? err.message : "That didn't work. Try again." }]);
-    } finally { setBusy(false); }
-  };
   const saveRules = async (body: unknown, message: string) => {
     try { await api(`/api/relay/rules`, { method: "POST", body }); say(message); await reload(); } catch (err) { say(err instanceof Error ? err.message : "Couldn't save the rule."); }
   };
-  const openInChat = () => { if (agent) window.open(`/?chat=${encodeURIComponent(agent.conversation.key)}`, "_blank", "noopener"); else setMode("ask"); };
 
   return (
-    <aside className={cx(s.card, s.ai)} aria-label="Relay AI">
+    <aside className={cx(s.card, s.ai)} aria-label={mode === "ask" ? "Ask Relay" : "Writing rules"}>
       <div className={s.aihead}>
-        <Logo /><b>Relay AI</b>
-        <button type="button" className={s.crmlink} onClick={openInChat}>Open in CRM chat ↗</button>
-        <div className={s.seg} role="group" aria-label="Panel mode">
-          <button type="button" aria-pressed={mode === "edit"} onClick={() => setMode("edit")}>Edit email</button>
-          <button type="button" aria-pressed={mode === "ask"} onClick={() => setMode("ask")}>Ask</button>
-          <button type="button" aria-pressed={mode === "rules"} onClick={() => setMode("rules")}>Writing rules</button>
-        </div>
+        <Logo /><b>{mode === "ask" ? "Ask Relay" : "Writing rules"}</b>
+        {mode === "ask" && agent && <button type="button" className={s.crmlink} onClick={() => window.open(`/?chat=${encodeURIComponent(agent.conversation.key)}`, "_blank", "noopener")}>Open in CRM chat ↗</button>}
       </div>
-      {mode === "edit" && (
-        <>
-          <div className={s.chat} ref={chatRef}>{chat.map((m, k) => <div key={k} className={cx(s.bub, s[m.who])}>{m.text}</div>)}</div>
-          {stock && draft?.mail && draft.state !== "sent"
-            ? <StockListForm draftId={draft.id} onClose={() => setStock(false)} onDone={async (text) => { setStock(false); setChat((c) => [...c, { who: "bot", text }]); await reload(); }} say={say} />
-            : <div className={s.quick}>
-                <button type="button" className={s.qstock} disabled={busy || !draft?.mail || draft.state === "sent"} onClick={() => setStock(true)}>Attach stock list</button>
-                {["Shorter", "Warmer", "Firmer", "Add a clear next step"].map((q) => <button key={q} type="button" disabled={busy} onClick={() => void edit(q)}>{q}</button>)}
-              </div>}
-          <form className={s.ask} onSubmit={(e) => { e.preventDefault(); if (input.trim()) void edit(input.trim()); }}>
-            <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Tell Relay what to change" aria-label="Edit instruction" disabled={busy} />
-            <button type="submit" aria-label="Apply" disabled={busy}><Arrow /></button>
-          </form>
-        </>
-      )}
       {mode === "ask" && (
         <div className={s.agent}>
           {agentError ? <p className={s.error} style={{ padding: 12 }}>{agentError}</p>
@@ -1033,7 +1281,7 @@ function AiPanel({ item, draft, rules, reload, say }: { item: RelayReviewItem; d
       )}
       {mode === "rules" && (
         <div className={s.rules}>
-          {rules.filter((r) => r.state === "active").map((r) => <div key={r.id} className={s.rule}><i>›</i><span>{r.text}</span><button type="button" aria-label="Remove rule" onClick={() => void saveRules({ delete: r.id }, r.source === "learned" ? "Learned rule removed · Relay won't suggest it again" : "Rule removed")}>×</button></div>)}
+          {rules.filter((x) => x.state === "active").map((x) => <div key={x.id} className={s.rule}><i>›</i><span>{x.text}</span><button type="button" aria-label="Remove rule" onClick={() => void saveRules({ delete: x.id }, x.source === "learned" ? "Learned rule removed · Relay won't suggest it again" : "Rule removed")}>×</button></div>)}
           <form className={s.ask} style={{ padding: "6px 0 0", border: 0 }} onSubmit={(e) => { e.preventDefault(); if (rule.trim()) { void saveRules({ text: rule.trim() }, "Rule added · applies to every draft"); setRule(""); } }}>
             <input value={rule} onChange={(e) => setRule(e.target.value)} placeholder="Add a rule, e.g. sign off 'Cheers'" aria-label="New rule" />
             <button type="submit" aria-label="Add rule">+</button>
