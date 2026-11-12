@@ -22,7 +22,7 @@ function Stat({ label, value, sub, loading }: { label: string; value: string | n
 
 /** The €/kWh rail: their target as a band, their own deals as dated dots, other buyers' deals as a band on a second lane. */
 function Track({ card }: { card: BuyerCardData }) {
-  const values = [card.target?.high, card.paid?.high, card.others?.high].filter((v): v is number => v != null);
+  const values = [card.target?.high, card.paid?.points.length ? card.paid.high : null, card.others?.high].filter((v): v is number => v != null && Number.isFinite(v));
   if (!values.length) return null;
   const max = Math.max(40, Math.ceil(Math.max(...values) / 10) * 10);
   const at = (value: number) => `${(value / max) * 100}%`;
@@ -36,8 +36,8 @@ function Track({ card }: { card: BuyerCardData }) {
   const rail = "absolute inset-x-0 top-2 h-1.5 rounded-full";
   return (
     <div className="mx-1 mt-1.5">
-      <div className={`relative ${card.target || card.paid ? "h-[88px]" : "h-[44px]"}`} role="img" aria-label={`€/kWh: ${label}`}>
-        {(card.target || card.paid) && <div className="absolute inset-x-0 top-4 h-7">
+      <div className={`relative ${card.target || card.paid?.points.length ? "h-[88px]" : "h-[44px]"}`} role="img" aria-label={`€/kWh: ${label}`}>
+        {(card.target || card.paid?.points.length) && <div className="absolute inset-x-0 top-4 h-7">
           <div className={rail} style={{ background: "var(--bt-divider)" }} />
           {card.target && (
             <div className="absolute top-[7px] h-2 rounded-full" style={{ left: at(card.target.low), width: width(card.target.low, card.target.high), background: "var(--bt-accent)", boxShadow: "inset 0 0 0 1px rgba(104,112,0,.45)" }}>
@@ -52,7 +52,7 @@ function Track({ card }: { card: BuyerCardData }) {
           ))}
         </div>}
         {card.others && (
-          <div className={`absolute inset-x-0 h-7 ${card.target || card.paid ? "top-[50px]" : "top-0"}`}>
+          <div className={`absolute inset-x-0 h-7 ${card.target || card.paid?.points.length ? "top-[50px]" : "top-0"}`}>
             <div className={rail} style={{ background: "var(--bt-divider)" }} />
             <div className="absolute top-[7px] h-2 rounded-full bg-white" style={{ left: at(card.others.low), width: width(card.others.low, card.others.high), boxShadow: "inset 0 0 0 1.5px var(--bt-text-2)" }}>
               <span className="absolute left-0 top-[11px] whitespace-nowrap text-[10.5px]" style={muted}>others · {card.others.count}</span>
@@ -90,6 +90,7 @@ export function BuyerCardBody({ card, loading, related, profileHref }: {
   profileHref: string | null;
 }) {
   const [allChips, setAllChips] = useState(false);
+  const [issueOpen, setIssueOpen] = useState(false);
   const sec = "border-t px-4 py-3.5";
   if (loading || !card) {
     return (
@@ -117,8 +118,8 @@ export function BuyerCardBody({ card, loading, related, profileHref }: {
           </div>
           <div className="grid grid-cols-3">
             <Stat label="Their target" value={card.target ? rangeText(card.target) : null} sub={monthYear(card.target?.seen ?? null)} />
-            <Stat label="They paid us" value={card.paid ? rangeText(card.paid) : null} sub={card.paid ? `${card.paid.count} ${card.paid.count === 1 ? "deal" : "deals"}${card.paid.last ? `, last ${monthYear(card.paid.last)}` : ""}` : null} />
-            <Stat label="Others paid us" value={card.others ? rangeText(card.others) : null} sub={card.others ? `${card.others.count} ${card.others.count === 1 ? "deal" : "deals"}` : null} />
+            <Stat label="They paid us" value={card.paid?.points.length ? rangeText(card.paid) : card.paid ? "Per unit" : null} sub={card.paid ? `${card.paid.count} ${card.paid.count === 1 ? "deal" : "deals"}${card.paid.last ? `, last ${monthYear(card.paid.last)}` : ""}` : null} />
+            <Stat label="Others paid us" value={card.others ? rangeText(card.others) : null} sub={card.others ? `${card.others.count} ${card.others.count === 1 ? "deal" : "deals"}, 18 months` : null} />
           </div>
           <Track card={card} />
         </div>
@@ -139,8 +140,8 @@ export function BuyerCardBody({ card, loading, related, profileHref }: {
                 {chip.seen && !researched && <small className="text-[11px] font-normal" style={{ color: chip.bought ? "#2f7a52" : "var(--bt-muted)" }}>{monthYear(chip.seen)}</small>}
               </span>
             ))}
-            {hidden > 0 && <button type="button" onClick={() => setAllChips(true)} className="inline-flex h-[26px] items-center rounded-md border border-dashed px-2.5 text-[12px] font-medium focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]" style={{ borderColor: "var(--bt-border)", color: "var(--bt-muted)" }}>+{hidden} more</button>}
-            {allChips && card.chips.length > CHIPS_SHOWN && <button type="button" onClick={() => setAllChips(false)} className="inline-flex h-[26px] items-center px-1.5 text-[12px] underline" style={muted}>Show less</button>}
+            {hidden > 0 && <button type="button" aria-expanded={false} onClick={() => setAllChips(true)} className="inline-flex h-[26px] items-center rounded-md border border-dashed px-2.5 text-[12px] font-medium focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]" style={{ borderColor: "var(--bt-border)", color: "var(--bt-muted)" }}>+{hidden} more</button>}
+            {allChips && card.chips.length > CHIPS_SHOWN && <button type="button" aria-expanded onClick={() => setAllChips(false)} className="inline-flex h-[26px] items-center px-1.5 text-[12px] underline" style={muted}>Show less</button>}
           </div>
         </div>
       )}
@@ -159,9 +160,9 @@ export function BuyerCardBody({ card, loading, related, profileHref }: {
       {(card.pastIssue || others.length > 0 || card.verified || profileHref) && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t px-4 py-2.5 text-[12px]" style={divider}>
           {card.pastIssue && (
-            <span className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 font-medium" style={{ background: "var(--bt-amber-bg)", color: "var(--bt-amber)" }} title={card.pastIssue} tabIndex={0} aria-label={`Past issue: ${card.pastIssue}`}>
+            <button type="button" aria-expanded={issueOpen} onClick={() => setIssueOpen((open) => !open)} className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 font-medium focus-visible:outline-2 focus-visible:outline-[var(--bt-text)]" style={{ background: "var(--bt-amber-bg)", color: "var(--bt-amber)" }} title={card.pastIssue}>
               <AlertTriangle size={12} aria-hidden="true" />Past issue
-            </span>
+            </button>
           )}
           {others.length > 0 && (
             <span style={{ color: "var(--bt-text-2)" }}>Also asking for{" "}
@@ -173,6 +174,7 @@ export function BuyerCardBody({ card, loading, related, profileHref }: {
           <span className="flex-1" />
           {card.verified && <span style={muted}>Verified {card.verified.slice(8, 10).replace(/^0/, "")} {monthYear(card.verified)}</span>}
           {profileHref && <a href={profileHref} className="inline-flex min-h-6 items-center font-medium underline decoration-[var(--bt-border)] underline-offset-2">{card.basis === "dossier" ? "Dossier" : "Buyer profile"}</a>}
+          {issueOpen && card.pastIssue && <p className="w-full whitespace-pre-line text-[12px]" style={{ color: "var(--bt-amber)" }}>{card.pastIssue}</p>}
         </div>
       )}
     </>

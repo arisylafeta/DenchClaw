@@ -69,7 +69,7 @@ function TheBuyer({ demand, context, onOpenDemand, thread }: { demand: Demand; c
   const profile = context?.buyer?.profile;
   const engagement = context?.buyer?.engagement;
   const others = (context?.buyer?.demand ?? []).filter((d) => d.id !== demand.id && d.status !== "closed");
-  const stage = profile?.tier ? `${profile.tier}-tier ${(profile.stage ?? "buyer").toLowerCase()}` : profile?.stage ?? null;
+  const stage = [profile?.tier ? `${profile.tier}-tier` : null, profile?.stage ? (profile.tier ? profile.stage.toLowerCase() : profile.stage) : null].filter(Boolean).join(" ") || null;
   const card = context ? buyerCard({ profile, engagement, request: { product_family: demand.product_family, wants: demand.wants }, market: context.market ?? [] }) : null;
   return (
     <PartyCard loading={context === null} role="Buyer" name={demand.buyer} companyId={demand.company_id} personId={demand.person_id} person={context?.person ?? null}

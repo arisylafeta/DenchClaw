@@ -22,13 +22,17 @@ it("shows the price benchmark, bought products, facts and the past issue as scan
   expect(screen.getByText("26.5–34")).toBeInTheDocument();
   expect(screen.getByText("2 deals, last May 2026")).toBeInTheDocument();
   expect(screen.getByText("30–33")).toBeInTheDocument();
+  expect(screen.getByText("2 deals, 18 months")).toBeInTheDocument();
   expect(screen.getByRole("img", { name: /their target 20–25; they paid 26.5, 34; others paid 30–33 over 2/ })).toBeInTheDocument();
   expect(screen.getByLabelText("Bought from us")).toBeInTheDocument();
   expect(screen.queryByText("BMW")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "+1 more" }));
   expect(screen.getByText("BMW")).toBeInTheDocument();
   expect(screen.getByText("20 packs")).toBeInTheDocument();
-  expect(screen.getByLabelText("Past issue: 2025-11-11: customs dispute")).toBeInTheDocument();
+  const issue = screen.getByRole("button", { name: "Past issue" });
+  expect(issue).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(issue);
+  expect(screen.getByText("2025-11-11: customs dispute")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Dossier" })).toHaveAttribute("href", "/?entry=company:c1");
   expect(screen.getByText("Verified 5 Nov 2026")).toBeInTheDocument();
 });

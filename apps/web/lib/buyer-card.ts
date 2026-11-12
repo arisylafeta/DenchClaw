@@ -1,4 +1,5 @@
 import type { BuyerEngagement, BuyerProfile } from "./buyer-profile";
+import { CELL_MAKERS, EXTRA_CELL_MAKERS, MAKES } from "./buyer-dossier";
 
 /**
  * The Buyer card on a request, as quick-scan data: what they buy, their price against what they and others paid us,
@@ -14,6 +15,7 @@ export type BuyerCardData = {
   /** What the price block is about: the request's product, or "All products" when no price names it. */
   priceTopic: string | null;
   target: (PriceRange & { seen: string | null }) | null;
+  /** Deals they paid us; the range is NaN when every deal was priced per unit only. */
   paid: (PriceRange & { count: number; last: string | null; points: PricePoint[] }) | null;
   others: (PriceRange & { count: number }) | null;
   chips: BuyerChip[];
@@ -39,21 +41,28 @@ export function productTokens(text: string | null | undefined): string[] {
   const lower = text.toLowerCase();
   const kwh = [...lower.matchAll(/(\d+(?:\.\d+)?)\s*kwh/g)].map((m) => `${Number(m[1])} kwh`);
   const words = lower.split(/[^a-z0-9.-]+/).filter((word) => word.length >= 3 && !/^\d/.test(word)
-    && !["packs", "pack", "modules", "module", "cells", "cell", "battery", "batteries", "kwh", "any", "make", "and", "for", "the", "with", "used", "new", "nmc", "lfp"].includes(word));
+    && !STOP.has(word));
   return uniq([...kwh, ...words]);
 }
+
+const STOP = new Set(["packs", "pack", "modules", "module", "cells", "cell", "battery", "batteries", "kwh", "any", "make", "and", "for", "the", "with",
+  "used", "new", "nmc", "lfp", "nca", "lmo", "asked", "said", "interested", "bought", "per", "target", "eur", "gbp", "usd", "delivered", "exw", "vat",
+  "plus", "whole", "batch", "packs.", "mixed", "units", "unit", "from", "our", "their", "price", "paid"]);
+/** Maker names alone (BYD, Tesla, CATL) cover everything a maker sells, so they never scope a price on their own. */
+const MAKER_WORDS = new Set([...MAKES, ...CELL_MAKERS, ...EXTRA_CELL_MAKERS].flatMap((name) => name.toLowerCase().split(/\s+or\s+|\s+/)).filter((w) => w.length >= 2));
 
 function priceKwhText(text: string) {
   return [...text.toLowerCase().matchAll(/(\d+(?:\.\d+)?)\s*kwh/g)].map((m) => `${Number(m[1])} kwh`);
 }
 
 /** A price is about the request when its note shares a model word, or a kWh size, with the request. */
-export function pricesFor(points: PricePoint[], tokens: string[]): PricePoint[] {
-  if (!tokens.length) return [];
+export function pricesFor<T extends { text: string }>(points: T[], tokens: string[]): T[] {
+  const strong = tokens.filter((token) => !MAKER_WORDS.has(token));
+  if (!strong.length) return [];
   return points.filter((point) => {
     const text = point.text.toLowerCase();
     const words = text.split(/[^a-z0-9.-]+/);
-    return tokens.some((token) => token.endsWith(" kwh") ? priceKwhText(text).includes(token) : words.includes(token));
+    return strong.some((token) => token.endsWith(" kwh") ? priceKwhText(text).includes(token) : words.includes(token));
   });
 }
 
@@ -66,12 +75,17 @@ function targetRange(point: PricePoint): PriceRange {
 }
 
 const spread = (values: number[]): PriceRange | null => values.length ? { low: round(Math.min(...values)), high: round(Math.max(...values)) } : null;
-const newest = (points: PricePoint[]) => points.map((p) => p.seen).filter((s): s is string => !!s).sort().at(-1) ?? null;
+const newest = (points: { seen: string | null }[]) => points.map((p) => p.seen).filter((s): s is string => !!s).sort().at(-1) ?? null;
 
-function pricePoints(dossier: Json, basis: string): PricePoint[] {
-  return list(dossier.price).map(obj).filter((p) => p.basis === basis && num(p.eur_per_kwh) !== null && num(p.eur_per_kwh)! > 0)
-    .map((p) => ({ eur_per_kwh: num(p.eur_per_kwh)!, seen: str(p.seen), text: str(p.currency_original) ?? "" }));
+/** Above this a "€/kWh" figure is a per-pack price filed in the wrong key; it is left out rather than plotted. */
+export const MAX_EUR_PER_KWH = 300;
+const plausible = (value: number | null): value is number => value !== null && value > 0 && value <= MAX_EUR_PER_KWH;
+type PriceRow = { eur_per_kwh: number | null; seen: string | null; text: string };
+function priceRows(dossier: Json, basis: string): PriceRow[] {
+  return list(dossier.price).map(obj).filter((p) => p.basis === basis && (num(p.eur_per_kwh) !== null || num(p.eur_per_unit) !== null))
+    .map((p) => ({ eur_per_kwh: plausible(num(p.eur_per_kwh)) ? num(p.eur_per_kwh) : null, seen: str(p.seen), text: str(p.currency_original) ?? "" }));
 }
+const perKwh = (rows: PriceRow[]): PricePoint[] => rows.filter((r): r is PricePoint => r.eur_per_kwh !== null);
 
 function productLabel(product: Json): string | null {
   const kwh = list(product.kwh).map(num).filter((n): n is number => n !== null);
@@ -109,7 +123,7 @@ function textChips(wants: string): BuyerChip[] {
     });
 }
 
-const COLLECTS: Record<string, string> = { own_haulier: "Own haulier", we_deliver: "We deliver", either: "Either" };
+const COLLECTS: Record<string, string> = { own_haulier: "Own haulier", needs_delivery: "Needs delivery", either: "Either" };
 const DECIDES: Record<string, string> = { fast: "Decides fast", normal: "Decides in weeks", slow: "Decides slowly" };
 const EVIDENCE: Record<string, string> = { tested_soh: "SoH", bms_data: "BMS", test_report: "Test report", label_photos: "Photos", pack_photos: "Photos", photos: "Photos", coc: "CoC" };
 
@@ -118,7 +132,7 @@ export function buyerCard({ profile, engagement, request, market = [] }: {
   engagement?: BuyerEngagement | null;
   /** The request on screen: its product line and title, used to scope the price block. */
   request: { product_family: string | null; wants: string | null };
-  /** Prices other buyers paid us (dossier `paid` prices of other companies). */
+  /** Prices other buyers paid us for this request's product (scoped by the route with `pricesFor`). */
   market?: PricePoint[];
 }): BuyerCardData {
   const box = obj(profile?.buyer_profile);
@@ -127,20 +141,22 @@ export function buyerCard({ profile, engagement, request, market = [] }: {
   const basis = hasDossier ? "dossier" : profile?.buyer_profile_basis === "researched" ? "researched" : Object.keys(box).length ? "stated" : "none";
 
   const tokens = productTokens(request.product_family ?? request.wants);
-  const targets = pricePoints(dossier, "stated_target");
-  const paidAll = pricePoints(dossier, "paid");
+  const targets = perKwh(priceRows(dossier, "stated_target"));
+  const paidAll = priceRows(dossier, "paid");
   const scopedTargets = pricesFor(targets, tokens);
   const scopedPaid = pricesFor(paidAll, tokens);
   const scoped = scopedTargets.length > 0 || scopedPaid.length > 0;
   const useTargets = scoped ? scopedTargets : targets;
   const usePaid = scoped ? scopedPaid : paidAll;
   // Other buyers' prices only compare on the request's product; across products the spread means nothing.
-  const othersScoped = pricesFor(market, tokens);
+  // The route already keeps only other buyers' prices for this request's product.
+  const othersScoped = market.filter((p) => plausible(p.eur_per_kwh));
 
   // The newest stated target is what they want now; older targets are history.
   const latestTarget = [...useTargets].sort((a, b) => (b.seen ?? "").localeCompare(a.seen ?? ""))[0];
   const target = latestTarget ? { ...targetRange(latestTarget), seen: latestTarget.seen } : null;
-  const paidRange = spread(usePaid.map((p) => p.eur_per_kwh));
+  const paidPoints = perKwh(usePaid);
+  const paidRange = spread(paidPoints.map((p) => p.eur_per_kwh));
   const othersRange = spread(othersScoped.map((p) => p.eur_per_kwh));
 
   const products = list(dossier.products).map(obj);
@@ -151,8 +167,10 @@ export function buyerCard({ profile, engagement, request, market = [] }: {
   const typical = num(quantity.typical_units);
   const minimum = num(quantity.min_units);
   const collects = str(obj(dossier.logistics).collects);
-  const needs = uniq(list(dossier.evidence_required).map((e) => EVIDENCE[String(e)] ?? (typeof e === "string" ? human(e) : null)));
-  const uses = uniq([...list(dossier.intent), ...list(dossier.capability)].map((e) => (typeof e === "string" ? human(e) : null))).slice(0, 2);
+  // Lists hold plain values or the dated form { value, seen, src }.
+  const value = (e: unknown) => str(e) ?? str(obj(e).value);
+  const needs = uniq(list(dossier.evidence_required).map(value).map((e) => (e ? EVIDENCE[e] ?? human(e) : null)));
+  const uses = uniq([...list(dossier.intent), ...list(dossier.capability)].map(value).map((e) => (e ? human(e) : null))).slice(0, 2);
   const minSoh = num(dossier.min_soh) ?? num(box.min_soh);
   const kwhMin = num(box.kwh_min);
   const kwhMax = num(box.kwh_max);
@@ -179,7 +197,7 @@ export function buyerCard({ profile, engagement, request, market = [] }: {
     basis,
     priceTopic: hasDossier ? (scoped ? request.product_family ?? null : "All products") : request.product_family ?? null,
     target,
-    paid: paidRange ? { ...paidRange, count: usePaid.length, last: newest(usePaid), points: usePaid } : null,
+    paid: usePaid.length ? { ...(paidRange ?? { low: NaN, high: NaN }), count: usePaid.length, last: newest(usePaid), points: paidPoints } : null,
     others: othersRange ? { ...othersRange, count: othersScoped.length } : null,
     chips,
     facts,

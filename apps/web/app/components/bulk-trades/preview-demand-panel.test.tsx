@@ -26,7 +26,7 @@ it("shimmers header and buyer values in their real shell until async reads finis
   releases["/api/bulk-listings/d1/context"](new Response(JSON.stringify({ buyer: { profile: { tier: "A", owner: "Alex" }, demand: [] }, mail: [], person: { name: "Example buyer", email: "buyer@example.test", company_name: "Example company" } })));
   expect(await screen.findByRole("heading", { name: "Example buyer" })).toBeInTheDocument();
   expect(screen.getByText("buyer@example.test")).toBeInTheDocument();
-  expect(screen.getByText("A-tier buyer")).toBeInTheDocument();
+  expect(screen.getByText("A-tier")).toBeInTheDocument();
   await waitFor(() => expect(screen.queryByText("Loading demand details")).not.toBeInTheDocument());
 });
 
