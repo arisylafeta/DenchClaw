@@ -75,7 +75,8 @@ export function DocumentView({
   onNavigate,
   searchFn,
 }: DocumentViewProps) {
-  const [editMode, setEditMode] = useState(!!filePath);
+  // Read view by default: it follows the file on disk live. Editing is an explicit mode.
+  const [editMode, setEditMode] = useState(false);
 
   // Strip YAML frontmatter if present
   const body = content.replace(/^---\s*\n[\s\S]*?\n---\s*\n/, "");
@@ -85,25 +86,6 @@ export function DocumentView({
   const displayTitle = title ?? h1Match?.[1];
   const markdownBody =
     displayTitle && h1Match ? body.replace(/^#\s+.+\n?/, "") : body;
-
-  // If we have a filePath and editing is enabled, render the Tiptap editor
-  if (editMode && filePath) {
-    return (
-      <MarkdownEditor
-        content={body}
-        rawContent={content}
-        filePath={filePath}
-        tree={tree ?? []}
-        onSave={onSave}
-        onDirty={onDirty}
-        onNavigate={onNavigate}
-        searchFn={searchFn}
-      />
-    );
-  }
-
-  // Check if the markdown contains embedded rich blocks (reports or diffs)
-  const hasRichBlocks = hasReportBlocks(markdownBody) || hasDiffBlocks(markdownBody);
 
   // Intercept workspace-internal links in read mode (delegated click handler)
   const handleLinkClick = useCallback(
@@ -144,6 +126,26 @@ export function DocumentView({
     },
     [onNavigate],
   );
+
+  // If we have a filePath and editing is enabled, render the Tiptap editor
+  if (editMode && filePath) {
+    return (
+      <MarkdownEditor
+        content={body}
+        rawContent={content}
+        filePath={filePath}
+        tree={tree ?? []}
+        onSave={onSave}
+        onDirty={onDirty}
+        onNavigate={onNavigate}
+        searchFn={searchFn}
+        onExit={() => setEditMode(false)}
+      />
+    );
+  }
+
+  // Check if the markdown contains embedded rich blocks (reports or diffs)
+  const hasRichBlocks = hasReportBlocks(markdownBody) || hasDiffBlocks(markdownBody);
 
   return (
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
