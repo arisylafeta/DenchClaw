@@ -20,12 +20,12 @@
 .sub { margin-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; line-height: 1.4; color: var(--bt-text-2); overflow-wrap: anywhere; }
 .chip { display: inline-flex; align-items: center; padding: 1px 6px; font-size: 11px; font-weight: 500; border-radius: 999px; background: var(--bt-segment); color: var(--bt-text-2); }
 .chipGreen { background: var(--bt-green-bg); color: var(--bt-green); }
-.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding-block: 10px; border-block: 1px solid var(--bt-border); }
-.fact { min-width: 0; }
-.fact + .fact { border-left: 1px solid var(--bt-border); padding-left: 8px; }
+.facts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 0; padding-block: 6px; border-block: 1px solid var(--bt-border); }
+.fact { display: flex; align-items: baseline; gap: 6px; min-width: 0; padding-right: 14px; }
+.fact + .fact { border-left: 1px solid var(--bt-border); padding-left: 14px; }
 .fact dt { font-size: 11px; line-height: 1.4; color: var(--bt-muted); }
-.fact dd { margin-top: 3px; font-size: 12px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
-.fact dd small { display: block; margin-top: 2px; font-size: 11px; font-weight: 400; color: var(--bt-muted); }
+.fact dd { margin: 0; font-size: 12px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+.fact dd small { display: inline; margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--bt-muted); }
 .quiet { color: var(--bt-muted); font-weight: 400 !important; }
 .brief { font-size: 12.5px; line-height: 1.45; color: var(--bt-text-2); overflow-wrap: anywhere; }
 .more { min-height: 44px; font-size: 12px; color: var(--bt-text); text-decoration: underline; text-underline-offset: 3px; }
