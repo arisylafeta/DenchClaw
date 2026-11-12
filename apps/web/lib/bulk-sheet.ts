@@ -6,7 +6,7 @@
 
 import { dealOwner, type DealOwner } from "./bulk-owner";
 import { likelihoodOf } from "./bulk-likelihood";
-import { LISTING_STAGES, listingStageOf, TRADE_STAGES, type ListingStage } from "./bulk-listing";
+import { dealStageOf, LISTING_STAGES, listingStageOf, TRADE_STAGES, type DealStage, type ListingStage } from "./bulk-listing";
 import type { OfferStage } from "./crm-postgres/bulk-offers";
 import type { BulkTradesRoute } from "./bulk-trades-url";
 import { demandTitle } from "./bulk-demand-header";
@@ -17,6 +17,9 @@ export const WAITING_LABEL: Record<WaitingOn, string> = { us: "On us", them: "Wa
 
 /** The commission the founders quote sellers: a fixed share of the deal value. */
 export const FEE_RATE = 0.1;
+/** Approximate rates used only to show pounds and dollars next to euro amounts; not live rates. */
+export const EUR_PER_GBP = 1.15;
+export const EUR_PER_USD = 0.86;
 
 export type SheetKind = "demand" | "supply";
 /** Starting point: a buyer asking for something, or a seller offering it. A buyer-seller connection is shown in progress and details, not here. */
@@ -36,15 +39,21 @@ export type SheetRow = {
   company_id: string | null;
   /** Product family or trade kind, as recorded. */
   category: string | null;
-  /** The listing stage, one of LISTING_STAGES. */
+  /** The list stage (Requests or Supply), one of LISTING_STAGES. */
   progress: ListingStage;
+  /** The Deals board stage; null (or absent) when the listing is not a deal. */
+  deal_stage?: DealStage | null;
+  /** A demand nobody can source right now: the reason (context.cant_source). A tag on the stage, not a stage. */
+  cant_source?: string | null;
+  /** Closed in the last 30 days: still shown so Closed, Sold, Delivered and Lost are not empty, but nothing to do. */
+  closed?: boolean;
   /** On hold: a tag on the stage, not a stage of its own. */
   held?: boolean;
   is_trade?: boolean;
   tone: SheetTone;
   /** Score 0-100: demand by expected fee, supply by value of all stock; null when not scored. */
   score: number | null;
-  /** Approximate deal value in EUR: supply is the value of all stock, demand is the fee divided by FEE_RATE. Null when unknown. */
+  /** Ticket size in EUR (ticketEur): price x volume when both are known, else the stored value. Null when unknown. */
   value_eur?: number | null;
   /** Chance (0-100 %) the deal completes, set per deal. Null when not set. */
   likelihood?: number | null;
@@ -101,6 +110,8 @@ export type ListingSheetInput = {
   paired_listing_id?: string | null;
   /** From bulk_listing_stage(): one of LISTING_STAGES. */
   stage: ListingStage;
+  /** From bulk_listing_deal_stage(): one of BOARD_STAGES, or null. */
+  deal_stage?: string | null;
 };
 
 const positive = (value: unknown): number | null => {
@@ -113,13 +124,35 @@ export function feeOverrideOf(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
 }
 
-/** Approximate value and fee. Supply carries the value of all stock; demand carries the fee (set as FEE_RATE of
- * volume x ceiling price, or of a matched lot), so its value is derived back from it. The fee is the one set on the
- * listing (context.fee_eur) when there is one, else FEE_RATE of the value. */
+const unitKey = (unit: unknown) => (typeof unit === "string" ? unit.toLowerCase().replace(/s$/, "") : "");
+const EUR_RATE: Record<string, number> = { EUR: 1, GBP: EUR_PER_GBP, USD: EUR_PER_USD };
+
+/** Ticket size in whole EUR. A request with a volume and a price per the same unit (packs and pack, kWh and kWh, MWh
+ * and kWh) is price x volume; otherwise the stored value: supply's spec.value_eur (the value of all the stock), or a
+ * request's spec.fee_eur divided back by FEE_RATE. Null when neither is known. */
+export function ticketEur(kind: SheetKind, spec: Record<string, unknown>): number | null {
+  if (kind === "demand") {
+    const volume = positive(spec.volume);
+    const price = positive(spec.max_price);
+    const rate = EUR_RATE[typeof spec.price_currency === "string" ? spec.price_currency : ""];
+    const [unit, priced] = [unitKey(spec.volume_unit), unitKey(spec.price_unit)];
+    const factor = !unit || !priced ? null : unit === priced ? 1 : unit === "mwh" && priced === "kwh" ? 1000 : null;
+    if (volume !== null && price !== null && rate && factor !== null) return Math.round(volume * factor * price * rate);
+    const fee = positive(spec.fee_eur);
+    return fee === null ? null : Math.round(fee / FEE_RATE);
+  }
+  const value = positive(spec.value_eur);
+  return value === null ? null : Math.round(value);
+}
+
+/** Ticket and fee. The fee is the one set on the listing (context.fee_eur) when there is one, else a request's stored
+ * spec.fee_eur, else FEE_RATE of the ticket. The fee is our take on the deal: weighted value is fee x chance (weightedFee). */
 export function valueAndFee(kind: SheetKind, spec: Record<string, unknown>, context?: Record<string, unknown> | null): { value_eur: number | null; fee_eur: number | null; fee_is_override: boolean } {
-  const value = kind === "supply" ? positive(spec.value_eur) : (() => { const fee = positive(spec.fee_eur); return fee === null ? null : Math.round(fee / FEE_RATE); })();
+  const value = ticketEur(kind, spec);
   const override = feeOverrideOf(context?.fee_eur);
   if (override !== null) return { value_eur: value, fee_eur: override, fee_is_override: true };
+  const stored = kind === "demand" ? positive(spec.fee_eur) : null;
+  if (stored !== null) return { value_eur: value, fee_eur: Math.round(stored), fee_is_override: false };
   return { value_eur: value, fee_eur: value === null ? null : Math.round(value * FEE_RATE), fee_is_override: false };
 }
 
@@ -132,8 +165,7 @@ export function formatEurCompact(value: number | null | undefined): string {
 }
 
 export const STAGE_TONE: Record<ListingStage, SheetTone> = {
-  New: "new", Qualified: "new", Sourcing: "active", Available: "active", "Can't source": "warning",
-  Offered: "waiting", Negotiating: "waiting", Agreed: "closing", Paid: "closing", Delivered: "closing",
+  New: "new", Qualified: "new", Sourcing: "active", Available: "active", Found: "waiting", Reserved: "closing", Sold: "closing", Closed: "new",
 };
 
 export function listingRow(input: ListingSheetInput): SheetRow {
@@ -142,6 +174,7 @@ export function listingRow(input: ListingSheetInput): SheetRow {
   const category = specText("product_family") ?? specText("trade_kind");
   const hold = specText("trade_stage") === "On hold" || !!specText("hold_until");
   const stage = listingStageOf(input.stage, input.kind);
+  const cantSource = input.kind === "demand" ? text(ctxText("cant_source")) : null;
   return {
     key: input.id, id: input.id, kind: input.kind,
     side: input.kind === "demand" ? "buyer" : "seller",
@@ -151,9 +184,9 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     company: text(input.party), company_id: input.company_id, category,
     is_trade: TRADE_STAGES.includes(input.furthest_stage as OfferStage),
     paired_listing_id: input.paired_listing_id ?? null,
-    progress: stage, held: hold,
-    // A stage this code does not know (a database ahead of or behind migration 095) keeps a neutral colour instead of breaking the sheet.
-    tone: hold ? "hold" : STAGE_TONE[stage] ?? "new",
+    progress: stage, held: hold, deal_stage: dealStageOf(input.deal_stage), cant_source: cantSource, closed: input.status === "closed",
+    // A stage this code does not know (a database ahead of or behind migration 111) keeps a neutral colour instead of breaking the sheet.
+    tone: hold ? "hold" : cantSource && stage !== "Found" && stage !== "Closed" ? "warning" : STAGE_TONE[stage] ?? "new",
     score: input.score,
     ...valueAndFee(input.kind, input.spec, input.context as Record<string, unknown> | null),
     latest: input.latest_title ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" } : null,
@@ -206,7 +239,7 @@ export function filterSheet(rows: SheetRow[], filters: SheetFilters): SheetRow[]
     (filters.category === "all" || row.category === filters.category) &&
     (filters.waiting === "all" || row.waiting_on === filters.waiting) &&
     (!filters.owner || filters.owner === "all" || row.owner === filters.owner) &&
-    (!needle || [row.title, row.company, row.category, row.progress, row.latest?.label, row.next_action, row.owner]
+    (!needle || [row.title, row.company, row.category, row.progress, row.deal_stage, row.latest?.label, row.next_action, row.owner]
       .some((value) => value?.toLowerCase().includes(needle)))), filters.side);
 }
 

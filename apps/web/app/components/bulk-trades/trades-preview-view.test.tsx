@@ -48,7 +48,7 @@ function row(overrides: Partial<SheetRow>): SheetRow {
 
 const ROWS: SheetRow[] = [
   row({}),
-  row({ key: "supply:s1", kind: "supply", id: "s1", side: "seller", title: "3 hybrid packs", company: "Seller Ltd", category: "packs", progress: "Offered",
+  row({ key: "supply:s1", kind: "supply", id: "s1", side: "seller", title: "3 hybrid packs", company: "Seller Ltd", category: "packs", progress: "Available", deal_stage: "Offered",
     latest: { label: "Offer by email", at: "2026-10-07" } }),
   row({ key: "bt_1", kind: "supply", id: "bt_1", side: "seller", title: "Synthetic eBS37", company: "Seller Ltd", category: "packs", progress: "Available",
     tone: "active", next_action: "Call the buyer", owner: "Alex", next_due: today }),
@@ -82,7 +82,7 @@ describe("Trades Preview sheet", () => {
   const params = () => new URLSearchParams(window.location.search);
   const rowOf = (name: RegExp) => screen.getByRole("button", { name }).closest("li")!;
 
-  it("opens on Today: four tabs, the driver filter, the quarter target and next actions by due date", async () => {
+  it("opens on Today: four tabs, the driver filter, the take target and next actions by due date", async () => {
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
     const today = await screen.findByRole("region", { name: "Today" });
@@ -91,7 +91,7 @@ describe("Trades Preview sheet", () => {
     expect(screen.getAllByRole("tab").map((tab) => tab.querySelector("[data-tab-count]")?.textContent ?? null)).toEqual([null, "1", "2", "1"]);
     expect(screen.getByRole("tab", { name: "Today" })).toHaveAttribute("aria-selected", "true");
     expect(within(screen.getByRole("group", { name: "Driver" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["All", "Alex", "Sean", "Ari"]);
-    expect(screen.getByRole("region", { name: "Pipeline against quarter target" })).toHaveTextContent("£54k (≈ €62k)");
+    expect(screen.getByRole("region", { name: "Pipeline against the take target" })).toHaveTextContent("£15k (≈ €17k) Dec to Feb");
     expect(within(today).getByRole("button", { name: /Edit next action: Call the buyer/ })).toBeInTheDocument();
     const none = screen.getByRole("region", { name: "No next action" });
     expect(within(none).getByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
@@ -111,9 +111,8 @@ describe("Trades Preview sheet", () => {
     const stages = () => within(screen.getByRole("group", { name: "Stage" })).getAllByRole("button");
     const progress = stages().map((b) => b.firstChild?.textContent);
     expect(screen.queryByLabelText("Progress")).not.toBeInTheDocument();
-    expect(progress).toEqual(["All", "New", "Qualified", "Sourcing", "Offered"]);
-    const more = Array.from((screen.getByLabelText("More stages") as HTMLSelectElement).options).map((o) => o.value);
-    expect(more).toEqual(["", "Can't source", "Negotiating", "Agreed", "Paid", "Delivered"]);
+    expect(progress).toEqual(["All", "New", "Qualified", "Sourcing", "Found", "Closed"]);
+    expect(screen.queryByLabelText("More stages")).not.toBeInTheDocument();
   });
 
   it("Supply lists supply with its stage, chance, owner and next action", async () => {
@@ -128,8 +127,8 @@ describe("Trades Preview sheet", () => {
     expect(trade.querySelector("[data-chance]")).toHaveTextContent("60%");
     const stages = () => within(screen.getByRole("group", { name: "Stage" })).getAllByRole("button");
     const progress = stages().map((b) => b.firstChild?.textContent);
-    expect(progress).toEqual(["All", "New", "Available", "Offered"]);
-    expect(Array.from((screen.getByLabelText("More stages") as HTMLSelectElement).options).map((o) => o.value)).toEqual(["", "Negotiating", "Agreed", "Paid", "Delivered"]);
+    expect(progress).toEqual(["All", "New", "Qualified", "Available", "Reserved", "Sold"]);
+    expect(screen.queryByLabelText("More stages")).not.toBeInTheDocument();
   });
 
   it("says plainly when a value is not recorded instead of guessing", async () => {
@@ -205,27 +204,28 @@ describe("Trades Preview sheet", () => {
     expect(screen.queryByRole("button", { name: /3 hybrid packs/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Today" }));
     expect(window.location.search).toBe("?path=%7Etrades-preview&owner=Alex");
-    const target = screen.getByRole("region", { name: "Pipeline against quarter target" });
-    expect(target).toHaveTextContent("£27k (≈ €31k)");
-    expect(target).toHaveTextContent("not fees banked this quarter");
+    const target = screen.getByRole("region", { name: "Pipeline against the take target" });
+    expect(target).toHaveTextContent("£15k (≈ €17k)");
+    expect(target).toHaveTextContent("Not take banked");
     expect(target).not.toHaveTextContent("Includes deals with no owner");
     expect(screen.getByRole("button", { name: /Synthetic eBS37/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /12 Ioniq packs/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Ari" }));
-    expect(screen.queryByRole("region", { name: "Pipeline against quarter target" })).not.toBeInTheDocument();
-    expect(screen.getByText("Targets are set for Alex and Sean.")).toBeInTheDocument();
+    // One target for the whole desk: Ari's deals are weighed against it too.
+    expect(screen.getByRole("region", { name: "Pipeline against the take target" })).toHaveTextContent("Ari's deals");
     await userEvent.click(screen.getByRole("button", { name: "All" }));
     expect(params().has("owner")).toBe(false);
-    expect(screen.getByRole("region", { name: "Pipeline against quarter target" })).toHaveTextContent("Includes deals with no owner.");
+    expect(screen.getByRole("region", { name: "Pipeline against the take target" })).toHaveTextContent("Includes deals with no owner.");
     expect(screen.getByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
   });
 
   it("opens filtered views from links, and older links on the right tab", async () => {
-    go("&tab=supply&progress=Offered");
+    go("&tab=supply&progress=Complete");
     vi.stubGlobal("fetch", mockApi());
     const first = render(<TradesPreviewView />);
-    expect(await screen.findByText("1 of 2 live")).toBeInTheDocument();
-    expect(within(screen.getByRole("group", { name: "Stage" })).getByRole("button", { name: /^Offered/ })).toHaveAttribute("aria-pressed", "true");
+    // Complete was a supply stage before migration 111; it now means Sold.
+    expect(await screen.findByText("0 of 2 live")).toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Stage" })).getByRole("button", { name: /^Sold/ })).toHaveAttribute("aria-pressed", "true");
     first.unmount();
 
     for (const [search, tab] of [["&q=ioniq", "Requests"], ["&progress=New", "Requests"], ["&side=buyer", "Requests"], ["&side=seller", "Supply"], ["&tab=board", "Deals"], ["&tab=trades", "Deals"], ["&owner=Sean", "Today"]] as const) {
@@ -240,7 +240,7 @@ describe("Trades Preview sheet", () => {
     go("&tab=supply&progress=Matched");
     vi.stubGlobal("fetch", mockApi());
     const first = render(<TradesPreviewView />);
-    expect(await screen.findByText("1 of 2 live")).toBeInTheDocument();
+    expect(await screen.findByText("2 of 2 live")).toBeInTheDocument();
     expect(within(screen.getByRole("group", { name: "Stage" })).getByRole("button", { name: /^Available/ })).toHaveAttribute("aria-pressed", "true");
     first.unmount();
 

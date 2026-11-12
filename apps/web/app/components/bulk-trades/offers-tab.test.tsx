@@ -13,6 +13,7 @@ const offer: Offer = {
   terms: { amount: 380, currency: "EUR", unit: "pack", firmness: "firm" }, next_step: "Send specs", next_due: null, waiting_on: "them", waiting_since: "2026-10-12",
   updated_at: "2026-10-12T10:00:00Z", last_message_at: "2026-10-12T10:00:00Z", messages: 2, threads: [], incoming: false,
   counterpart_id: null, from_kind: null, from_label: null, link_options: [],
+  quantity: null, paid_on: null, paid_amount: null, paid_currency: null, take_gbp: null,
 };
 const thread: ThreadEntry[] = [
   { id: "m1", channel: "mail", direction: "inbound", title: "Re: packs", body: "We can bid 380 per pack", at: "2026-10-12T10:00:00Z", ref: "t1", href: "/?crm=inbox&view=conversations&thread=t1&crmOnly=false" },
@@ -111,6 +112,26 @@ describe("Offers tab", () => {
     fireEvent.submit(save.closest("form")!);
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH"
       && c.body === JSON.stringify({ stage: "declined", declinedReason: "Price too high" }))).toBe(true));
+  });
+
+  it("asks for the paid details before saving Paid, then saves them with the stage", async () => {
+    const calls: { url: string; method: string; body?: string }[] = [];
+    stub(calls);
+    render(<OffersTab demandId="d1" onChanged={() => {}} />);
+    await userEvent.click(await screen.findByText("Attero Recycling"));
+    await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Stage" }), "paid");
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+    const form = screen.getByRole("form", { name: "Paid details" });
+    const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Paid on"), { target: { value: "2026-12-03" } });
+    fireEvent.change(screen.getByLabelText("Amount paid"), { target: { value: "18000" } });
+    fireEvent.change(screen.getByLabelText("Quantity (pack)"), { target: { value: "48" } });
+    fireEvent.change(screen.getByLabelText("Our take (£)"), { target: { value: "1500" } });
+    expect(save.disabled).toBe(false);
+    fireEvent.submit(form);
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH"
+      && c.body === JSON.stringify({ stage: "paid", paidOn: "2026-12-03", paidAmount: 18000, paidCurrency: "EUR", quantity: 48, takeGbp: 1500 }))).toBe(true));
   });
 
   it("drafts the offer email and opens it in the side panel", async () => {

@@ -1,68 +1,66 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ user: vi.fn(), listing: vi.fn(), offer: vi.fn(), update: vi.fn(), noStock: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ currentUser: mocks.user }));
+const mocks = vi.hoisted(() => ({ guard: vi.fn(), listing: vi.fn(), get: vi.fn(), update: vi.fn(), link: vi.fn(), noStock: vi.fn() }));
+vi.mock("@/lib/bulk-trades-route", async (original) => ({ ...(await original<typeof import("@/lib/bulk-trades-route")>()), guardBulkTrades: mocks.guard }));
 vi.mock("@/lib/crm-postgres/bulk-listings", () => ({ getListing: mocks.listing }));
 vi.mock("@/lib/crm-postgres/bulk-offer-mail", () => ({ markNoStock: mocks.noStock }));
-vi.mock("@/lib/crm-postgres/bulk-offers", async (orig) => ({
-  ...(await orig<typeof import("@/lib/crm-postgres/bulk-offers")>()),
-  getOffer: mocks.offer, updateOffer: mocks.update, linkOffer: vi.fn(), addThreadEntry: vi.fn(), offerThread: vi.fn(),
+vi.mock("@/lib/crm-postgres/bulk-offers", () => ({
+  OFFER_STAGES: ["candidate", "offered", "negotiating", "contract_out", "signed", "invoiced", "paid", "complete", "declined", "lost"],
+  OfferConflict: class extends Error {}, addThreadEntry: vi.fn(), offerThread: vi.fn(),
+  getOffer: mocks.get, updateOffer: mocks.update, linkOffer: mocks.link,
 }));
 import { PATCH } from "./route";
 
-const context = { params: Promise.resolve({ id: "btl_1", offerId: "bto_1" }) };
+const context = { params: Promise.resolve({ id: "bl_1", offerId: "bof_1" }) };
 const patch = (body: unknown) => new Request("http://localhost/offer", { method: "PATCH", body: JSON.stringify(body) });
+const offer = { id: "bof_1", stage: "invoiced", paid_on: null, paid_amount: null, paid_currency: null, quantity: null, take_gbp: null };
 
-describe("offer PATCH", () => {
+describe("offer PATCH: the paid rule", () => {
   beforeEach(() => {
-    process.env.CRM_DB_BACKEND = "postgres";
-    mocks.user.mockResolvedValue({ id: "user", email: "user@test" });
-    mocks.listing.mockResolvedValue({ id: "btl_1" });
-    mocks.update.mockResolvedValue({ id: "bto_1", stage: "declined" });
-    mocks.noStock.mockResolvedValue({ marked: "sto_1", suggestion: null });
+    mocks.guard.mockResolvedValue({ userId: "u1", email: "alex@rebattery.io" });
+    mocks.listing.mockResolvedValue({ id: "bl_1", kind: "supply" });
+    mocks.get.mockResolvedValue(offer);
+    mocks.update.mockImplementation(async (_l: string, _o: string, p: { stage?: string }) => ({ ...offer, ...p }));
   });
-  afterEach(() => { vi.resetAllMocks(); delete process.env.CRM_DB_BACKEND; });
+  afterEach(() => vi.resetAllMocks());
 
-  it("refuses Declined or Lost without a reason, and writes nothing", async () => {
-    for (const stage of ["declined", "lost"]) {
-      for (const body of [{ stage }, { stage, declinedReason: "   " }, { stage, declinedReason: null }]) {
-        const response = await PATCH(patch(body), context);
-        expect(response.status).toBe(400);
-      }
-    }
+  it("refuses Paid without the paid facts, names what is missing, and writes nothing", async () => {
+    const response = await PATCH(patch({ stage: "paid" }), context);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "To mark this offer Paid, add the paid date, amount paid, currency, quantity and take in GBP.",
+      missing: ["paid_on", "paid_amount", "paid_currency", "quantity", "take_gbp"],
+    });
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
-  it("stores the trimmed reason with the stage", async () => {
-    expect((await PATCH(patch({ stage: "declined", declinedReason: " Price too high " }), context)).status).toBe(200);
-    expect(mocks.update).toHaveBeenCalledWith("btl_1", "bto_1", { stage: "declined", declinedReason: "Price too high" }, "user");
+  it("refuses Complete when only some facts are given", async () => {
+    const response = await PATCH(patch({ stage: "complete", paidOn: "2026-12-03", paidAmount: 18000, paidCurrency: "EUR" }), context);
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("To mark this offer Complete, add the quantity and take in GBP.");
+    expect(mocks.update).not.toHaveBeenCalled();
   });
 
-  it("marks the linked stock line stale only when a request's reason is exactly No stock", async () => {
-    mocks.listing.mockResolvedValue({ id: "btl_1", kind: "demand" });
-    mocks.update.mockResolvedValue({ id: "bto_1", stage: "declined", declined_reason: "No stock" });
-    const response = await PATCH(patch({ stage: "declined", declinedReason: "No stock" }), context);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ noStock: { marked: "sto_1" } });
-    expect(mocks.noStock).toHaveBeenCalledWith("btl_1", "bto_1", "demand", "user");
-
-    mocks.noStock.mockClear();
-    mocks.update.mockResolvedValue({ id: "bto_1", stage: "declined", declined_reason: "Price too high" });
-    await PATCH(patch({ stage: "declined", declinedReason: "Price too high" }), context);
-    expect(mocks.noStock).not.toHaveBeenCalled();
+  it("saves Paid with every fact, and counts the ones already on the offer", async () => {
+    const full = { stage: "paid", paidOn: "2026-12-03", paidAmount: 18000, paidCurrency: "eur", quantity: 48, takeGbp: 1500 };
+    expect((await PATCH(patch(full), context)).status).toBe(200);
+    expect(mocks.update).toHaveBeenCalledWith("bl_1", "bof_1", {
+      stage: "paid", paid: { paid_on: "2026-12-03", paid_amount: 18000, paid_currency: "EUR", quantity: 48, take_gbp: 1500 },
+    }, "u1");
+    mocks.get.mockResolvedValue({ ...offer, paid_on: "2026-12-03", paid_amount: 18000, paid_currency: "EUR", quantity: 48, take_gbp: 1500 });
+    expect((await PATCH(patch({ stage: "complete" }), context)).status).toBe(200);
   });
 
-  it("suggests closing a listing instead of marking stock on a supply offer", async () => {
-    mocks.listing.mockResolvedValue({ id: "btl_1", kind: "supply" });
-    mocks.update.mockResolvedValue({ id: "bto_1", stage: "lost", declined_reason: "No stock" });
-    mocks.noStock.mockResolvedValue({ marked: null, suggestion: "Close the listing when every offer has come back." });
-    const response = await PATCH(patch({ stage: "lost", declinedReason: "No stock" }), context);
-    expect(await response.json()).toMatchObject({ noStock: { suggestion: expect.stringMatching(/Close the listing/) } });
-    expect(mocks.noStock).toHaveBeenCalledWith("btl_1", "bto_1", "supply", "user");
+  it("will not clear a paid fact on an offer that is paid", async () => {
+    mocks.get.mockResolvedValue({ ...offer, stage: "paid", paid_on: "2026-12-03", paid_amount: 18000, paid_currency: "EUR", quantity: 48, take_gbp: 1500 });
+    const response = await PATCH(patch({ takeGbp: null }), context);
+    expect(response.status).toBe(400);
+    expect((await response.json()).missing).toEqual(["take_gbp"]);
   });
 
-  it("still moves an offer to any other stage without a reason", async () => {
-    expect((await PATCH(patch({ stage: "negotiating" }), context)).status).toBe(200);
-    expect(mocks.update).toHaveBeenCalledWith("btl_1", "bto_1", { stage: "negotiating" }, "user");
+  it("leaves other stages and edits alone", async () => {
+    expect((await PATCH(patch({ stage: "signed" }), context)).status).toBe(200);
+    expect((await PATCH(patch({ nextStep: "Send the invoice" }), context)).status).toBe(200);
+    expect((await PATCH(patch({ stage: "paid", paidOn: "soon" }), context)).status).toBe(400);
   });
 });

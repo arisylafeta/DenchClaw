@@ -4,7 +4,7 @@
 // Weeks start on Monday, UTC. A number that could not be read is null and the page says so; nothing
 // here invents a 0. Weeks before a source has any history are null, not 0.
 import {
-  DAY_MS, MIN_PAID_AMOUNT, EUR_GBP, mondayOf, shiftWeek, weekOf, weekRange,
+  DAY_MS, MIN_PAID_AMOUNT, EUR_GBP, TARGETS, mondayOf, shiftWeek, weekOf, weekRange,
 } from "./home-metrics";
 import { internalBuyer, paidDeals, realDeals, type PlatformRows } from "./home-platform";
 import type { PulseWeek } from "./marketplace-pulse";
@@ -26,7 +26,8 @@ export const BULK_HISTORY_FROM = "2026-09-07";
 export const USD_GBP = 0.79;
 /** Marketplace target carried over from Pulse (4 paid deals a month). To confirm for this quarter. */
 export const MARKETPLACE_PAID_TARGET = 12;
-export const BULK_TAKE_TARGET_GBP = 15_000;
+/** The one bulk target, from TARGETS: take on paid bulk deals over the quarter. */
+export const BULK_TAKE_TARGET_GBP = TARGETS.bulk_take.value;
 /** An offer with no touch for this many days has gone quiet. */
 export const QUIET_OFFER_DAYS = 21;
 
@@ -194,10 +195,15 @@ export type BulkRows = {
     created_at: string;
     updated_at: string;
     last_touch_on: string | null;
+    /** terms.amount, terms.unit and terms.currency: the price and what it is per. */
     amount: number | string | null;
     unit: string | null;
-    quantity: number | string | null;
     currency: string | null;
+    /** The offer's own columns (migration 111): quantity in the price unit, and the paid facts. */
+    quantity: number | string | null;
+    paid_on?: string | null;
+    paid_amount?: number | string | null;
+    paid_currency?: string | null;
     take_gbp: number | string | null;
   }[];
   /** Human contact on a listing: mail, outreach, quotes, notes, calls and WhatsApp. */
@@ -208,7 +214,8 @@ export type BulkRows = {
 const NOT_DEALS = new Set(["research_profile", "duplicate", "moved_to_profile", "not_demand"]);
 export const isDeal = (l: BulkRows["listings"][number]) => !NOT_DEALS.has(l.closed_reason ?? "");
 
-const MADE = new Set(["offered", "negotiating", "signed", "paid", "declined"]);
+/** Offers that were actually made: offered and every stage after it, won or lost. */
+const MADE = new Set(["offered", "negotiating", "contract_out", "signed", "invoiced", "paid", "complete", "declined", "lost"]);
 const ONE_UNIT = new Set(["", "pack", "lot", "total", "unit", "container", "system"]);
 
 /**
@@ -287,13 +294,17 @@ export function bulkWeekly(rows: BulkRows, weeks: string[], now: Date): BulkWeek
         if (value !== null) { offersValued += 1; }
       }
     }
-    if (stage === "paid") {
-      const i = slot(o.updated_at);
+    // A deal is closed when its offer is paid (or delivered after that), in the week it was paid. Offers paid before
+    // migration 111 have no paid date; they fall back to their last update.
+    if (stage === "paid" || stage === "complete") {
+      const i = slot(o.paid_on ? `${o.paid_on.slice(0, 10)}T00:00:00Z` : o.updated_at);
+      const paid = num(o.paid_amount);
+      const closedValue = paid !== null ? gbp(paid, o.paid_currency) : value;
       if (i !== undefined) {
         out.closed[i] += 1;
-        out.closed_value[i] += value ?? 0;
+        out.closed_value[i] += closedValue ?? 0;
         closedTotal += 1;
-        if (value !== null) { closedValued += 1; }
+        if (closedValue !== null) { closedValued += 1; }
         const take = num(o.take_gbp);
         if (take !== null) { out.take_gbp[i] += take; } else { closedNoTake += 1; }
       }
@@ -442,7 +453,7 @@ export function buildOkr(input: OkrInput): OkrData {
       : "Web hits and listings come from the weekly collector, which has not run yet." });
   }
   health.push({ warn: false, text: `Bulk records start the week of ${BULK_HISTORY_FROM}; earlier weeks are blank, not zero.` });
-  health.push({ warn: false, text: "Bulk take is read from a paid offer's take_gbp; deals without it are listed on the key result." });
+  health.push({ warn: false, text: "Bulk take is the take in GBP recorded when an offer is marked paid; deals without it are listed on the key result." });
 
   return {
     now: now.toISOString(),

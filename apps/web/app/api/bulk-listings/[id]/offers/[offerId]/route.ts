@@ -2,6 +2,7 @@ import { getListing } from "@/lib/crm-postgres/bulk-listings";
 import { markNoStock } from "@/lib/crm-postgres/bulk-offer-mail";
 import { OFFER_STAGES, OfferConflict, addThreadEntry, getOffer, linkOffer, offerThread, updateOffer, type OfferPatch, type OfferStage } from "@/lib/crm-postgres/bulk-offers";
 import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
+import { missingPaidFacts, missingPaidMessage, readPaidFacts } from "@/lib/bulk-offer-paid";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -40,6 +41,18 @@ export async function PATCH(req: Request, { params }: Context) {
     patch.declinedReason = reason;
   }
   if ("terms" in body) { if (!body.terms || typeof body.terms !== "object" || Array.isArray(body.terms)) return badRequest("Terms must be an object."); patch.terms = body.terms as OfferPatch["terms"]; }
+  const paid = readPaidFacts(body);
+  if (typeof paid === "string") return badRequest(paid);
+  if (Object.keys(paid).length) patch.paid = paid;
+  // Paid and Complete need the paid facts, so bulk take is counted from what was really paid. Checked against what the
+  // offer already holds, whenever the stage or a paid fact changes.
+  if ("stage" in patch || patch.paid) {
+    const current = await getOffer(id, offerId, guard.userId);
+    if (!current) return notFound("Offer");
+    const stage = patch.stage ?? current.stage;
+    const missing = missingPaidFacts(stage, { ...current, ...patch.paid });
+    if (stage && missing.length) return Response.json({ error: missingPaidMessage(stage, missing), missing }, { status: 400 });
+  }
   if ("counterpartId" in body) {
     if (body.counterpartId != null && typeof body.counterpartId !== "string") return badRequest("counterpartId must be text or null.");
     try { if (!await linkOffer(id, offerId, (body.counterpartId as string | null) || null, guard.userId)) return notFound("Offer"); }

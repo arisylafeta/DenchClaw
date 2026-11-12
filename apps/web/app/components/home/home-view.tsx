@@ -153,13 +153,24 @@ function MarketplaceGoal({ data }: { data: HomeData }) {
   );
 }
 
+/** Bulk take banked against the one bulk target, which runs over a quarter rather than this month. */
 function BulkGoal({ data }: { data: HomeData }) {
   const b = data.bulk_goal;
   const first = b?.closing[0];
+  const t = b?.take;
   return (
     <article className={`${styles.card} ${styles.goal}`}>
-      <div className={styles.ghd}><b>Bulk trades</b><span>Deals closed</span></div>
-      {b ? <GoalCount count={b.closed} pace={b.pace} unit="bulk deals" /> : <div className={styles.none}>{NO_DATA}</div>}
+      <div className={styles.ghd}><b>Bulk trades</b><span>Take, {t?.period_label ?? "Dec 2026 to Feb 2027"}</span></div>
+      {t ? (
+        <>
+          <div className={styles.fig}><span className={styles.n}>{shortPounds(t.take_gbp)}</span><span className={styles.of}>of {shortPounds(t.target_gbp)}</span></div>
+          <Meter count={t.take_gbp} target={t.target_gbp} share={t.share} label={`${shortPounds(t.take_gbp)} of ${shortPounds(t.target_gbp)} bulk take`} />
+          <div className={styles.mk}>
+            <span>{t.started ? `Pace for today: ${shortPounds(t.pace_gbp)}` : "Starts 1 Dec"}</span>
+            <span>{t.without_take > 0 ? `${t.without_take} paid without take` : t.take_gbp >= t.target_gbp ? "Target met" : `${shortPounds(t.target_gbp - t.take_gbp)} to go`}</span>
+          </div>
+        </>
+      ) : <div className={styles.none}>{NO_DATA}</div>}
       <div className={styles.pair}>
         <div>
           <span>In closing</span>
@@ -276,7 +287,7 @@ function Row({ label, n, d, colour }: { label: string; n: number; d: number; col
   );
 }
 
-/** Up to four evenly spaced week labels under the bids chart. */
+/** Up to four evenly spaced week labels under the offers chart. */
 function axisWeeks(weeks: string[]): string[] {
   if (weeks.length <= 4) {return weeks;}
   return [0, 1, 2, 3].map((i) => weeks[Math.round((i * (weeks.length - 1)) / 3)]);
@@ -288,29 +299,29 @@ function BulkTrades({ data }: { data: HomeData }) {
     return <section className={styles.bulk} aria-label="Bulk trades"><article className={`${styles.card} ${styles.bk}`}><div className={styles.none}>{NO_DATA}</div></article></section>;
   }
   const ob = b.order_book;
-  const weekly = b.bids.weekly;
+  const weekly = b.offers.weekly;
   const bidMax = Math.max(1, ...weekly.map((w) => w.all));
   const slot = weekly.length ? 300 / weekly.length : 300;
-  const stepMax = Math.max(1, ...b.buyers.steps.map((s) => s.count));
+  const stepMax = Math.max(1, ...b.counterparties.steps.map((s) => s.count));
   return (
     <section className={styles.bulk} aria-label="Bulk trades">
       <article className={`${styles.card} ${styles.bk}`}>
         <h3>Order book</h3>
         <div className={styles.d}>A trade clears only where both sides have a price</div>
-        <Row label="Open lots with a price" n={ob.priced} d={ob.open} colour="var(--h-accent)" />
-        <Row label="Buy-boxes with a max price" n={ob.buy_boxes_priced} d={ob.buy_boxes} colour="var(--h-accent)" />
-        <Row label="Lots quiet for 7+ days" n={ob.quiet} d={ob.open} colour="var(--h-never)" />
+        <Row label="Open supply with a value" n={ob.priced} d={ob.open} colour="var(--h-accent)" />
+        <Row label="Open requests with a max price" n={ob.buy_boxes_priced} d={ob.buy_boxes} colour="var(--h-accent)" />
+        <Row label="Supply quiet for 7+ days" n={ob.quiet} d={ob.open} colour="var(--h-never)" />
       </article>
       <article className={`${styles.card} ${styles.bk}`}>
-        <h3>Bids</h3>
-        <div className={styles.d}>{b.bids.since ? `Recorded since ${dayLabel(b.bids.since)} · firm in purple` : "No bids recorded yet"}</div>
+        <h3>Offers</h3>
+        <div className={styles.d}>{b.offers.since ? `Made since ${dayLabel(b.offers.since)} · firm in purple` : "No offers made yet"}</div>
         <div className={styles.lvh} style={{ marginBottom: 8 }}>
           <span className={styles.note}>Last 30 days</span>
-          <span className={styles.v} style={{ fontSize: 24 }}>{b.bids.firm_30d} <small>firm of {b.bids.total_30d}</small></span>
+          <span className={styles.v} style={{ fontSize: 24 }}>{b.offers.firm_30d} <small>firm of {b.offers.total_30d}</small></span>
         </div>
         {weekly.length > 0 && (
           <>
-            <svg className={styles.mini} viewBox="0 0 300 64" preserveAspectRatio="none" role="img" aria-label="Bids per week, firm bids in purple">
+            <svg className={styles.mini} viewBox="0 0 300 64" preserveAspectRatio="none" role="img" aria-label="Offers per week, firm offers in purple">
               <line x1="0" x2="300" y1="62" y2="62" stroke="var(--h-line-2)" strokeWidth="1" />
               {weekly.map((w, i) => {
                 const x = i * slot + slot * 0.25;
@@ -333,10 +344,10 @@ function BulkTrades({ data }: { data: HomeData }) {
         )}
       </article>
       <article className={`${styles.card} ${styles.bk}`}>
-        <h3>Buyers on open lots</h3>
-        <div className={styles.d}>Furthest step each buyer has reached</div>
+        <h3>Counterparties on open listings</h3>
+        <div className={styles.d}>Where each live offer stands</div>
         <div className={styles.steps}>
-          {b.buyers.steps.map((s) => (
+          {b.counterparties.steps.map((s) => (
             <div key={s.label} className={`${styles.step} ${s.past ? styles.past : ""}`}>
               <span>{s.label}</span>
               <div className={styles.t}><i style={{ width: `${((s.count / stepMax) * 100).toFixed(1)}%` }} /></div>
@@ -344,7 +355,7 @@ function BulkTrades({ data }: { data: HomeData }) {
             </div>
           ))}
         </div>
-        {b.teaser_note && <div className={styles.note} style={{ marginTop: 10 }}>{b.teaser_note}</div>}
+        {b.offered_note && <div className={styles.note} style={{ marginTop: 10 }}>{b.offered_note}</div>}
       </article>
     </section>
   );

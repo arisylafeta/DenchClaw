@@ -34,17 +34,18 @@ const PLATFORM: PlatformHome = {
   },
 };
 const BULK: BulkHome = {
-  closed_this_month: 0, lost_this_month: 2,
+  take: { take_gbp: 0, target_gbp: 15_000, share: 0, pace_gbp: 0, started: false, without_take: 0, period_label: "Dec 2026 to Feb 2027" },
+  lost_this_month: 2,
   closing: [{ title: "Oklahoma Panasonic 2170 cells", value: "$516,800" }],
   order_book: { open: 18, priced: 6, quiet: 7, buy_boxes: 22, buy_boxes_priced: 5 },
-  bids: { since: "2026-09-29T20:11:19Z", total_30d: 7, firm_30d: 1, weekly: [
+  offers: { since: "2026-09-29T20:11:19Z", total_30d: 7, firm_30d: 1, weekly: [
     { week_start: "2026-09-28", all: 4, firm: 1 }, { week_start: "2026-10-05", all: 0, firm: 0 },
     { week_start: "2026-10-12", all: 3, firm: 0 }, { week_start: "2026-10-19", all: 0, firm: 0 },
   ] },
-  buyers: { steps: [
-    { label: "To contact", count: 17, past: false }, { label: "Teaser sent", count: 42, past: false },
-    { label: "NDA, specs", count: 1, past: true }, { label: "Bid in", count: 4, past: true }, { label: "LOI, deposit", count: 1, past: true },
-  ], teaser_passed: 6, teaser_total: 48 },
+  counterparties: { steps: [
+    { label: "Candidate", count: 17, past: false }, { label: "Offered", count: 42, past: false },
+    { label: "Negotiating", count: 1, past: true }, { label: "Agreed", count: 4, past: true }, { label: "Paid", count: 1, past: true },
+  ], offered_passed: 6, offered_total: 48 },
 };
 
 const home = (over: Partial<Parameters<typeof buildHome>[0]> = {}): HomeData =>
@@ -62,7 +63,7 @@ describe("HomeView", () => {
     render(<HomeView />);
     expect(await screen.findByText("Thursday 22 October · day 22 of 31")).toBeInTheDocument();
     expect(screen.getByText("weekly funnel stale since 18 Oct")).toBeInTheDocument();
-    expect(screen.getByText(/Targets: 4 paid a month \(Pulse\) · 2 bulk a month \(19 Oct call\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Targets: 4 paid a month \(Pulse\) · £15k bulk take, Dec to Feb \(OKR\)/)).toBeInTheDocument();
 
     const goals = within(screen.getByRole("region", { name: "Monthly goals" }));
     expect(goals.getByText("Pace for today: 2.8")).toBeInTheDocument();
@@ -70,6 +71,9 @@ describe("HomeView", () => {
     expect(goals.getByText("3 paid of 26 sent")).toBeInTheDocument();
     expect(goals.getByText("Oklahoma Panasonic 2170 cells, $516,800")).toBeInTheDocument();
     expect(goals.getByText("Lost in October")).toBeInTheDocument();
+    expect(goals.getByText("Take, Dec 2026 to Feb 2027")).toBeInTheDocument();
+    expect(goals.getByText("Starts 1 Dec")).toBeInTheDocument();
+    expect(goals.getByText("£15k to go")).toBeInTheDocument();
     expect(goals.getByText("£24.6k")).toBeInTheDocument();
     expect(goals.getByText("97% from one deal (Pylon Technologies). 4 paid deals in total.")).toBeInTheDocument();
     expect(goals.getByText("£6.9k")).toBeInTheDocument();
@@ -82,7 +86,7 @@ describe("HomeView", () => {
     expect(screen.getByText("No deals opened since 2 Oct")).toBeInTheDocument();
     expect(screen.getByText("6 / 18")).toBeInTheDocument();
     expect(screen.getByText("5 / 22")).toBeInTheDocument();
-    expect(screen.getByText(/6 of 48 buyers who got a teaser/)).toBeInTheDocument();
+    expect(screen.getByText(/6 of 48 counterparties who were offered a deal/)).toBeInTheDocument();
     expect(screen.getByText("Visitors about half")).toBeInTheDocument();
     expect(screen.getByText("Weekly funnel stale")).toBeInTheDocument();
   });

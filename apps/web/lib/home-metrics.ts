@@ -9,7 +9,7 @@ import { mondayOf, type MetricKey, type PulseWeek } from "./marketplace-pulse";
 // Targets and configuration
 // ---------------------------------------------------------------------------
 
-export type TargetKey = "marketplace_paid" | "bulk_closed" | "fees_long_term" | "seller_reply";
+export type TargetKey = "marketplace_paid" | "bulk_take" | "fees_long_term" | "seller_reply";
 
 export type TargetDef = {
   key: TargetKey;
@@ -25,7 +25,8 @@ export type TargetDef = {
 /** The only targets on Home. Add one here, with its source, before showing it anywhere. */
 export const TARGETS: Record<TargetKey, TargetDef> = {
   marketplace_paid: { key: "marketplace_paid", value: 4, label: "4 paid a month", source: "Pulse", header: true },
-  bulk_closed: { key: "bulk_closed", value: 2, label: "2 bulk a month", source: "19 Oct call", header: true },
+  // Bulk take (our fees on paid bulk deals) for the whole desk, Dec 2026 to Feb 2027. The only bulk target.
+  bulk_take: { key: "bulk_take", value: 15_000, label: "£15k bulk take, Dec to Feb", source: "OKR", header: true },
   fees_long_term: { key: "fees_long_term", value: 10_000, label: "£10k a month", source: "7 Sep call", header: false },
   // A share: every buyer gets a seller reply within 24 hours.
   seller_reply: { key: "seller_reply", value: 1, label: "all", source: "Pulse", header: false },

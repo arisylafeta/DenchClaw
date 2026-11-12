@@ -3,9 +3,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // Runs only against a disposable database: scripts/rebattery/crm-test-db.sh up prints the URL.
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
 
-describe.skipIf(!TEST_URL)("bulk_listing_stage", () => {
+describe.skipIf(!TEST_URL)("bulk_listing_stage and bulk_listing_deal_stage (migration 111)", () => {
   let pg: typeof import("../postgres");
-  const stage = async (id: string) => (await pg.queryPg<{ s: string }>("select bulk_listing_stage($1) as s", [id]))[0].s;
+  const stage = async (id: string) => (await pg.queryPg<{ s: string | null }>("select bulk_listing_stage($1) as s", [id]))[0].s;
+  const deal = async (id: string) => (await pg.queryPg<{ s: string | null }>("select bulk_listing_deal_stage($1) as s", [id]))[0].s;
+  const offer = (id: string, listing: string, st: string, counterpart: string | null = null) => pg.queryPg(
+    `insert into crm_bulk_offers (id, bulk_listing_id, counterpart_id, role, stage) values ($1, $2, $4, 'counterparty', $3)
+     on conflict (id) do update set stage = excluded.stage`, [id, listing, st, counterpart]);
 
   beforeAll(async () => {
     process.env.DATABASE_URL = TEST_URL;
@@ -29,24 +33,23 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage", () => {
     await pg.pgPool.end();
   });
 
-  it("is New until the basics are in, then Qualified (demand) or Available (supply)", async () => {
+  it("is New until the basics are in, then Qualified for both kinds", async () => {
     expect(await stage("stg_new")).toBe("New");
     expect(await stage("stg_partial")).toBe("New");
-    expect(await stage("stg_ready")).toBe("Available");
+    expect(await stage("stg_ready")).toBe("Qualified");
     expect(await stage("stg_demand")).toBe("Qualified");
+    expect(await deal("stg_ready")).toBeNull();
   });
 
   it("keeps a demand New while a qualifying question is open", async () => {
     expect(await stage("stg_asked")).toBe("New");
   });
 
-  it("is Available (supply) or Sourcing (demand) by a visible saved match, and a hidden one does not count", async () => {
-    await pg.queryPg("insert into crm_bulk_trade_supply_matches (supply_id, demand_id, strength, reason, hidden) values ('stg_new', 'stg_demand', 'partial', 'x', true)");
-    expect(await stage("stg_new")).toBe("New");
-    await pg.queryPg("update crm_bulk_trade_supply_matches set hidden = false where supply_id = 'stg_new'");
-    expect(await stage("stg_new")).toBe("Available");
-    expect(await stage("stg_demand")).toBe("Sourcing");
-    await pg.queryPg("delete from crm_bulk_trade_supply_matches where supply_id = 'stg_new'");
+  it("no longer reads the retired match tables", async () => {
+    const [{ n }] = await pg.queryPg<{ n: number }>(
+      `select count(*)::int as n from pg_proc where prosrc like '%crm_bulk_trade_%'
+       and proname in ('bulk_listing_stage', 'bulk_listing_deal_stage', 'bulk_listing_has_match', 'bulk_listing_offer_rank', 'bulk_listing_qualified')`);
+    expect(n).toBe(0);
   });
 
   it("moves a qualified listing on when it has an owner: demand to Sourcing, supply to Available", async () => {
@@ -58,47 +61,66 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage", () => {
     expect(await stage("stg_demand")).toBe("Qualified");
   });
 
-  it("marks a demand Can't source while a reason is set, over Sourcing, but never over a live deal", async () => {
-    const { setListingCantSource } = await import("./bulk-listing-cant-source");
-    const reason = (text: string | null) => setListingCantSource("stg_demand", text);
-    expect(await setListingCantSource("stg_ready", "Supply cannot be unsourceable")).toBe(false);
-    await reason("No Ioniq packs in Europe this quarter");
-    expect(await stage("stg_demand")).toBe("Can't source");
-    await pg.queryPg(`update crm_bulk_listings set context = jsonb_set(context, '{cant_source}', '"   "') where id = 'stg_demand'`);
-    expect(await stage("stg_demand")).toBe("Qualified"); // a blank reason does not count
-    await reason(null);
-    expect((await pg.queryPg<{ has: boolean }>("select context ? 'cant_source' as has from crm_bulk_listings where id = 'stg_demand'"))[0].has).toBe(false);
-    await pg.queryPg("insert into crm_bulk_offers (id, bulk_listing_id, counterpart_id, role, stage) values ('stg_dc', 'stg_ready', 'stg_demand', 'counterparty', 'candidate')");
-    await reason("Gone quiet");
-    expect(await stage("stg_demand")).toBe("Can't source");
-    await pg.queryPg("update crm_bulk_offers set stage = 'offered' where id = 'stg_dc'");
-    expect(await stage("stg_demand")).toBe("Offered");
-    await reason(null);
-    await pg.queryPg("update crm_bulk_offers set stage = 'candidate' where id = 'stg_dc'");
-    expect(await stage("stg_demand")).toBe("Sourcing"); // a candidate supplier, not offered yet
-    await pg.queryPg("delete from crm_bulk_offers where id = 'stg_dc'");
+  it("counts a live counterparty offer as a match (bulk_listing_has_match): Sourcing and Available before anything is offered", async () => {
+    await offer("stg_m", "stg_new", "candidate", "stg_demand");
+    expect((await pg.queryPg<{ m: boolean }>("select bulk_listing_has_match('stg_new') as m"))[0].m).toBe(true);
+    expect([await stage("stg_new"), await stage("stg_demand")]).toEqual(["Available", "Sourcing"]);
+    await offer("stg_m", "stg_new", "declined", "stg_demand");
+    expect([await stage("stg_new"), await stage("stg_demand")]).toEqual(["New", "Qualified"]);
+    await pg.queryPg("delete from crm_bulk_offers where id = 'stg_m'");
   });
 
-  it("follows the furthest offer for both kinds: Offered, Negotiating, Agreed, Paid, Delivered", async () => {
-    const offer = (id: string, st: string) => pg.queryPg(
-      "insert into crm_bulk_offers (id, bulk_listing_id, role, stage) values ($1, 'stg_ready', 'counterparty', $2) on conflict (id) do update set stage = excluded.stage", [id, st]);
-    await offer("stg_o1", "candidate");
-    expect(await stage("stg_ready")).toBe("Available");
-    await offer("stg_o2", "declined");
-    expect(await stage("stg_ready")).toBe("Available");
-    await offer("stg_o1", "offered");
-    expect(await stage("stg_ready")).toBe("Offered");
-    await offer("stg_o1", "negotiating");
-    expect(await stage("stg_ready")).toBe("Negotiating");
+  it("keeps a Can't source reason as a tag: the stage does not change", async () => {
+    const { setListingCantSource } = await import("./bulk-listing-cant-source");
+    await setListingCantSource("stg_demand", "No Ioniq packs in Europe this quarter");
+    expect(await stage("stg_demand")).toBe("Qualified");
+    await setListingCantSource("stg_demand", null);
+  });
+
+  it("walks a deal: list stages Found (demand) and Available, Sold (supply); deal stages Offered to Delivered", async () => {
+    const both = async () => [await stage("stg_ready"), await stage("stg_demand"), await deal("stg_ready"), await deal("stg_demand")];
+    await offer("stg_o1", "stg_ready", "offered", "stg_demand");
+    expect(await both()).toEqual(["Available", "Found", "Offered", "Offered"]);
+    await offer("stg_o1", "stg_ready", "negotiating", "stg_demand");
+    expect(await both()).toEqual(["Available", "Found", "Negotiating", "Negotiating"]);
     for (const st of ["contract_out", "signed", "invoiced"]) {
-      await offer("stg_o1", st);
-      expect(await stage("stg_ready")).toBe("Agreed");
+      await offer("stg_o1", "stg_ready", st, "stg_demand");
+      expect(await both()).toEqual(["Available", "Found", "Agreed", "Agreed"]); // Reserved is the hold only, for now
     }
-    await offer("stg_o1", "paid");
-    expect(await stage("stg_ready")).toBe("Paid");
-    await offer("stg_o1", "complete");
-    expect(await stage("stg_ready")).toBe("Delivered");
-    await pg.queryPg("delete from crm_bulk_offers where id in ('stg_o1', 'stg_o2')");
+    await offer("stg_o1", "stg_ready", "paid", "stg_demand");
+    expect(await both()).toEqual(["Sold", "Found", "Paid", "Paid"]);
+  });
+
+  it("closes both listings when the offer is complete: supply as sold, demand as bought from us", async () => {
+    await offer("stg_o1", "stg_ready", "complete", "stg_demand");
+    const rows = await pg.queryPg<{ id: string; status: string; closed_reason: string }>(
+      "select id, status, closed_reason from crm_bulk_listings where id in ('stg_ready', 'stg_demand') order by id");
+    expect(rows).toEqual([{ id: "stg_demand", status: "closed", closed_reason: "bought_from_us" }, { id: "stg_ready", status: "closed", closed_reason: "sold" }]);
+    expect([await stage("stg_ready"), await stage("stg_demand"), await deal("stg_ready")]).toEqual(["Sold", "Closed", "Delivered"]);
+    await pg.queryPg("delete from crm_bulk_offers where id = 'stg_o1'");
+    await pg.queryPg("update crm_bulk_listings set status = 'open', closed_reason = null where id in ('stg_ready', 'stg_demand')");
+  });
+
+  it("is Lost on the board when every counterparty offer is declined or lost, and not while one is alive", async () => {
+    await offer("stg_l1", "stg_partial", "declined");
+    await offer("stg_l2", "stg_partial", "lost");
+    expect(await deal("stg_partial")).toBe("Lost");
+    await offer("stg_l3", "stg_partial", "candidate");
+    expect(await deal("stg_partial")).toBeNull();
+    await offer("stg_l3", "stg_partial", "offered");
+    expect(await deal("stg_partial")).toBe("Offered");
+    await pg.queryPg("delete from crm_bulk_offers where id in ('stg_l1', 'stg_l2', 'stg_l3')");
+    expect(await deal("stg_partial")).toBeNull();
+  });
+
+  it("is Reserved while a supply hold runs, and a closed supply that did not sell is Closed", async () => {
+    await pg.queryPg("update crm_bulk_listings set hold_until = current_date + 2 where id = 'stg_new'");
+    expect(await stage("stg_new")).toBe("Reserved");
+    await pg.queryPg("update crm_bulk_listings set hold_until = current_date - 1 where id = 'stg_new'");
+    expect(await stage("stg_new")).toBe("New");
+    await pg.queryPg("update crm_bulk_listings set status = 'closed', closed_reason = 'gone' where id = 'stg_new'");
+    expect(await stage("stg_new")).toBe("Closed");
+    await pg.queryPg("update crm_bulk_listings set status = 'open', closed_reason = null, hold_until = null where id = 'stg_new'");
   });
 
   it("stores a fee override on either kind as a number, and clears it", async () => {
@@ -112,8 +134,9 @@ describe.skipIf(!TEST_URL)("bulk_listing_stage", () => {
     expect(await setListingFee("stg_missing", 1)).toBe(false);
   });
 
-  it("an unknown listing is New", async () => {
-    expect(await stage("stg_missing")).toBe("New");
+  it("an unknown listing has no stage", async () => {
+    expect(await stage("stg_missing")).toBeNull();
+    expect(await deal("stg_missing")).toBeNull();
   });
 
   it("rejects the retired offer stages and accepts negotiating", async () => {

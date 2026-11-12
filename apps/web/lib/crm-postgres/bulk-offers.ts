@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { queryPg } from "../postgres";
+import { asStageActor } from "./bulk-stage-events";
+import type { PaidFacts } from "../bulk-offer-paid";
 
 export const OFFER_STAGES = ["candidate", "offered", "negotiating", "contract_out", "signed", "invoiced", "paid", "complete", "declined", "lost"] as const;
 export type OfferStage = typeof OFFER_STAGES[number];
@@ -20,6 +22,13 @@ export type Offer = {
   last_touch_on: string | null;
   last_touch_via: string | null;
   terms: OfferTerms;
+  /** Quantity in the price unit (terms.unit), and what was paid: required before the offer is Paid (bulk-offer-paid). */
+  quantity: number | null;
+  paid_on: string | null;
+  paid_amount: number | null;
+  paid_currency: string | null;
+  /** Our take on the deal in GBP. The OKR page sums it. */
+  take_gbp: number | null;
   next_step: string | null;
   next_due: string | null;
   /** Who the next move is on: us (they spoke last, or we owe the step) or them (we spoke last). */
@@ -56,7 +65,9 @@ export type ThreadEntry = {
 
 const selectOffers = (user: string) => `select o.id, o.bulk_listing_id as listing_id, o.role, o.person_id, o.company_id,
   case when o.bulk_listing_id <> $1 then coalesce((select b.party from crm_bulk_listings b where b.id = o.bulk_listing_id), o.name) else o.name end as name, o.contact, o.stage,
-  o.declined_reason, o.wants, o.last_touch_on::text, o.last_touch_via, o.terms, o.data->>'next_step' as next_step,
+  o.declined_reason, o.wants, o.last_touch_on::text, o.last_touch_via, o.terms,
+  o.quantity::float8 as quantity, o.paid_on::text, o.paid_amount::float8 as paid_amount, o.paid_currency, o.take_gbp::float8 as take_gbp,
+  o.data->>'next_step' as next_step,
   o.data->>'next_due' as next_due,
   case when o.data->>'waiting_on' in ('us','them') then o.data->>'waiting_on' end as waiting_on, o.data->>'waiting_since' as waiting_since, o.updated_at::text,
   nullif(greatest(
@@ -209,31 +220,49 @@ export async function linkOffer(listingId: string, offerId: string, targetId: st
   return getOffer(listingId, offerId, actorUserId);
 }
 
-export type OfferPatch = { stage?: OfferStage; nextStep?: string | null; nextDue?: string | null; wants?: string | null; terms?: OfferTerms; declinedReason?: string | null };
+export type OfferPatch = {
+  stage?: OfferStage; nextStep?: string | null; nextDue?: string | null; wants?: string | null; terms?: OfferTerms; declinedReason?: string | null;
+  /** Paid facts (bulk-offer-paid); a key present with null clears it. */
+  paid?: Partial<PaidFacts>;
+};
 
+const PAID_COLUMNS = ["paid_on", "paid_amount", "paid_currency", "quantity", "take_gbp"] as const satisfies readonly (keyof PaidFacts)[];
+
+/** The one path that changes an offer from the app. Stage events are written by the trigger from migration 111;
+ * this names the user as their actor. The Story still gets its readable status line. */
 export async function updateOffer(listingId: string, offerId: string, patch: OfferPatch, actorUserId: string | null): Promise<Offer | null> {
   const current = await getOffer(listingId, offerId, actorUserId);
   if (!current) return null;
   const data: Record<string, unknown> = {};
   if ("nextStep" in patch) data.next_step = patch.nextStep?.trim() || null;
   if ("nextDue" in patch) data.next_due = patch.nextDue || null;
-  await queryPg(
-    `update crm_bulk_offers set
-       stage = case when $3::boolean then $4 else stage end,
-       wants = case when $5::boolean then $6 else wants end,
-       terms = case when $7::boolean then $8::jsonb else terms end,
-       declined_reason = case when $9::boolean then $10 else declined_reason end,
-       data = (data || $11::jsonb) - coalesce((select array_agg(k) from jsonb_each_text($11::jsonb) e(k, v) where v is null), '{}'::text[]),
-       updated_at = now()
-     where id = $2 and bulk_listing_id = $1`,
-    [current.listing_id, offerId, "stage" in patch, patch.stage ?? null, "wants" in patch, patch.wants ?? null,
-      "terms" in patch, JSON.stringify(patch.terms ?? {}), "declinedReason" in patch, patch.declinedReason ?? null, JSON.stringify(data)]);
-  if (patch.stage && patch.stage !== current.stage) {
-    await queryPg(
-      `insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, person_id, kind, title, data, actor_user_id)
-       values ($1, $2, $3, 'status', $4, $5::jsonb, $6)`,
-      [current.listing_id, offerId, current.person_id, `${current.name ?? "Offer"} · ${STAGE_LABEL[patch.stage]}`, JSON.stringify({ from: current.stage, stage: patch.stage }), actorUserId]);
-  }
+  const paid = patch.paid ?? {};
+  const has = (key: keyof PaidFacts) => key in paid;
+  await asStageActor(actorUserId, async (tx) => {
+    await tx.query(
+      `update crm_bulk_offers set
+         stage = case when $3::boolean then $4 else stage end,
+         wants = case when $5::boolean then $6 else wants end,
+         terms = case when $7::boolean then $8::jsonb else terms end,
+         declined_reason = case when $9::boolean then $10 else declined_reason end,
+         data = (data || $11::jsonb) - coalesce((select array_agg(k) from jsonb_each_text($11::jsonb) e(k, v) where v is null), '{}'::text[]),
+         paid_on = case when $12::boolean then $13::date else paid_on end,
+         paid_amount = case when $14::boolean then $15::numeric else paid_amount end,
+         paid_currency = case when $16::boolean then $17 else paid_currency end,
+         quantity = case when $18::boolean then $19::numeric else quantity end,
+         take_gbp = case when $20::boolean then $21::numeric else take_gbp end,
+         updated_at = now()
+       where id = $2 and bulk_listing_id = $1`,
+      [current.listing_id, offerId, "stage" in patch, patch.stage ?? null, "wants" in patch, patch.wants ?? null,
+        "terms" in patch, JSON.stringify(patch.terms ?? {}), "declinedReason" in patch, patch.declinedReason ?? null, JSON.stringify(data),
+        ...PAID_COLUMNS.flatMap((key) => [has(key), paid[key] ?? null])]);
+    if (patch.stage && patch.stage !== current.stage) {
+      await tx.query(
+        `insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, person_id, kind, title, data, actor_user_id)
+         values ($1, $2, $3, 'status', $4, $5::jsonb, $6)`,
+        [current.listing_id, offerId, current.person_id, `${current.name ?? "Offer"} · ${STAGE_LABEL[patch.stage]}`, JSON.stringify({ from: current.stage, stage: patch.stage }), actorUserId]);
+    }
+  });
   return getOffer(listingId, offerId, actorUserId);
 }
 

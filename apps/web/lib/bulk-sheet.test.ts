@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BOARD_STAGES, DEMAND_STAGES, LISTING_STAGES, SUPPLY_STAGES, listingStageOf, progressFor, stagesFor } from "./bulk-listing";
-import { listingRow, STAGE_TONE, filterSheet, filtersFromRoute, routeFromFilters, NO_FILTERS, sheetOptions, sortSheet, sortRows, SHEET_SORTS, valueAndFee, formatEurCompact } from "./bulk-sheet";
+import { listingRow, STAGE_TONE, filterSheet, filtersFromRoute, routeFromFilters, NO_FILTERS, sheetOptions, sortSheet, sortRows, SHEET_SORTS, ticketEur, valueAndFee, formatEurCompact } from "./bulk-sheet";
+import { weightedFee } from "./bulk-desk";
 
 const demand = (over = {}) => listingRow({
   id: "d1", kind: "demand", party: "H. Nolden", company_id: "c1", summary: "Complete packs",
@@ -12,31 +13,42 @@ const supply = (over = {}) => listingRow({
   id: "t1", kind: "supply", party: "Seller", company_id: null, summary: "eBS37 lot",
   spec: { trade_kind: "packs" }, context: {}, status: "open", activity_count: 0, score: null,
   latest_kind: null, latest_title: null, latest_at: null, observed_on: "2026-10-12", updated_at: "2026-10-12",
-  next_action: "Call buyer", next_due: "2026-10-20", furthest_stage: "offered", stage: "Offered", ...over,
+  next_action: "Call buyer", next_due: "2026-10-20", furthest_stage: "offered", stage: "Available", deal_stage: "Offered", ...over,
 });
 
 describe("sheet rows", () => {
   const listing = (over = {}) => listingRow({ id: "bt_1", kind: "supply", party: "Seller", company_id: null,
     summary: "Battery lot", spec: { is_trade: true }, context: {}, status: "open", score: null, activity_count: 0,
     latest_kind: null, latest_title: null, latest_at: null, observed_on: null, updated_at: "2026-10-21",
-    next_action: null, next_due: null, furthest_stage: null, stage: "Offered", ...over });
+    next_action: null, next_due: null, furthest_stage: null, stage: "Available", deal_stage: "Offered", ...over });
 
   it("keeps mirrored lots as supply listings, and makes a trade only from accepted offers", () => {
-    expect(listing()).toMatchObject({ id: "bt_1", key: "bt_1", kind: "supply", side: "seller", progress: "Offered" });
-    for (const stage of ["contract_out", "signed", "invoiced", "paid", "complete"]) expect(listing({ furthest_stage: stage, stage: "Agreed" }))
-      .toMatchObject({ progress: "Agreed", tone: "closing", is_trade: true });
-    expect(listing({ furthest_stage: "negotiating", stage: "Negotiating" })).toMatchObject({ progress: "Negotiating", tone: "waiting", is_trade: false });
+    expect(listing()).toMatchObject({ id: "bt_1", key: "bt_1", kind: "supply", side: "seller", progress: "Available", deal_stage: "Offered" });
+    for (const stage of ["contract_out", "signed", "invoiced", "paid", "complete"]) expect(listing({ furthest_stage: stage, stage: "Available", deal_stage: "Agreed" }))
+      .toMatchObject({ progress: "Available", deal_stage: "Agreed", tone: "active", is_trade: true });
+    expect(listing({ furthest_stage: "negotiating", deal_stage: "Negotiating" })).toMatchObject({ progress: "Available", deal_stage: "Negotiating", is_trade: false });
     expect(listing({ furthest_stage: "offered" }).is_trade).toBe(false);
-    expect(listing({ kind: "demand", furthest_stage: "contract_out", stage: "Agreed" })).toMatchObject({ side: "buyer", progress: "Agreed" });
+    expect(listing({ kind: "demand", furthest_stage: "contract_out", stage: "Found", deal_stage: "Agreed" })).toMatchObject({ side: "buyer", progress: "Found", deal_stage: "Agreed" });
+    expect(listing({ deal_stage: null }).deal_stage).toBeNull();
+    expect(listing({ deal_stage: "Lost" }).deal_stage).toBe("Lost");
+    expect(listing({ deal_stage: "Bogus" }).deal_stage).toBeNull();
   });
 
-  it("shows offer progress and preserves an explicit hold", () => {
+  it("shows the list stage and preserves an explicit hold", () => {
     for (const stage of SUPPLY_STAGES)
       expect(listing({ stage }).progress).toBe(stage);
-    expect(listing({ stage: "Qualified" }).progress).toBe("Available"); // supply has no Qualified since 096
-    expect(listing({ stage: "Offered", spec: { trade_stage: "On hold", hold_until: "2026-11-01" } }))
-      .toMatchObject({ progress: "Offered", held: true, tone: "hold" });
-    expect(listing({ stage: "Offered" })).toMatchObject({ held: false });
+    expect(listing({ stage: "Qualified" }).progress).toBe("Qualified"); // supply has Qualified again since 111
+    expect(listing({ stage: "Available", spec: { trade_stage: "On hold", hold_until: "2026-11-01" } }))
+      .toMatchObject({ progress: "Available", held: true, tone: "hold" });
+    expect(listing({ stage: "Available" })).toMatchObject({ held: false });
+  });
+
+  it("tags a request nobody can source on its stage, and marks recently closed rows", () => {
+    expect(demand({ stage: "Sourcing", context: { cant_source: "No Ioniq packs in Europe" } })).toMatchObject({ progress: "Sourcing", cant_source: "No Ioniq packs in Europe", tone: "warning" });
+    expect(demand({ stage: "Sourcing", context: { cant_source: "   " } })).toMatchObject({ cant_source: null, tone: "active" });
+    expect(supply({ context: { cant_source: "x" } }).cant_source).toBeNull();
+    expect(demand({ stage: "Closed", status: "closed" })).toMatchObject({ progress: "Closed", closed: true });
+    expect(demand().closed).toBe(false);
   });
   it("states only what the record says: a new demand has no development, next action or owner", () => {
     expect(demand()).toMatchObject({ progress: "New", latest: null, next_action: null, owner: null, side: "buyer" });
@@ -50,11 +62,12 @@ describe("sheet rows", () => {
 });
 
 describe("sheet filters", () => {
-  const rows = [demand(), supply(), supply({ id: "t2", summary: "Cells lot", party: "Other", spec: { trade_kind: "cells" }, furthest_stage: "contract_out", stage: "Agreed", observed_on: "2026-10-11" })];
+  const rows = [demand(), supply(), supply({ id: "t2", summary: "Cells lot", party: "Other", spec: { trade_kind: "cells" }, furthest_stage: "contract_out", stage: "Reserved", deal_stage: "Agreed", observed_on: "2026-10-11" })];
 
   it("filters by side, progress, company and category and searches across the visible text", () => {
     expect(filterSheet(rows, { ...NO_FILTERS, side: "buyer" }).map((row) => row.id)).toEqual(["d1"]);
-    expect(filterSheet(rows, { ...NO_FILTERS, progress: "Agreed" }).map((row) => row.id)).toEqual(["t2"]);
+    expect(filterSheet(rows, { ...NO_FILTERS, progress: "Reserved" }).map((row) => row.id)).toEqual(["t2"]);
+    expect(filterSheet(rows, { ...NO_FILTERS, query: "agreed" }).map((row) => row.id)).toEqual(["t2"]);
     expect(filterSheet(rows, { ...NO_FILTERS, company: "Seller" }).map((row) => row.id)).toEqual(["t1"]);
     expect(filterSheet(rows, { ...NO_FILTERS, category: "cells" }).map((row) => row.id)).toEqual(["t2"]);
     expect(filterSheet(rows, { ...NO_FILTERS, query: "nolden" }).map((row) => row.id)).toEqual(["d1"]);
@@ -117,7 +130,7 @@ describe("sortRows", () => {
   const rows = [
     row("a", { score: 40, next_due: "2026-10-30", progress: "Sourcing", title: "A" }),
     row("b", { score: null, next_due: null, progress: "New", title: "B" }),
-    row("c", { score: 90, next_due: "2026-10-25", progress: "Offered", title: "C" }),
+    row("c", { score: 90, next_due: "2026-10-25", progress: "Found", title: "C" }),
     row("d", { score: 12, next_due: null, progress: "Qualified", title: "D" }),
   ];
   const ids = (sort: (typeof SHEET_SORTS)[number]) => sortRows(rows, sort).map((r) => r.id);
@@ -191,39 +204,67 @@ describe("value and fee", () => {
 });
 
 describe("stages", () => {
-  it("orders every stage once, and splits them by kind with the deal stages shared", () => {
-    expect(LISTING_STAGES).toEqual(["New", "Qualified", "Sourcing", "Can't source", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
-    expect(DEMAND_STAGES).toEqual(["New", "Qualified", "Sourcing", "Can't source", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
-    expect(SUPPLY_STAGES).toEqual(["New", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
-    expect(BOARD_STAGES).toEqual(["Offered", "Negotiating", "Agreed", "Paid", "Delivered"]);
+  it("orders every list stage once, splits them by kind, and keeps the deal stages for the Board", () => {
+    expect(LISTING_STAGES).toEqual(["New", "Qualified", "Sourcing", "Available", "Found", "Reserved", "Sold", "Closed"]);
+    expect(DEMAND_STAGES).toEqual(["New", "Qualified", "Sourcing", "Found", "Closed"]);
+    expect(SUPPLY_STAGES).toEqual(["New", "Qualified", "Available", "Reserved", "Sold"]);
+    expect(BOARD_STAGES).toEqual(["Offered", "Negotiating", "Agreed", "Paid", "Delivered", "Lost"]);
     expect(stagesFor("demand")).toBe(DEMAND_STAGES);
     expect(stagesFor("supply")).toBe(SUPPLY_STAGES);
     for (const stage of [...DEMAND_STAGES, ...SUPPLY_STAGES]) expect(LISTING_STAGES).toContain(stage);
   });
-  it("colours early stages quiet, working stages blue, deals amber then green, and Can't source as a warning", () => {
-    expect(LISTING_STAGES.map((stage) => STAGE_TONE[stage])).toEqual(
-      ["new", "new", "active", "warning", "active", "waiting", "waiting", "closing", "closing", "closing"]);
-    expect(demand({ stage: "Can't source" })).toMatchObject({ progress: "Can't source", tone: "warning" });
+  it("colours early stages quiet, working stages blue, Found amber, Reserved and Sold green", () => {
+    expect(LISTING_STAGES.map((stage) => STAGE_TONE[stage])).toEqual(["new", "new", "active", "active", "waiting", "closing", "closing", "new"]);
     expect(demand({ stage: "Mystery" as never })).toMatchObject({ progress: "Mystery", tone: "new" });
   });
-  it("reads the labels of a database without migration 095 as today's stages", () => {
+  it("reads the labels of a database before migration 111 as today's list stages", () => {
     expect(demand({ stage: "Matched" as never })).toMatchObject({ progress: "Sourcing", tone: "active" });
-    expect(demand({ stage: "Found" as never })).toMatchObject({ progress: "Sourcing", tone: "active" });
+    expect(demand({ stage: "Can't source" as never })).toMatchObject({ progress: "Sourcing" });
+    expect(supply({ stage: "Found" as never })).toMatchObject({ progress: "Available" });
     expect(supply({ stage: "Matched" as never })).toMatchObject({ progress: "Available", tone: "active" });
-    expect(supply({ stage: "Signed & Paid" as never })).toMatchObject({ progress: "Agreed", tone: "closing" });
-    expect(demand({ stage: "Complete" as never })).toMatchObject({ progress: "Delivered", tone: "closing" });
-    expect(listingStageOf("Offered", "supply")).toBe("Offered");
+    expect(supply({ stage: "Signed & Paid" as never })).toMatchObject({ progress: "Available", tone: "active" });
+    expect(demand({ stage: "Complete" as never })).toMatchObject({ progress: "Found" });
+    for (const [label, demandStage, supplyStage] of [["Offered", "Found", "Available"], ["Negotiating", "Found", "Available"], ["Agreed", "Found", "Available"],
+      ["Paid", "Found", "Sold"], ["Delivered", "Found", "Sold"]] as const) {
+      expect([listingStageOf(label, "demand"), listingStageOf(label, "supply")]).toEqual([demandStage, supplyStage]);
+    }
+    expect(listingStageOf("Closed", "supply")).toBe("Closed");
   });
   it("keeps, maps or drops a Progress filter for a list of one kind", () => {
-    expect(progressFor("Found", "demand")).toBe("Sourcing");
+    expect(progressFor("Found", "demand")).toBe("Found");
     expect(progressFor("Found", "supply")).toBe("Available");
     expect(progressFor("Matched", "demand")).toBe("Sourcing");
-    expect(progressFor("Qualified", "supply")).toBe("Available");
-    expect(progressFor("Qualified", "demand")).toBe("Qualified");
-    expect(progressFor("Matched", "supply")).toBe("Available");
-    expect(progressFor("Signed & Paid", "supply")).toBe("Agreed");
-    expect(progressFor("Complete", "demand")).toBe("Delivered");
-    expect(progressFor("Can't source", "supply")).toBeNull();
+    expect(progressFor("Qualified", "supply")).toBe("Qualified");
+    expect(progressFor("Reserved", "supply")).toBe("Reserved");
+    expect(progressFor("Reserved", "demand")).toBeNull();
+    expect(progressFor("Sold", "demand")).toBeNull();
+    expect(progressFor("Signed & Paid", "supply")).toBe("Available");
+    expect(progressFor("Complete", "supply")).toBe("Sold");
+    expect(progressFor("Can't source", "demand")).toBe("Sourcing");
     expect(progressFor("bogus", "demand")).toBeNull();
+  });
+});
+
+describe("ticket and weighted value", () => {
+  it("is price x volume for a request when the units agree, converted to euros", () => {
+    const spec = { volume: 40, volume_unit: "packs", max_price: 1500, price_currency: "EUR", price_unit: "pack" };
+    expect(ticketEur("demand", spec)).toBe(60000);
+    expect(ticketEur("demand", { ...spec, price_currency: "GBP" })).toBe(69000);
+    expect(ticketEur("demand", { ...spec, price_currency: "USD" })).toBe(51600);
+    expect(ticketEur("demand", { volume: 2, volume_unit: "MWh", max_price: 60, price_currency: "EUR", price_unit: "kWh" })).toBe(120000);
+  });
+  it("falls back to the stored value when price or volume is missing or the units differ", () => {
+    expect(ticketEur("demand", { volume: 40, volume_unit: "cells", max_price: 1500, price_currency: "EUR", price_unit: "pack", fee_eur: 900 })).toBe(9000);
+    expect(ticketEur("demand", { max_price: 1500, price_currency: "EUR", price_unit: "pack" })).toBeNull();
+    expect(ticketEur("supply", { value_eur: 48000.4 })).toBe(48000);
+    expect(ticketEur("supply", { volume: 3, max_price: 10 })).toBeNull();
+  });
+  it("keeps a request's stored fee, else takes the fee as 10% of the ticket, and weighs it by chance", () => {
+    const gbp = { volume: 10, volume_unit: "packs", max_price: 1000, price_currency: "GBP", price_unit: "pack" };
+    expect(valueAndFee("demand", gbp)).toEqual({ value_eur: 11500, fee_eur: 1150, fee_is_override: false });
+    expect(valueAndFee("demand", { ...gbp, fee_eur: 900 })).toEqual({ value_eur: 11500, fee_eur: 900, fee_is_override: false });
+    const row = demand({ spec: { product_family: "Ioniq", ...gbp }, context: { likelihood: 40 } });
+    expect(row).toMatchObject({ value_eur: 11500, fee_eur: 1150, likelihood: 40 });
+    expect(weightedFee(row)).toBe(460);
   });
 });

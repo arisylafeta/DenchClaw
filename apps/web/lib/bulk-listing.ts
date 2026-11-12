@@ -41,6 +41,8 @@ export type BulkListingView = {
   furthest_stage: OfferStage | null;
   /** One of LISTING_STAGES. */
   stage: ListingStage;
+  /** The Deals board stage, or null when the listing is not a deal (see BOARD_STAGES). */
+  deal_stage: DealStage | null;
   /** True when furthest_stage is on the signing and paying track or beyond: the listing is a trade. A label on the same record, not a separate one. */
   is_trade: boolean;
   /** Present when kind is demand: the existing Demand row the demand panel renders. */
@@ -50,37 +52,41 @@ export type BulkListingView = {
 /** A trade is a listing on the signing and paying track or beyond: a contract is out with a counterparty. */
 export const TRADE_STAGES: readonly OfferStage[] = ["contract_out", "signed", "invoiced", "paid", "complete"];
 
-/** Every listing stage, in order. Computed by bulk_listing_stage() in Postgres; never stored. Demand and supply
- * have their own early stages (DEMAND_STAGES, SUPPLY_STAGES) and share the deal stages on the Board (BOARD_STAGES). */
-export const LISTING_STAGES = ["New", "Qualified", "Sourcing", "Can't source", "Available", "Offered", "Negotiating", "Agreed", "Paid", "Delivered"] as const;
+/** Every list stage, in order (team, 27 Oct 2026). Computed by bulk_listing_stage() in Postgres (migration 111); never
+ * stored. Requests (demand) and Supply each have their own list (DEMAND_STAGES, SUPPLY_STAGES). Closed is a demand stage,
+ * and also where a supply listing that closed without a sale ends up. */
+export const LISTING_STAGES = ["New", "Qualified", "Sourcing", "Available", "Found", "Reserved", "Sold", "Closed"] as const;
 export type ListingStage = (typeof LISTING_STAGES)[number];
 
-/** Deal stages: an offer is out to a counterparty. Only these are on the Board. */
-export const BOARD_STAGES = ["Offered", "Negotiating", "Agreed", "Paid", "Delivered"] as const satisfies readonly ListingStage[];
-/** Requests: we look for supply for a buyer, then deal. */
-export const DEMAND_STAGES = ["New", "Qualified", "Sourcing", "Can't source", ...BOARD_STAGES] as const satisfies readonly ListingStage[];
-/** Supply: a seller's stock is ready to put to buyers, then deal. */
-export const SUPPLY_STAGES = ["New", "Available", ...BOARD_STAGES] as const satisfies readonly ListingStage[];
-/** The stages the Requests and Supply lists show as buttons; the rest (Can't source, and the deal stages after Offered,
- * which the Deals tab covers) sit in a "More stages" menu. */
-export const DEMAND_MAIN_STAGES = ["New", "Qualified", "Sourcing", "Offered"] as const satisfies readonly ListingStage[];
-export const SUPPLY_MAIN_STAGES = ["New", "Available", "Offered"] as const satisfies readonly ListingStage[];
+/** Requests: New, Qualified, Sourcing (looking for supply), Found (a supplier has been offered), Closed. */
+export const DEMAND_STAGES = ["New", "Qualified", "Sourcing", "Found", "Closed"] as const satisfies readonly ListingStage[];
+/** Supply: New, Qualified, Available (ready for buyers), Reserved (on hold: hold_until, for now), Sold. */
+export const SUPPLY_STAGES = ["New", "Qualified", "Available", "Reserved", "Sold"] as const satisfies readonly ListingStage[];
 
-/** Labels from bulk_listing_stage() before migrations 095 and 096, mapped to today's stages so the UI reads right whichever
- * order the UI and the migration go live in. Matched and Found mean a counterparty was found but not offered: Sourcing
- * for demand, Available for supply. */
+/** The Deals board: a listing is a deal once a counterparty has been offered it, and Lost when every counterparty
+ * offer is declined or lost. Computed by bulk_listing_deal_stage(); null when the listing is not a deal. */
+export const BOARD_STAGES = ["Offered", "Negotiating", "Agreed", "Paid", "Delivered", "Lost"] as const;
+export type DealStage = (typeof BOARD_STAGES)[number];
+
+/** Labels from bulk_listing_stage() before migration 111 (and older links), mapped to today's list stages so the UI reads
+ * right whichever order the UI and the migration go live in. Before 111 the deal stages and Can't source were list stages. */
 const LEGACY_STAGE: Record<string, (kind: ListingKind) => ListingStage> = {
   Matched: (kind) => (kind === "demand" ? "Sourcing" : "Available"),
-  Found: (kind) => (kind === "demand" ? "Sourcing" : "Available"),
-  "Signed & Paid": () => "Agreed",
-  Complete: () => "Delivered",
+  Found: (kind) => (kind === "demand" ? "Found" : "Available"),
+  "Can't source": (kind) => (kind === "demand" ? "Sourcing" : "Available"),
+  Offered: (kind) => (kind === "demand" ? "Found" : "Available"),
+  Negotiating: (kind) => (kind === "demand" ? "Found" : "Available"),
+  Agreed: (kind) => (kind === "demand" ? "Found" : "Available"),
+  "Signed & Paid": (kind) => (kind === "demand" ? "Found" : "Available"),
+  Paid: (kind) => (kind === "demand" ? "Found" : "Sold"),
+  Delivered: (kind) => (kind === "demand" ? "Found" : "Sold"),
+  Complete: (kind) => (kind === "demand" ? "Found" : "Sold"),
 };
 
-/** A stage label as the UI should show it: today's labels as they are, older ones mapped, anything else unchanged. */
+/** A stage label as the UI should show it for one kind: its own stages as they are, older labels mapped, anything else unchanged. */
 export function listingStageOf(label: string, kind: ListingKind): ListingStage {
-  // Supply has no Qualified stage since 096: a qualified lot is Available.
-  if (kind === "supply" && label === "Qualified") return "Available";
-  return (LISTING_STAGES as readonly string[]).includes(label) ? (label as ListingStage) : LEGACY_STAGE[label]?.(kind) ?? (label as ListingStage);
+  if ((stagesFor(kind) as readonly string[]).includes(label) || label === "Closed") return label as ListingStage;
+  return LEGACY_STAGE[label]?.(kind) ?? (label as ListingStage);
 }
 
 /** A Progress filter value for a list of one kind: kept when it is one of that kind's stages, mapped when it is an older
@@ -90,8 +96,13 @@ export function progressFor(value: string, kind: ListingKind): ListingStage | nu
   return (stagesFor(kind) as readonly string[]).includes(stage) ? stage : null;
 }
 
-export function isBoardStage(stage: string): boolean {
-  return (BOARD_STAGES as readonly string[]).includes(stage);
+/** A deal stage from bulk_listing_deal_stage(), or null for anything else (no deal yet, or an unknown label). */
+export function dealStageOf(label: string | null | undefined): DealStage | null {
+  return label && (BOARD_STAGES as readonly string[]).includes(label) ? (label as DealStage) : null;
+}
+
+export function isBoardStage(stage: string | null | undefined): boolean {
+  return dealStageOf(stage) !== null;
 }
 
 /** The stages one kind of listing can be in. */

@@ -73,6 +73,9 @@ describe("bulkWeekly", () => {
       offer({ id: "d", stage: "declined", updated_at: "2026-11-03T10:00:00Z" }),
       offer({ id: "e", stage: "candidate" }),
       offer({ id: "f", stage: "offered", created_at: "2026-09-10T10:00:00Z", updated_at: "2026-09-10T10:00:00Z" }),
+      // Paid on the 27th and delivered later: counted in the week it was paid, at what was paid.
+      offer({ id: "g", bulk_listing_id: "l3", stage: "complete", created_at: "2026-10-21T10:00:00Z", updated_at: "2026-11-04T10:00:00Z",
+        amount: 99, unit: "kWh", paid_on: "2026-10-27", paid_amount: 2000, paid_currency: "EUR", take_gbp: "150" }),
     ],
     touches: [
       { bulk_listing_id: "l1", occurred_at: "2026-10-15T10:00:00Z" },
@@ -94,12 +97,13 @@ describe("bulkWeekly", () => {
   it("counts offers made but not candidates, with value only where it is known", () => {
     expect(out.offers[w("2026-10-12")]).toBe(4);
     expect(out.offers_value[w("2026-10-12")]).toBe(1000 + 2450 + 1500);
-    expect(out.valued).toMatchObject({ offers: 3, offers_total: 4 });
+    expect(out.valued).toMatchObject({ offers: 3, offers_total: 5 });
   });
-  it("counts paid offers in the week they were last updated, with take and the ones missing it", () => {
-    expect(out.closed[w("2026-10-26")]).toBe(2);
-    expect(out.closed_value[w("2026-10-26")]).toBe(3950);
-    expect(out.take_gbp[w("2026-10-26")]).toBe(300);
+  it("counts paid and complete offers in the week they were paid (else last updated), with take and the ones missing it", () => {
+    expect(out.closed[w("2026-10-26")]).toBe(3);
+    expect(out.closed_value[w("2026-10-26")]).toBeCloseTo(3950 + 2000 * 0.86);
+    expect(out.take_gbp[w("2026-10-26")]).toBe(450);
+    expect(out.closed[w("2026-11-02")]).toBe(0);
     expect(out.closed_without_take).toBe(1);
   });
   it("counts declined offers by update week and offers quiet for 21 days", () => {

@@ -15,8 +15,8 @@ export async function okrBulkRows(): Promise<BulkRows> {
               to_char(created_at at time zone 'UTC', ${ISO}) as created_at,
               to_char(updated_at at time zone 'UTC', ${ISO}) as updated_at,
               to_char(last_touch_on, 'YYYY-MM-DD') as last_touch_on,
-              terms->>'amount' as amount, terms->>'unit' as unit, terms->>'quantity' as quantity,
-              terms->>'currency' as currency, data->>'take_gbp' as take_gbp
+              terms->>'amount' as amount, terms->>'unit' as unit, terms->>'currency' as currency,
+              quantity, to_char(paid_on, 'YYYY-MM-DD') as paid_on, paid_amount, paid_currency, take_gbp
          from crm_bulk_offers
         where role = 'counterparty'`,
     ),

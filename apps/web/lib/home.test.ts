@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHome, healthItems, overviewReading, stepReading, teaserNote, type Segment } from "./home";
+import { buildHome, healthItems, overviewReading, stepReading, offeredNote, type Segment } from "./home";
 import { freshness, funnelSteps, funnelWeeks, weekRange } from "./home-metrics";
 import type { PlatformHome } from "./home-platform";
 import type { BulkHome } from "./home-bulk";
@@ -34,11 +34,12 @@ const PLATFORM: PlatformHome = {
 };
 
 const BULK: BulkHome = {
-  closed_this_month: 0, lost_this_month: 2,
+  take: { take_gbp: 0, target_gbp: 15_000, share: 0, pace_gbp: 0, started: false, without_take: 0, period_label: "Dec 2026 to Feb 2027" },
+  lost_this_month: 2,
   closing: [{ title: "Oklahoma Panasonic 2170 cells", value: "$516,800" }],
   order_book: { open: 18, priced: 6, quiet: 7, buy_boxes: 22, buy_boxes_priced: 5 },
-  bids: { since: "2026-09-29T20:11:19Z", total_30d: 7, firm_30d: 1, weekly: [] },
-  buyers: { steps: [], teaser_passed: 6, teaser_total: 48 },
+  offers: { since: "2026-09-29T20:11:19Z", total_30d: 7, firm_30d: 1, weekly: [] },
+  counterparties: { steps: [], offered_passed: 6, offered_total: 48 },
 };
 
 describe("readings", () => {
@@ -64,10 +65,10 @@ describe("readings", () => {
       .toBe("No data yet for this step.");
   });
 
-  it("notes teaser pass-through, and calls the leak only when few get past", () => {
-    expect(teaserNote(7, 49)).toBe("7 of 49 buyers who got a teaser moved past it (14%). Teaser to NDA is the leak.");
-    expect(teaserNote(5, 10)).toBe("5 of 10 buyers who got a teaser moved past it (50%).");
-    expect(teaserNote(0, 0)).toBeNull();
+  it("notes how many offered counterparties moved on, and calls the leak only when few get past", () => {
+    expect(offeredNote(7, 49)).toBe("7 of 49 counterparties who were offered a deal moved past Offered (14%). Offered to Negotiating is the leak.");
+    expect(offeredNote(5, 10)).toBe("5 of 10 counterparties who were offered a deal moved past Offered (50%).");
+    expect(offeredNote(0, 0)).toBeNull();
   });
 });
 
@@ -78,7 +79,7 @@ describe("data health", () => {
       "Weekly funnel stale since 18 Oct (collector stopped)",
       "Visitors about half of real traffic since the 27 Aug consent change",
       "Reply counts differ: live 7 of 23, snapshots 4 of 22",
-      "Paid deals counted by payment date, not by week as in Pulse. Euro fees at 0.86 to the pound. Open lots leave out On hold.",
+      "Paid deals counted by payment date, not by week as in Pulse. Euro fees at 0.86 to the pound. Open supply leaves out listings on hold.",
     ]);
   });
 
@@ -96,16 +97,16 @@ describe("buildHome", () => {
     const home = buildHome({ now: NOW, weeks: WEEKS, collectedAt: COLLECTED, platform: PLATFORM, platformError: null, bulk: BULK, crmError: null });
     expect(home.header).toMatchObject({ date: "Thursday 22 October", day: 22, days_in_month: 31, platform_to: NOW.toISOString() });
     expect(home.header.funnel.stale).toBe(true);
-    expect(home.header.targets).toEqual([{ label: "4 paid a month", source: "Pulse" }, { label: "2 bulk a month", source: "19 Oct call" }]);
+    expect(home.header.targets).toEqual([{ label: "4 paid a month", source: "Pulse" }, { label: "£15k bulk take, Dec to Feb", source: "OKR" }]);
     expect(home.marketplace).toMatchObject({ paid: 1, pace: { target: 4, pace: 2.8, to_go: 3 }, last_paid_days: 19 });
     expect(home.marketplace?.fill).toEqual({ num: 3, den: 26, rate: 3 / 26, since: "2026-08-10" });
-    expect(home.bulk_goal).toMatchObject({ closed: 0, pace: { target: 2, pace: 1.4, to_go: 2 }, lost: 2, month_label: "October" });
+    expect(home.bulk_goal).toMatchObject({ take: { take_gbp: 0, target_gbp: 15_000, started: false }, lost: 2, month_label: "October" });
     expect(home.fees).toMatchObject({ ytd_gbp: 24_618, month_label: "October", goal_label: "£10k a month", goal_source: "7 Sep call" });
     expect(home.reply).toMatchObject({ within: 7, later: 2, never: 14, open: 2, since: "2026-08-01", target_label: "all" });
     expect(home.overview?.no_deal_since).toBe("2026-10-02T15:33:25Z");
     expect(home.funnel?.biggest_drop).toBe("start_send");
     expect(home.funnel?.weeks[0]).toBe("2026-08-10");
-    expect(home.bulk?.teaser_note).toMatch(/^6 of 48/);
+    expect(home.bulk?.offered_note).toMatch(/^6 of 48 counterparties/);
     expect(home.errors).toEqual({ platform: null, crm: null });
   });
 
@@ -118,7 +119,7 @@ describe("buildHome", () => {
     const noPlatform = buildHome({ now: NOW, weeks: WEEKS, collectedAt: COLLECTED, platform: null, platformError: "down", bulk: BULK, crmError: null });
     expect(noPlatform).toMatchObject({ marketplace: null, fees: null, reply: null, since_deal: null, overview: null });
     expect(noPlatform.header.platform_to).toBeNull();
-    expect(noPlatform.bulk_goal?.closed).toBe(0);
+    expect(noPlatform.bulk_goal?.take.take_gbp).toBe(0);
     expect(noPlatform.funnel?.steps).toHaveLength(4);
 
     const noCrm = buildHome({ now: NOW, weeks: [], collectedAt: null, platform: PLATFORM, platformError: null, bulk: null, crmError: "down" });

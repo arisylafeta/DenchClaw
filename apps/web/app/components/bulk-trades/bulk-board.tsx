@@ -1,20 +1,22 @@
 "use client";
 
 import { FEE_RATE, formatEurCompact, type SheetRow, type SheetTone } from "@/lib/bulk-sheet";
-import { dealTotals } from "@/lib/bulk-desk";
-import type { ListingStage } from "@/lib/bulk-listing";
+import { dealTotals, weightedFee } from "@/lib/bulk-desk";
+import type { DealStage } from "@/lib/bulk-listing";
 import { BusyRegion } from "./bt-shimmer";
 import { ScoreCircle, SideChip, WaitingBadge } from "./opportunities-sheet";
 import { DriverAvatar, DueText, Gap } from "./desk-bits";
 
-/** Read-only pipeline of the deal stages (bulk_listing_stage): only listings with an offer out are here. Work moves
- * on by what happens to its offers (Offers tab). Nothing is dragged. */
-const COLUMNS: { name: ListingStage; tone: SheetTone; hint: string }[] = [
+/** Read-only pipeline of the deal stages (bulk_listing_deal_stage): a listing is here once a counterparty has been offered
+ * it, and in Lost when every counterparty offer was declined or lost. Work moves on by what happens to its offers
+ * (Offers tab). Nothing is dragged. */
+const COLUMNS: { name: DealStage; tone: SheetTone; hint: string }[] = [
   { name: "Offered", tone: "waiting", hint: "Put to a counterparty" },
   { name: "Negotiating", tone: "waiting", hint: "Terms under discussion" },
   { name: "Agreed", tone: "closing", hint: "Contract out, signed or invoiced" },
   { name: "Paid", tone: "closing", hint: "Payment received" },
   { name: "Delivered", tone: "closing", hint: "Delivered" },
+  { name: "Lost", tone: "warning", hint: "Every counterparty declined or was lost" },
 ];
 const DOT: Record<SheetTone, string> = { new: "var(--bt-muted)", active: "var(--bt-blue)", waiting: "var(--bt-amber)", closing: "var(--bt-green)", hold: "var(--bt-purple)", warning: "var(--bt-red)" };
 
@@ -29,6 +31,7 @@ function Stat({ label, value, gap, title, data }: { label: string; value: string
 }
 
 function Card({ row, today, onOpen }: { row: SheetRow; today: string; onOpen: (row: SheetRow) => void }) {
+  const weighted = weightedFee(row);
   return (
     <li>
       <button type="button" onClick={() => onOpen(row)}
@@ -45,13 +48,15 @@ function Card({ row, today, onOpen }: { row: SheetRow; today: string; onOpen: (r
           </span>
           <span data-card-owner><DriverAvatar owner={row.owner} /></span>
         </span>
-        <span className="grid grid-cols-3 gap-2">
+        <span className="grid grid-cols-2 gap-2">
           <Stat label="Ticket" data="data-card-value" gap="Add size" value={row.value_eur != null ? formatEurCompact(row.value_eur) : null}
             title={row.value_eur != null ? `Approximate ${row.side === "buyer" ? "deal" : "stock"} value, EUR ${row.value_eur.toLocaleString("en-GB")}` : "No size recorded"} />
           <Stat label="Fee" data="data-card-fee" gap="Set fee" value={row.fee_eur != null ? formatEurCompact(row.fee_eur) : null}
             title={row.fee_eur != null ? `${row.fee_is_override ? "Fee set by hand" : `${FEE_RATE * 100}% of value`}, EUR ${row.fee_eur.toLocaleString("en-GB")}` : "No fee: set one or record a value"} />
           <Stat label="Chance" data="data-card-chance" gap="Set %" value={row.likelihood != null ? `${row.likelihood}%` : null}
             title={row.likelihood != null ? "Chance this deal completes" : "Chance not set"} />
+          <Stat label="Weighted" data="data-card-weighted" gap="Needs fee and %" value={weighted != null ? formatEurCompact(weighted) : null}
+            title={weighted != null ? `Fee × chance, EUR ${Math.round(weighted).toLocaleString("en-GB")}` : "Set a fee and a chance to weigh this deal"} />
         </span>
         <span className="flex flex-col gap-1 border-t pt-2 text-[12px] leading-snug" style={{ borderColor: "var(--bt-divider)", color: "var(--bt-text-2)" }}>
           <span className="[display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden" style={row.next_action ? undefined : { color: "var(--bt-amber)", fontWeight: 500 }}>{row.next_action ?? "No next action"}</span>
@@ -73,7 +78,7 @@ export function BulkBoard({ shown, loading, error, today, onOpen }: { shown: She
       {error && <p className="text-[13px]" role="alert" style={{ color: "var(--bt-red)" }}>{error}</p>}
       <div className="flex gap-3 overflow-x-auto pb-3" aria-label="Pipeline">
         {COLUMNS.map((column) => {
-          const cards = shown.filter((row) => row.progress === column.name);
+          const cards = shown.filter((row) => row.deal_stage === column.name);
           const totals = dealTotals(cards);
           return (
             <section key={column.name} aria-label={column.name} title={column.hint} className="flex w-[17.5rem] shrink-0 flex-col gap-2 rounded-xl p-2.5" style={{ background: "var(--bt-segment)" }}>

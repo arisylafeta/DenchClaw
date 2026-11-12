@@ -22,8 +22,8 @@ describe("listing view", () => {
     [{}, { listing_title: "Context title" }, "Context title"],
     [{ listing_title: " " }, {}, "Summary"],
   ])("uses supply title fallbacks", async (spec, context, title) => {
-    mocks.query.mockResolvedValueOnce([{ id: "supply", kind: "supply", summary: "Summary", spec, context }]).mockResolvedValueOnce([{ stage: "contract_out" }]).mockResolvedValueOnce([{ listing_stage: "Agreed" }]);
-    expect(await listingView("supply")).toMatchObject({ title, furthest_stage: "contract_out", is_trade: true, stage: "Agreed" });
+    mocks.query.mockResolvedValueOnce([{ id: "supply", kind: "supply", summary: "Summary", spec, context }]).mockResolvedValueOnce([{ stage: "contract_out" }]).mockResolvedValueOnce([{ listing_stage: "Reserved", deal_stage: "Agreed" }]);
+    expect(await listingView("supply")).toMatchObject({ title, furthest_stage: "contract_out", is_trade: true, stage: "Reserved", deal_stage: "Agreed" });
     expect(mocks.demand).not.toHaveBeenCalled();
   });
   it("attaches the existing demand and uses its headline rules", async () => {
@@ -32,8 +32,8 @@ describe("listing view", () => {
     mocks.demand.mockResolvedValue(demand);
     expect(await listingView("demand")).toMatchObject({ demand, title: "4 × Renault packs", is_trade: false });
   });
-  it("shows a pre-095 stage label as today's stage", async () => {
+  it("shows a pre-111 stage label as today's stage, with no deal stage", async () => {
     mocks.query.mockResolvedValueOnce([{ id: "supply", kind: "supply", summary: "Summary", spec: {}, context: {} }]).mockResolvedValueOnce([{ stage: "candidate" }]).mockResolvedValueOnce([{ listing_stage: "Matched" }]);
-    expect(await listingView("supply")).toMatchObject({ stage: "Available" });
+    expect(await listingView("supply")).toMatchObject({ stage: "Available", deal_stage: null });
   });
 });

@@ -1,10 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { boardRows, dealTotals, deskCounts, EUR_PER_GBP, quarterTarget, todayGroups, WIN_RATE, type TodayGroupKey } from "@/lib/bulk-desk";
+import { dealTotals, deskCounts, EUR_PER_GBP, openDealRows, TAKE_TARGET, todayGroups, type TodayGroupKey } from "@/lib/bulk-desk";
 import { formatEurCompact, type SheetRow } from "@/lib/bulk-sheet";
 import type { DealOwner } from "@/lib/bulk-owner";
-import { isBoardStage } from "@/lib/bulk-listing";
 import { BusyRegion, Sh } from "./bt-shimmer";
 import { NextActionCell } from "./next-action-cell";
 import { ProgressChip } from "./opportunities-sheet";
@@ -12,7 +11,7 @@ import { DriverAvatar, DueText } from "./desk-bits";
 import { ErrorText } from "./trade-ui";
 import { DossiersToReview } from "./dossiers-to-review";
 
-/** Whole thousands for the target, e.g. £27k, €31k. */
+/** Whole thousands for the target, e.g. £15k, €17k. */
 const roundK = (symbol: string, value: number) => `${symbol}${Math.round(value / 1000).toLocaleString("en-GB")}k`;
 const percent = (part: number, whole: number) => (whole > 0 ? Math.min(100, Math.round((part / whole) * 100)) : 0);
 
@@ -34,27 +33,22 @@ function Meter({ label, hint, value, of, focal = false, loading }: { label: stri
   );
 }
 
-/** Open deals on the Board against the quarter target: their fees weighted by chance, and in full against what a
- * 20% win rate needs. Not take banked this quarter: there is no quarter accounting yet. */
-export function QuarterTarget({ rows, owner, loading, onOpenBoard }: { rows: SheetRow[]; owner: DealOwner | "all"; loading: boolean; onOpenBoard: () => void }) {
-  const target = quarterTarget(owner);
-  if (!target) {
-    return <p data-no-target className="text-[13px]" style={{ color: "var(--bt-muted)" }}>Targets are set for Alex and Sean.</p>;
-  }
-  const totals = dealTotals(boardRows(rows));
+/** Open deals on the Board (Offered to Paid) against the one bulk target: take for the desk over Dec 2026 to Feb 2027.
+ * Their fees weighted by chance, not take banked: banked take is on the OKR page. */
+export function TakeTarget({ rows, owner, loading, onOpenBoard }: { rows: SheetRow[]; owner: DealOwner | "all"; loading: boolean; onOpenBoard: () => void }) {
+  const totals = dealTotals(openDealRows(rows));
   return (
-    <section aria-label="Pipeline against quarter target" className="flex flex-col gap-3 rounded-xl border p-4" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+    <section aria-label="Pipeline against the take target" className="flex flex-col gap-3 rounded-xl border p-4" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
       <header className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h2 className="text-[14px] font-semibold">Pipeline against quarter target{owner !== "all" && <span className="font-normal" style={{ color: "var(--bt-muted)" }}> · {owner}</span>}</h2>
+        <h2 className="text-[14px] font-semibold">Pipeline against the take target{owner !== "all" && <span className="font-normal" style={{ color: "var(--bt-muted)" }}> · {owner}&apos;s deals</span>}</h2>
         <span className="text-[14px] font-semibold tabular-nums" title={`Approx. at €${EUR_PER_GBP} to £1`}>
-          {roundK("£", target.gbp)} <span className="font-normal" style={{ color: "var(--bt-muted)" }}>(≈ {roundK("€", target.eur)})</span>
+          {roundK("£", TAKE_TARGET.gbp)} <span className="font-normal" style={{ color: "var(--bt-muted)" }}>(≈ {roundK("€", TAKE_TARGET.eur)}) Dec to Feb</span>
         </span>
       </header>
-      <Meter label="Weighted fees" hint="fee × chance" value={totals.weighted_eur} of={target.eur} focal loading={loading} />
-      <Meter label="All fees" hint={`needed at a ${WIN_RATE * 100}% win rate`} value={totals.fee_eur} of={target.needed_eur} loading={loading} />
+      <Meter label="Weighted fees" hint="fee × chance" value={totals.weighted_eur} of={TAKE_TARGET.eur} focal loading={loading} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[12px]" style={{ color: "var(--bt-muted)" }}>
-          Open deals on the Board, Offered to Delivered, not fees banked this quarter.{owner === "all" && " Includes deals with no owner."} Euro amounts approx. at €{EUR_PER_GBP} to £1.
+          Open deals on the Board, Offered to Paid, against the desk&apos;s take target for Dec 2026 to Feb 2027. Not take banked; that is on the OKR page.{owner === "all" && " Includes deals with no owner."} Euro amounts approx. at €{EUR_PER_GBP} to £1.
         </p>
         {!loading && totals.unsized > 0 && (
           <button type="button" onClick={onOpenBoard} data-unsized-nudge
@@ -71,7 +65,7 @@ export function QuarterTarget({ rows, owner, loading, onOpenBoard }: { rows: She
 const GROUP_TONE: Partial<Record<TodayGroupKey, string>> = { overdue: "var(--bt-red)", today: "var(--bt-blue)" };
 
 /** What the row is: a request, a supply lot, or a deal once it is offered. */
-const kindLabel = (row: SheetRow) => (isBoardStage(row.progress) ? "Deal" : row.kind === "demand" ? "Request" : "Supply");
+const kindLabel = (row: SheetRow) => (row.deal_stage ? "Deal" : row.kind === "demand" ? "Request" : "Supply");
 
 /** One task: the next action to do, where it belongs underneath, when it is due and who drives it on the right. */
 function ActionRow({ row, today, onOpen, onNext }: { row: SheetRow; today: string; onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void> }) {
@@ -111,21 +105,23 @@ function summary(rows: SheetRow[], owner: DealOwner | "all", groups: { key: Toda
     + `${plural(actions, "next action", "next actions")}${urgent ? `: ${urgent}` : ""}.`;
 }
 
-/** Today: the quarter target, then every open listing's next action by when it is due. Nothing else. */
+/** Today: the take target, then every open listing's next action by when it is due. Nothing else. */
 export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, onOpenBoard, onOpenCompany }: {
   rows: SheetRow[]; owner: DealOwner | "all"; loading: boolean; error: string | null; today: string;
   onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void>; onOpenBoard: () => void;
   onOpenCompany?: (id: string) => void;
 }) {
   const groups = useMemo(() => todayGroups(rows, today), [rows, today]);
+  // Listings closed in the last 30 days are on the sheet for the Closed, Sold and Delivered columns; Today is open work only.
+  const open = useMemo(() => rows.filter((row) => !row.closed), [rows]);
   const busy = loading && !rows.length;
   return (
     <BusyRegion busy={busy} label="Loading…" className="flex flex-col gap-4">
       <div className="flex flex-col gap-0.5">
         <h2 className="text-[20px] font-semibold tracking-[-0.01em]">{new Date(`${today}T12:00:00Z`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}</h2>
-        {(busy || (!error && rows.length > 0)) && <p data-today-summary className="text-[13px]" style={{ color: "var(--bt-text-2)" }}><Sh on={busy} chars={48}>{summary(rows, owner, groups)}</Sh></p>}
+        {(busy || (!error && rows.length > 0)) && <p data-today-summary className="text-[13px]" style={{ color: "var(--bt-text-2)" }}><Sh on={busy} chars={48}>{summary(open, owner, groups)}</Sh></p>}
       </div>
-      <QuarterTarget rows={rows} owner={owner} loading={busy} onOpenBoard={onOpenBoard} />
+      <TakeTarget rows={rows} owner={owner} loading={busy} onOpenBoard={onOpenBoard} />
       <DossiersToReview onOpenCompany={onOpenCompany} />
       <ErrorText error={error} />
       <section aria-label="Next actions" className="overflow-hidden rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>

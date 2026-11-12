@@ -41,15 +41,17 @@ describe.skipIf(!TEST_URL)("sheet list", () => {
     await pg.pgPool.end();
   });
 
-  it("lists open and qualifying demand, open offers and live trades once each, and leaves history and finished work out", async () => {
+  it("lists open and qualifying demand, open offers and live trades once each, recent closed demand, and leaves older and unsold closes out", async () => {
     const rows = (await sheet.listSheet()).filter((row) => /^(btd|bts|btl)_sheet_/.test(row.id));
     expect(rows.map((row) => `${row.kind}:${row.id}`).sort()).toEqual(
-      ["demand:btd_sheet_new", "demand:btd_sheet_qual", "demand:btd_sheet_worked", "supply:bts_sheet_open", "supply:btl_sheet_live"].sort());
+      ["demand:btd_sheet_closed", "demand:btd_sheet_new", "demand:btd_sheet_qual", "demand:btd_sheet_worked", "supply:bts_sheet_open", "supply:btl_sheet_live"].sort());
+    // Closed in the last 30 days: shown as Closed with nothing to do. Closed supply that did not sell stays out.
+    expect(rows.find((row) => row.id === "btd_sheet_closed")).toMatchObject({ progress: "Closed", closed: true, deal_stage: null });
     const worked = rows.find((row) => row.id === "btd_sheet_worked")!;
     expect(worked).toMatchObject({ progress: "New", latest: { label: "Asked supplier A", kind: "Outreach" }, next_action: null, owner: null });
     expect(rows.find((row) => row.id === "btd_sheet_qual")).toMatchObject({ progress: "New", side: "buyer" });
-    expect(rows.find((row) => row.id === "btd_sheet_new")).toMatchObject({ progress: "Agreed", tone: "closing", side: "buyer", latest: null });
-    expect(rows.find((row) => row.id === "bts_sheet_open")).toMatchObject({ progress: "Agreed", tone: "closing", side: "seller" });
+    expect(rows.find((row) => row.id === "btd_sheet_new")).toMatchObject({ progress: "Found", deal_stage: "Agreed", tone: "waiting", side: "buyer", latest: null });
+    expect(rows.find((row) => row.id === "bts_sheet_open")).toMatchObject({ progress: "Available", deal_stage: "Agreed", tone: "active", side: "seller" });
     // The furthest live offer links the supply and the demand, so each names the other.
     expect(rows.find((row) => row.id === "bts_sheet_open")?.paired_listing_id).toBe("btd_sheet_new");
     expect(rows.find((row) => row.id === "btd_sheet_new")?.paired_listing_id).toBe("bts_sheet_open");

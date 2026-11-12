@@ -21,7 +21,10 @@ const PLATFORM: PlatformRows = {
   payments: [{ deal_id: "d1", status: "captured", payment_purpose: "initial", amount: "1860", currency: "gbp", platform_fee_amount: "155", captured_at: "2026-10-02T15:33:27Z", created_at: "2026-10-02T15:33:26Z" }],
   offers: [], conversations: [], messages: [], accountEmails: new Map(), accountNames: new Map(),
 };
-const BULK = { lots: [{ id: "l", title: "Lot", trade_stage: "Closing", value: "$1", last_touched: null, latest_activity_at: null, updated_at: "2026-10-01T00:00:00Z", stage_event_at: null }], demand: [], bids: [], buyers: [] };
+const BULK = {
+  listings: [{ id: "l", kind: "supply", status: "open", title: "Lot", party: "Seller", value_eur: "1", max_price: null, on_hold: false, deal_stage: "Agreed", latest_touch_at: null }],
+  offers: [],
+};
 
 afterEach(() => vi.clearAllMocks());
 
@@ -50,7 +53,7 @@ describe("GET /api/home", () => {
     expect(listWeeks).toHaveBeenCalledWith(16);
     expect(body.header.funnel).toMatchObject({ collected_at: "2026-10-18T08:40:59Z", stale: true });
     expect(body.fees?.ytd_gbp).toBe(155);
-    expect(body.bulk_goal?.closing).toEqual([{ title: "Lot", value: "$1" }]);
+    expect(body.bulk_goal?.closing).toEqual([{ title: "Seller: Lot", value: "€1" }]);
     expect(body.errors).toEqual({ platform: null, crm: null });
   });
 

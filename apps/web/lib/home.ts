@@ -2,7 +2,7 @@
 // bulk trades), writes the one-line readings and the data-health notes. Pure, so it is unit tested.
 // Either live source can fail on its own; the page then shows what it has and says what is missing.
 import type { PulseWeek } from "./marketplace-pulse";
-import type { BulkHome, ClosingLot } from "./home-bulk";
+import type { BulkHome, ClosingDeal, TakeGoal } from "./home-bulk";
 import type { PlatformHome, ReplyBuckets, SinceDeal } from "./home-platform";
 import {
   EUR_GBP, POSTHOG_UNDERCOUNT_SINCE, REPLY_SINCE, TARGETS,
@@ -35,7 +35,8 @@ export type HomeData = {
     /** Paid over sent across the funnel chart's weeks. */
     fill: (WindowRate & { since: string }) | null;
   } | null;
-  bulk_goal: { closed: number; pace: Pace; closing: ClosingLot[]; lost: number; month_label: string } | null;
+  /** Bulk take against the one bulk target (TARGETS.bulk_take) over its quarter, plus the deals closing and lost. */
+  bulk_goal: { take: TakeGoal; closing: ClosingDeal[]; lost: number; month_label: string } | null;
   fees: {
     ytd_gbp: number;
     month_gbp: number;
@@ -54,7 +55,7 @@ export type HomeData = {
     steps: (FunnelStepStat & { reading: Segment[] })[];
     biggest_drop: FunnelStepKey | null;
   } | null;
-  bulk: (BulkHome & { teaser_note: string | null }) | null;
+  bulk: (BulkHome & { offered_note: string | null }) | null;
   health: HealthItem[];
   errors: { platform: string | null; crm: string | null };
 };
@@ -112,12 +113,12 @@ export function stepReading(step: FunnelStepStat, isBiggestDrop: boolean, fill: 
   }
 }
 
-/** "7 of 49 buyers who got a teaser moved past it (14%). Teaser to NDA is the leak." */
-export function teaserNote(passed: number, total: number): string | null {
+/** "7 of 49 counterparties who were offered a deal moved past Offered (14%). Offered to Negotiating is the leak." */
+export function offeredNote(passed: number, total: number): string | null {
   if (total === 0) {return null;}
   const share = passed / total;
-  const leak = share < 0.25 ? " Teaser to NDA is the leak." : "";
-  return `${passed} of ${total} buyers who got a teaser moved past it (${Math.round(share * 100)}%).${leak}`;
+  const leak = share < 0.25 ? " Offered to Negotiating is the leak." : "";
+  return `${passed} of ${total} counterparties who were offered a deal moved past Offered (${Math.round(share * 100)}%).${leak}`;
 }
 
 export function healthItems(input: {
@@ -153,7 +154,7 @@ export function healthItems(input: {
   items.push({
     warn: false,
     title: null,
-    text: `Paid deals counted by payment date, not by week as in Pulse. Euro fees at ${EUR_GBP} to the pound. Open lots leave out On hold.`,
+    text: `Paid deals counted by payment date, not by week as in Pulse. Euro fees at ${EUR_GBP} to the pound. Open supply leaves out listings on hold.`,
   });
   return items;
 }
@@ -179,7 +180,6 @@ export function buildHome(input: {
   const drop = biggestDrop(steps);
 
   const marketTarget = TARGETS.marketplace_paid;
-  const bulkTarget = TARGETS.bulk_closed;
   const feeGoal = TARGETS.fees_long_term;
 
   return {
@@ -202,7 +202,7 @@ export function buildHome(input: {
       }
       : null,
     bulk_goal: bulk
-      ? { closed: bulk.closed_this_month, pace: pace(bulk.closed_this_month, bulkTarget.value, now), closing: bulk.closing, lost: bulk.lost_this_month, month_label }
+      ? { take: bulk.take, closing: bulk.closing, lost: bulk.lost_this_month, month_label }
       : null,
     fees: platform
       ? {
@@ -228,7 +228,7 @@ export function buildHome(input: {
     funnel: steps.length
       ? { weeks: chartWeeks, steps: steps.map((s) => ({ ...s, reading: stepReading(s, s.key === drop, fill) })), biggest_drop: drop }
       : null,
-    bulk: bulk ? { ...bulk, teaser_note: teaserNote(bulk.buyers.teaser_passed, bulk.buyers.teaser_total) } : null,
+    bulk: bulk ? { ...bulk, offered_note: offeredNote(bulk.counterparties.offered_passed, bulk.counterparties.offered_total) } : null,
     health: healthItems({
       funnel: funnelFresh,
       reply: platform?.reply ?? null,

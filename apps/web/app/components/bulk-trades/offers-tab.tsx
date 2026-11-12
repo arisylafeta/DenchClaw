@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, ExternalLink, Mail, MessageCircle, Phone, Pl
 import { useCallback, useEffect, useState } from "react";
 import type { Offer, OfferStage, ThreadEntry } from "@/lib/crm-postgres/bulk-offers";
 import { shortDate } from "@/lib/bulk-trade-details";
+import { PAID_CURRENCIES, PAID_FACT_LABEL, isPaidStage, missingPaidFacts } from "@/lib/bulk-offer-paid";
 import { DetailSheet, ErrorText, buttonClass, buttonStyle, inputClass, inputStyle, request } from "./trade-ui";
 import { MailDraftView } from "../crm/inbox/mail-draft-view";
 import { rowFocus } from "./demand-page";
@@ -191,6 +192,8 @@ function ThreadPanel({ base, offerId, request: requestSide, onUpdated, onDraft }
   const [outcomeReason, setOutcomeReason] = useState("");
   /** What the outcome did to the linked stock, or the suggestion when there is no stock link. */
   const [outcomeNote, setOutcomeNote] = useState<string | null>(null);
+  /** Paid and Complete wait here until the paid facts are in; "edit" changes them on an offer already paid. */
+  const [paidStage, setPaidStage] = useState<"paid" | "complete" | "edit" | null>(null);
   const apply = (r: { offer: OfferRow; thread?: ThreadEntry[] }) => {
     setOffer(r.offer); if (r.thread) setThread(r.thread);
   };
@@ -229,13 +232,25 @@ function ThreadPanel({ base, offerId, request: requestSide, onUpdated, onDraft }
             const next = e.target.value as OfferStage;
             if (!offer) { return; }
             // Lost and declined need a reason first, so the stage only saves once it is written.
-            if (next === "declined" || next === "lost") { setOutcomeStage(next); setOutcomeReason(offer.declined_reason ?? ""); return; }
-            setOutcomeStage(null); void patch({ stage: next });
+            if (next === "declined" || next === "lost") { setPaidStage(null); setOutcomeStage(next); setOutcomeReason(offer.declined_reason ?? ""); return; }
+            // Paid and Complete need when, how much and our take first, unless the offer already has them.
+            if ((next === "paid" || next === "complete") && missingPaidFacts(next, offer).length) { setOutcomeStage(null); setPaidStage(next); return; }
+            setOutcomeStage(null); setPaidStage(null); void patch({ stage: next });
           }}
           className="border px-2 py-1 text-[12px]" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
           {STAGES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </div>
+      {offer && paidStage && (
+        <PaidForm offer={offer} stage={paidStage} busy={busy} onCancel={() => setPaidStage(null)}
+          onSave={(facts) => { const stage = paidStage; setPaidStage(null); void patch(stage === "edit" ? facts : { stage, ...facts }); }} />
+      )}
+      {offer && !paidStage && isPaidStage(offer.stage) && (
+        <p className="flex flex-wrap items-center gap-2 text-[12px]" style={{ color: "var(--bt-muted)" }}>
+          <span>{paidLine(offer)}</span>
+          <button type="button" disabled={busy} className={`${rowFocus} underline`} onClick={() => setPaidStage("edit")}>Edit paid details</button>
+        </p>
+      )}
       {outcomeStage && (
         <form aria-label={`Reason for ${STAGE_LABEL[outcomeStage].toLowerCase()}`} className="flex flex-wrap items-center gap-2"
           onSubmit={(e) => {
@@ -286,6 +301,55 @@ function ThreadPanel({ base, offerId, request: requestSide, onUpdated, onDraft }
         </ul>
       </section>
     </BusyRegion>
+  );
+}
+
+const money = (amount: number, currency: string) => `${currency} ${amount.toLocaleString("en-GB")}`;
+
+/** "Paid 12 Nov · GBP 18,000 for 12 · take £1,800", or what is still missing. */
+function paidLine(offer: Offer): string {
+  const missing = missingPaidFacts("paid", offer);
+  const parts = [offer.paid_on ? `Paid ${shortDate(offer.paid_on)}` : null,
+    offer.paid_amount != null && offer.paid_currency ? money(offer.paid_amount, offer.paid_currency) : null,
+    offer.quantity != null ? `for ${offer.quantity.toLocaleString("en-GB")}${offer.terms.unit ? ` ${offer.terms.unit}` : ""}` : null,
+    offer.take_gbp != null ? `take £${offer.take_gbp.toLocaleString("en-GB")}` : null].filter(Boolean);
+  return missing.length ? `${parts.join(" · ")}${parts.length ? " · " : ""}No ${missing.length === 5 ? "paid details" : missing.map((key) => PAID_FACT_LABEL[key]).join(", ")} yet` : parts.join(" · ");
+}
+
+/** When it was paid, what was paid, how much was sold and our take. All five are needed for Paid and Complete. */
+function PaidForm({ offer, stage, busy, onSave, onCancel }: {
+  offer: Offer; stage: "paid" | "complete" | "edit"; busy: boolean;
+  onSave: (facts: { paidOn: string; paidAmount: number; paidCurrency: string; quantity: number; takeGbp: number }) => void; onCancel: () => void;
+}) {
+  const [paidOn, setPaidOn] = useState(offer.paid_on ?? new Date().toISOString().slice(0, 10));
+  const [amount, setAmount] = useState(offer.paid_amount?.toString() ?? "");
+  const [currency, setCurrency] = useState(offer.paid_currency ?? offer.terms.currency?.toUpperCase() ?? "GBP");
+  const [quantity, setQuantity] = useState(offer.quantity?.toString() ?? "");
+  const [take, setTake] = useState(offer.take_gbp?.toString() ?? "");
+  const number = (text: string) => (text.trim() && Number.isFinite(Number(text)) ? Number(text) : null);
+  const ready = !!paidOn && number(amount) !== null && number(quantity) !== null && (number(quantity) ?? 0) > 0 && number(take) !== null;
+  const field = `${inputClass} w-28 text-[12px]`;
+  return (
+    <form aria-label="Paid details" className="flex flex-wrap items-end gap-2"
+      onSubmit={(e) => { e.preventDefault(); if (ready) onSave({ paidOn, paidAmount: number(amount)!, paidCurrency: currency, quantity: number(quantity)!, takeGbp: number(take)! }); }}>
+      <span className="w-full text-[12px]" style={{ color: "var(--bt-muted)" }}>
+        {stage === "edit" ? "Paid details" : `${STAGE_LABEL[stage]}: when was it paid, how much, and what is our take?`}
+      </span>
+      <label className="flex flex-col gap-0.5 text-[11px]" style={{ color: "var(--bt-muted)" }}>Paid on
+        <input type="date" required value={paidOn} onChange={(e) => setPaidOn(e.target.value)} className={`${inputClass} text-[12px]`} style={inputStyle} /></label>
+      <label className="flex flex-col gap-0.5 text-[11px]" style={{ color: "var(--bt-muted)" }}>Amount paid
+        <input inputMode="decimal" required value={amount} onChange={(e) => setAmount(e.target.value)} className={field} style={inputStyle} /></label>
+      <label className="flex flex-col gap-0.5 text-[11px]" style={{ color: "var(--bt-muted)" }}>Currency
+        <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="border px-2 py-1 text-[12px]" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+          {PAID_CURRENCIES.map((code) => <option key={code} value={code}>{code}</option>)}
+        </select></label>
+      <label className="flex flex-col gap-0.5 text-[11px]" style={{ color: "var(--bt-muted)" }}>Quantity{offer.terms.unit ? ` (${offer.terms.unit})` : ""}
+        <input inputMode="decimal" required value={quantity} onChange={(e) => setQuantity(e.target.value)} className={field} style={inputStyle} /></label>
+      <label className="flex flex-col gap-0.5 text-[11px]" style={{ color: "var(--bt-muted)" }}>Our take (£)
+        <input inputMode="decimal" required value={take} onChange={(e) => setTake(e.target.value)} className={field} style={inputStyle} /></label>
+      <button type="submit" disabled={busy || !ready} className={`${rowFocus} ${buttonClass}`} style={buttonStyle}>Save</button>
+      <button type="button" disabled={busy} className={`${rowFocus} ${buttonClass}`} style={buttonStyle} onClick={onCancel}>Cancel</button>
+    </form>
   );
 }
 

@@ -31,7 +31,8 @@ export function ListingHeader({ listing, onBack, onChanged }: { listing: BulkLis
     <div className={css.titleRow}>
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-1"><h2 className={css.title}>{listing.title}</h2><CopyIdButton id={listing.id} className="mt-1" /></div>
-        <div className={css.sub}><span>{listing.party}</span><span className={css.chip}>{listing.status === "closed" ? "closed" : listing.stage}</span>
+        <div className={css.sub}><span>{listing.party}</span><span className={css.chip}>{listing.status === "closed" && listing.stage !== "Sold" ? "closed" : listing.stage}</span>
+          {listing.deal_stage && <span className={css.chip} title="Stage on the Deals board">Deal: {listing.deal_stage}</span>}
           {listing.context.priority === true && <span className={`${css.chip} ${css.chipGreen}`}>Priority</span>}
           {listing.is_trade && <span className={`${css.chip} ${css.chipGreen}`}>TRADE</span>}
         </div>

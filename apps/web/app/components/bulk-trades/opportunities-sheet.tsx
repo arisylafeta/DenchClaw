@@ -9,6 +9,7 @@ import { iconForLabel } from "./story-entry";
 import { NextActionCell } from "./next-action-cell";
 import { ErrorText } from "./trade-ui";
 import { DriverAvatar, Gap } from "./desk-bits";
+import { weightedFee } from "@/lib/bulk-desk";
 
 const TONE: Record<SheetTone, { dot: string; bg: string }> = {
   new: { dot: "var(--bt-muted)", bg: "var(--bt-segment)" },
@@ -19,9 +20,9 @@ const TONE: Record<SheetTone, { dot: string; bg: string }> = {
   warning: { dot: "var(--bt-red)", bg: "var(--bt-red-bg)" },
 };
 
-// Score | Opportunity | Ticket | Fee | Chance | Driver | Stage | Next action. Ticket, fee and chance join at lg.
+// Score | Opportunity | Ticket | Fee | Chance | Weighted | Driver | Stage | Next action. Ticket, fee, chance and weighted join at lg.
 // Sized by the sheet's own width (container queries), not the window: in a narrow workspace pane it drops columns instead of scrolling.
-const GRID = "@2xl:grid-cols-[2.25rem_minmax(0,1.7fr)_2.75rem_8.5rem_minmax(11rem,1.4fr)] @4xl:grid-cols-[2.25rem_minmax(0,1.7fr)_4.5rem_4.5rem_3.5rem_2.75rem_8.5rem_minmax(12rem,1.5fr)]";
+const GRID = "@2xl:grid-cols-[2.25rem_minmax(0,1.7fr)_2.75rem_8.5rem_minmax(11rem,1.4fr)] @4xl:grid-cols-[2.25rem_minmax(0,1.7fr)_4.5rem_4.5rem_3.5rem_4.5rem_2.75rem_8.5rem_minmax(12rem,1.5fr)]";
 const field = "h-9 rounded-lg border bg-[var(--bt-surface)] px-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]";
 const fieldStyle = { borderColor: "var(--bt-border)", color: "var(--bt-text)" };
 
@@ -51,12 +52,14 @@ export function WaitingBadge({ row, compact = false, large = false }: { row: Pic
   );
 }
 
-export function ProgressChip({ row }: { row: Pick<SheetRow, "tone" | "progress" | "held"> }) {
+export function ProgressChip({ row }: { row: Pick<SheetRow, "tone" | "progress" | "held"> & Partial<Pick<SheetRow, "cant_source">> }) {
   const tone = TONE[row.tone];
   return (
-    <span className="inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium" style={{ background: tone.bg }}>
+    <span className="inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium" style={{ background: tone.bg }}
+      title={row.cant_source ? `Can't source: ${row.cant_source}` : undefined}>
       <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full" style={{ background: tone.dot }} />
       {row.progress}{row.held && <span style={{ color: "var(--bt-purple)" }}>· On hold</span>}
+      {row.cant_source && <span data-cant-source style={{ color: "var(--bt-red)" }}>· Can't source</span>}
     </span>
   );
 }
@@ -101,6 +104,7 @@ function IconDate({ icon: Icon, date, title, tone }: { icon: typeof Flag; date: 
 }
 
 function SheetRowItem({ row, today, onOpen, onNext, loading = false, showSide = true }: { loading?: boolean; showSide?: boolean; row: SheetRow; today: string; onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void> }) {
+  const weighted = weightedFee(row);
   const latestIcon = row.latest?.kind ? iconForLabel(row.latest.kind) : Flag;
   const num = "hidden min-w-0 text-[13px] tabular-nums @4xl:block";
   return (
@@ -127,6 +131,8 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false, showSide = 
         <Sh on={loading} chars={5}>{row.fee_eur != null ? formatEurCompact(row.fee_eur) : <Gap>Set fee</Gap>}</Sh></span>
       <span data-chance className={num} title={row.likelihood != null ? "Chance this deal completes" : "Chance not set"}>
         <Sh on={loading} chars={3}>{row.likelihood != null ? `${row.likelihood}%` : <Gap>Set %</Gap>}</Sh></span>
+      <span data-weighted className={num} title={weighted != null ? `Fee × chance, EUR ${Math.round(weighted).toLocaleString("en-GB")}` : "Needs a fee and a chance"}>
+        <Sh on={loading} chars={5}>{weighted != null ? formatEurCompact(weighted) : <Gap>Needs fee and %</Gap>}</Sh></span>
       <span data-owner className="hidden @2xl:block">{loading ? <ShBlock on size={24}><span /></ShBlock> : <DriverAvatar owner={row.owner} />}</span>
       <span className="flex min-w-0 flex-col items-start gap-1"><Sh on={loading} chars={11} round><ProgressChip row={row} /></Sh>{!loading && <WaitingBadge row={row} />}</span>
       <span className="min-w-0">
@@ -270,7 +276,7 @@ export function OpportunitiesSheet({ rows, filters, shown, loading, error, today
       <div className="@container overflow-x-auto rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
         <div className="@2xl:min-w-[40rem] @4xl:min-w-[54rem]">
         <div aria-hidden="true" className={`hidden gap-x-3 border-b px-2 py-2 text-[12px] @2xl:grid ${GRID}`} style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>
-          <span>Score</span><span>Opportunity</span><span className="hidden @4xl:block" title="Approximate value of the deal or the stock">Ticket</span><span className="hidden @4xl:block" title={`${FEE_RATE * 100}% of the ticket unless set`}>Fee</span><span className="hidden @4xl:block" title="Chance the deal completes">Chance</span><span>Driver</span><span>Stage</span><span>Next action</span>
+          <span>Score</span><span>Opportunity</span><span className="hidden @4xl:block" title="Approximate value of the deal or the stock">Ticket</span><span className="hidden @4xl:block" title={`${FEE_RATE * 100}% of the ticket unless set`}>Fee</span><span className="hidden @4xl:block" title="Chance the deal completes">Chance</span><span className="hidden @4xl:block" title="Fee × chance">Weighted</span><span>Driver</span><span>Stage</span><span>Next action</span>
         </div>
         {displayRows.length > 0 ? (
           <ul className="divide-y divide-[var(--bt-divider)]">

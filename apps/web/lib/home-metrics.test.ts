@@ -26,7 +26,7 @@ describe("targets", () => {
   it("holds only the four agreed targets, each with a source", () => {
     expect(Object.values(TARGETS).map((t) => [t.key, t.value, t.source])).toEqual([
       ["marketplace_paid", 4, "Pulse"],
-      ["bulk_closed", 2, "19 Oct call"],
+      ["bulk_take", 15_000, "OKR"],
       ["fees_long_term", 10_000, "7 Sep call"],
       ["seller_reply", 1, "Pulse"],
     ]);

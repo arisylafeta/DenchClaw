@@ -1,24 +1,12 @@
-// The Bulk desk numbers: the quarter target, what the Board's deals are worth, and the Today list. Safe for client and server.
-import { isBoardStage } from "./bulk-listing";
-import type { DealOwner } from "./bulk-owner";
-import type { SheetRow } from "./bulk-sheet";
+// The Bulk desk numbers: the take target, what the Board's deals are worth, and the Today list. Safe for client and server.
+import { EUR_PER_GBP, type SheetRow } from "./bulk-sheet";
+import { TARGETS } from "./home-metrics";
 
-/** Take (our fees) each driver aims for in a quarter, in GBP. Alex and Sean are the drivers. */
-export const QUARTER_TARGET_GBP = 27_000;
-/** Approximate rate used only to show the target in EUR next to the EUR fees; not a live rate. */
-export const EUR_PER_GBP = 1.15;
-/** The drivers with a target. Ari owns deals but has none. */
-export const TARGET_DRIVERS: readonly DealOwner[] = ["Alex", "Sean"];
-/** Share of the Board's deals we expect to win; the unweighted fees needed are the target divided by this. */
-export const WIN_RATE = 0.2;
+export { EUR_PER_GBP };
 
-/** The quarter target for the owner filter: both drivers for All, one for Alex or Sean, none (null) for anyone else. */
-export function quarterTarget(owner: DealOwner | "all"): { gbp: number; eur: number; needed_eur: number } | null {
-  if (owner !== "all" && !TARGET_DRIVERS.includes(owner)) return null;
-  const gbp = QUARTER_TARGET_GBP * (owner === "all" ? TARGET_DRIVERS.length : 1);
-  const eur = Math.round(gbp * EUR_PER_GBP);
-  return { gbp, eur, needed_eur: Math.round(eur / WIN_RATE) };
-}
+/** The one bulk target: take (our fees) for the whole desk over Dec 2026 to Feb 2027, in GBP and approximate EUR.
+ * Set in TARGETS (home-metrics); Home, the OKR page and the desk all read it from there. */
+export const TAKE_TARGET = { gbp: TARGETS.bulk_take.value, eur: Math.round(TARGETS.bulk_take.value * EUR_PER_GBP), label: TARGETS.bulk_take.label } as const;
 
 /** A deal's fee scaled by its chance of completing; null unless both are known. */
 export function weightedFee(row: Pick<SheetRow, "fee_eur" | "likelihood">): number | null {
@@ -71,9 +59,14 @@ export function deskCounts(rows: SheetRow[]): { requests: number; supply: number
   };
 }
 
-/** The deals on the Board: listings at Offered or later. */
+/** The deals on the Board: listings with a deal stage (Offered or later, or Lost). */
 export function boardRows(rows: SheetRow[]): SheetRow[] {
-  return rows.filter((row) => isBoardStage(row.progress));
+  return rows.filter((row) => !!row.deal_stage);
+}
+
+/** The open deals: on the Board and neither Delivered nor Lost. What the take target is weighed against. */
+export function openDealRows(rows: SheetRow[]): SheetRow[] {
+  return boardRows(rows).filter((row) => row.deal_stage !== "Delivered" && row.deal_stage !== "Lost");
 }
 
 export type TodayGroupKey = "overdue" | "today" | "upcoming" | "undated" | "none";
@@ -82,14 +75,15 @@ const GROUP_LABEL: Record<TodayGroupKey, string> = { overdue: "Overdue", today: 
 
 /**
  * Next actions by when they are due: Overdue, Today, Upcoming, No date, then the open listings with no next action.
- * Delivered listings with nothing left to do are left out. Dated groups run soonest first; the rest by score.
+ * Closed listings, and Delivered or Lost deals with nothing left to do, are left out. Dated groups run soonest first; the rest by score.
  */
 export function todayGroups(rows: SheetRow[], today: string): TodayGroup[] {
   const byScore = (a: SheetRow, b: SheetRow) => (b.score ?? -1) - (a.score ?? -1) || a.title.localeCompare(b.title);
   const byDue = (a: SheetRow, b: SheetRow) => (a.next_due ?? "").localeCompare(b.next_due ?? "") || byScore(a, b);
   const groups: Record<TodayGroupKey, SheetRow[]> = { overdue: [], today: [], upcoming: [], undated: [], none: [] };
   for (const row of rows) {
-    if (!row.next_action) { if (row.progress !== "Delivered") groups.none.push(row); continue; }
+    if (row.closed) continue;
+    if (!row.next_action) { if (row.deal_stage !== "Delivered" && row.deal_stage !== "Lost") groups.none.push(row); continue; }
     const due = row.next_due?.slice(0, 10) ?? null;
     groups[!due ? "undated" : due < today ? "overdue" : due === today ? "today" : "upcoming"].push(row);
   }

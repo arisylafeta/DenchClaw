@@ -2,7 +2,12 @@ import { likelihoodScoreSql } from "../bulk-likelihood";
 import { queryPg } from "../postgres";
 import { listingRow, sortSheet, type ListingSheetInput, type SheetRow } from "../bulk-sheet";
 
-/** One row per live listing (open or qualifying; a qualifying demand shows as stage New), including lots already mirrored as supply listings. */
+/** Closes that are housekeeping, not the end of a deal: they never show as Closed. */
+const HOUSEKEEPING = ["duplicate", "moved_to_profile", "moved_to_lot", "research_profile", "not_demand", "offer_reply", "supply", "recycling", "not_a_fit"];
+
+/** One row per live listing (open or qualifying; a qualifying demand shows as stage New), including lots already mirrored as
+ * supply listings. Listings closed in the last 30 days stay too, so Closed, Sold, Delivered and Lost are not empty: every
+ * closed demand except housekeeping closes, and supply that sold. */
 export const SHEET_QUERY = `
   select listing.id, listing.kind, listing.party, listing.company_id, listing.summary,
     listing.spec, listing.context, listing.status, listing.updated_at::text,
@@ -18,7 +23,7 @@ export const SHEET_QUERY = `
     latest.kind as latest_kind, latest.title as latest_title, latest.occurred_at::text as latest_at,
     offer.stage as furthest_stage,
     case when offer.stage not in ('declined', 'lost') then offer.paired_listing_id end as paired_listing_id,
-    bulk_listing_stage(listing.id) as stage
+    bulk_listing_stage(listing.id) as stage, bulk_listing_deal_stage(listing.id) as deal_stage
   from crm_bulk_listings listing
   left join lateral (
     select a.kind, a.title, a.occurred_at from crm_bulk_listing_activity a
@@ -33,7 +38,10 @@ export const SHEET_QUERY = `
       when 'contract_out' then 4 when 'negotiating' then 3 when 'offered' then 2 when 'candidate' then 1 else 0 end desc,
       o.updated_at desc, o.id desc limit 1
   ) offer on true
-  where listing.status in ('open', 'qualifying') and listing.kind in ('demand', 'supply')`;
+  where listing.kind in ('demand', 'supply') and (listing.status in ('open', 'qualifying')
+    or (listing.status = 'closed' and listing.updated_at >= now() - interval '30 days'
+      and listing.closed_reason not in (${HOUSEKEEPING.map((reason) => `'${reason}'`).join(", ")})
+      and (listing.kind = 'demand' or bulk_listing_stage(listing.id) = 'Sold')))`;
 
 export async function listSheet(): Promise<SheetRow[]> {
   return sortSheet((await queryPg<ListingSheetInput>(SHEET_QUERY)).map(listingRow));
