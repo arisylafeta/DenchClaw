@@ -46,7 +46,15 @@ Buyer deep-research profiles, speed of reply as a ranking input, and any automat
 - **Stale candidates:** stock sells or goes stale after scoring. Re-check a candidate's live status before asking and before offering; mark it `expired`, not deleted.
 - **Privacy:** neither side is named to the other. `reason` and drafts use teaser-visible fields only, and drafts name no counterparty.
 
-## Questions for Ari
+## Decisions (Alex, 12 Nov 2026)
+
+1. One new table, `crm_bulk_matches`; an offer row is created only on Yes. `bulk_listing_stage()` stops reading the frozen match tables.
+2. A match run starts when a person marks the deal ready.
+3. The seller's price is always locked first. On a supply deal: if the seller's quote is in date, go straight to the buyers; if it is expired or missing, draft a re-confirm to the seller and offer buyers only once it is back.
+4. A reservation holds a quantity, not the whole lot. Default 5 working days, or the seller's quote expiry if sooner. Shown on the card, lapses by itself, one click to extend. Internal only: it removes nothing from the marketplace.
+5. The model may reorder the top five. Both the scorer's order and the model's order are stored.
+
+## Questions as first asked
 
 1. One new table with an offer created only on Yes, or `candidate` offer rows? And may `bulk_listing_stage()` stop reading the frozen match tables?
 2. Qualified is computed, not stored, and supply Qualified merged into Available on 28 Oct. What starts a match run: a person marking the deal ready, a job, or new supply for standing demand only?
