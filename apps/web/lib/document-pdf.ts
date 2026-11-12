@@ -3,10 +3,11 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Marked } from "marked";
+
+const escapeHtml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+// Raw HTML in the markdown is shown as text, never emitted.
+const marked = new Marked({ gfm: true, renderer: { html: ({ text }) => escapeHtml(text) } });
 
 const run = promisify(execFile);
 const CHROME = process.env.DENCH_PDF_CHROME || "/usr/bin/google-chrome";
@@ -28,7 +29,7 @@ a { color: inherit; text-decoration: none; }
 
 /** Markdown to a standalone, print-styled HTML page. */
 export function renderDocumentHtml(markdown: string, title: string): string {
-  const body = renderToStaticMarkup(createElement(ReactMarkdown, { remarkPlugins: [remarkGfm] }, markdown));
+  const body = marked.parse(markdown, { async: false });
   const safeTitle = title.replace(/[<>&"]/g, "");
   return `<!doctype html><html><head><meta charset="utf-8"><title>${safeTitle}</title><style>${STYLE}</style></head><body>${body}</body></html>`;
 }
