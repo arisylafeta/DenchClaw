@@ -690,7 +690,7 @@ def main(argv=None):
         print(f"lines at start {summary['lines_at_start']} -> at end {summary['lines_at_end']}")
         print(f"sync errors recorded: {summary['sync_errors']}")
         if args.preview:
-            text = preview(conn, source_note=dsn)
+            text = preview(conn, source_note=f"database {where['db']} on {target}")
             Path(args.preview).write_text(text, encoding="utf-8")
             print(f"preview written to {args.preview}")
     finally:
