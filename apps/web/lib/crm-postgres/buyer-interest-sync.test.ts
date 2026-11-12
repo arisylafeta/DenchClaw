@@ -1,0 +1,246 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { broaderKeysFor, productKeyFor } from "@/lib/match/product-key-for";
+
+// Runs only against a disposable database: scripts/rebattery/crm-test-db.sh up prints the URL.
+const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
+
+type Line = {
+  kind: string;
+  ownership: string;
+  product_key: string;
+  product_key_level: string | null;
+  make: string | null;
+  model: string | null;
+  format: string | null;
+  chemistry: string | null;
+  quantity: string | number | null;
+  quantity_unit: string | null;
+  quantity_basis: string | null;
+  price: string | number | null;
+  price_currency: string | null;
+  price_unit: string | null;
+  price_basis: string | null;
+  first_seen: string;
+  last_seen: string;
+  expires_on: string | null;
+  source_refs: string[];
+  decline_reason: string | null;
+  demand_id: string | null;
+  offer_id: string | null;
+};
+
+describe.skipIf(!TEST_URL)("buyer interest sync", () => {
+  let pg: typeof import("../postgres");
+  let demand: typeof import("./bulk-demand");
+  let offers: typeof import("./bulk-offers");
+  const run = Math.random().toString(36).slice(2, 8);
+  const id = (value: string) => `${value}_${run}`;
+
+  const lines = async (where: string, params: unknown[] = []) =>
+    pg.queryPg<Line>(
+      `select kind, ownership, product_key, product_key_level, make, model, format, chemistry,
+         quantity::float8 as quantity, quantity_unit, quantity_basis, price::float8 as price,
+         price_currency, price_unit, price_basis, first_seen::text, last_seen::text, expires_on::text,
+         source_refs, decline_reason, demand_id, offer_id
+       from buyer_interest where ${where} order by product_key, kind`,
+      params);
+
+  // Standing demand rows must state a basis (migration 061); the writers always set one.
+  const withBasis = (kind: "demand" | "supply", spec: Record<string, unknown>) =>
+    kind === "demand" && spec.intent === "standing" && spec.basis === undefined ? { ...spec, basis: "stated" } : spec;
+
+  const listing = (lid: string, kind: "demand" | "supply", companyId: string | null, spec: Record<string, unknown>,
+    extra: { status?: string; reason?: string | null; quantity?: string | null; context?: Record<string, unknown>; observedOn?: string } = {}) =>
+    pg.queryPg<{ id: string }>(
+      `insert into crm_bulk_listings (id, kind, party, company_id, summary, status, closed_reason, observed_on, quantity, spec, context)
+       values ($1, $2, $3, $4, $3, $5, $6, $7, $8, $9::jsonb, $10::jsonb) returning id`,
+      [lid, kind, `Party ${lid}`, companyId, extra.status ?? "open", extra.reason ?? null, extra.observedOn ?? "2026-11-01",
+        extra.quantity ?? null, JSON.stringify(withBasis(kind, spec)), JSON.stringify(extra.context ?? {})]);
+
+  beforeAll(async () => {
+    process.env.DATABASE_URL = TEST_URL;
+    pg = await import("../postgres");
+    demand = await import("./bulk-demand");
+    offers = await import("./bulk-offers");
+    for (const company of ["buyer1", "buyer2", "buyer3", "buyer4"]) {
+      await pg.queryPg(`insert into crm_companies (id, name) values ($1, $1)`, [id(company)]);
+    }
+  });
+
+  afterAll(async () => {
+    if (!pg) {return;}
+    await pg.queryPg(`delete from buyer_interest where company_id like $1`, [`%_${run}`]);
+    await pg.queryPg(`delete from buyer_interest_sync_errors where source_id like $1`, [`%_${run}`]);
+    await pg.queryPg(`delete from crm_bulk_listings where id like $1`, [`%_${run}`]);
+    await pg.queryPg(`delete from crm_companies where id like $1`, [`%_${run}`]);
+    await pg.pgPool.end();
+  });
+
+  it("turns an open ask into one line per product with its facts, quantity, price and needed-by date", async () => {
+    await listing(id("d1"), "demand", id("buyer1"), {
+      intent: "request", formats: ["Packs"], chemistries: ["LFP"], kwh_min: 50, kwh_max: 60,
+      volume: 12, volume_unit: "packs", max_price: 95, price_currency: "EUR", price_unit: "kWh",
+      needed_by: "2026-12-01", confirmed_on: "2026-11-02",
+    }, { observedOn: "2026-11-01" });
+
+    const rows = await lines("demand_id = $1", [id("d1")]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      kind: "ask", ownership: "synced", product_key: "broad:lfp-packs", product_key_level: "broad",
+      format: "pack", chemistry: "LFP", quantity: 12, quantity_unit: "packs", quantity_basis: "stated",
+      price: 95, price_currency: "EUR", price_unit: "kWh", price_basis: "target",
+      first_seen: "2026-11-01", last_seen: "2026-11-02", expires_on: "2026-12-01",
+    });
+    expect(rows[0].source_refs).toEqual([`crm:${id("d1")}`]);
+  });
+
+  it("holds one line per stated format and merges a repeat instead of duplicating", async () => {
+    await listing(id("d2"), "demand", id("buyer1"), {
+      intent: "standing", formats: ["Packs", "Modules"], chemistries: ["NMC"], volume: 4, volume_unit: "packs",
+    });
+    const before = await lines("demand_id = $1", [id("d2")]);
+    expect(before.map((row) => row.product_key)).toEqual(["broad:nmc-modules", "broad:nmc-packs"]);
+    await pg.queryPg(`update crm_bulk_listings set spec = spec || '{"volume": 6}'::jsonb where id = $1`, [id("d2")]);
+    await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [id("d2")]);
+    const after = await lines("demand_id = $1", [id("d2")]);
+    expect(after).toHaveLength(2);
+    expect(after.every((row) => row.quantity === 6)).toBe(true);
+  });
+
+  it("replaces the ask with bought or declined when the demand closes", async () => {
+    await listing(id("d3"), "demand", id("buyer2"), {
+      intent: "request", formats: ["Packs"], chemistries: ["NMC"], volume: 2, volume_unit: "packs", needed_by: "2026-12-01",
+    });
+    await pg.queryPg(`update crm_bulk_listings set status = 'closed', closed_reason = 'bought_from_us' where id = $1`, [id("d3")]);
+    expect(await lines("demand_id = $1", [id("d3")])).toMatchObject([{ kind: "bought", expires_on: null }]);
+
+    const other = id("d4");
+    await listing(other, "demand", id("buyer2"), { intent: "request", formats: ["Packs"], chemistries: ["NMC"] });
+    await pg.queryPg(`update crm_bulk_listings set status = 'closed', closed_reason = 'bought_elsewhere' where id = $1`, [other]);
+    expect(await lines("demand_id = $1", [other])).toMatchObject([{ kind: "declined", decline_reason: "bought_elsewhere" }]);
+
+    // Reopening replaces the outcome with the ask again.
+    await pg.queryPg(`update crm_bulk_listings set status = 'open', closed_reason = null where id = $1`, [other]);
+    expect(await lines("demand_id = $1", [other])).toMatchObject([{ kind: "ask" }]);
+  });
+
+  it("keeps an expired ask and sets its expiry rather than turning it into a decision", async () => {
+    await listing(id("d5"), "demand", id("buyer3"), {
+      intent: "request", formats: ["Packs"], chemistries: ["LFP"], needed_by: "2026-11-30",
+    });
+    await pg.queryPg(`update crm_bulk_listings set status = 'closed', closed_reason = 'expired' where id = $1`, [id("d5")]);
+    const rows = await lines("demand_id = $1", [id("d5")]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "ask", expires_on: "2026-11-30" });
+  });
+
+  it("drops the lines for a bookkeeping close (duplicate, moved to a profile, converted to supply)", async () => {
+    await listing(id("d6"), "demand", id("buyer3"), { intent: "standing", formats: ["Cells"], chemistry: "LFP" });
+    expect(await lines("demand_id = $1", [id("d6")])).toHaveLength(1);
+    await pg.queryPg(`update crm_bulk_listings set status = 'closed', closed_reason = 'duplicate' where id = $1`, [id("d6")]);
+    expect(await lines("demand_id = $1", [id("d6")])).toEqual([]);
+  });
+
+  it("writes the same key the TypeScript builder computes", async () => {
+    const spec = { intent: "standing", makes: ["Polestar"], model: "2", formats: ["Packs"], chemistries: ["NMC"], kwh_min: 78, kwh_max: 78 };
+    await listing(id("d7"), "demand", id("buyer4"), spec);
+    const [row] = await lines("demand_id = $1", [id("d7")]);
+    const facts = { make: "Polestar", model: "2", format: "Packs", chemistry: "NMC", kwhMin: 78, kwhMax: 78 };
+    expect(row.product_key).toBe(productKeyFor(facts));
+    expect(row.product_key).toBe("model:polestar-2-78kwh");
+    expect(row.product_key_level).toBe("model");
+
+    // A reviewed pack family is a TS-only upgrade of a SQL line: the builder's roll-up must still contain the SQL key,
+    // so filling pack keys later only ever makes a line more specific.
+    const familySpec = { intent: "request", makes: ["Hyundai"], model: "Ioniq 5", formats: ["Packs"], chemistries: ["NMC"], kwh_min: 73, kwh_max: 73 };
+    await listing(id("d8"), "demand", id("buyer4"), familySpec);
+    const [familyRow] = await lines("demand_id = $1", [id("d8")]);
+    expect(familyRow.product_key).toBe("model:hyundai-ioniq5-73kwh");
+    expect(broaderKeysFor({
+      make: "Hyundai", model: "Ioniq 5", format: "Packs", chemistry: "NMC", kwhMin: 73, kwhMax: 73,
+    })).toContain(familyRow.product_key);
+
+    // Aliases and accents fold the same way on both sides, so a later pack fill never rewrites a different make.
+    for (const [make, model, kwh, expected] of [["VW", "e-Golf", 36, "model:volkswagen-egolf-36kwh"],
+      ["Škoda", "Enyaq", 77, "model:skoda-enyaq-77kwh"], ["Mercedes", "EQB", 66, "model:mercedes-benz-eqb-66kwh"]] as const) {
+      const lid = id(`alias_${make}`);
+      await listing(lid, "demand", id("buyer4"), { intent: "standing", makes: [make], model, formats: ["Packs"], chemistries: ["NMC"], kwh_min: kwh, kwh_max: kwh });
+      const [line] = await lines("demand_id = $1", [lid]);
+      expect(line.product_key).toBe(expected);
+      expect(productKeyFor({ make, model, format: "Packs", chemistry: "NMC", kwhMin: kwh, kwhMax: kwh })).toBe(expected);
+    }
+  });
+
+  it("syncs through the app's demand writers (addDemand, closeDemand)", async () => {
+    const [user] = await pg.queryPg<{ id: string }>(
+      `insert into crm_users (email, display_name, password_hash)
+       values ('interest-' || gen_random_uuid() || '@example.test', 'Alex', 'x') returning id`);
+    const ask = await demand.addDemand({
+      buyer: "App Buyer", wants: "LFP packs", kind: "request", company_id: id("buyer1"),
+      spec: { formats: ["Packs"], chemistries: ["LFP"], volume: 3, volume_unit: "packs" }, needed_by: "2026-12-15",
+    }, user.id);
+    expect(await lines("demand_id = $1", [ask.id])).toMatchObject([{ kind: "ask", product_key: "broad:lfp-packs", quantity: 3 }]);
+    await demand.closeDemand(ask.id, "bought_elsewhere");
+    expect(await lines("demand_id = $1", [ask.id])).toMatchObject([{ kind: "declined", decline_reason: "bought_elsewhere" }]);
+  });
+
+  it("records a buyer offer's paid and declined stages, replacing the earlier outcome", async () => {
+    await listing(id("s1"), "supply", null, { volume_unit: "packs" }, { quantity: "40 packs", observedOn: "2026-10-20" });
+    await pg.queryPg(
+      `insert into crm_bulk_listing_fields (bulk_listing_id, field_key, value, status, visibility)
+       values ($1, 'make', 'Kia', 'confirmed', 'teaser'), ($1, 'model', 'Niro', 'confirmed', 'teaser'),
+              ($1, 'chemistry', 'NMC', 'confirmed', 'teaser'), ($1, 'format', 'packs', 'confirmed', 'teaser'),
+              ($1, 'capacity_kwh', '64', 'confirmed', 'teaser')`,
+      [id("s1")]);
+    await pg.queryPg(
+      `insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, name, stage, terms)
+       values ($1, $2, 'counterparty', $3, 'Offer Buyer', 'paid',
+         '{"amount": 4500, "currency": "EUR", "unit": "pack"}'::jsonb)`,
+      [id("o1"), id("s1"), id("buyer1")]);
+
+    const bought = await lines("offer_id = $1", [id("o1")]);
+    expect(bought).toHaveLength(1);
+    expect(bought[0]).toMatchObject({
+      kind: "bought", ownership: "synced", product_key: "model:kia-niro-64kwh", quantity: 40, quantity_unit: "packs",
+      price: 4500, price_currency: "EUR", price_unit: "pack", price_basis: "paid", first_seen: "2026-10-20",
+    });
+    expect(bought[0].source_refs).toEqual([`crm:${id("o1")}`, `crm:${id("s1")}`]);
+
+    await offers.updateOffer(id("s1"), id("o1"), { stage: "declined", declinedReason: "logistics" }, null);
+    const declined = await lines("offer_id = $1", [id("o1")]);
+    expect(declined).toHaveLength(1);
+    expect(declined[0]).toMatchObject({ kind: "declined", decline_reason: "logistics", price_basis: "bid" });
+
+    // Back to an open stage: no outcome line any more.
+    await offers.updateOffer(id("s1"), id("o1"), { stage: "negotiating" }, null);
+    expect(await lines("offer_id = $1", [id("o1")])).toEqual([]);
+  });
+
+  it("ignores our own side of a listing and offers on demand listings", async () => {
+    await listing(id("d9"), "demand", id("buyer2"), { intent: "request", formats: ["Packs"], chemistries: ["LFP"] });
+    await listing(id("s2"), "supply", null, {});
+    await pg.queryPg(
+      `insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, stage)
+       values ($1, $2, 'contact', $3, 'paid'), ($4, $5, 'counterparty', $3, 'paid')`,
+      [id("o2"), id("s2"), id("buyer2"), id("o3"), id("d9")]);
+    expect(await lines("offer_id = any($1::text[]) or demand_id = $2", [[id("o2"), id("o3")], id("d9")]))
+      .toMatchObject([{ kind: "ask" }]);
+  });
+
+  it("never breaks the parent write when the sync fails, and logs the failure", async () => {
+    // A table rename makes the sync fail exactly as a broken migration or bad data would.
+    await pg.queryPg(`alter table buyer_interest rename to buyer_interest_paused_${run}`);
+    try {
+      const written = await listing(id("d10"), "demand", id("buyer1"), { intent: "request", formats: ["Packs"], chemistries: ["LFP"] });
+      expect(written).toHaveLength(1);
+      const [row] = await pg.queryPg<{ id: string }>(`select id from crm_bulk_listings where id = $1`, [id("d10")]);
+      expect(row.id).toBe(id("d10"));
+      const [error] = await pg.queryPg<{ source_table: string; message: string }>(
+        `select source_table, message from buyer_interest_sync_errors where source_id = $1`, [id("d10")]);
+      expect(error.source_table).toBe("crm_bulk_listings");
+      expect(error.message).toMatch(/buyer_interest/);
+    } finally {
+      await pg.queryPg(`alter table buyer_interest_paused_${run} rename to buyer_interest`);
+    }
+  });
+});
