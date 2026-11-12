@@ -148,6 +148,7 @@ def map_saved_search(search):
         "wants": search.get("label") or "Any battery listing", "quantity": None, "location": None,
         "spec": spec, "note": "\n".join(notes), "observed_on": confirmed,
         "source_kind": "import", "source_id": f"saved_search:{search['id']}", "source_label": "Saved search",
+        "unsubscribed_on": str(search.get("unsubscribed_at") or "")[:10] or None,
         "source_url": f"{SITE}{search.get('catalog_path') or '/marketplace/listings'}",
         "unsubscribed": search.get("status") == "unsubscribed",
     }
@@ -278,6 +279,15 @@ def is_recent(request, now=None):
     return (now or dt.datetime.now(dt.timezone.utc)) - created <= ANNOUNCE_WITHIN
 
 
+def existing_company_id(cur, email):
+    """The company a saved search belongs to, without creating one: an unsubscribed search must not add a lead."""
+    cur.execute("""select p.company_id from crm_people p
+                   where p.email is not null and lower(p.email) = %s and p.company_id is not null
+                   order by p.updated_at desc nulls last limit 1""", ((email or "").lower(),))
+    row = cur.fetchone()
+    return row.get("company_id") if isinstance(row, dict) else (row[0] if row else None)
+
+
 def read_env_value(path, name):
     for line in Path(path).read_text().splitlines():
         if line.startswith(f"{name}="):
@@ -371,12 +381,19 @@ def main():
 
     conn = psycopg2.connect(args.dsn)
     added = closed = 0
+    today = dt.date.today()
     with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         for row in rows:
             unsubscribed = row.pop("unsubscribed", False)
+            # Every confirmed search is a saved_search want: open while alerts are on, expired when unsubscribed.
+            # An unsubscribed one keeps its history but never creates a company, and never becomes a demand row.
             if unsubscribed:
+                row["company_id"] = existing_company_id(cur, row.get("email"))
+                row["unsubscribed_on"] = row.get("unsubscribed_on") or today.isoformat()
+                survey.upsert_saved_search_interest(cur, row, unsubscribed=True, today=today)
                 continue
             survey.link(cur, row)
+            survey.upsert_saved_search_interest(cur, row, today=today)
             new = survey.insert(cur, row)
             added += new
             request = requests_by_source.get(row["source_id"])

@@ -175,6 +175,121 @@ def _record_saved_search(cur, row):
     return cur.fetchone() is not None
 
 
+INTEREST_KINDS = ('standing', 'interest', 'inferred')
+INTEREST_EXPIRY_DAYS = {'standing': 90, 'interest': 180, 'inferred': 180}
+
+
+def interest_table_ready(cur):
+    """False on a database that predates migration 112, so an importer can run before the migration lands."""
+    cur.execute("select to_regclass('public.buyer_interest') as name")
+    row = cur.fetchone()
+    name = row.get('name') if isinstance(row, dict) else (row[0] if row else None)
+    return bool(name)
+
+
+def interest_facts(spec):
+    """The facts behind a want, from a survey, saved-search or research spec (a list takes its first value)."""
+    spec = spec or {}
+
+    def first(*keys):
+        for key in keys:
+            value = spec.get(key)
+            if isinstance(value, list):
+                value = value[0] if value else None
+            if value not in (None, ''):
+                return value
+        return None
+
+    return {
+        'make': first('makes', 'make'), 'model': first('model'),
+        'format': first('formats', 'format'), 'chemistry': first('chemistries', 'chemistry'),
+        'kwh': first('kwh', 'capacity_kwh'), 'kwh_min': spec.get('kwh_min') or spec.get('kwhMin'),
+        'kwh_max': spec.get('kwh_max') or spec.get('kwhMax'), 'cell_maker': first('cell_makers', 'cell_maker'),
+    }
+
+
+def upsert_interest(cur, *, company_id, kind, facts, first_seen, last_seen, person_id=None, expires_on=None,
+                    saved_search_id=None, quantity=None, quantity_unit=None, quantity_basis=None, price=None,
+                    price_currency=None, price_unit=None, price_basis=None, source_refs=(), decline_reason=None):
+    """Upserts one buyer_interest line and returns its id (None when it cannot or need not be written).
+
+    Mastered kinds merge on (company, product key, kind); synced kinds merge on their source id. The product key
+    is computed by the same SQL function the triggers use, so importer and trigger lines agree.
+    """
+    if not company_id or not interest_table_ready(cur):
+        return None
+    # A line that cannot be written must never abort its importer's transaction.
+    cur.execute("savepoint buyer_interest_line")
+    try:
+        cur.execute("""with facts as (select buyer_interest_facts(%s::jsonb) as facts),
+                            keyed as (select facts, buyer_interest_product_key(facts) as key from facts)
+                       select key, buyer_interest_key_level(key) as level, facts->>'make' as make, facts->>'model' as model,
+                         buyer_interest_format(facts->>'format') as format, buyer_interest_chemistry(facts->>'chemistry') as chemistry,
+                         buyer_interest_number(facts->'kwh_min') as kwh_min, buyer_interest_number(facts->'kwh_max') as kwh_max
+                       from keyed where key <> 'broad:any-batteries'""", (json.dumps(facts or {}),))
+        keyed = cur.fetchone()
+        if not keyed:
+            cur.execute("release savepoint buyer_interest_line")
+            return None  # nothing stated that names a product: do not invent a broad bucket
+        values = keyed if isinstance(keyed, dict) else dict(zip(
+            ('key', 'level', 'make', 'model', 'format', 'chemistry', 'kwh_min', 'kwh_max'), keyed))
+        mastered = kind in INTEREST_KINDS
+        conflict = ("on conflict (company_id, product_key, kind) where ownership = 'mastered'"
+                    if mastered else "on conflict (kind, saved_search_id, product_key) where saved_search_id is not null")
+        refresh = ("last_seen = greatest(buyer_interest.last_seen, excluded.last_seen), person_id = coalesce(excluded.person_id, buyer_interest.person_id), "
+                   "expires_on = greatest(buyer_interest.expires_on, excluded.expires_on), "
+                   if mastered else
+                   "last_seen = greatest(buyer_interest.last_seen, excluded.last_seen), person_id = coalesce(excluded.person_id, buyer_interest.person_id), "
+                   "expires_on = coalesce(excluded.expires_on, buyer_interest.expires_on), ")
+        cur.execute(f"""insert into buyer_interest (id, company_id, person_id, kind, ownership, product_key, product_key_level,
+                         make, model, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit,
+                         quantity_basis, price, price_currency, price_unit, price_basis, source_refs, expires_on,
+                         saved_search_id, decline_reason)
+                       values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s::date, %s, %s, %s, %s, %s, %s, %s,
+                         %s::text[], %s::date, %s, %s)
+                       {conflict} do update set {refresh}
+                         source_refs = coalesce((select array_agg(distinct ref order by ref)
+                           from unnest(buyer_interest.source_refs || excluded.source_refs) ref), '{{}}'),
+                         updated_at = now()
+                       returning id""",
+                    (f'bi_{uuid.uuid4().hex}', company_id, person_id, kind, 'mastered' if mastered else 'synced',
+                     values['key'], values['level'], values['make'], values['model'], values['format'], values['chemistry'],
+                     values['kwh_min'], values['kwh_max'], first_seen, last_seen, quantity, quantity_unit,
+                     quantity_basis or ('not_stated' if quantity is None else 'stated'), price, price_currency, price_unit,
+                     price_basis, list(source_refs or []), expires_on, saved_search_id, decline_reason))
+        row = cur.fetchone()
+        cur.execute("release savepoint buyer_interest_line")
+        return row['id'] if isinstance(row, dict) else (row[0] if row else None)
+    except Exception:
+        cur.execute("rollback to savepoint buyer_interest_line")
+        return None
+
+
+def upsert_profile_interest(cur, row, basis='stated'):
+    """A profile merge (survey answer or research) is also a mastered want: standing when the buyer said it, inferred otherwise."""
+    if not row.get('company_id'):
+        return None
+    kind = 'standing' if basis == 'stated' else 'inferred'
+    observed = row.get('observed_on') or dt.date.today().isoformat()
+    expires = (dt.date.fromisoformat(str(observed)[:10]) + dt.timedelta(days=INTEREST_EXPIRY_DAYS[kind])).isoformat()
+    return upsert_interest(cur, company_id=row['company_id'], kind=kind, facts=interest_facts(row.get('spec')),
+                           person_id=row.get('person_id'), first_seen=str(observed)[:10], last_seen=str(observed)[:10],
+                           expires_on=expires, source_refs=[row.get('source_id') or f"crm:{row['company_id']}"])
+
+
+def upsert_saved_search_interest(cur, row, unsubscribed=False, today=None):
+    """A confirmed saved search is a synced want: open while alerts are on, expired when unsubscribed."""
+    day = today or dt.date.today()
+    today_iso = day.isoformat() if isinstance(day, dt.date) else str(day)[:10]
+    confirmed = str(row.get('observed_on') or today_iso)[:10]
+    last_seen = str(row.get('unsubscribed_on') or today_iso)[:10] if unsubscribed else today_iso
+    search_id = str(row.get('source_id') or '').removeprefix('saved_search:') or None
+    return upsert_interest(cur, company_id=row.get('company_id'), kind='saved_search', facts=interest_facts(row.get('spec')),
+                           person_id=row.get('person_id'), first_seen=confirmed, last_seen=last_seen,
+                           expires_on=last_seen if unsubscribed else None, saved_search_id=search_id,
+                           source_refs=[f'saved_search:{search_id}'] if search_id else [])
+
+
 def merge_profile(cur, row, basis='stated'):
     """Company is the profile home; resolve/create it through intake before calling.
 
@@ -217,7 +332,13 @@ def merge_profile(cur, row, basis='stated'):
       where id = %s and (buyer_profile is distinct from buyer_profile || %s::jsonb
         or buyer_profile_basis is distinct from %s) returning id""",
       (json.dumps(profile), basis, row.get('observed_on') or dt.date.today(), row['company_id'], json.dumps(profile), basis))
-    return cur.fetchone() is not None
+    changed = cur.fetchone() is not None
+    # The same answer is a mastered want, so matching can read it before buyer_profile is retired. A saved search
+    # is its own synced kind, written by the saved-search importer, not a standing want. A dossier buyer's answer
+    # is only a proposal (Alex approves it), so the dossier branch above writes no line.
+    if not str(row.get('source_id') or '').startswith('saved_search:'):
+        upsert_profile_interest(cur, row, basis)
+    return changed
 
 
 def expire_demand(cur, today=None):

@@ -25,7 +25,7 @@ import sys
 import uuid
 from pathlib import Path
 from bulk_registry import BUY_BOX  # read from the database, loaded on first use
-from demand_lifecycle import merge_profile, family_key, existing_demand, reputation_for
+from demand_lifecycle import merge_profile, family_key, existing_demand, reputation_for, upsert_saved_search_interest
 
 REPO = Path(__file__).resolve().parents[2]
 FORMBRICKS_CONTAINER = "formbricks-postgres-1"
