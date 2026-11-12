@@ -555,6 +555,8 @@ function groupRow(members: Member[], req: Requirement, now: Date): MatchRow {
     personId: cheapest.row.personId,
     contact: cheapest.row.contact,
     stockId: cheapest.row.stockId,
+    // Packs: the count. Lots: only when every line states its quantity.
+    units: lots ? (candidates.every((c) => c.units != null) ? candidates.reduce((sum, c) => sum + (c.units ?? 0), 0) : null) : count,
     holds: `${pack} × ${count}`,
     source: meta,
     fit: marks,

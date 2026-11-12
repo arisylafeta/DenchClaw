@@ -266,6 +266,7 @@ export async function supplyMatchesV2(listingId: string): Promise<MatchesResult 
     considered: demand.length + ranked.evaluated,
     blocked: listed.length ? null : "Nothing fits yet. Add a dossier or a listing field to widen the match.",
     errors: [],
+    units: key.units ?? null,
   };
 }
 

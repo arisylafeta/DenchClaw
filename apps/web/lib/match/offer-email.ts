@@ -8,7 +8,7 @@
 // fact, names the other party or writes an address.
 import { keyLine, type FieldFact, type ProductKey } from "./product-key";
 
-export type OfferEmailKind = "supply_offer" | "request_stock" | "chase";
+export type OfferEmailKind = "supply_offer" | "request_stock" | "chase" | "stock_confirm" | "seller_reconfirm";
 
 /** The buyer's own words, read from `buyer_profile`: the derived wants text and the dossier products. */
 export type BuyerFacts = {
@@ -53,6 +53,8 @@ export type OfferEmailInput = {
   previousSubject?: string | null;
   /** Names, contacts and addresses that must never appear in the copy. */
   privateValues?: (string | null | undefined)[];
+  /** A stock confirm: what the supplier holds, in our words from their own stock line ("Stellantis 50 kWh pack x 23"). */
+  holds?: string | null;
 };
 
 export type OfferEmail = { kind: OfferEmailKind; subject: string; body: string };
@@ -481,7 +483,7 @@ export function buildOfferEmail(input: OfferEmailInput): OfferEmail {
   // Buyer-facing: town and country, only from a teaser row. Request side: the country alone.
   const place = input.kind === "supply_offer"
     ? buyerPlace(fields, input.location)
-    : input.kind === "request_stock" ? publicCountry(input.location) : null;
+    : input.kind === "request_stock" || input.kind === "stock_confirm" ? publicCountry(input.location) : null;
   const want = buyerWant(input.buyer, input.key);
   const where = place ? ` in ${place}` : "";
   let subject: string;
@@ -512,6 +514,24 @@ export function buildOfferEmail(input: OfferEmailInput): OfferEmail {
       const facts = [requirementLine(fields)].filter(Boolean).join(" ");
       body = `${greeting(input.recipientFirstName)}\n\nWe're looking for ${product}${where}.${facts ? ` ${facts}` : ""}\n\nDo you have anything that fits?\n\n${SIGN_OFF}`;
     }
+  } else if (input.kind === "stock_confirm") {
+    // A stored match on a request: the supplier is asked to confirm their own stock and quote. Their price is asked for,
+    // never offered, and the request is described by its facts only, as in the stock ask.
+    const asked = requestProduct(input.request);
+    const phrase = input.request && asked ? requestPhrase(input.request, asked) : productLine(input.key);
+    const timing = requestTiming(input.request);
+    const facts = [timing ? `They're needed by ${timing}.` : null, requestSohLine(input.request)].filter(Boolean).join(" ");
+    const holds = clean(input.holds);
+    subject = `Stock check: ${phrase}`;
+    body = `${greeting(input.recipientFirstName)}\n\nWe're looking for ${phrase}${where}.${facts ? ` ${facts}` : ""}\n\n`
+      + `${holds ? `Is your ${holds} still available?` : "Is your stock still available?"} If so, how many can you offer, at what price, `
+      + `and until when does that price hold?\n\n${SIGN_OFF}`;
+  } else if (input.kind === "seller_reconfirm") {
+    // A supply deal whose seller quote is missing or out of date: buyers are asked only once the seller confirms it again.
+    const short = productPhrase(input.key);
+    subject = short ? `Still available? ${short}` : "Still available?";
+    body = `${greeting(input.recipientFirstName)}\n\nIs your ${product} still available?\n\n`
+      + `Could you confirm how many you have, your price, and until when that price holds?\n\n${SIGN_OFF}`;
   } else {
     const short = productPhrase(input.key);
     const previous = clean(input.previousSubject);

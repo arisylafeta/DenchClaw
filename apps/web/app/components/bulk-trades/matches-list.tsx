@@ -8,6 +8,7 @@ import { Button, Chip, LinkButton, StatusDot, type ChipTone } from "@/components
 import { ErrorText, request } from "./trade-ui";
 import { rowFocus } from "./demand-page";
 import { offerDate, RequestMatches, STAGE_LABEL } from "./request-matches";
+import { StoredMatchesView } from "./stored-matches";
 import css from "./demand-panel.module.css";
 
 /** The six reasons Alex uses, in the order he says them. Any other detail goes in the text field. */
@@ -286,8 +287,34 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
   );
 }
 
-/** Loads one listing's matches and owns the writes the list makes. */
+/**
+ * The Matches tab: the deal's stored five first (Find matches, then ask, yes, no and reservations), then every candidate
+ * the scorer sees today under "All candidates", worked out on each view as before. All candidates starts open until the
+ * deal has had a run, then folds away.
+ */
 export function MatchesTab({ kind, id, active, onOpenOffers }: { kind: "supply" | "demand"; id: string; active: boolean; onOpenOffers?: () => void }) {
+  const [showAll, setShowAll] = useState<boolean | null>(null);
+  const onLoaded = useCallback((hasRun: boolean) => setShowAll((current) => current ?? !hasRun), []);
+  if (!active) {
+    return null;
+  }
+  const allOpen = showAll ?? true;
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-4">
+      <StoredMatchesView dealId={id} kind={kind} onOpenOffers={onOpenOffers} onLoaded={onLoaded} />
+      <section aria-label="All candidates" className="flex flex-col gap-3">
+        <button type="button" aria-expanded={allOpen} onClick={() => setShowAll(!allOpen)}
+          className={`${rowFocus} flex w-fit items-center gap-1 rounded-md px-1 py-1 text-[13px] font-semibold`}>
+          {allOpen ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />} All candidates
+        </button>
+        {allOpen && <LiveMatches kind={kind} id={id} active onOpenOffers={onOpenOffers} />}
+      </section>
+    </div>
+  );
+}
+
+/** Loads one listing's live-computed candidates and owns the writes the list makes. */
+function LiveMatches({ kind, id, active, onOpenOffers }: { kind: "supply" | "demand"; id: string; active: boolean; onOpenOffers?: () => void }) {
   const base = kind === "supply"
     ? `/api/bulk-listings/${encodeURIComponent(id)}/matches/v2`
     : `/api/bulk-trades/demand/${encodeURIComponent(id)}/matches/v2`;

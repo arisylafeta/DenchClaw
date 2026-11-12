@@ -93,7 +93,7 @@ const GRAPH = (key: string) => `case when s.details->'battery_graph'->>'found' =
 
 // Lines with no make are read too: a cell or part code from the request can still name them (the INR21700-50E line
 // keeps its code in supplier_ref). Which of them may be considered is decided per request, in demandMatchesV2.
-async function unlistedStock(): Promise<StockRow[]> {
+export async function unlistedStock(): Promise<StockRow[]> {
   return queryPg<StockRow>(
     `select s.id, s.company_id, s.person_id, coalesce(c.name, p.full_name) as supplier, s.title,
             nullif(trim(s.details->>'make'), '') as make, s.details->>'model' as model, s.details->>'format' as format,
@@ -482,6 +482,7 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
       personId: who.personId,
       contact: who.contact,
       stockId: candidate.key.startsWith("stock:") ? candidate.key.slice("stock:".length) : null,
+      units: candidate.units ?? null,
       holds: holdsLine(candidate),
       source: [sourceLine(candidate), candidate.location ?? candidate.country].filter(Boolean).join(" · ") || null,
       fit: marks,

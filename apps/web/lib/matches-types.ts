@@ -32,6 +32,8 @@ export type MatchRow = {
   contact: string | null;
   /** The unlisted stock row behind this match, recorded on the offer it becomes. */
   stockId: string | null;
+  /** Request rows: the units the candidate states (a group: the packs it holds), null when it does not say. */
+  units?: number | null;
   /** Request rows only: what they hold, from the source ("Lishen LR21700LH cells · quantity not stated"). */
   holds?: string;
   /** Request rows only: where that comes from, and when ("Catalogue, 8 Oct"). */
@@ -143,6 +145,8 @@ export type MatchesResult = {
   coverage?: MatchCoverage | null;
   /** Requests only: the "Matched on" chips and the outreach so far. */
   summary?: RequestSummary | null;
+  /** Supply listings: the units in the lot, as the key reads them. What a reservation on the lot is counted against. */
+  units?: number | null;
 };
 
 /** One requirement chip; `strong` is the product itself. */
