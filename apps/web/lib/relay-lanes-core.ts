@@ -84,3 +84,27 @@ export function oldestLead(cards: LaneCard[], now = Date.now()): { waited: strin
   const oldest = Math.min(...times);
   return { waited: waited(new Date(oldest).toISOString(), now), late: now - oldest > LEAD_GOAL_MINUTES * 60_000 };
 }
+
+const GREETING = /^(?:hi|hello|hey|dear|morning|afternoon|good (?:morning|afternoon|evening)|greetings)\b[^.!?\n]{0,40}[,!:]?$/i;
+const QUOTED = /^(?:>|on .{4,120} wrote:\s*$|-{2,}\s*original message|from:\s)/i;
+const SIGN_OFF = /^(?:best|regards|kind regards|best regards|warm regards|many thanks|thanks|thank you|cheers|sincerely|br|all the best)\b[^.!?]{0,30}$/i;
+
+/**
+ * A few of their own words for an inbox row: the first question in their email, or else its opening. The greeting, the
+ * sign-off and anything quoted from an earlier email are skipped; the words are theirs, cut at a word, never reworded.
+ */
+export function theirWords(text: string | null | undefined, max = 220): string | null {
+  const lines: string[] = [];
+  for (const raw of (text ?? "").replace(/\r\n/g, "\n").split("\n")) {
+    const line = raw.trim();
+    if (QUOTED.test(line) || (lines.length && SIGN_OFF.test(line))) break;
+    if (line && !(lines.length === 0 && GREETING.test(line))) lines.push(line);
+  }
+  const flat = lines.join(" ").replace(/\s+/g, " ").trim();
+  if (!flat) return null;
+  const sentences = flat.match(/[^.!?]+(?:[.!?]+|$)/g)?.map((x) => x.trim()).filter(Boolean) ?? [flat];
+  const asked = sentences.slice(0, 8).find((x) => x.endsWith("?") && x.length >= 12);
+  let words = asked ?? "";
+  if (!words) for (const x of sentences) { if (words && (words + " " + x).length > max) break; words = words ? `${words} ${x}` : x; }
+  return words.length > max ? `${words.slice(0, max).replace(/\s+\S*$/, "")}…` : words;
+}

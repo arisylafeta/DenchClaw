@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { oldestLead, sortLanes, verifySuggest, waited, leadTitle } from "./relay-lanes-core";
+import { oldestLead, sortLanes, theirWords, verifySuggest, waited, leadTitle } from "./relay-lanes-core";
 
 // A made-up thread in the shape of the real ones.
 const TEXT = `From maria@example.test, 2026-11-06:
@@ -111,5 +111,34 @@ describe("leadTitle", () => {
   it("keeps the summary when the email says too little", () => {
     expect(leadTitle([facts[0]], "A buyer asking what is available.")).toEqual({ title: "A buyer asking what is available.", rest: [facts[0]] });
     expect(leadTitle([], "A buyer asking what is available.").title).toBe("A buyer asking what is available.");
+  });
+});
+
+describe("theirWords", () => {
+  it("takes their first question, past the greeting", () => {
+    expect(theirWords("Hi Alex,\n\nThanks for the list. We could take around 40 packs. What would that be per kWh, delivered to Leeds?\n\nPriya"))
+      .toBe("What would that be per kWh, delivered to Leeds?");
+  });
+
+  it("takes the opening when nothing is asked, and stops at the quoted email", () => {
+    expect(theirWords("Morning,\nThe pallets left today. Tracking follows.\nRegards\n\nOn Tue, 3 Nov 2026 at 10:00, Alex <alex@rebattery.example> wrote:\n> Are they on the way?"))
+      .toBe("The pallets left today. Tracking follows.");
+  });
+
+  it("leaves the sign-off out", () => {
+    expect(theirWords("Hi Alex,\n\nPlease send the stock list.\n\nBest,\nSam")).toBe("Please send the stock list.");
+    expect(theirWords("Dear Alex,\nNo need to list them online.\nRegards, Murat")).toBe("No need to list them online.");
+  });
+
+  it("cuts a long opening at a word", () => {
+    const out = theirWords(`${"word ".repeat(80)}end.`, 60)!;
+    expect(out.endsWith("…")).toBe(true);
+    expect(out.length).toBeLessThanOrEqual(61);
+  });
+
+  it("has nothing for an empty email", () => {
+    expect(theirWords("")).toBeNull();
+    expect(theirWords("Hi Alex,")).toBeNull();
+    expect(theirWords(null)).toBeNull();
   });
 });
