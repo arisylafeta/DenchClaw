@@ -22,20 +22,15 @@ describe("compact preview header", () => {
     expect(document.querySelector("[data-waiting-on]")).toBeNull();
   });
 
-  it("keeps the brief recoverable, metadata visible and inferred waiting absent", () => {
+  it("keeps metadata visible, the ask text out of the header and inferred waiting absent", () => {
     render(<DemandHeader demand={demand} supply={null} actions={<button>Edit demand</button>} />);
     expect(screen.getByRole("heading", { name: "4 × example battery packs" })).toBeInTheDocument();
     expect(screen.getByText("Started")).toBeInTheDocument();
     expect(screen.getByText("Approx. value")).toBeInTheDocument();
     expect(screen.queryByText(/waiting for our reply/)).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Score 47 out of 100" })).toBeInTheDocument();
-    const brief = screen.getByText(/Example buyer is asking for/);
-    const collapsed = brief.textContent!.length;
-    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
-    expect(brief).toHaveTextContent(demandDescription(demand));
-    expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Show less" }));
-    expect(brief.textContent!.length).toBe(collapsed);
+    // The ask text lives in Details; the header stays short.
+    expect(screen.queryByText(/Example buyer is asking for/)).not.toBeInTheDocument();
   });
 
   it("puts the deal controls on their own row under the title, so the title keeps the full width", () => {

@@ -1,14 +1,12 @@
 "use client";
 
 import { CopyIdButton } from "./copy-id-button";
-import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { Demand } from "@/lib/bulk-demand";
-import { demandDescription, demandStarted, demandTitle, demandValue } from "@/lib/bulk-demand-header";
+import { demandStarted, demandTitle, demandValue } from "@/lib/bulk-demand-header";
 import type { DemandSupply } from "@/lib/demand-supply-types";
 import css from "./demand-header.module.css";
 import { Sh } from "./bt-shimmer";
-import { useRegistry } from "./use-registry";
 import { WaitingBadge } from "./opportunities-sheet";
 
 /** A circular score: the ring fills with the score out of 100. */
@@ -35,11 +33,6 @@ export function DemandHeader({ demand, supply, actions, onBack, isTrade = false,
   ownerPicker?: React.ReactNode;
   isTrade?: boolean; waiting?: { waiting_on: "us" | "them" | null; waiting_since: string | null } | null; demand: Demand; supply: DemandSupply | null; actions: React.ReactNode; loadingSupply?: boolean; onBack?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const registry = useRegistry();
-  const description = demandDescription(demand, 200, registry);
-  const words = description.split(/\s+/);
-  const long = words.length > 42;
   const value = demandValue(demand);
   const started = demandStarted(demand);
   const sellers = [...new Set((supply?.shortlisted ?? []).map((unit) => unit.seller).filter(Boolean))] as string[];
@@ -83,12 +76,6 @@ export function DemandHeader({ demand, supply, actions, onBack, isTrade = false,
           <dd className={value ? undefined : css.quiet}>{value?.text ?? "Not priced"}{value?.note && <small>{value.note}</small>}</dd>
         </div>
       </dl>
-      {description && (
-        <div className={css.brief} data-open={open}>
-          <p>{long && !open ? `${words.slice(0, 42).join(" ")}…` : description}</p>
-          {long && <button type="button" aria-expanded={open} className={css.more} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show more"}</button>}
-        </div>
-      )}
     </header>
   );
 }

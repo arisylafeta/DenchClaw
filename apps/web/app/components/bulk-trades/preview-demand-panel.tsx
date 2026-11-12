@@ -21,6 +21,8 @@ import { OffersTab } from "./offers-tab";
 import type { ThreadEntry } from "@/lib/crm-postgres/bulk-offers";
 import { DemandHeader } from "./demand-header";
 import { PartyCard, type PartyPerson } from "./party-card";
+import { BuyerCardBody, BuyerStatus } from "./buyer-card";
+import { buyerCard, type PricePoint } from "@/lib/buyer-card";
 import { ListingConversation } from "./listing-conversation";
 import { DocumentsTab } from "./documents-tab";
 import { MatchaTab } from "./matcha-tab";
@@ -33,6 +35,8 @@ type BuyerContext = {
   buyer: { profile: BuyerProfile | undefined; engagement: BuyerEngagement | null; demand: Demand[] } | null;
   mail: BuyerMail[];
   person?: PartyPerson | null;
+  /** Prices other buyers paid us, for the benchmark. */
+  market?: PricePoint[];
 };
 
 const ago = (iso: string) => {
@@ -65,21 +69,14 @@ function TheBuyer({ demand, context, onOpenDemand, thread }: { demand: Demand; c
   const profile = context?.buyer?.profile;
   const engagement = context?.buyer?.engagement;
   const others = (context?.buyer?.demand ?? []).filter((d) => d.id !== demand.id && d.status !== "closed");
-  const stage = [profile?.tier ? `${profile.tier}-tier` : null, profile?.stage].filter(Boolean).join(" · ");
-  const glance = [
-    stage ? { label: "Stage", value: stage } : null,
-    profile?.owner ? { label: "Owner", value: profile.owner } : null,
-    engagement?.last_heard_at ? { label: "Last heard", value: ago(engagement.last_heard_at) } : null,
-  ].filter((item) => item !== null);
-  const notes = [
-    profile?.buyer_profile?.wants ? { label: "Usually buys", value: profile.buyer_profile.wants } : null,
-    profile?.outreach_notes ? { label: "Notes", value: profile.outreach_notes } : null,
-    profile?.past_issues ? { label: "Past issues", value: profile.past_issues, bad: true } : null,
-  ].filter((note) => note !== null);
+  const stage = [profile?.tier ? `${profile.tier}-tier` : null, profile?.stage ? (profile.tier ? profile.stage.toLowerCase() : profile.stage) : null].filter(Boolean).join(" ") || null;
+  const card = context ? buyerCard({ profile, engagement, request: { product_family: demand.product_family, wants: demand.wants }, market: context.market ?? [] }) : null;
   return (
     <PartyCard loading={context === null} role="Buyer" name={demand.buyer} companyId={demand.company_id} personId={demand.person_id} person={context?.person ?? null}
-      contact={demand.contact} email={demand.email} glance={glance} notes={notes}
-      related={{ label: "Also asking for", items: others.map((d) => ({ id: d.id, label: d.product_family ?? d.wants.slice(0, 48), onOpen: onOpenDemand ? () => onOpenDemand(d.id) : undefined })) }}>
+      contact={demand.contact} email={demand.email}
+      status={context ? <BuyerStatus stage={stage} lastHeard={engagement?.last_heard_at ? ago(engagement.last_heard_at) : null} card={card} /> : null}
+      body={<BuyerCardBody card={card} loading={context === null} profileHref={demand.company_id ? buildEntryLink("company", demand.company_id) : null}
+        related={others.map((d) => ({ id: d.id, label: d.product_family ?? d.wants.slice(0, 48), onOpen: onOpenDemand ? () => onOpenDemand(d.id) : undefined }))} />}>
       {thread}
     </PartyCard>
   );

@@ -5,6 +5,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { ArrowUpRight } from "lucide-react";
 import { mailMessagePath, type ArtifactRef } from "@/lib/mail-artifacts";
 import type { MailMessageSummary } from "@/lib/mail-types";
+import { DocumentCard } from "./document-card";
 import { excerpt, MailDraftCard, type ArtifactOpenHandler } from "./mail-draft-card";
 
 type Load = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; message: MailMessageSummary };
@@ -80,6 +81,7 @@ export function MailMessageCard({ artifact, onOpen }: { artifact: Extract<Artifa
 
 /** Picks the card for an artifact block by kind. */
 export function ArtifactCard({ artifact, autoOpen, onOpen }: { artifact: ArtifactRef; autoOpen: boolean; onOpen?: ArtifactOpenHandler }) {
+  if (artifact.kind === "document") {return <DocumentCard artifact={artifact} onOpen={onOpen} />;}
   return artifact.kind === "mail_message"
     ? <MailMessageCard artifact={artifact} onOpen={onOpen} />
     : <MailDraftCard artifact={artifact} autoOpen={autoOpen} onOpen={onOpen} />;

@@ -184,12 +184,13 @@ export class HermesChatService {
       : await readConversation(key,0,undefined,actor);
     Object.assign(history.conversation,{ access });
     history.conversation.source = source;
-    const inflight = resume?.inflight ? { ...resume.inflight, user: stripAgentMessageContext(resume.inflight.user ?? "") } : resume?.inflight;
-    const queued = resume?.queued ? { ...resume.queued, user: stripAgentMessageContext(resume.queued.user) } : resume?.queued;
+    const agentWorkspace = resolveAgentWorkspacePrefix();
+    const inflight = resume?.inflight ? { ...resume.inflight, user: stripAgentMessageContext(resume.inflight.user ?? "", agentWorkspace) } : resume?.inflight;
+    const queued = resume?.queued ? { ...resume.queued, user: stripAgentMessageContext(resume.queued.user, agentWorkspace) } : resume?.queued;
     const messages: GatewayChatSnapshot["messages"] = history.messages.map(row => row.role === "user" ? {
-      ...row, text: stripAgentMessageContext(row.text),
-      ...(row.content ? { content: stripAgentMessageContext(row.content) } : {}),
-      ...(row.parts ? { parts: row.parts.map(part => part.type === "text" && typeof part.text === "string" ? { ...part, text: stripAgentMessageContext(part.text) } : part) } : {}),
+      ...row, text: stripAgentMessageContext(row.text, agentWorkspace),
+      ...(row.content ? { content: stripAgentMessageContext(row.content, agentWorkspace) } : {}),
+      ...(row.parts ? { parts: row.parts.map(part => part.type === "text" && typeof part.text === "string" ? { ...part, text: stripAgentMessageContext(part.text, agentWorkspace) } : part) } : {}),
     } : row);
     const queueHead = queued?.user && [...messages].toReversed().find(row => row.role === "user" && row.text === queued.user);
     const queueIndex = queueHead ? messages.indexOf(queueHead) : -1;
