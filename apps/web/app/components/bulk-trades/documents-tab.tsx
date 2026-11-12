@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { FileText, Link2, Trash2 } from "lucide-react";
+import { Check, Download, FileText, Link2, Trash2 } from "lucide-react";
+import { ConnectDrive, DriveLogo } from "../crm/inbox/attachment-strip";
 import { DIRECTION_LABEL, DOC_STATES, STATE_LABEL, documentSection, type DocState, type ListingDocument } from "@/lib/bulk-documents";
 import { isImage, shortDate } from "@/lib/bulk-trade-details";
 import { ErrorText, request } from "./trade-ui";
@@ -38,6 +39,17 @@ function DocCard({ listingId, doc, onChange, onRemove, onError, loading = false 
     try { onChange((await request<{ document: ListingDocument }>(docsUrl(listingId, `/${doc.id}`), { method: "PATCH", body: JSON.stringify(patch) })).document); }
     catch (err) { onError(err instanceof Error ? err.message : "Could not save."); }
   }
+  const [drive, setDrive] = useState<{ status: "idle" | "saving" | "connect" } | { status: "saved"; url: string; converted: boolean }>({ status: "idle" });
+  async function toDrive() {
+    setDrive({ status: "saving" });
+    try {
+      const response = await fetch(docsUrl(listingId, `/${doc.id}/drive`), { method: "POST" });
+      const body = await response.json().catch(() => ({})) as { url?: string; converted?: boolean; error?: string; message?: string };
+      if (response.status === 409 && body.error === "drive_not_connected") { setDrive({ status: "connect" }); return; }
+      if (!response.ok || !body.url) throw new Error(body.message ?? "Couldn't save to Drive.");
+      setDrive({ status: "saved", url: body.url, converted: !!body.converted });
+    } catch (err) { setDrive({ status: "idle" }); onError(err instanceof Error ? err.message : "Couldn't save to Drive."); }
+  }
   async function remove() {
     try { await request(docsUrl(listingId, `/${doc.id}`), { method: "DELETE" }); onRemove(doc.id); }
     catch (err) { onError(err instanceof Error ? err.message : "Could not delete."); }
@@ -60,8 +72,17 @@ function DocCard({ listingId, doc, onChange, onRemove, onError, loading = false 
           </select>}
           {doc.direction !== "received" && <span className="text-[12px]" style={{ color: "var(--bt-muted)" }}><Sh on={loading} chars={7}>{DIRECTION_LABEL[doc.direction]}</Sh></span>}
           <span className="flex-1" />
+          {!loading && doc.has_file && (<>
+            {drive.status === "saved"
+              ? <a className="p-1" href={drive.url} target="_blank" rel="noopener noreferrer" title={`Saved to Google Drive${drive.converted ? " as a Google file" : ""} · open`} aria-label={`Open ${doc.title} in Google`}><Check size={13} aria-hidden="true" style={{ color: "var(--bt-muted)" }} /></a>
+              : <button type="button" className="p-1" disabled={drive.status === "saving"} title="Open in Google Docs / Sheets" aria-label={`Open ${doc.title} in Google Docs or Sheets`} onClick={() => void toDrive()}>
+                {drive.status === "saving" ? <span className="block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden="true" /> : <DriveLogo />}
+              </button>}
+            <a className="p-1" href={docsUrl(listingId, `/${doc.id}/file`)} download={doc.file_name ?? undefined} title="Download" aria-label={`Download ${doc.title}`} style={{ color: "var(--bt-muted)" }}><Download size={13} aria-hidden="true" /></a>
+          </>)}
           <button disabled={loading} type="button" aria-label={`Delete ${doc.title}`} className="p-1" style={{ color: "var(--bt-muted)" }} onClick={() => void remove()}><Trash2 size={13} aria-hidden="true" /></button>
         </div>
+        {drive.status === "connect" && <ConnectDrive onCancel={() => setDrive({ status: "idle" })} onConnected={() => void toDrive()} />}
       </div>
     </li>
   );
