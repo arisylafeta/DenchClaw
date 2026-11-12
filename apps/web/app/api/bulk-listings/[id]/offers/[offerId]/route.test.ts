@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({ user: vi.fn(), listing: vi.fn(), offer: vi.fn(
 vi.mock("@/lib/auth", () => ({ currentUser: mocks.user }));
 vi.mock("@/lib/crm-postgres/bulk-listings", () => ({ getListing: mocks.listing }));
 vi.mock("@/lib/crm-postgres/bulk-offer-mail", () => ({ markNoStock: mocks.noStock }));
+vi.mock("@/lib/bulk-offer-position", () => ({ offerPositions: async () => new Map() }));
 vi.mock("@/lib/crm-postgres/bulk-offers", async (orig) => ({
   ...(await orig<typeof import("@/lib/crm-postgres/bulk-offers")>()),
   getOffer: mocks.offer, updateOffer: mocks.update, linkOffer: vi.fn(), addThreadEntry: vi.fn(), offerThread: vi.fn(),
@@ -30,6 +31,17 @@ describe("offer PATCH", () => {
         expect(response.status).toBe(400);
       }
     }
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("sets whose move by hand, switches a chase off and skips a suggestion, and refuses anything else", async () => {
+    mocks.update.mockResolvedValue({ id: "bto_1", stage: "offered" });
+    expect((await PATCH(patch({ turn: "them" }), context)).status).toBe(200);
+    expect(mocks.update).toHaveBeenLastCalledWith("btl_1", "bto_1", { turn: "them" }, "user");
+    expect((await PATCH(patch({ turn: null, chaseOff: true, stageHintSkip: "m1" }), context)).status).toBe(200);
+    expect(mocks.update).toHaveBeenLastCalledWith("btl_1", "bto_1", { turn: null, chaseOff: true, stageHintSkip: "m1" }, "user");
+    mocks.update.mockClear();
+    for (const body of [{ turn: "maybe" }, { chaseOff: false }, { stageHintSkip: "" }]) expect((await PATCH(patch(body), context)).status).toBe(400);
     expect(mocks.update).not.toHaveBeenCalled();
   });
 
