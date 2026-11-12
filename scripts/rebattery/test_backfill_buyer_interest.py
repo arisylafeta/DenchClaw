@@ -5,6 +5,7 @@ Set BULK_TRADES_TEST_DATABASE_URL (scripts/rebattery/crm-test-db.sh up prints th
 import contextlib
 import importlib.util
 import io
+import json
 import unittest
 import uuid
 from pathlib import Path
@@ -71,12 +72,22 @@ class Backfill(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         with cls.conn.cursor() as cur:
-            cur.execute("delete from buyer_interest where company_id = any(%s)", ([cls.company, cls.dossier_company],))
-            cur.execute("delete from buyer_interest_sync_errors where source_id like %s", (f"%{cls.tag}%",))
-            cur.execute("delete from crm_bulk_offers where company_id = any(%s)", ([cls.company, cls.dossier_company],))
-            cur.execute("delete from crm_bulk_listings where company_id = any(%s)", ([cls.company, cls.dossier_company],))
-            cur.execute("delete from crm_people where id = %s", (cls.person,))
-            cur.execute("delete from crm_companies where id = any(%s)", ([cls.company, cls.dossier_company],))
+            for sql, params in (
+                ("delete from buyer_interest where company_id = any(%s)", ([cls.company, cls.dossier_company],)),
+                ("delete from buyer_interest_sync_errors where source_id like %s", (f"%{cls.tag}%",)),
+                ("delete from crm_bulk_offers where company_id = any(%s)", ([cls.company, cls.dossier_company],)),
+                ("delete from crm_bulk_listings where company_id = any(%s)", ([cls.company, cls.dossier_company],)),
+                ("delete from crm_people where id = %s", (cls.person,)),
+                ("delete from crm_companies where id = any(%s)", ([cls.company, cls.dossier_company],)),
+            ):
+                cur.execute("savepoint test_cleanup")
+                try:
+                    cur.execute(sql, params)
+                    cur.execute("release savepoint test_cleanup")
+                except Exception:  # noqa: BLE001
+                    # A retired Bulk Trades table refuses the cascade on rows it still references. That is the
+                    # database's rule, not a failed test: the fixture rows are left for the disposable copy.
+                    cur.execute("rollback to savepoint test_cleanup")
         cls.conn.commit()
         cls.conn.close()
 
@@ -253,9 +264,9 @@ products:
 The story, unchanged by this step.
 """
 
-    def write_dossier(self, products_status=None):
+    def write_dossier(self, products_status=None, markdown=None):
         """The 10 pilot buyers, as the backfill sees them: a company whose buyer_dossier holds frontmatter."""
-        markdown = self.DOSSIER.format(company=self.dossier_company, tag=self.tag)
+        markdown = markdown or self.DOSSIER.format(company=self.dossier_company, tag=self.tag)
         if products_status:
             markdown = markdown.replace('status: "asked"', f'status: "{products_status}"', 1)
         with self.cursor() as cur:
@@ -280,7 +291,8 @@ The story, unchanged by this step.
             ("bought", "part:EBS37"),
             ("declined", "part:SU001B5189"),
             ("interest", "broad:stellantis-nmc-cells"),
-            ("standing", "broad:bmw-volvo-any-packs"),
+            ("standing", "broad:bmw-any-packs"),
+            ("standing", "broad:volvo-any-packs"),
             ("standing", "broad:vw-group-any-packs"),
         ])
         line = next(line for line in lines if line["product_key"] == "part:EBS37")
@@ -358,6 +370,162 @@ The story, unchanged by this step.
             with self.cursor() as cur:
                 cur.execute("delete from crm_company_context_notes where id = %s", (f"ccn_savedsearch_{self.tag}",))
             self.conn.commit()
+
+
+    # --- keys the sources must not invent ----------------------------------
+    def test_a_compound_make_becomes_one_line_per_make(self):
+        row_id = self.demand_row(spec={"makes": ["MG, Stellantis, Tesla"], "chemistries": ["LFP"], "formats": ["Packs"]})
+        self.sync([row_id])
+        self.assertEqual([line["product_key"] for line in self.lines()], [
+            "broad:mg-lfp-packs", "broad:stellantis-lfp-packs", "broad:tesla-lfp-packs"])
+
+    def test_a_row_that_states_no_product_gets_a_note_instead_of_a_line(self):
+        # A quantity and nothing else: the row names no product, so it is history without a want.
+        row_id = self.demand_row(status="closed", closed_reason="bought_elsewhere",
+                                 spec={"volume": 2, "volume_unit": "packs"})
+        self.sync([row_id])
+        self.assertEqual(self.lines(), [])
+        with self.cursor() as cur:
+            cur.execute("select operation, message from buyer_interest_sync_errors where source_id = %s", (row_id,))
+            notes = cur.fetchall() or []
+        self.assertEqual([note["operation"] for note in notes], ["no_product_facts"])
+        self.assertIn("no product fact", notes[0]["message"])
+        # A re-run rewrites the note rather than piling it up.
+        self.sync([row_id])
+        with self.cursor() as cur:
+            cur.execute("select count(*) as n from buyer_interest_sync_errors where source_id = %s", (row_id,))
+            self.assertEqual(cur.fetchone()["n"], 1)
+        # A row that later states a product keeps the line and loses the complaint.
+        with self.cursor() as cur:
+            cur.execute("""update crm_bulk_listings set spec = '{"makes": ["Tesla"], "formats": ["Packs"]}'::jsonb
+                            where id = %s""", (row_id,))
+            cur.execute("select buyer_interest_sync_demand_row(%s)", (row_id,))
+        self.conn.commit()
+        self.assertEqual([line["product_key"] for line in self.lines()], ["broad:tesla-any-packs"])
+        with self.cursor() as cur:
+            cur.execute("select count(*) as n from buyer_interest_sync_errors where source_id = %s", (row_id,))
+            self.assertEqual(cur.fetchone()["n"], 0)
+
+    def test_an_offer_whose_listing_states_no_product_gets_a_note_instead_of_a_line(self):
+        listing_id = f"btl_backfill_{uuid.uuid4().hex[:12]}_{self.tag}"
+        offer_id = f"bto_backfill_{uuid.uuid4().hex[:12]}_{self.tag}"
+        with self.cursor() as cur:
+            cur.execute("""insert into crm_bulk_listings (id, kind, party, company_id, summary, status, observed_on, quantity)
+                           values (%s, 'supply', 'Supply lot', %s, 'a lot that names no product', 'open', '2026-10-01',
+                             '40 packs')""", (listing_id, self.company))
+            cur.execute("""insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, name, stage, terms)
+                           values (%s, %s, 'counterparty', %s, 'Offer Buyer', 'paid', '{"amount": 100}'::jsonb)""",
+                        (offer_id, listing_id, self.company))
+        self.conn.commit()
+        self.sync([offer_id], source_table="crm_bulk_offers")
+        self.assertEqual(self.lines(), [])
+        with self.cursor() as cur:
+            cur.execute("""select source_table, message from buyer_interest_sync_errors
+                            where source_id = %s and operation = 'no_product_facts'""", (offer_id,))
+            notes = cur.fetchall() or []
+        self.assertEqual(len(notes), 1)
+        note = notes[0]
+        self.assertEqual(note["source_table"], "crm_bulk_offers")
+        self.assertIn(listing_id, note["message"])
+
+    def test_a_dossier_prose_model_keeps_its_wording_out_of_the_key(self):
+        self.write_dossier(markdown="""---
+company_id: "{company}"
+company: "Dossier Test Buyer"
+last_verified: "2026-11-04"
+products:
+  - make: "VW Group"
+    model: "82 kWh: ID.4, Q4 e-tron, Enyaq, ID.7, Elroq"
+    format: packs
+    chemistry: NMC
+    kwh: [82]
+    status: "asked"
+    seen: "2026-10-07"
+---
+The story.
+""".format(company=self.dossier_company))
+        self.convert()
+        [line] = self.lines(self.dossier_company)
+        self.assertEqual(line["product_key"], "broad:vw-group-nmc-packs")
+        self.assertEqual(line["raw_product"], "82 kWh: ID.4, Q4 e-tron, Enyaq, ID.7, Elroq")
+        self.assertEqual(line["model"], "82 kWh: ID.4, Q4 e-tron, Enyaq, ID.7, Elroq")
+
+    def test_a_product_name_in_part_number_is_not_a_part_key(self):
+        self.write_dossier(markdown="""---
+company_id: "{company}"
+company: "Dossier Test Buyer"
+last_verified: "2026-11-04"
+products:
+  - make: "Proterra"
+    part_number: "Onyx Strata H4-15"
+    format: packs
+    status: "declined"
+    seen: "2026-07-02"
+---
+The story.
+""".format(company=self.dossier_company))
+        self.convert()
+        [line] = self.lines(self.dossier_company)
+        self.assertEqual(line["product_key"], "broad:proterra-any-packs")
+        self.assertEqual(line["product_key_level"], "broad")
+        self.assertEqual(line["raw_product"], "Onyx Strata H4-15")
+        self.assertEqual(line["model"], "Onyx Strata H4-15")
+
+    # --- (e) buy-box coverage ---------------------------------------------
+    def buy_box_company(self, profile):
+        """Its own company: a buy box is chosen by the absence of rows, so no leftover from another test may join in."""
+        company = f"co_buybox_{uuid.uuid4().hex[:8]}_{self.tag}"
+        with self.cursor() as cur:
+            cur.execute("""insert into crm_companies (id, name, buyer_profile, buyer_profiled_at)
+                           values (%s, 'Buy-box Test Buyer', %s::jsonb, '2026-10-05')""",
+                        (company, json.dumps(profile)))
+        self.conn.commit()
+        return company
+
+    def drop_company(self, company):
+        """Emptied, not deleted: a retired Bulk Trades table rejects the cascade on crm_companies in this database."""
+        with self.cursor() as cur:
+            cur.execute("delete from buyer_interest where company_id = %s", (company,))
+            cur.execute("delete from buyer_interest_sync_errors where source_id = %s", (company,))
+            cur.execute("""update crm_companies set buyer_profile = '{}'::jsonb, buyer_profiled_at = null
+                            where id = %s""", (company,))
+        self.conn.commit()
+
+    def test_a_buy_box_with_no_source_row_becomes_an_inferred_line(self):
+        company = self.buy_box_company({"makes": ["Tesla"], "formats": ["Packs"]})
+        try:
+            with self.cursor() as cur:
+                rows = [row for row in self.backfill.buy_box_rows(cur) if row["id"] == company]
+                self.assertEqual(len(rows), 1)
+                result = self.backfill.sync_buy_box_rows(cur, rows)
+            self.conn.commit()
+            self.assertEqual(result["written"], 1, result)
+            [line] = self.lines(company)
+            self.assertEqual(line["kind"], "inferred")
+            self.assertEqual(line["ownership"], "mastered")
+            self.assertEqual(line["product_key"], "broad:tesla-any-packs")
+            self.assertEqual(str(line["first_seen"]), "2026-10-05")
+            self.assertEqual(str(line["expires_on"]), "2027-04-03")  # inferred: first seen + 180 days
+            self.assertIn("crm:buyer_profile", line["source_refs"])
+        finally:
+            self.drop_company(company)
+
+    def test_a_buy_box_that_states_no_product_is_recorded_not_invented(self):
+        company = self.buy_box_company({"wants": "All listings"})
+        try:
+            with self.cursor() as cur:
+                rows = [row for row in self.backfill.buy_box_rows(cur) if row["id"] == company]
+                result = self.backfill.sync_buy_box_rows(cur, rows)
+            self.conn.commit()
+            self.assertEqual(result["skipped"], 1, result)
+            self.assertEqual(self.lines(company), [])
+            with self.cursor() as cur:
+                cur.execute("""select message from buyer_interest_sync_errors
+                                where source_id = %s and operation = 'no_product_facts'""", (company,))
+                note = cur.fetchone() or {}
+            self.assertIn("buy box", note.get("message") or "")
+        finally:
+            self.drop_company(company)
 
 
 if __name__ == "__main__":

@@ -16,11 +16,18 @@ replays the write paths that already exist over the existing data, so nothing ha
             whose source is a saved search. The live saved searches are on the platform and are NOT read here.
   dossier   the pilot dossiers' frontmatter products, as mastered lines (asked -> standing, said_interested ->
             interest) and as bought/declined history when no offer or demand row already says the same thing.
-            The dossier text is not touched.
+            A product that names several makes is one line per make; a prose model falls back to its make-level
+            key with the wording kept on the line. The dossier text is not touched.
+  buy box   the buy boxes no other batch reaches: no dossier, no line, no closed profile row. Inferred lines from
+            the profile's own facts, first seen when the profile was made (buyer_profiled_at, else the earliest
+            recorded profile change). This is the coverage floor, not a guess about what the buyer wants.
 
-Dry run by default: every batch runs inside a savepoint that is rolled back, so the preview counts real writes.
---apply writes one transaction per batch. Re-running is safe: every path upserts on its own unique key, and the
-dossier lines carry a deterministic id.
+A source that states no product fact at all is not turned into a broad:any-batteries line: it is recorded in
+buyer_interest_sync_errors as operation 'no_product_facts' (with the source id) so a person can fix the source.
+
+Dry run by default: every batch runs inside one transaction that is rolled back at the end, so each batch sees
+what the earlier ones wrote and the counts are what an apply would leave. --apply writes one transaction per
+batch. Re-running is safe: every path upserts on its own unique key, and the dossier lines carry a deterministic id.
 
   backfill_buyer_interest.py                                  # dry run against the local CRM database
   backfill_buyer_interest.py --dsn <dsn> --apply              # write (production needs --i-have-approval)
@@ -99,11 +106,14 @@ def _in_batches(ids, size):
 
 
 def _clear_truncations(cur, source_ids):
-    """A truncation note describes a source row's current fan-out, so a re-run rewrites it, never piles it up."""
+    """A truncation note describes a source row's current fan-out, so a re-run rewrites it, never piles it up.
+
+    The same holds for the no-product note: a row that now states a product must not keep the old complaint.
+    """
     ids = [str(value) for value in source_ids if value]
     if ids:
         cur.execute("""delete from buyer_interest_sync_errors
-                        where operation = 'truncated' and source_id = any(%s)""", (ids,))
+                        where operation in ('truncated', 'no_product_facts') and source_id = any(%s)""", (ids,))
 
 
 def _ids(cur, sql, params=()):
@@ -323,16 +333,27 @@ def product_facts(product):
     return facts
 
 
+def _fact_sets(cur, facts):
+    """The fact sets the SQL builder fans one source row into, plus how many combinations it states."""
+    cur.execute("""select fs.facts as fact_sets, fs.stated_total as stated
+                     from buyer_interest_fact_sets(%s::jsonb) fs""", (json.dumps(facts or {}),))
+    row = cur.fetchone()
+    return list(row["fact_sets"] or []), int(row["stated"] or 0)
+
+
 def _keyed(cur, facts):
     """The product key and its facts, from the same SQL builder the triggers use."""
-    cur.execute("""with facts as (select buyer_interest_facts(%s::jsonb) as facts),
+    payload = json.dumps(facts or {})
+    cur.execute("""with facts as (select %s::jsonb as facts),
                         keyed as (select facts, buyer_interest_product_key(facts) as key from facts)
-                   select key, buyer_interest_key_level(key) as level, facts->>'make' as make, facts->>'model' as model,
+                   select key, buyer_interest_key_level(key) as level, buyer_interest_states_product(facts) as stated,
+                          buyer_interest_raw_product(facts) as raw_product,
+                          facts->>'make' as make, facts->>'model' as model,
                           buyer_interest_format(facts->>'format') as format,
                           buyer_interest_chemistry(facts->>'chemistry') as chemistry,
                           buyer_interest_number(facts->'kwh_min') as kwh_min,
                           buyer_interest_number(facts->'kwh_max') as kwh_max
-                     from keyed""", (json.dumps(facts or {}),))
+                     from keyed""", (payload,))
     return cur.fetchone()
 
 
@@ -349,16 +370,57 @@ def _already_says(cur, company_id, key, kind):
     return cur.fetchone() is not None
 
 
+def _write_line(cur, company_id, kind, ownership, keyed, seen, refs):
+    """One mastered line per product and make; a synced line per purchase or decline, keyed by its source."""
+    if ownership == "mastered":
+        cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key,
+                         product_key_level, make, model, raw_product, format, chemistry, kwh_min, kwh_max,
+                         first_seen, last_seen, quantity_basis, source_refs, expires_on)
+                       values (%s, %s, %s, 'mastered', %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                         coalesce(%s::date, current_date), coalesce(%s::date, current_date), 'not_stated',
+                         %s::text[], coalesce(%s::date, current_date) + case when %s = 'standing'
+                           then 90 else 180 end)
+                       on conflict (company_id, product_key, kind) where ownership = 'mastered'
+                       do update set first_seen = least(buyer_interest.first_seen, excluded.first_seen),
+                         last_seen = greatest(buyer_interest.last_seen, excluded.last_seen),
+                         expires_on = greatest(buyer_interest.expires_on, excluded.expires_on),
+                         model = coalesce(buyer_interest.model, excluded.model),
+                         raw_product = coalesce(buyer_interest.raw_product, excluded.raw_product),
+                         source_refs = (select array_agg(distinct ref order by ref)
+                           from unnest(buyer_interest.source_refs || excluded.source_refs) ref),
+                         updated_at = now()""",
+                    (_dossier_line_id(company_id, kind, keyed["key"]), company_id, kind,
+                     keyed["key"], keyed["level"], keyed["make"], keyed["model"], keyed["raw_product"],
+                     keyed["format"], keyed["chemistry"], keyed["kwh_min"], keyed["kwh_max"], seen, seen, refs,
+                     seen, kind))
+    else:
+        cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key,
+                         product_key_level, make, model, raw_product, format, chemistry, kwh_min, kwh_max,
+                         first_seen, last_seen, quantity_basis, source_refs, decline_reason)
+                       values (%s, %s, %s, 'synced', %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                         coalesce(%s::date, current_date), coalesce(%s::date, current_date), 'not_stated',
+                         %s::text[], %s)
+                       on conflict (id) do update set last_seen = greatest(buyer_interest.last_seen,
+                         excluded.last_seen),
+                         source_refs = (select array_agg(distinct ref order by ref)
+                           from unnest(buyer_interest.source_refs || excluded.source_refs) ref),
+                         updated_at = now()""",
+                    (_dossier_line_id(company_id, kind, keyed["key"]), company_id, kind,
+                     keyed["key"], keyed["level"], keyed["make"], keyed["model"], keyed["raw_product"],
+                     keyed["format"], keyed["chemistry"], keyed["kwh_min"], keyed["kwh_max"], seen, seen, refs,
+                     "dossier product marked " + kind))
+
+
 def sync_dossier_rows(cur, companies):
-    """One mastered line per dossier product; the frontmatter itself is left exactly as it is."""
-    written, skipped, from_source, no_facts, errors = 0, 0, 0, 0, 0
+    """One mastered line per dossier product and per make it states; the frontmatter itself is left as it is."""
+    written, skipped, from_source, no_facts, truncated, errors = 0, 0, 0, 0, 0, 0
     for company in companies:
         frontmatter, _body = buyer_dossier.parse(company.get("buyer_dossier") or "")
         products = frontmatter.get("products") or []
         if isinstance(products, dict):  # a mapping instead of a list: one product
             products = [products]
         last_verified = frontmatter.get("last_verified")
-        for product in products:
+        for index, product in enumerate(products):
             if not isinstance(product, dict):
                 skipped += 1
                 continue
@@ -369,60 +431,98 @@ def sync_dossier_rows(cur, companies):
             kind, ownership = mapping
             cur.execute("savepoint bi_row")
             try:
-                keyed = _keyed(cur, product_facts(product))
-                if not keyed or keyed["key"] == "broad:any-batteries":
+                # One line per stated combination, exactly as a demand row fans out: "BMW, Volvo" is two makes.
+                fact_sets, stated = _fact_sets(cur, product_facts(product))
+                keyed_lines = [keyed for keyed in (_keyed(cur, fact) for fact in fact_sets) if keyed and keyed["stated"]]
+                if not keyed_lines:
                     cur.execute("release savepoint bi_row")
-                    no_facts += 1  # the product names no fact at all
+                    no_facts += 1
+                    _record_error(cur, "crm_companies", f"{company['id']}:{index}", "no_product_facts",
+                                  "dossier product states no product fact: "
+                                  + json.dumps(product, ensure_ascii=False)[:160])
                     continue
-                if kind in ("bought", "declined") and _already_says(cur, company["id"], keyed["key"], kind):
-                    cur.execute("release savepoint bi_row")
-                    from_source += 1
-                    continue
+                if stated > len(keyed_lines):
+                    truncated += 1
+                    _record_error(cur, "crm_companies", f"{company['id']}:{index}", "truncated",
+                                  f"kept {len(keyed_lines)} of {stated} stated combinations")
                 seen = str(product.get("seen") or last_verified or "")[:10] or None
                 refs = [str(product["src"])] if product.get("src") else [f"crm:dossier:{company['id']}"]
-                if ownership == "mastered":
-                    cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key,
-                                     product_key_level, make, model, format, chemistry, kwh_min, kwh_max,
-                                     first_seen, last_seen, quantity_basis, source_refs, expires_on)
-                                   values (%s, %s, %s, 'mastered', %s, %s, %s, %s, %s, %s, %s, %s,
-                                     coalesce(%s::date, current_date), coalesce(%s::date, current_date), 'not_stated',
-                                     %s::text[], coalesce(%s::date, current_date) + case when %s = 'standing'
-                                       then 90 else 180 end)
-                                   on conflict (company_id, product_key, kind) where ownership = 'mastered'
-                                   do update set first_seen = least(buyer_interest.first_seen, excluded.first_seen),
-                                     last_seen = greatest(buyer_interest.last_seen, excluded.last_seen),
-                                     expires_on = greatest(buyer_interest.expires_on, excluded.expires_on),
-                                     source_refs = (select array_agg(distinct ref order by ref)
-                                       from unnest(buyer_interest.source_refs || excluded.source_refs) ref),
-                                     updated_at = now()""",
-                                (_dossier_line_id(company["id"], kind, keyed["key"]), company["id"], kind,
-                                 keyed["key"], keyed["level"], keyed["make"], keyed["model"], keyed["format"],
-                                 keyed["chemistry"], keyed["kwh_min"], keyed["kwh_max"], seen, seen, refs,
-                                 seen, kind))
-                else:
-                    cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key,
-                                     product_key_level, make, model, format, chemistry, kwh_min, kwh_max,
-                                     first_seen, last_seen, quantity_basis, source_refs, decline_reason)
-                                   values (%s, %s, %s, 'synced', %s, %s, %s, %s, %s, %s, %s, %s,
-                                     coalesce(%s::date, current_date), coalesce(%s::date, current_date), 'not_stated',
-                                     %s::text[], %s)
-                                   on conflict (id) do update set last_seen = greatest(buyer_interest.last_seen,
-                                     excluded.last_seen),
-                                     source_refs = (select array_agg(distinct ref order by ref)
-                                       from unnest(buyer_interest.source_refs || excluded.source_refs) ref),
-                                     updated_at = now()""",
-                                (_dossier_line_id(company["id"], kind, keyed["key"]), company["id"], kind,
-                                 keyed["key"], keyed["level"], keyed["make"], keyed["model"], keyed["format"],
-                                 keyed["chemistry"], keyed["kwh_min"], keyed["kwh_max"], seen, seen, refs,
-                                 "dossier product marked " + kind))
+                for keyed in keyed_lines:
+                    if kind in ("bought", "declined") and _already_says(cur, company["id"], keyed["key"], kind):
+                        from_source += 1
+                        continue
+                    _write_line(cur, company["id"], kind, ownership, keyed, seen, refs)
+                    written += 1
                 cur.execute("release savepoint bi_row")
-                written += 1
             except Exception as exc:  # noqa: BLE001
                 cur.execute("rollback to savepoint bi_row")
                 _record_error(cur, "crm_companies", company["id"], "dossier", exc)
                 errors += 1
     return {"companies": len(companies), "written": written, "skipped": skipped,
-            "already_from_source": from_source, "no_facts": no_facts, "errors": errors}
+            "already_from_source": from_source, "no_facts": no_facts, "truncated": truncated, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
+# (e) Buy boxes nothing else reaches: the profile itself is the evidence
+# ---------------------------------------------------------------------------
+def buy_box_rows(cur):
+    """Buy boxes with no dossier, no line and no closed profile row: the profile is the only thing stating them."""
+    cur.execute("""select c.id, c.name, c.buyer_profile,
+                          coalesce(c.buyer_profiled_at,
+                            (select min(ch.changed_at)::date from crm_buyer_profile_changes ch
+                              where ch.company_id = c.id)) as since
+                     from crm_companies c
+                    where c.buyer_profile is not null and c.buyer_profile <> '{}'::jsonb
+                      and c.buyer_dossier is null
+                      and not exists (select 1 from buyer_interest b where b.company_id = c.id)
+                      and not exists (select 1 from crm_bulk_listings l
+                                       where l.company_id = c.id and l.kind = 'demand' and l.status = 'closed'
+                                         and l.closed_reason = any(%s))
+                    order by c.id""", (list(PROFILE_REASONS),))
+    return cur.fetchall()
+
+
+def buy_box_spec(profile):
+    """The product facts a buy box states, in the shape the fact-set builder reads."""
+    profile = profile or {}
+    return {key: profile[key] for key in BUY_BOX_KEYS if profile.get(key) not in (None, "", [], {})}
+
+
+def sync_buy_box_rows(cur, companies):
+    """An inferred line per stated fact, first seen when the profile was made.
+
+    This is the coverage floor: a buyer with a buy box and no source row still gets the wants their profile states,
+    and a profile that states no product is recorded rather than turned into an empty bucket.
+    """
+    written, skipped, truncated, errors = 0, 0, 0, 0
+    for company in companies:
+        profile = company["buyer_profile"] or {}
+        cur.execute("savepoint bi_row")
+        try:
+            fact_sets, stated = _fact_sets(cur, buy_box_spec(profile))
+            keyed_lines = [keyed for keyed in (_keyed(cur, fact) for fact in fact_sets) if keyed and keyed["stated"]]
+            if not keyed_lines:
+                cur.execute("release savepoint bi_row")
+                skipped += 1
+                _record_error(cur, "crm_companies", company["id"], "no_product_facts",
+                              "buy box states no product fact: " + json.dumps(profile, ensure_ascii=False)[:160])
+                continue
+            if stated > len(keyed_lines):
+                truncated += 1
+                _record_error(cur, "crm_companies", company["id"], "truncated",
+                              f"kept {len(keyed_lines)} of {stated} stated combinations")
+            since = str(company["since"] or dt.date.today().isoformat())[:10]
+            for keyed in keyed_lines:
+                _write_line(cur, company["id"], "inferred", "mastered", keyed, since,
+                            [f"crm:{company['id']}", "crm:buyer_profile"])
+                written += 1
+            cur.execute("release savepoint bi_row")
+        except Exception as exc:  # noqa: BLE001
+            cur.execute("rollback to savepoint bi_row")
+            _record_error(cur, "crm_companies", company["id"], "buy_box", exc)
+            errors += 1
+    return {"companies": len(companies), "written": written, "skipped": skipped, "truncated": truncated,
+            "errors": errors}
 
 
 # ---------------------------------------------------------------------------
@@ -433,8 +533,8 @@ def count_lines(cur):
     return {f"{row['kind']}:{row['ownership']}": row["n"] for row in cur.fetchall()}
 
 
-def _batch(cur, name, payload_ids, work, apply_writes):
-    """One transaction per batch; on a dry run the batch is rolled back and its counts are kept."""
+def _batch(cur, name, payload_ids, work, apply_writes, dry_run=False):
+    """One transaction per batch when applying; a dry run keeps every batch and rolls the whole run back at the end."""
     cur.execute("savepoint bi_batch")
     before = count_lines(cur)
     result = work(cur)
@@ -445,6 +545,9 @@ def _batch(cur, name, payload_ids, work, apply_writes):
     if apply_writes:
         cur.execute("release savepoint bi_batch")
         cur.connection.commit()
+    elif dry_run:
+        # Kept inside the dry run's own transaction, so the next batch sees what this one would have written.
+        cur.execute("release savepoint bi_batch")
     else:
         cur.execute("rollback to savepoint bi_batch")
         cur.connection.rollback()
@@ -455,11 +558,17 @@ def run(conn, apply_writes=False, batch_size=BATCH):
     """Every source batch, in order. Returns a summary of each batch and the line totals."""
     import psycopg2.extras
     summary = {"batches": [], "apply": bool(apply_writes)}
+    dry_run = not apply_writes
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("select to_regclass('public.buyer_interest') as name")
         if not cur.fetchone()["name"]:
             raise SystemExit("buyer_interest does not exist: apply migration 112 first")
         summary["lines_at_start"] = count_lines(cur)
+        if dry_run:
+            cur.execute("savepoint bi_dry_run")
+
+        def batch(name, work):
+            summary["batches"].append(_batch(cur, name, None, work, apply_writes, dry_run))
 
         for name, sql, work in (
             ("demand", "select id from crm_bulk_listings where kind = 'demand' order by id",
@@ -469,24 +578,27 @@ def run(conn, apply_writes=False, batch_size=BATCH):
         ):
             ids = _ids(cur, sql)
             for n, chunk in enumerate(_in_batches(ids, batch_size), start=1):
-                summary["batches"].append(_batch(cur, f"{name}-{n}", chunk, work(chunk), apply_writes))
+                batch(f"{name}-{n}", work(chunk))
 
         rows = profile_rows(cur)
         for n, chunk in enumerate(_in_batches(rows, batch_size), start=1):
-            summary["batches"].append(_batch(cur, f"profile-{n}", chunk,
-                                             lambda c, chunk=chunk: sync_profile_rows(c, chunk), apply_writes))
+            batch(f"profile-{n}", lambda c, chunk=chunk: sync_profile_rows(c, chunk))
 
         searches = saved_search_rows(cur)
-        summary["batches"].append(_batch(cur, "saved-search-1", searches,
-                                         lambda c: sync_saved_search_rows(c, searches), apply_writes))
+        batch("saved-search-1", lambda c: sync_saved_search_rows(c, searches))
 
         companies = dossier_rows(cur)
-        summary["batches"].append(_batch(cur, "dossier-1", companies,
-                                         lambda c: sync_dossier_rows(c, companies), apply_writes))
+        batch("dossier-1", lambda c: sync_dossier_rows(c, companies))
+
+        # Last, so the buy boxes that other batches just covered are already excluded.
+        batch("buy-box-1", lambda c: sync_buy_box_rows(c, buy_box_rows(c)))
 
         summary["lines_at_end"] = count_lines(cur)
         cur.execute("select count(*) as n from buyer_interest_sync_errors")
         summary["sync_errors"] = cur.fetchone()["n"]
+        if dry_run:
+            cur.execute("rollback to savepoint bi_dry_run")
+            conn.rollback()
     return summary
 
 

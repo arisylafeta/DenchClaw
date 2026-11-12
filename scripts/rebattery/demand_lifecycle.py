@@ -2,6 +2,7 @@
 import datetime as dt
 import hashlib
 import json
+import re
 import uuid
 
 FREEMAIL = {'gmail', 'googlemail', 'yahoo', 'outlook', 'hotmail', 'icloud', 'proton', 'protonmail', 'aol', 'live', 'gmx', 'mail'}
@@ -197,6 +198,28 @@ def _stated_values(values, *singles):
     return sorted(dict.fromkeys(stated), key=str.casefold) or [None]
 
 
+# "BMW / Volvo" and "MG, Stellantis, Tesla" are separate makes; "Hyundai or Kia" is one group name.
+MAKE_SEPARATORS = re.compile(r'\s*(?:,|/|&|\band\b)\s*', re.IGNORECASE)
+
+
+def split_makes(values):
+    """Every make a stated list names, split like buyer_interest_make_list() in SQL. Empty in, empty out."""
+    makes = {}
+    for value in values or []:
+        if value is None:
+            continue
+        for piece in MAKE_SEPARATORS.split(str(value)):
+            piece = piece.strip()
+            if piece:
+                makes[piece] = None
+    return sorted(makes, key=str.casefold)
+
+
+def _make_values(spec):
+    """The stated makes, split; one 'not stated' slot when the spec names none."""
+    return split_makes(_stated_values(spec.get('makes'), spec.get('make'))) or [None]
+
+
 def interest_facts(spec):
     """One fact dict per stated make x chemistry x format, capped at INTEREST_FACT_COMBINATIONS.
 
@@ -220,7 +243,7 @@ def interest_facts(spec):
         'kwh_max': spec.get('kwh_max') or spec.get('kwhMax'), 'cell_maker': single('cell_makers', 'cell_maker'),
     }
     facts = []
-    for make in _stated_values(spec.get('makes'), spec.get('make')):
+    for make in _make_values(spec):
         for chemistry in _stated_values(spec.get('chemistries'), spec.get('chemistry')):
             for fmt in _stated_values(spec.get('formats'), spec.get('format')):
                 if len(facts) >= INTEREST_FACT_COMBINATIONS:
@@ -232,7 +255,7 @@ def interest_facts(spec):
 def interest_fact_total(spec):
     """How many combinations the spec states before the cap, for the truncation note."""
     spec = spec or {}
-    return (len(_stated_values(spec.get('makes'), spec.get('make')))
+    return (len(_make_values(spec))
             * len(_stated_values(spec.get('chemistries'), spec.get('chemistry')))
             * len(_stated_values(spec.get('formats'), spec.get('format'))))
 
