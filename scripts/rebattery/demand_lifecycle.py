@@ -177,6 +177,8 @@ def _record_saved_search(cur, row):
 
 INTEREST_KINDS = ('standing', 'interest', 'inferred')
 INTEREST_EXPIRY_DAYS = {'standing': 90, 'interest': 180, 'inferred': 180}
+# One source may hold this many lines; a longer list is truncated and recorded, never dropped silently.
+INTEREST_FACT_COMBINATIONS = 12
 
 
 def interest_table_ready(cur):
@@ -187,25 +189,67 @@ def interest_table_ready(cur):
     return bool(name)
 
 
+def _stated_values(values, *singles):
+    """Every value a spec states for one fact, ordered like buyer_interest_stated_list() in SQL."""
+    stated = [str(value).strip() for value in values if str(value or '').strip()] if isinstance(values, list) else []
+    if not stated:
+        stated = [str(value).strip() for value in singles if str(value or '').strip()]
+    return sorted(dict.fromkeys(stated), key=str.casefold) or [None]
+
+
 def interest_facts(spec):
-    """The facts behind a want, from a survey, saved-search or research spec (a list takes its first value)."""
+    """One fact dict per stated make x chemistry x format, capped at INTEREST_FACT_COMBINATIONS.
+
+    A want that names two makes or two chemistries keeps all of them: the demand trigger fans out the same
+    way through buyer_interest_fact_sets() in migration 112, so importer and trigger lines agree.
+    """
     spec = spec or {}
 
-    def first(*keys):
+    def single(*keys):
         for key in keys:
             value = spec.get(key)
             if isinstance(value, list):
                 value = value[0] if value else None
-            if value not in (None, ''):
+            if value not in (None, '', {}, []):
                 return value
         return None
 
-    return {
-        'make': first('makes', 'make'), 'model': first('model'),
-        'format': first('formats', 'format'), 'chemistry': first('chemistries', 'chemistry'),
-        'kwh': first('kwh', 'capacity_kwh'), 'kwh_min': spec.get('kwh_min') or spec.get('kwhMin'),
-        'kwh_max': spec.get('kwh_max') or spec.get('kwhMax'), 'cell_maker': first('cell_makers', 'cell_maker'),
+    base = {
+        'model': single('model'),
+        'kwh': single('kwh', 'capacity_kwh'), 'kwh_min': spec.get('kwh_min') or spec.get('kwhMin'),
+        'kwh_max': spec.get('kwh_max') or spec.get('kwhMax'), 'cell_maker': single('cell_makers', 'cell_maker'),
     }
+    facts = []
+    for make in _stated_values(spec.get('makes'), spec.get('make')):
+        for chemistry in _stated_values(spec.get('chemistries'), spec.get('chemistry')):
+            for fmt in _stated_values(spec.get('formats'), spec.get('format')):
+                if len(facts) >= INTEREST_FACT_COMBINATIONS:
+                    return facts
+                facts.append({**base, 'make': make, 'chemistry': chemistry, 'format': fmt})
+    return facts
+
+
+def interest_fact_total(spec):
+    """How many combinations the spec states before the cap, for the truncation note."""
+    spec = spec or {}
+    return (len(_stated_values(spec.get('makes'), spec.get('make')))
+            * len(_stated_values(spec.get('chemistries'), spec.get('chemistry')))
+            * len(_stated_values(spec.get('formats'), spec.get('format'))))
+
+
+def _record_truncation(cur, source_id, stated_total):
+    """A truncated fan-out is visible in buyer_interest_sync_errors instead of disappearing."""
+    if stated_total <= INTEREST_FACT_COMBINATIONS or not interest_table_ready(cur):
+        return
+    cur.execute("savepoint buyer_interest_truncated")
+    try:
+        cur.execute("""insert into buyer_interest_sync_errors (source_table, source_id, operation, message)
+                       values ('buyer_interest_import', %s, 'truncated', %s)""",
+                    (str(source_id or '') or None,
+                     f'kept {INTEREST_FACT_COMBINATIONS} of {stated_total} stated combinations'))
+        cur.execute("release savepoint buyer_interest_truncated")
+    except Exception:
+        cur.execute("rollback to savepoint buyer_interest_truncated")
 
 
 def upsert_interest(cur, *, company_id, kind, facts, first_seen, last_seen, person_id=None, expires_on=None,
@@ -266,15 +310,30 @@ def upsert_interest(cur, *, company_id, kind, facts, first_seen, last_seen, pers
 
 
 def upsert_profile_interest(cur, row, basis='stated'):
-    """A profile merge (survey answer or research) is also a mastered want: standing when the buyer said it, inferred otherwise."""
+    """A profile merge (survey answer or research) is also a mastered want: standing when the buyer said it, inferred otherwise.
+
+    Every stated make and chemistry is written, and the survey row's quantity and price are kept on the line.
+    """
     if not row.get('company_id'):
         return None
     kind = 'standing' if basis == 'stated' else 'inferred'
     observed = row.get('observed_on') or dt.date.today().isoformat()
     expires = (dt.date.fromisoformat(str(observed)[:10]) + dt.timedelta(days=INTEREST_EXPIRY_DAYS[kind])).isoformat()
-    return upsert_interest(cur, company_id=row['company_id'], kind=kind, facts=interest_facts(row.get('spec')),
-                           person_id=row.get('person_id'), first_seen=str(observed)[:10], last_seen=str(observed)[:10],
-                           expires_on=expires, source_refs=[row.get('source_id') or f"crm:{row['company_id']}"])
+    spec = row.get('spec') or {}
+    quantity = row.get('volume') if row.get('volume') is not None else spec.get('volume')
+    price = row.get('max_price') if row.get('max_price') is not None else spec.get('max_price')
+    lines = [upsert_interest(
+        cur, company_id=row['company_id'], kind=kind, facts=facts,
+        person_id=row.get('person_id'), first_seen=str(observed)[:10], last_seen=str(observed)[:10],
+        expires_on=expires, source_refs=[row.get('source_id') or f"crm:{row['company_id']}"],
+        quantity=quantity, quantity_unit=(row.get('volume_unit') or spec.get('volume_unit')) if quantity is not None else None,
+        quantity_basis='stated' if quantity is not None else 'not_stated',
+        price=price, price_currency=(row.get('price_currency') or spec.get('price_currency')) if price is not None else None,
+        price_unit=(row.get('price_unit') or spec.get('price_unit')) if price is not None else None,
+        price_basis='target' if price is not None else None)
+        for facts in interest_facts(spec)]
+    _record_truncation(cur, row.get('source_id'), interest_fact_total(spec))
+    return next((line for line in lines if line), None)
 
 
 def upsert_saved_search_interest(cur, row, unsubscribed=False, today=None):
@@ -284,10 +343,14 @@ def upsert_saved_search_interest(cur, row, unsubscribed=False, today=None):
     confirmed = str(row.get('observed_on') or today_iso)[:10]
     last_seen = str(row.get('unsubscribed_on') or today_iso)[:10] if unsubscribed else today_iso
     search_id = str(row.get('source_id') or '').removeprefix('saved_search:') or None
-    return upsert_interest(cur, company_id=row.get('company_id'), kind='saved_search', facts=interest_facts(row.get('spec')),
-                           person_id=row.get('person_id'), first_seen=confirmed, last_seen=last_seen,
-                           expires_on=last_seen if unsubscribed else None, saved_search_id=search_id,
-                           source_refs=[f'saved_search:{search_id}'] if search_id else [])
+    spec = row.get('spec') or {}
+    lines = [upsert_interest(cur, company_id=row.get('company_id'), kind='saved_search', facts=facts,
+                             person_id=row.get('person_id'), first_seen=confirmed, last_seen=last_seen,
+                             expires_on=last_seen if unsubscribed else None, saved_search_id=search_id,
+                             source_refs=[f'saved_search:{search_id}'] if search_id else [])
+             for facts in interest_facts(spec)]
+    _record_truncation(cur, row.get('source_id'), interest_fact_total(spec))
+    return next((line for line in lines if line), None)
 
 
 def merge_profile(cur, row, basis='stated'):

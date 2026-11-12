@@ -104,6 +104,44 @@ class InterestLines(unittest.TestCase):
         self.assertEqual(str(standing[0]["first_seen"]), "2026-11-04")
         self.assertEqual(str(standing[0]["last_seen"]), "2026-11-20")
 
+    def test_a_profile_line_keeps_the_survey_quantity_and_price(self):
+        with self.cursor() as cur:
+            self.lifecycle.upsert_profile_interest(cur, self.survey_row(
+                volume=8, volume_unit="packs", max_price=90, price_currency="EUR", price_unit="kWh",
+                spec={"formats": ["Packs"], "chemistries": ["NMC"]}), "stated")
+        self.conn.commit()
+        [line] = [line for line in self.lines("standing") if line["product_key"] == "broad:nmc-packs"]
+        self.assertEqual(float(line["quantity"]), 8)
+        self.assertEqual(line["quantity_unit"], "packs")
+        self.assertEqual(line["quantity_basis"], "stated")
+        self.assertEqual(float(line["price"]), 90)
+        self.assertEqual(line["price_currency"], "EUR")
+        self.assertEqual(line["price_unit"], "kWh")
+        self.assertEqual(line["price_basis"], "target")
+        # Do not leave this line behind for the tests that read every standing line of the shared company.
+        with self.cursor() as cur:
+            cur.execute("delete from buyer_interest where company_id = %s and kind = 'standing' and product_key = %s",
+                        (self.company, "broad:nmc-packs"))
+        self.conn.commit()
+
+    def test_every_stated_make_and_chemistry_becomes_a_line(self):
+        spec = {"makes": ["Toyota or Lexus", "Stellantis"], "chemistries": ["NMC", "LFP"], "formats": ["Packs"]}
+        facts = self.lifecycle.interest_facts(spec)
+        self.assertEqual(len(facts), 4)
+        with self.cursor() as cur:
+            for fact in facts:
+                self.lifecycle.upsert_interest(cur, company_id=self.company, kind="interest", facts=fact,
+                                               first_seen="2026-11-05", last_seen="2026-11-05")
+        self.conn.commit()
+        keys = sorted(line["product_key"] for line in self.lines("interest"))
+        self.assertEqual(keys, ["broad:stellantis-lfp-packs", "broad:stellantis-nmc-packs",
+                                "broad:toyota-or-lexus-lfp-packs", "broad:toyota-or-lexus-nmc-packs"])
+
+    def test_the_fan_out_is_capped_and_its_size_reported(self):
+        spec = {"makes": ["A", "B", "C", "D"], "chemistries": ["NMC", "LFP", "NCA"], "formats": ["Packs", "Modules"]}
+        self.assertEqual(len(self.lifecycle.interest_facts(spec)), 12)
+        self.assertEqual(self.lifecycle.interest_fact_total(spec), 24)
+
     def test_research_is_inferred_and_gets_its_own_expiry(self):
         # merge_profile keeps a stated profile over research, so the research mapping is exercised directly.
         with self.cursor() as cur:
@@ -136,8 +174,8 @@ class InterestLines(unittest.TestCase):
         with self.cursor() as cur:
             self.lifecycle.upsert_saved_search_interest(cur, search, today=dt.date(2026, 11, 12))
         self.conn.commit()
-        [line] = self.lines("saved_search")
-        self.assertEqual(line["product_key"], "broad:nmc-packs")
+        [line] = [line for line in self.lines("saved_search") if line["product_key"] == "broad:tesla-nmc-packs"]
+        self.assertEqual(line["product_key"], "broad:tesla-nmc-packs")   # the stated make stays on the key
         self.assertEqual(str(line["first_seen"]), "2026-11-07")
         self.assertEqual(str(line["last_seen"]), "2026-11-12")
         self.assertIsNone(line["expires_on"])
