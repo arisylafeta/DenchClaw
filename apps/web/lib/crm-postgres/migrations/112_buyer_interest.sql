@@ -41,6 +41,8 @@ create table if not exists buyer_interest (
   product_key_level text check (product_key_level in ('part', 'pack', 'model', 'cell', 'broad')),
   make text,
   model text,
+  -- What the source said that its key cannot hold: a prose model, or a part number that is a product name.
+  raw_product text,
   format text check (format is null or format in ('pack', 'module', 'cell', 'system')),
   chemistry text,
   kwh_min numeric check (kwh_min is null or kwh_min > 0),
@@ -67,6 +69,9 @@ create table if not exists buyer_interest (
     (kind in ('standing', 'interest', 'inferred') and ownership = 'mastered')
     or (kind in ('ask', 'saved_search', 'bought', 'declined') and ownership = 'synced'))
 );
+
+-- The table may exist from an earlier apply of this migration; the column is additive.
+alter table buyer_interest add column if not exists raw_product text;
 
 -- One mastered line per buyer x product x kind; mastered repeats merge and move last_seen.
 create unique index if not exists buyer_interest_mastered_uidx
@@ -151,6 +156,72 @@ create or replace function buyer_interest_kwh_text(value numeric) returns text l
   select nullif(regexp_replace(round(value, 1)::text, '\.0+$', ''), '')
 $$;
 
+-- An OEM part number, or null when the value is prose, a model name or a serial rather than a code. Adverts write
+-- the same code several ways ("37501-AO050", "37501AO050"), so separators are dropped and letter O folds to digit 0;
+-- a word is never mangled into a code ("Onyx Strata H4-15" is a product name, not a part). Mirrors partKey().
+create or replace function buyer_interest_part(value text) returns text language sql immutable as $$
+  with raw as (select btrim(coalesce(value, '')) as text),
+       code as (select text, regexp_replace(upper(text), '[^A-Z0-9]', '', 'g') as folded from raw)
+  select case
+    when text = '' then null
+    when text !~ '^[A-Za-z0-9][A-Za-z0-9 ./_#-]*$' then null      -- only code characters
+    when text ~ '[a-z]{2}' then null                              -- a run of lower-case letters is a word
+    when cardinality(regexp_split_to_array(text, '\s+')) > 2 then null
+    when folded !~ '[0-9].*[0-9]' then null                       -- an OEM code carries digits
+    when length(folded) not between 5 and 14 then null
+    else replace(folded, 'O', '0') end
+  from code
+$$;
+
+-- Every make a list states: "BMW / Volvo" and "MG, Stellantis, Tesla" are three makes, not one slugged phrase.
+-- A group name written with "or" stays whole ("Hyundai or Kia"), because that is one demand. Mirrors splitMakes().
+create or replace function buyer_interest_make_list(p_values text[]) returns text[] language sql immutable as $$
+  select coalesce((select array_agg(distinct btrim(piece) order by btrim(piece))
+                     from unnest(p_values) value
+                     cross join lateral unnest(regexp_split_to_array(value, '\s*(,|/|&|\yand\y)\s*', 'i')) piece
+                    where nullif(btrim(piece), '') is not null),
+                  p_values)  -- nothing to split: keep the "not stated" slot the caller passed
+$$;
+
+-- A model that lists vehicles or years rather than naming one: "hybrid 2015-2022 (225xe, 330e)",
+-- "82 kWh: ID.4, Q4 e-tron, Enyaq". Prose never enters a key. Mirrors isProseModel().
+create or replace function buyer_interest_prose_model(value text) returns boolean language sql immutable as $$
+  select coalesce(btrim(coalesce(value, '')) <> '' and (
+    btrim(value) ~ '[(),;/:]'
+    or cardinality(regexp_split_to_array(btrim(value), '\s+')) >= 4
+    or btrim(value) ~ '\y(19|20)[0-9]{2}\y'), false)
+$$;
+
+-- The model without a capacity the facts already state: "Zoe 41 kWh" is the Zoe, keyed by its 41 kWh.
+create or replace function buyer_interest_model_text(value text) returns text language sql immutable as $$
+  select nullif(btrim(regexp_replace(regexp_replace(btrim(coalesce(value, '')), '\y[0-9]+(\.[0-9]+)?\s*kwh\y', ' ', 'gi'), '\s+', ' ', 'g')), '')
+$$;
+
+-- True when the facts name any product at all. Only then is a line written: a row that states no make, chemistry,
+-- format, part, cell or capacity has nothing to match and is recorded instead (operation 'no_product_facts').
+create or replace function buyer_interest_states_product(facts jsonb) returns boolean language sql immutable as $$
+  select coalesce(
+    nullif(btrim(coalesce(facts->>'make', '')), '') is not null
+    or nullif(btrim(coalesce(facts->>'model', '')), '') is not null
+    or nullif(btrim(coalesce(facts->>'chemistry', '')), '') is not null
+    or nullif(btrim(coalesce(facts->>'format', '')), '') is not null
+    or nullif(btrim(coalesce(facts->>'cell_maker', '')), '') is not null
+    or jsonb_array_length(coalesce(nullif(facts->'part_numbers', 'null'::jsonb), '[]'::jsonb)) > 0
+    or buyer_interest_number(facts->'kwh') is not null
+    or buyer_interest_number(facts->'kwh_min') is not null
+    or buyer_interest_number(facts->'kwh_max') is not null, false)
+$$;
+
+-- What the source said that its key cannot hold: a prose model, else a stated part number that is not a code.
+-- Kept on the line so a person can read the original wording after the key falls back to the make.
+create or replace function buyer_interest_raw_product(facts jsonb) returns text language sql immutable as $$
+  select coalesce(
+    case when buyer_interest_prose_model(facts->>'model') then btrim(facts->>'model') end,
+    (select min(btrim(part)) from jsonb_array_elements_text(
+       case when jsonb_typeof(facts->'part_numbers') = 'array' then facts->'part_numbers' else '[]'::jsonb end) part
+      where buyer_interest_part(part) is null and nullif(btrim(part), '') is not null))
+$$;
+
 -- The make as a key segment. Group names keep their own identity ("VW Group"), a brand maps to the display
 -- name normalMake uses, and anything else is its own slug. The TS builder mirrors this list.
 create or replace function buyer_interest_make(value text) returns text language sql immutable as $$
@@ -190,6 +261,20 @@ create or replace function buyer_interest_format(value text) returns text langua
     else null end
 $$;
 
+-- A part number field that holds a product name instead ("Onyx Strata H4-15") is a model, not a part. Only used
+-- when no model is stated, and never as a key segment unless it survives buyer_interest_prose_model().
+create or replace function buyer_interest_part_as_model(p_spec jsonb, p_context jsonb, p_fields jsonb)
+returns text language sql immutable as $$
+  select min(btrim(part))
+    from jsonb_array_elements_text(
+      case when jsonb_typeof(coalesce(p_spec->'part_numbers', p_spec->'partNumbers',
+                                      p_context->'part_numbers', p_fields->'part_numbers')) = 'array'
+        then coalesce(p_spec->'part_numbers', p_spec->'partNumbers', p_context->'part_numbers', p_fields->'part_numbers')
+        else '[]'::jsonb end) part
+   where buyer_interest_part(part) is null
+     and cardinality(regexp_split_to_array(btrim(part), '\s+')) >= 2
+$$;
+
 -- The facts behind a key, from a source row's spec, context and trade fields. Never guesses: missing means missing.
 create or replace function buyer_interest_facts(p_spec jsonb, p_context jsonb default '{}'::jsonb, p_fields jsonb default '{}'::jsonb)
 returns jsonb language sql immutable as $$
@@ -197,7 +282,7 @@ returns jsonb language sql immutable as $$
     'make', coalesce(buyer_interest_first_text(p_spec->'makes'), buyer_interest_first_text(p_spec->'make'),
       buyer_interest_first_text(p_context->'make'), buyer_interest_first_text(p_fields->'make')),
     'model', coalesce(buyer_interest_first_text(p_spec->'model'), buyer_interest_first_text(p_context->'model'),
-      buyer_interest_first_text(p_fields->'model')),
+      buyer_interest_first_text(p_fields->'model'), buyer_interest_part_as_model(p_spec, p_context, p_fields)),
     'format', coalesce(buyer_interest_first_text(p_spec->'formats'), buyer_interest_first_text(p_spec->'format'),
       buyer_interest_first_text(p_context->'format'), buyer_interest_first_text(p_fields->'format')),
     'chemistry', coalesce(buyer_interest_first_text(p_spec->'chemistries'), buyer_interest_first_text(p_spec->'chemistry'),
@@ -223,18 +308,22 @@ create or replace function buyer_interest_product_key(facts jsonb) returns text 
       case when facts->>'kwh_min' is not null and facts->>'kwh_min' = facts->>'kwh_max'
         then buyer_interest_number(facts->'kwh_min') end) as value
   ), part as (
-    select 'part:' || replace(upper(regexp_replace(btrim(part), '[^A-Za-z0-9]', '', 'g')), 'O', '0') as key
+    select 'part:' || buyer_interest_part(part) as key
     from jsonb_array_elements_text(coalesce(facts->'part_numbers', '[]'::jsonb)) part
-    where length(regexp_replace(btrim(part), '[^A-Za-z0-9]', '', 'g')) between 5 and 14
+    where buyer_interest_part(part) is not null
     order by 1 limit 1
   )
   select coalesce(
     (select key from part),
-    case when buyer_interest_make(facts->>'make') is not null and buyer_interest_fold(facts->>'model') is not null
+    case when buyer_interest_make(facts->>'make') is not null
+        and buyer_interest_fold(buyer_interest_model_text(facts->>'model')) is not null
+        and not buyer_interest_prose_model(facts->>'model')
         and (select value from kwh) is not null
-      then 'model:' || buyer_interest_make(facts->>'make') || '-' || buyer_interest_fold(facts->>'model') || '-'
+      then 'model:' || buyer_interest_make(facts->>'make') || '-' || buyer_interest_fold(buyer_interest_model_text(facts->>'model')) || '-'
         || buyer_interest_kwh_text((select value from kwh)) || 'kwh' end,
-    case when buyer_interest_slug(facts->>'cell_maker') is not null and buyer_interest_slug(facts->>'model') is not null
+    case when buyer_interest_slug(facts->>'cell_maker') is not null
+        and buyer_interest_slug(facts->>'model') is not null
+        and not buyer_interest_prose_model(facts->>'model')
       then 'cell:' || buyer_interest_slug(facts->>'cell_maker') || '-' || buyer_interest_slug(facts->>'model') end,
     -- Broad is the last level. A stated make stays on the key, so two makes in one ask keep two lines.
     'broad:' || coalesce(buyer_interest_make(facts->>'make') || '-', '')
@@ -274,8 +363,8 @@ create or replace function buyer_interest_fact_sets(p_spec jsonb, p_context json
   p_fields jsonb default '{}'::jsonb, p_limit int default 12)
 returns table (facts jsonb[], stated_total int) language plpgsql immutable as $$
 declare
-  makes text[] := buyer_interest_stated_list(p_spec->'makes', buyer_interest_first_text(p_spec->'make'),
-    buyer_interest_first_text(p_context->'make'), buyer_interest_first_text(p_fields->'make'));
+  makes text[] := buyer_interest_make_list(buyer_interest_stated_list(p_spec->'makes', buyer_interest_first_text(p_spec->'make'),
+    buyer_interest_first_text(p_context->'make'), buyer_interest_first_text(p_fields->'make')));
   chemists text[] := buyer_interest_stated_list(p_spec->'chemistries', buyer_interest_first_text(p_spec->'chemistry'),
     buyer_interest_first_text(p_context->'chemistry'), buyer_interest_first_text(p_fields->'chemistry'));
   formats text[] := buyer_interest_stated_list(p_spec->'formats', buyer_interest_first_text(p_spec->'format'),
@@ -313,6 +402,7 @@ create or replace function buyer_interest_sync_demand_row(p_id text) returns voi
 declare
   row_ crm_bulk_listings%rowtype;
   fact_sets jsonb[];
+  product_sets jsonb[];
   stated_total int;
   facts jsonb;
   keys text[] := '{}';
@@ -379,20 +469,36 @@ begin
   select fs.facts, fs.stated_total into fact_sets, stated_total
   from buyer_interest_fact_sets(row_.spec, row_.context) fs;
 
+  -- A row that states no product at all is not a want: it is not written, only recorded for a person to fix.
+  select coalesce(array_agg(fact), '{}') into product_sets from unnest(fact_sets) fact
+   where buyer_interest_states_product(fact);
+  delete from buyer_interest_sync_errors where operation = 'no_product_facts' and source_id = row_.id;
+  if cardinality(product_sets) = 0 then
+    delete from buyer_interest where demand_id = row_.id;
+    insert into buyer_interest_sync_errors (source_table, source_id, operation, message)
+    values ('crm_bulk_listings', row_.id, 'no_product_facts',
+      format('states no product fact: %s', left(coalesce(nullif(btrim(coalesce(row_.summary, '')), ''), row_.source_id,
+        row_.id), 120)));
+    return;
+  end if;
+
   -- The key set this row states now. Anything else on this source is stale: an old chemistry, a dropped make,
   -- or an outcome the row has since superseded.
   select coalesce(array_agg(distinct buyer_interest_product_key(fact)), '{}') into keys
-  from unnest(fact_sets) fact;
+  from unnest(product_sets) fact;
+
   delete from buyer_interest
   where demand_id = row_.id and not (kind = line_kind and product_key = any(keys));
 
-  foreach facts in array fact_sets loop
+  foreach facts in array product_sets loop
     insert into buyer_interest (id, company_id, person_id, kind, ownership, product_key, product_key_level,
-      make, model, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit, quantity_basis,
-      price, price_currency, price_unit, price_basis, source_refs, expires_on, demand_id, decline_reason)
+      make, model, raw_product, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit,
+      quantity_basis, price, price_currency, price_unit, price_basis, source_refs, expires_on, demand_id,
+      decline_reason)
     values ('bi_' || replace(gen_random_uuid()::text, '-', ''), row_.company_id, row_.person_id, line_kind, 'synced',
       buyer_interest_product_key(facts), buyer_interest_key_level(buyer_interest_product_key(facts)),
-      facts->>'make', facts->>'model', buyer_interest_format(facts->>'format'),
+      facts->>'make', facts->>'model', buyer_interest_raw_product(facts),
+      buyer_interest_format(facts->>'format'),
       buyer_interest_chemistry(facts->>'chemistry'), buyer_interest_number(facts->'kwh_min'),
       buyer_interest_number(facts->'kwh_max'), first_d, last_d, qty, unit,
       case when qty is null then 'not_stated' else 'stated' end,
@@ -403,6 +509,7 @@ begin
       product_key_level = excluded.product_key_level,
       make = coalesce(excluded.make, buyer_interest.make),
       model = coalesce(excluded.model, buyer_interest.model),
+      raw_product = coalesce(excluded.raw_product, buyer_interest.raw_product),
       format = coalesce(excluded.format, buyer_interest.format),
       chemistry = coalesce(excluded.chemistry, buyer_interest.chemistry),
       kwh_min = coalesce(excluded.kwh_min, buyer_interest.kwh_min),
@@ -423,10 +530,10 @@ begin
       updated_at = now();
   end loop;
 
-  if stated_total > cardinality(fact_sets) then
+  if stated_total > cardinality(product_sets) then
     insert into buyer_interest_sync_errors (source_table, source_id, operation, message)
     values ('crm_bulk_listings', row_.id, 'truncated',
-      format('kept %s of %s stated combinations', cardinality(fact_sets), stated_total));
+      format('kept %s of %s stated combinations', cardinality(product_sets), stated_total));
   end if;
 end $$;
 
@@ -468,6 +575,7 @@ declare
   listing crm_bulk_listings%rowtype;
   fields jsonb;
   fact_sets jsonb[];
+  product_sets jsonb[];
   stated_total int;
   facts jsonb;
   keys text[] := '{}';
@@ -514,9 +622,22 @@ begin
   select fs.facts, fs.stated_total into fact_sets, stated_total
   from buyer_interest_fact_sets(listing.spec, listing.context, fields) fs;
 
+  -- A listing that states no product at all gives the purchase nothing to match: it is recorded, not written.
+  select coalesce(array_agg(fact), '{}') into product_sets from unnest(fact_sets) fact
+   where buyer_interest_states_product(fact);
+  delete from buyer_interest_sync_errors where operation = 'no_product_facts' and source_id = offer.id;
+  if cardinality(product_sets) = 0 then
+    delete from buyer_interest where offer_id = offer.id;
+    insert into buyer_interest_sync_errors (source_table, source_id, operation, message)
+    values ('crm_bulk_offers', offer.id, 'no_product_facts',
+      format('listing %s states no product fact: %s', listing.id,
+        left(coalesce(nullif(btrim(coalesce(listing.summary, '')), ''), listing.id), 100)));
+    return;
+  end if;
+
   -- The product the listing states now; a line for another product or outcome on this offer is stale.
   select coalesce(array_agg(distinct buyer_interest_product_key(fact)), '{}') into keys
-  from unnest(fact_sets) fact;
+  from unnest(product_sets) fact;
   delete from buyer_interest
   where offer_id = offer.id and not (kind = line_kind and product_key = any(keys));
 
@@ -535,13 +656,15 @@ begin
     || case when offer.counterpart_id is not null then array['crm:' || offer.counterpart_id]::text[] else '{}'::text[] end,
     null);
 
-  foreach facts in array fact_sets loop
+  foreach facts in array product_sets loop
     insert into buyer_interest (id, company_id, person_id, kind, ownership, product_key, product_key_level,
-      make, model, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit, quantity_basis,
-      price, price_currency, price_unit, price_basis, source_refs, expires_on, offer_id, decline_reason)
+      make, model, raw_product, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit,
+      quantity_basis, price, price_currency, price_unit, price_basis, source_refs, expires_on, offer_id,
+      decline_reason)
     values ('bi_' || replace(gen_random_uuid()::text, '-', ''), offer.company_id, offer.person_id, line_kind, 'synced',
       buyer_interest_product_key(facts), buyer_interest_key_level(buyer_interest_product_key(facts)),
-      facts->>'make', facts->>'model', buyer_interest_format(facts->>'format'),
+      facts->>'make', facts->>'model', buyer_interest_raw_product(facts),
+      buyer_interest_format(facts->>'format'),
       buyer_interest_chemistry(facts->>'chemistry'), buyer_interest_number(facts->'kwh_min'),
       buyer_interest_number(facts->'kwh_max'), first_d, last_d, qty, unit,
       case when qty is null then 'not_stated' else 'stated' end,
@@ -552,6 +675,7 @@ begin
       product_key_level = excluded.product_key_level,
       make = coalesce(excluded.make, buyer_interest.make),
       model = coalesce(excluded.model, buyer_interest.model),
+      raw_product = coalesce(excluded.raw_product, buyer_interest.raw_product),
       format = coalesce(excluded.format, buyer_interest.format),
       chemistry = coalesce(excluded.chemistry, buyer_interest.chemistry),
       kwh_min = coalesce(excluded.kwh_min, buyer_interest.kwh_min),
@@ -568,10 +692,10 @@ begin
       updated_at = now();
   end loop;
 
-  if stated_total > cardinality(fact_sets) then
+  if stated_total > cardinality(product_sets) then
     insert into buyer_interest_sync_errors (source_table, source_id, operation, message)
     values ('crm_bulk_offers', offer.id, 'truncated',
-      format('kept %s of %s stated combinations', cardinality(fact_sets), stated_total));
+      format('kept %s of %s stated combinations', cardinality(product_sets), stated_total));
   end if;
 end $$;
 

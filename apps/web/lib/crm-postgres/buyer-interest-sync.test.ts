@@ -278,7 +278,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
   });
 
   it("moves an offer line when the counterparty company changes", async () => {
-    await listing(id("s3"), "supply", null, {}, { quantity: "4 packs" });
+    await listing(id("s3"), "supply", null, { makes: ["Kia"], formats: ["Packs"] }, { quantity: "4 packs" });
     await pg.queryPg(
       `insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, name, stage)
        values ($1, $2, 'counterparty', $3, 'Offer Buyer', 'paid')`,
@@ -286,6 +286,20 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     expect((await lines("offer_id = $1", [id("o4")]))[0].company_id).toBe(id("buyer1"));
     await pg.queryPg(`update crm_bulk_offers set company_id = $2 where id = $1`, [id("o4"), id("buyer3")]);
     expect((await lines("offer_id = $1", [id("o4")]))[0].company_id).toBe(id("buyer3"));
+  });
+
+  it("records a purchase whose listing states no product instead of writing an empty bucket", async () => {
+    await listing(id("s5"), "supply", null, {}, { quantity: "4 packs" });
+    await pg.queryPg(
+      `insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, name, stage)
+       values ($1, $2, 'counterparty', $3, 'Offer Buyer', 'paid')`,
+      [id("o7"), id("s5"), id("buyer1")]);
+    expect(await lines("offer_id = $1", [id("o7")])).toEqual([]);
+    const notes = await pg.queryPg<{ operation: string; message: string }>(
+      `select operation, message from buyer_interest_sync_errors where source_id = $1`, [id("o7")]);
+    expect(notes).toHaveLength(1);
+    expect(notes[0].operation).toBe("no_product_facts");
+    expect(notes[0].message).toContain(id("s5"));
   });
 
   it("treats signed and invoiced counterparty offers as bought, and contract_out as nothing", async () => {
