@@ -63,7 +63,7 @@ describe("listing routes", () => {
     expect((await post({ name: "ABZ Metals", source: "email" })).status).toBe(400);
   });
   it("uses the seller's mailbox context without a buyer profile", async () => {
-    expect(await (await context(req, params)).json()).toEqual({ buyer: null, mail: [], person: null });
+    expect(await (await context(req, params)).json()).toEqual({ buyer: null, mail: [], person: null, market: [] });
     expect(mocks.buyer).not.toHaveBeenCalled();
     expect(mocks.mail).toHaveBeenCalledWith(expect.objectContaining({ company_id: "seller" }), "user");
     expect(mocks.query).toHaveBeenCalledWith(expect.any(String), ["person", "seller@test"]);
@@ -71,7 +71,7 @@ describe("listing routes", () => {
   it("preserves buyer profiles for demand context", async () => {
     mocks.get.mockResolvedValue({ kind: "demand", company_id: "buyer", person_id: null, email: "buyer@test" });
     mocks.buyer.mockResolvedValue({ id: "buyer" });
-    expect(await (await context(req, params)).json()).toEqual({ buyer: { id: "buyer" }, mail: [], person: null });
+    expect(await (await context(req, params)).json()).toEqual({ buyer: { id: "buyer" }, mail: [], person: null, market: [] });
     expect(mocks.buyer).toHaveBeenCalledWith("buyer");
   });
 });

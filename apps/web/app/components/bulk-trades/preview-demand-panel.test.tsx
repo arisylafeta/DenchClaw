@@ -19,14 +19,14 @@ it("shimmers header and buyer values in their real shell until async reads finis
   render(<PreviewDemandPanel demand={demand} today="2026-10-20" onChanged={() => {}} onClose={() => {}} onOpenTrade={() => {}} />);
   expect(screen.getByRole("heading", { name: "12 × Ioniq packs" })).toBeInTheDocument();
   expect(screen.getByText("Supplier")).toBeInTheDocument();
-  expect(screen.getByText("Stage")).toBeInTheDocument();
+  expect(screen.getByText("Their target")).toBeInTheDocument();
   expect(screen.getByText("Loading demand details")).toBeInTheDocument();
   const card = document.querySelector('[aria-label="Buyer card"]')!;
   expect(card.querySelectorAll('[aria-hidden="true"]').length).toBeGreaterThan(3);
   releases["/api/bulk-listings/d1/context"](new Response(JSON.stringify({ buyer: { profile: { tier: "A", owner: "Alex" }, demand: [] }, mail: [], person: { name: "Example buyer", email: "buyer@example.test", company_name: "Example company" } })));
   expect(await screen.findByRole("heading", { name: "Example buyer" })).toBeInTheDocument();
   expect(screen.getByText("buyer@example.test")).toBeInTheDocument();
-  expect(screen.getByText("Alex")).toBeInTheDocument();
+  expect(screen.getByText("A-tier buyer")).toBeInTheDocument();
   await waitFor(() => expect(screen.queryByText("Loading demand details")).not.toBeInTheDocument());
 });
 

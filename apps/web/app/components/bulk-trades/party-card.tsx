@@ -33,12 +33,17 @@ export type PartyCardProps = {
   related?: { label: string; items: { id: string; label: string; onOpen?: () => void }[] };
   /** Extra sections that belong to the person, shown at the foot of the card (their email and WhatsApp conversations). */
   children?: React.ReactNode;
+  /** A one-line status under the header, in place of the glance tiles. */
+  status?: React.ReactNode;
+  /** Quick-scan sections in place of the glance tiles and notes (the Buyer card). */
+  body?: React.ReactNode;
 };
 
 /** A compact CRM person header: avatar, name, email, role and company, actions, then what matters at a glance. */
-export function PartyCard({ role, name, companyId, personId, person, contact, email, glance = [], notes = [], related, loading, children }: PartyCardProps) {
-  if (loading !== undefined) glance = ["Stage", "Owner", "Last heard"].map((label) => glance.find((item) => item.label === label) ?? { label, value: "Not recorded" });
-  if (loading !== undefined) notes = [
+export function PartyCard({ role, name, companyId, personId, person, contact, email, glance = [], notes = [], related, loading, children, status, body }: PartyCardProps) {
+  if (body !== undefined) { glance = []; notes = []; related = undefined; }
+  else if (loading !== undefined) glance = ["Stage", "Owner", "Last heard"].map((label) => glance.find((item) => item.label === label) ?? { label, value: "Not recorded" });
+  if (body === undefined && loading !== undefined) notes = [
     ...["Usually buys", "Notes"].map((label) => notes.find((note) => note.label === label) ?? { label, value: "Not recorded" }),
     ...notes.filter((note) => note.label !== "Usually buys" && note.label !== "Notes"),
   ];
@@ -75,10 +80,12 @@ export function PartyCard({ role, name, companyId, personId, person, contact, em
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {loading && <button type="button" disabled className={actionClass} style={actionStyle}><Mail size={14} aria-hidden="true" /> Compose email</button>}
-          {!loading && mail && <a href={`mailto:${mail}`} className={actionClass} style={actionStyle}><Mail size={14} aria-hidden="true" /> Compose email</a>}
+          {!loading && mail && <a href={`mailto:${mail}`} className={actionClass} style={body !== undefined ? { ...actionStyle, background: "var(--bt-text)", color: "var(--bt-surface)", borderColor: "var(--bt-text)" } : actionStyle}><Mail size={14} aria-hidden="true" /> Compose email</a>}
           {profile && <a href={profile} className={actionClass} style={actionStyle}><ExternalLink size={14} aria-hidden="true" /> Open in CRM</a>}
         </div>
       </div>
+      {status}
+      {body}
       {glance.length > 0 && (
         <div className="grid gap-2 px-4 pb-3" style={{ gridTemplateColumns: `repeat(${Math.min(glance.length, 4)}, minmax(0, 1fr))` }}>
           {glance.map((item) => (
@@ -108,7 +115,7 @@ export function PartyCard({ role, name, companyId, personId, person, contact, em
           )}
         </div>
       )}
-      {children && <div className="mx-4 mb-4 flex flex-col gap-2">{children}</div>}
+      {children && <div className={`mx-4 mb-4 flex flex-col gap-2${body !== undefined ? " mt-3" : ""}`}>{children}</div>}
       {!companyId && <p className="border-t px-4 py-2 text-[12px]" style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>Not linked to a CRM company yet.</p>}
     </section>
     </BusyRegion>
