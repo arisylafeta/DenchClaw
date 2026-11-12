@@ -36,6 +36,28 @@ export type WorkspaceContext = {
  * `[Attached files: ...]` (when present) is already in `userText`; this
  * helper only layers on the agent-only prefixes from `workspaceContext`.
  */
+const ATTACHED_FILES_BLOCK = /\[Attached files: ([^\]]*)\]/;
+
+/**
+ * Uploads land at workspace-relative `assets/...`, but the agent runs elsewhere, so it can't open
+ * them (PDFs and other non-images never reach it any other way). Give it absolute paths.
+ */
+function absolutizeAttachedFiles(text: string, workspacePrefix: string): string {
+	const root = workspacePrefix.replace(/\/+$/, "");
+	return text.replace(ATTACHED_FILES_BLOCK, (_block, list: string) => `[Attached files: ${list
+		.split(", ")
+		.map((path) => (path.startsWith("/") || path.startsWith("~") || !path.trim() ? path : `${root}/${path}`))
+		.join(", ")}]`);
+}
+
+function relativizeAttachedFiles(text: string, workspacePrefix: string): string {
+	const lead = `${workspacePrefix.replace(/\/+$/, "")}/`;
+	return text.replace(ATTACHED_FILES_BLOCK, (_block, list: string) => `[Attached files: ${list
+		.split(", ")
+		.map((path) => (path.startsWith(lead) ? path.slice(lead.length) : path))
+		.join(", ")}]`);
+}
+
 export function buildAgentMessage(args: {
 	userText: string;
 	workspaceContext?: WorkspaceContext;
@@ -43,7 +65,7 @@ export function buildAgentMessage(args: {
 	workspacePrefix?: string | null;
 }): string {
 	const { userText, workspaceContext, workspacePrefix } = args;
-	let message = userText;
+	let message = workspacePrefix ? absolutizeAttachedFiles(userText, workspacePrefix) : userText;
 
 	const ctx = workspaceContext;
 	if (!ctx) {
@@ -78,8 +100,8 @@ export function buildAgentMessage(args: {
 }
 
 /** Undo only the agent-only blocks emitted by buildAgentMessage; preserve attachment cards. */
-export function stripAgentMessageContext(text: string): string {
-	let remaining = text;
+export function stripAgentMessageContext(text: string, workspacePrefix?: string | null): string {
+	let remaining = workspacePrefix ? relativizeAttachedFiles(text, workspacePrefix) : text;
 	// Match the generated header, count, columns and preview lines, only at offset zero.
 	const table = /^\[Selected table (rows|cells): [^\n]+\]\n\d+ rows?(?: x \d+ columns?)? selected\.\nColumns: [^\n]*(?:\n- (?:row \d+ \([^\n]*|\.\.\.\d+ more selected (?:rows|cells)))*\n\n/;
 	remaining = remaining.replace(table, "");

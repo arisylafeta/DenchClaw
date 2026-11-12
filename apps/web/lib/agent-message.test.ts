@@ -161,3 +161,13 @@ describe("buildAgentMessage", () => {
 		expect(attIdx).toBeLessThan(goIdx);
 	});
 });
+
+describe("attached file paths", () => {
+	it("gives the agent absolute paths for relative uploads and strips them back", async () => {
+		const { stripAgentMessageContext } = await import("./agent-message");
+		const user = "[Attached files: assets/1-cv.pdf, /abs/x.png, ~crm/p]\n\nread it";
+		const sent = buildAgentMessage({ userText: user, workspacePrefix: "/ws/root/" });
+		expect(sent).toBe("[Attached files: /ws/root/assets/1-cv.pdf, /abs/x.png, ~crm/p]\n\nread it");
+		expect(stripAgentMessageContext(sent, "/ws/root")).toBe(user);
+	});
+});
