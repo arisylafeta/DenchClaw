@@ -454,10 +454,19 @@ export function lotKeyFor(supplierId: string, groupKey: string, part: string, sc
 
 /**
  * Folded OEM part number used to split lots: letter O and digit 0 are one character (adverts mix "37501AO050" and
- * "37501A0050"). Empty when none is stated, or for run-on lists and serials longer than any OEM part number.
+ * "37501A0050"). Empty when none is stated, when the value is prose or a model name rather than a code, or when it
+ * is a run-on list or a serial longer than any OEM part number.
+ *
+ * A word is never a part number: "Onyx Strata H4-15" and "72 Ah cell" return empty instead of a mangled code, so a
+ * product name cannot reach a `part:` key. Mirrored by buyer_interest_part() in migration 112.
  */
 export function partKey(value: string | null | undefined): string {
-  const folded = (value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/O/g, "0");
+  const raw = (value ?? "").trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9 ./_#-]*$/.test(raw)) return "";
+  if (/[a-z]{2}/.test(raw)) return ""; // a run of lower-case letters is a word, not a code
+  if (raw.split(/\s+/).length > 2) return ""; // more than two tokens is prose
+  const folded = raw.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/O/g, "0");
+  if (folded.replace(/\D/g, "").length < 2) return ""; // every OEM code carries digits
   return folded.length >= 5 && folded.length <= 14 ? folded : "";
 }
 

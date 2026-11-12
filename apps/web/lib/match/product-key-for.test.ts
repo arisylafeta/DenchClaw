@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   broaderKeysFor,
   expandProductFacts,
+  isProseModel,
   kwhKeyText,
   makeKey,
   packFamilyFor,
@@ -125,6 +126,38 @@ describe("productKeyFor", () => {
       "broad:toyota-or-lexus-lfp-packs",
       "broad:toyota-or-lexus-nmc-packs",
     ]);
+  });
+
+  it("splits a compound make into one want per make, never one slugged phrase", () => {
+    const split = expandProductFacts({ makes: ["BMW / Volvo"], formats: ["Packs"] });
+    expect(split.stated).toBe(2);
+    expect(split.facts.map(productKeyFor).sort()).toEqual(["broad:bmw-any-packs", "broad:volvo-any-packs"]);
+    expect(expandProductFacts({ makes: ["MG, Stellantis, Tesla"], chemistries: ["LFP"], formats: ["Packs"] })
+      .facts.map(productKeyFor).sort()).toEqual([
+      "broad:mg-lfp-packs", "broad:stellantis-lfp-packs", "broad:tesla-lfp-packs",
+    ]);
+    // A group name stays one demand: "Hyundai or Kia" is not two makes.
+    expect(expandProductFacts({ makes: ["Hyundai or Kia"], formats: ["Packs"] }).facts.map(productKeyFor))
+      .toEqual(["broad:hyundai-or-kia-any-packs"]);
+  });
+
+  it("keeps a prose model out of the key and falls back to the make", () => {
+    const prose = "82 kWh: ID.4, Q4 e-tron, Enyaq, ID.7, Elroq";
+    expect(isProseModel(prose)).toBe(true);
+    expect(isProseModel("hybrid 2015-2022 (225xe, 330e)")).toBe(true);
+    expect(isProseModel("Ioniq 5")).toBe(false);
+    expect(productKeyFor({ make: "VW Group", model: prose, chemistry: "NMC", format: "packs", kwh: 82 }))
+      .toBe("broad:vw-group-nmc-packs");
+    // A capacity written into the model name is the capacity the facts already state.
+    expect(productKeyFor({ make: "Renault", model: "Zoe 41 kWh", format: "packs", kwh: 41 }))
+      .toBe("model:renault-zoe-41kwh");
+  });
+
+  it("never keys a product name as a part number", () => {
+    // A dossier put a module name in part_number: it must not become part:0NYXSTRATAH415.
+    expect(productKeyFor({ partNumbers: ["Onyx Strata H4-15"], make: "Proterra", format: "packs" }))
+      .toBe("broad:proterra-any-packs");
+    expect(productKeyFor({ partNumbers: ["37501AO050"] })).toBe("part:37501A0050");
   });
 
   it("caps the fan-out and reports how many combinations the source stated", () => {

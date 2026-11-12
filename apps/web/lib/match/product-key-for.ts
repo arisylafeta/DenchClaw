@@ -87,6 +87,39 @@ export function makeKey(value: string | null | undefined): string | null {
   return MAKE_KEY_ALIASES[folded] ?? slug(normalMake(value ?? null)) ?? slug(value);
 }
 
+/**
+ * Every make a value states: "BMW / Volvo" and "MG, Stellantis, Tesla" are three makes, not one slugged phrase.
+ * A group name with "or" stays whole ("Hyundai or Kia", "BMW or Mini"), because that is one demand.
+ * Mirrors buyer_interest_make_list() in SQL.
+ */
+export function splitMakes(values: (string | null | undefined)[] | null | undefined): string[] {
+  const makes = new Set<string>();
+  for (const value of values ?? []) {
+    for (const piece of String(value ?? "").split(/\s*(?:,|\/|&|\band\b)\s*/i)) {
+      const make = piece.trim();
+      if (make) {makes.add(make);}
+    }
+  }
+  return [...makes].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * A model value that lists vehicles or years instead of naming one model: "hybrid 2015-2022 (225xe, 330e)",
+ * "82 kWh: ID.4, Q4 e-tron, Enyaq". Such prose never enters a key; the line falls back to its make-level key and
+ * the text is kept on the line. Mirrors buyer_interest_prose_model() in SQL.
+ */
+export function isProseModel(value: string | null | undefined): boolean {
+  const text = (value ?? "").trim();
+  if (!text) {return false;}
+  return /[(),;/:]/.test(text) || text.split(/\s+/).length >= 4 || /\b(?:19|20)\d{2}\b/.test(text);
+}
+
+/** The model without a capacity the facts already state: "Zoe 41 kWh" is the Zoe, keyed by its 41 kWh. */
+export function modelKeyText(value: string | null | undefined): string | null {
+  const text = (value ?? "").trim().replace(/\b\d+(?:\.\d+)?\s*kwh\b/gi, " ").replace(/\s+/g, " ").trim();
+  return text || null;
+}
+
 /** One decimal, never a trailing .0. Mirrors buyer_interest_kwh_text() in SQL. */
 export function kwhKeyText(value: number | null | undefined): string | null {
   const kwh = normalKwh(value ?? null);
@@ -149,13 +182,15 @@ function graphPack(facts: ProductFacts): string | null {
 
 function modelKey(facts: ProductFacts): string | null {
   const make = makeKey(facts.make ?? null);
-  const model = fold(normalModel(facts.make ?? null, facts.model ?? null) ?? facts.model ?? null);
+  if (isProseModel(facts.model ?? null)) {return null;}
+  const model = fold(normalModel(facts.make ?? null, modelKeyText(facts.model ?? null)) ?? modelKeyText(facts.model ?? null));
   const kwh = kwhKeyText(singleKwh(facts));
   return make && model && kwh ? `model:${make}-${model}-${kwh}kwh` : null;
 }
 
 function cellKey(facts: ProductFacts): string | null {
   const maker = slug(facts.cellMaker ?? null);
+  if (isProseModel(facts.model ?? null)) {return null;}
   const model = slug(facts.model ?? null);
   if (!maker || !model) {return null;}
   return `cell:${maker}-${model}`;
@@ -196,7 +231,7 @@ function statedValues(values: (string | null | undefined)[] | null | undefined, 
  * in SQL. `stated` is how many combinations the facts really name, so a caller can record the truncation.
  */
 export function expandProductFacts(facts: ProductFacts, limit = PRODUCT_FACT_COMBINATIONS): { facts: ProductFacts[]; stated: number } {
-  const makes = statedValues(facts.makes, facts.make ?? null);
+  const makes = statedValues(splitMakes(statedValues(facts.makes, facts.make ?? null)), null);
   const chemistries = statedValues(facts.chemistries, facts.chemistry ?? null);
   const formats = statedValues(facts.formats, facts.format ?? null);
   const expanded: ProductFacts[] = [];

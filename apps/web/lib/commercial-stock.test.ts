@@ -84,6 +84,13 @@ describe("stock lots", () => {
     expect(partKey("16 755 893 80 16 755 894 80 16 890 952 80")).toBe("");
     expect(partKey("123")).toBe("");
   });
+
+  it("never turns a product name into a part code", () => {
+    // Letter O only folds to zero inside a code: a word keeps its own letters and is not a part number at all.
+    expect(partKey("Onyx Strata H4-15")).toBe("");
+    expect(partKey("72 Ah cell")).toBe("");
+    expect(partKey("EBS69")).toBe("EBS69"); // lower case inside a code is still a code
+  });
 });
 
 describe("pack identity", () => {
