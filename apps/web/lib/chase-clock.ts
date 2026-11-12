@@ -122,8 +122,8 @@ function londonOffset(at: number): number {
   return Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second")) - Math.floor(at / 1000) * 1000;
 }
 
-/** The instant of a London wall-clock hour on a London date. 09:00 and 18:00 are never inside a clock change. */
-function londonAt(date: string, hour: number): number {
+/** The instant of a London wall-clock hour on a London date. Midnight, 09:00 and 18:00 are never inside a clock change. */
+export function londonAt(date: string, hour: number): number {
   const guess = Date.parse(`${date}T${String(hour).padStart(2, "0")}:00:00Z`);
   return guess - londonOffset(guess);
 }

@@ -196,9 +196,9 @@ describe.skipIf(!TEST_URL)("offer outreach (matches v3, slice 2)", () => {
     expect(link.confirmed_by).toBe("alex@rebattery.io");
   });
 
-  it("chases an offered offer whose only email is unanswered and more than three working days old", async () => {
+  it("chases an offered offer whose only email is unanswered and past a chase day, not one sent today", async () => {
     const longAgo = "2026-10-05T09:00:00Z";   // a Monday
-    const recent = "2026-11-02T09:00:00Z";     // the Monday of the test week
+    const recent = "2026-11-04T09:00:00Z";     // the morning of the check: working day 0, nothing due yet
     await offer(id("o_chase"), id("sup"), "offered", {}, id("buyer7"));
     await sentMail(id(`m_chase_${run}`), id("o_chase"), id("sup"), longAgo);
     await offer(id("o_fresh"), id("sup"), "offered", {}, id("buyer8"));

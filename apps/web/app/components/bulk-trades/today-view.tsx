@@ -11,6 +11,7 @@ import { ProgressChip } from "./opportunities-sheet";
 import { DriverAvatar, DueText } from "./desk-bits";
 import { ErrorText, request } from "./trade-ui";
 import { DossiersToReview } from "./dossiers-to-review";
+import { ScorecardBlock } from "./scorecard-block";
 
 /** Whole thousands for the target, e.g. £15k, €17k. */
 const roundK = (symbol: string, value: number) => `${symbol}${Math.round(value / 1000).toLocaleString("en-GB")}k`;
@@ -204,7 +205,7 @@ function summary(rows: SheetRow[], owner: DealOwner | "all", groups: { key: Toda
     + `${plural(actions, "next action", "next actions")}${urgent ? `: ${urgent}` : ""}.`;
 }
 
-/** Today: the take target, the active deal warning, mentions, deals stuck in New, then every open listing's next action by
+/** Today: the take target, the scorecard, the active deal warning, mentions, deals stuck in New, then every open listing's next action by
  * when it is due (overdue ones by owner), each with whose move it is from the real conversation. */
 export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, onOpenBoard, onOpenCompany, onChanged }: {
   rows: SheetRow[]; owner: DealOwner | "all"; loading: boolean; error: string | null; today: string;
@@ -229,6 +230,7 @@ export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, 
         {(busy || (!error && rows.length > 0)) && <p data-today-summary className="text-[13px]" style={{ color: "var(--bt-text-2)" }}><Sh on={busy} chars={48}>{summary(open, owner, groups)}</Sh></p>}
       </div>
       <TakeTarget rows={rows} owner={owner} loading={busy} onOpenBoard={onOpenBoard} />
+      <ScorecardBlock />
       {!busy && crowded.map(({ owner: who, count }) => (
         <p key={who} role="status" data-active-warning className="rounded-xl border px-4 py-3 text-[13px]" style={{ color: "var(--bt-amber)", background: "var(--bt-amber-bg)", borderColor: "var(--bt-amber-border)" }}>
           {who === "No owner" ? `${count} active deals have no owner` : `${who} has ${count} active deals`}. More than {ACTIVE_DEAL_LIMIT} is more than one person can work well: park some, or hand them on.

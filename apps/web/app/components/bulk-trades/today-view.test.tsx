@@ -3,6 +3,7 @@ import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { SheetRow } from "@/lib/bulk-sheet";
+import { computeScorecard } from "@/lib/bulk-scorecard";
 import { forgetShared } from "./trade-ui";
 import { TodayView } from "./today-view";
 
@@ -12,10 +13,11 @@ const row = (o: Partial<SheetRow>): SheetRow => ({
 });
 const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
 
-function stubFetch(mentions: unknown[] = []) {
+function stubFetch(mentions: unknown[] = [], scorecard: unknown = {}) {
   const calls: { url: string; init?: RequestInit }[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     calls.push({ url, init });
+    if (url === "/api/bulk-scorecard") return new Response(JSON.stringify(scorecard));
     if (url.startsWith("/api/bulk-mentions?") || url === "/api/bulk-mentions") return new Response(JSON.stringify({ person: "Alex", me: "Alex", mentions }));
     return new Response("{}");
   }));
@@ -65,6 +67,25 @@ describe("Today (slice 3)", () => {
     const overdue = screen.getByRole("region", { name: "Overdue" });
     expect(within(overdue).getAllByRole("region").map((r) => r.getAttribute("aria-label"))).toEqual(["Overdue: Sean", "Overdue: Alex"]);
     expect(within(screen.getByRole("region", { name: "Overdue: Sean" })).getByText(/^Waiting on them · \d+ working days$/)).toBeTruthy();
+  });
+
+  it("shows the scorecard: each measure against target, the arrow, and how it is counted one click away", async () => {
+    const card = computeScorecard({
+      enquiries: [{ id: "e", arrived_at: "2026-12-07T10:00:00Z", replied_at: "2026-12-07T10:30:00Z", card_status: "sent", route: null, sent: null, dismissed_at: null, deal_id: null, deal_created_at: null }],
+      listings: [], sheet: [], events: [], runs: [], offers: [],
+    }, new Date("2026-12-15T09:00:00Z"));
+    stubFetch([], card);
+    view([row({ id: "x" })]);
+    const block = await screen.findByRole("region", { name: "Scorecard" });
+    expect(within(block).getByText(/Week of 7 Dec 2026/)).toBeTruthy();
+    const lines = within(block).getAllByRole("listitem");
+    expect(lines).toHaveLength(11);
+    expect(lines[0]).toHaveTextContent("Enquiries answered within 2 working hours100% (1 of 1)target 80%");
+    expect(lines[9]).toHaveTextContent("no data yet");
+    expect(within(block).queryByText(/How counted|working hours \(Mon to Fri/)).toBeNull();
+    fireEvent.click(within(lines[0]).getByRole("button"));
+    expect(within(lines[0]).getByText(/Mon to Fri, 09:00 to 18:00 London/)).toBeTruthy();
+    expect(within(lines[0]).getByText(/Baseline 12 Nov 2026: under 11%/)).toBeTruthy();
   });
 
   it("shows the signed-in person's mentions until they tick them", async () => {
