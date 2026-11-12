@@ -18,6 +18,7 @@ import {
 import { Button } from "../ui/button";
 import { useRegistry } from "../bulk-trades/use-registry";
 import { formatDayLabel, formatRelativeDate } from "./format-relative-date";
+import { WantsTable } from "./company-wants-table";
 import { DossierPanel } from "./company-dossier-panel";
 
 export type BuyerData = {
@@ -59,9 +60,9 @@ function toDraft(profile: BuyerProfile): Draft {
 
 /** The value the company entry API stores for one draft field. */
 function toValue(key: keyof Draft, value: string | string[]): unknown {
-  if (key === "capabilities") return value;
-  if (key === "can_receive_waste") return value === "" ? null : value === "yes";
-  if (key === "main_contact_id") return value ? [value] : [];
+  if (key === "capabilities") {return value;}
+  if (key === "can_receive_waste") {return value === "" ? null : value === "yes";}
+  if (key === "main_contact_id") {return value ? [value] : [];}
   return (value as string).trim() || null;
 }
 
@@ -113,7 +114,7 @@ export function BuyerTab({ companyId, buyer, people, onSaved }: {
     const before = toDraft(profile);
     const fields: Record<string, unknown> = {};
     for (const key of Object.keys(BUYER_FIELD_NAMES) as (keyof Draft)[]) {
-      if (JSON.stringify(before[key]) !== JSON.stringify(draft[key])) fields[BUYER_FIELD_NAMES[key]] = toValue(key, draft[key]);
+      if (JSON.stringify(before[key]) !== JSON.stringify(draft[key])) {fields[BUYER_FIELD_NAMES[key]] = toValue(key, draft[key]);}
     }
     if (!Object.keys(fields).length) {
       setEditing(false);
@@ -248,6 +249,8 @@ export function BuyerTab({ companyId, buyer, people, onSaved }: {
           })}
         </ul>
       </section>
+
+      <WantsTable companyId={companyId} />
 
       <section aria-label="How we deal with them" className="rounded-2xl border p-4" style={cardStyle}>
         <div className="mb-3 flex items-center gap-2">
