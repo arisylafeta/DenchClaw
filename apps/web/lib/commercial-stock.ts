@@ -455,16 +455,23 @@ export function lotKeyFor(supplierId: string, groupKey: string, part: string, sc
 /**
  * Folded OEM part number used to split lots: letter O and digit 0 are one character (adverts mix "37501AO050" and
  * "37501A0050"). Empty when none is stated, when the value is prose or a model name rather than a code, or when it
- * is a run-on list or a serial longer than any OEM part number.
+ * is a run-on list (over five tokens) or a serial longer than any OEM part number.
  *
  * A word is never a part number: "Onyx Strata H4-15" and "72 Ah cell" return empty instead of a mangled code, so a
  * product name cannot reach a `part:` key. Mirrored by buyer_interest_part() in migration 112.
  */
 export function partKey(value: string | null | undefined): string {
   const raw = (value ?? "").trim();
-  if (!/^[A-Za-z0-9][A-Za-z0-9 ./_#-]*$/.test(raw)) return "";
-  if (/[a-z]{2}/.test(raw)) return ""; // a run of lower-case letters is a word, not a code
-  if (raw.split(/\s+/).length > 2) return ""; // more than two tokens is prose
+  if (!raw) return "";
+  const tokens = raw.split(/\s+/);
+  if (tokens.length > 5) return ""; // more than five tokens is prose or a run-on list
+  if (tokens.length === 1 && !/^[A-Za-z0-9][A-Za-z0-9./_#-]*$/.test(raw)) return "";
+  // A spaced code ("5QE 915 105 B") is made of plain alphanumeric tokens: no words, at least one token of 3+ characters.
+  if (tokens.length > 1) {
+    if (tokens.some((token) => !/^[A-Za-z0-9]+$/.test(token) || /^[A-Za-z]{3,}$/.test(token))) return "";
+    if (!tokens.some((token) => token.length >= 3)) return "";
+  }
+  if (/[A-Za-z]{4}/.test(raw) && /[a-z]/.test(raw)) return ""; // a lower-case word (battery, Tesla), not a code
   const folded = raw.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/O/g, "0");
   if (folded.replace(/\D/g, "").length < 2) return ""; // every OEM code carries digits
   return folded.length >= 5 && folded.length <= 14 ? folded : "";

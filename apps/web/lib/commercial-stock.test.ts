@@ -85,6 +85,15 @@ describe("stock lots", () => {
     expect(partKey("123")).toBe("");
   });
 
+  it("reads a spaced OEM code of up to five alphanumeric tokens, in either case", () => {
+    expect(partKey("5QE 915 105 B")).toBe("5QE915105B");
+    expect(partKey("5qe 915 105 b")).toBe("5QE915105B");
+    expect(partKey("1 2 3 4 5 6")).toBe("");
+    expect(partKey("Tesla Model 3 pack")).toBe("");
+    expect(partKey("battery pack 2024")).toBe("");
+    expect(partKey("ID 4 77")).toBe("");
+  });
+
   it("never turns a product name into a part code", () => {
     // Letter O only folds to zero inside a code: a word keeps its own letters and is not a part number at all.
     expect(partKey("Onyx Strata H4-15")).toBe("");

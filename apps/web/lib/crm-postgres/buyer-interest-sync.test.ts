@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { partKey } from "@/lib/commercial-stock";
 import { broaderKeysFor, productKeyFor } from "@/lib/match/product-key-for";
 
 // Runs only against a disposable database: scripts/rebattery/crm-test-db.sh up prints the URL.
@@ -462,6 +463,42 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       expect(await lines("offer_id = $1", [id("title3o")])).toEqual([]);
       expect(await pg.queryPg(`select operation from buyer_interest_sync_errors where source_id = $1`, [id("title3o")]))
         .toEqual([{ operation: "no_product_facts" }]);
+    });
+
+    it("takes the make that appears first in the title, and knows Mini", async () => {
+      const make = async (title: string) =>
+        (await pg.queryPg<{ make: string }>(`select buyer_interest_title_make($1) as make`, [title]))[0].make;
+      expect(await make("Audi / VW lot")).toBe("Audi");
+      expect(await make("VW / Audi lot")).toBe("Volkswagen");
+      expect(await make("Mini Cooper SE pack")).toBe("Mini");
+      expect(await make("BMW Mini lot")).toBe("BMW");
+      expect(await make("Mixed lot")).toBeNull();
+    });
+  });
+
+  describe("an OEM part code", () => {
+    it("accepts spaced codes of up to five code-shaped tokens in either case and keeps prose out, like the TS builder", async () => {
+      const cases: [string, string | null][] = [
+        ["5QE 915 105 B", "5QE915105B"], ["5qe 915 105 b", "5QE915105B"], ["SU001-B5189", "SU001B5189"],
+        ["37501-AO050", "37501A0050"], ["Tesla Model 3 pack", null], ["battery pack 2024", null], ["72 Ah cell", null],
+        ["Onyx Strata H4-15", null], ["1 2 3 4 5 6", null], ["ID 4 77", null],
+      ];
+      for (const [text, expected] of cases) {
+        const [row] = await pg.queryPg<{ part: string | null }>(`select buyer_interest_part($1) as part`, [text]);
+        expect(row.part, text).toBe(expected);
+        expect(partKey(text) || null, `TS ${text}`).toBe(expected);
+      }
+    });
+  });
+
+  describe("a supply listing that becomes a demand listing", () => {
+    it("loses its offer-derived lines", async () => {
+      await listing(id("flip"), "supply", null, { makes: ["Audi"], chemistries: ["NMC"], formats: ["Packs"] });
+      await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, stage) values ($1, $2, 'counterparty', $3, 'paid')`,
+        [id("flipo"), id("flip"), id("buyer4")]);
+      expect(await lines("offer_id = $1", [id("flipo")])).toHaveLength(1);
+      await pg.queryPg(`update crm_bulk_listings set kind = 'demand', spec = spec || '{"intent": "request"}'::jsonb where id = $1`, [id("flip")]);
+      expect(await lines("offer_id = $1", [id("flipo")])).toEqual([]);
     });
   });
 
