@@ -1,4 +1,5 @@
 import type { Parsed } from "./bulk-trade-details";
+import { parseLines, type DemandLine } from "./demand-lines";
 
 /** Decision-relevant context. When supplied in a PATCH, replaces the full context object. */
 export type BuyerContext = {
@@ -22,6 +23,8 @@ export type BuyerContext = {
   sources?: { kind: string; id?: string; url?: string; label: string }[];
   /** The pack types the buyer asked for, one row each (for example a shortlist of marketplace listings). Shown as a table under Product. */
   packs?: BuyerPack[];
+  /** The buyer's pack types with how many of each (lib/demand-lines.ts), for Group matches. Written by Matcha, edited on Details. */
+  lines?: DemandLine[];
   reviewed_at?: string;
 };
 
@@ -74,6 +77,9 @@ export function parseBuyerContext(value: unknown): Parsed<BuyerContext> {
       case "application":
       case "next_action":
         valid = typeof raw === "string";
+        break;
+      case "lines":
+        valid = !("error" in parseLines(raw));
         break;
       case "min_usable_energy_kwh_per_pack":
         valid = typeof raw === "number" && Number.isFinite(raw) && raw > 0;

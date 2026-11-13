@@ -8,9 +8,10 @@
 // each has a marked seam below. The supply tab does not use this file.
 import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import type { FitMark, FitState, MatchOffer, MatchRow, MatchTag, MatchUnit, MatchesResult } from "@/lib/matches-types";
+import type { FitMark, FitState, MatchOffer, MatchRow, MatchTag, MatchUnit, MatchesResult, SupplierMatch } from "@/lib/matches-types";
 import type { OfferStage } from "@/lib/crm-postgres/bulk-offers";
 import css from "./request-matches.module.css";
+import { GroupMatches, NeedsCard } from "./group-matches";
 
 export const STAGES: [OfferStage, string][] = [
   ["candidate", "Candidate"], ["offered", "Offered"], ["negotiating", "Negotiating"],
@@ -227,12 +228,20 @@ type Props = {
   notAFitForm: (row: MatchRow) => ReactNode;
   error: ReactNode;
   onOpenOffers?: () => void;
+  onOpenDetails?: () => void;
+  /** Group matches: one offer for a supplier, with all their stock on the buyer's pack types. */
+  onAddSupplier: (supplier: SupplierMatch) => void;
 };
 
 export function RequestMatches({
   result, rows, hidden, onShowAll, criteriaOpen, onToggleCriteria, adding, onAdd, asking, onAskNotAFit, notAFitForm, error, onOpenOffers,
+  onOpenDetails, onAddSupplier,
 }: Props) {
   const [open, setOpen] = useState<string | null>(null);
+  // A request with several pack types opens on Group matches; one with fewer keeps the Per battery list alone.
+  const lines = result.lines ?? [];
+  const twoViews = lines.length >= 2 && !!result.suppliers;
+  const [view, setView] = useState<"group" | "battery">("group");
   const coverage = result.coverage;
   const outreach = result.summary?.outreach ?? null;
   const chips = result.summary?.chips ?? [{ label: result.lotKey.line, strong: true }];
@@ -313,8 +322,24 @@ export function RequestMatches({
         )}
       </section>
 
+      {twoViews && <NeedsCard lines={lines} buyer={shortName(result.buyer ?? "the buyer")} onEdit={onOpenDetails} />}
+
+      {twoViews && (
+        <div className={css.tabs} role="tablist" aria-label="Matches view">
+          <button type="button" role="tab" className={css.tab} aria-selected={view === "group"} onClick={() => setView("group")}>
+            Group matches · {result.suppliers!.filter((s) => !s.otherOnly).length} suppliers
+          </button>
+          <button type="button" role="tab" className={css.tab} aria-selected={view === "battery"} onClick={() => setView("battery")}>
+            Per battery matches · {result.rows.length}
+          </button>
+        </div>
+      )}
+
       {error}
 
+      {twoViews && view === "group" && <GroupMatches suppliers={result.suppliers!} adding={adding} onAdd={onAddSupplier} onOpenOffers={onOpenOffers} />}
+
+      {(!twoViews || view === "battery") && <>
       <section className={css.card} aria-label="Matches" style={{ overflow: "hidden" }}>
         {grouped ? (
           <div className={css.sec}>
@@ -417,6 +442,7 @@ export function RequestMatches({
       {hidden > 0 && (
         <button type="button" className={`${css.btn} ${css.more}`} onClick={onShowAll}>Show {Math.min(10, hidden)} more of {hidden}</button>
       )}
+      </>}
     </div>
   );
 }
