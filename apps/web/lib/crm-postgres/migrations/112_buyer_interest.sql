@@ -289,9 +289,19 @@ returns jsonb language sql immutable as $$
       buyer_interest_first_text(p_context->'chemistry'), buyer_interest_first_text(p_fields->'chemistry')),
     'kwh', coalesce(buyer_interest_number(p_spec->'kwh'), buyer_interest_number(p_spec->'capacity_kwh'),
       buyer_interest_number(p_context->'kwh'), buyer_interest_number(p_context->'capacity_kwh'),
-      buyer_interest_number(p_fields->'capacity_kwh'), buyer_interest_number(p_fields->'kwh')),
-    'kwh_min', coalesce(buyer_interest_number(p_spec->'kwh_min'), buyer_interest_number(p_context->'kwh_min')),
-    'kwh_max', coalesce(buyer_interest_number(p_spec->'kwh_max'), buyer_interest_number(p_context->'kwh_max')),
+      buyer_interest_number(p_fields->'capacity_kwh'), buyer_interest_number(p_fields->'kwh'),
+      buyer_interest_number(p_spec->'energy_kwh'), buyer_interest_number(p_context->'energy_kwh')),
+    -- A stated point capacity is its own range, so a line keyed broad still says 82 kWh.
+    'kwh_min', coalesce(buyer_interest_number(p_spec->'kwh_min'), buyer_interest_number(p_context->'kwh_min'),
+      buyer_interest_number(p_spec->'kwh'), buyer_interest_number(p_spec->'capacity_kwh'),
+      buyer_interest_number(p_context->'kwh'), buyer_interest_number(p_context->'capacity_kwh'),
+      buyer_interest_number(p_fields->'capacity_kwh'), buyer_interest_number(p_fields->'kwh'),
+      buyer_interest_number(p_spec->'energy_kwh'), buyer_interest_number(p_context->'energy_kwh')),
+    'kwh_max', coalesce(buyer_interest_number(p_spec->'kwh_max'), buyer_interest_number(p_context->'kwh_max'),
+      buyer_interest_number(p_spec->'kwh'), buyer_interest_number(p_spec->'capacity_kwh'),
+      buyer_interest_number(p_context->'kwh'), buyer_interest_number(p_context->'capacity_kwh'),
+      buyer_interest_number(p_fields->'capacity_kwh'), buyer_interest_number(p_fields->'kwh'),
+      buyer_interest_number(p_spec->'energy_kwh'), buyer_interest_number(p_context->'energy_kwh')),
     'cell_maker', coalesce(buyer_interest_first_text(p_spec->'cell_makers'), buyer_interest_first_text(p_spec->'cell_maker'),
       buyer_interest_first_text(p_context->'cell_maker')),
     'part_numbers', case when jsonb_typeof(coalesce(p_spec->'part_numbers', p_spec->'partNumbers', p_context->'part_numbers',
@@ -357,10 +367,21 @@ create or replace function buyer_interest_stated_list(p_list jsonb, p_first text
     array[null]::text[])
 $$;
 
+-- The vehicle make a listing title names ("2024 Audi MEB 82 kWh pack"): the first make in the list that appears as a
+-- whole word. Only a listing with no mapped make falls back to it; a title never overrides a stated make.
+create or replace function buyer_interest_title_make(p_title text) returns text language sql immutable as $$
+  select case when m in ('bmw', 'mg', 'byd', 'ds', 'nio') then upper(m) when m = 'vw' then 'Volkswagen' else initcap(m) end
+  from (select (regexp_match(buyer_interest_unaccent(p_title),
+    '\y(volkswagen|vw|audi|skoda|seat|cupra|porsche|bmw|mini|mercedes-benz|mercedes|tesla|nissan|renault|dacia|peugeot|citroen|opel|vauxhall|fiat|jeep|ford|hyundai|kia|genesis|toyota|lexus|honda|mazda|mitsubishi|suzuki|subaru|volvo|polestar|jaguar|land rover|mg|byd|smart|lotus|lucid|rivian|nio|xpeng|zeekr|leapmotor|maxus|ds)\y'))[1] as m) found
+$$;
+
 -- One fact set per stated make x chemistry x format, so every combination of a row's facts becomes a line instead
 -- of only the first value of each list. Capped at p_limit lines; stated_total says how many the row really states.
+-- A listing with no mapped make or format falls back to what it does state: the make in its title (p_title) and its
+-- trade_kind (packs, modules, cells). The mapped fields and the spec's own lists always win.
+drop function if exists buyer_interest_fact_sets(jsonb, jsonb, jsonb, int);
 create or replace function buyer_interest_fact_sets(p_spec jsonb, p_context jsonb default '{}'::jsonb,
-  p_fields jsonb default '{}'::jsonb, p_limit int default 12)
+  p_fields jsonb default '{}'::jsonb, p_limit int default 12, p_title text default null)
 returns table (facts jsonb[], stated_total int) language plpgsql immutable as $$
 declare
   makes text[] := buyer_interest_make_list(buyer_interest_stated_list(p_spec->'makes', buyer_interest_first_text(p_spec->'make'),
@@ -374,6 +395,14 @@ declare
   c text;
   f text;
 begin
+  if makes = array[null]::text[] and buyer_interest_title_make(p_title) is not null then
+    makes := array[buyer_interest_title_make(p_title)];
+  end if;
+  if formats = array[null]::text[] and buyer_interest_format(coalesce(buyer_interest_first_text(p_spec->'trade_kind'),
+      buyer_interest_first_text(p_context->'trade_kind'))) is not null then
+    formats := array[buyer_interest_format(coalesce(buyer_interest_first_text(p_spec->'trade_kind'),
+      buyer_interest_first_text(p_context->'trade_kind')))];
+  end if;
   for m, c, f in
     select x.value, y.value, z.value
     from unnest(makes) x(value)
@@ -626,7 +655,9 @@ begin
   from crm_bulk_listing_fields where bulk_listing_id = listing.id and value is not null and status <> 'conflict';
 
   select fs.facts, fs.stated_total into fact_sets, stated_total
-  from buyer_interest_fact_sets(listing.spec, listing.context, fields) fs;
+  from buyer_interest_fact_sets(listing.spec, listing.context, fields, 12,
+    coalesce(nullif(btrim(listing.context->>'listing_title'), ''), nullif(btrim(coalesce(listing.spec->>'listing_title', '')), ''),
+      listing.summary)) fs;
 
   -- A listing that states no product at all gives the purchase nothing to match: it is recorded, not written.
   select coalesce(array_agg(fact), '{}') into product_sets from unnest(fact_sets) fact

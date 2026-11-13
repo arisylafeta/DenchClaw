@@ -406,6 +406,51 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     });
   });
 
+  describe("a supply listing with no mapped product fields", () => {
+    it("derives the bought line from its title, energy_kwh and trade_kind (the live Audi shape)", async () => {
+      await pg.queryPg(
+        `insert into crm_bulk_listings (id, kind, party, summary, status, observed_on, quantity, spec, context)
+         values ($1, 'supply', 'Unknown seller', '2024 Audi MEB 82 kWh pack (12 x 8s modules), sold to Silent Classics.', 'open',
+           '2026-06-16', '1 pack',
+           '{"basis": "stated", "energy_kwh": 82, "trade_kind": "packs", "module_series": "8s", "quantity_unit": "packs"}'::jsonb,
+           '{"listing_title": "2024 Audi MEB 82 kWh pack"}'::jsonb)`, [id("audi")]);
+      await pg.queryPg(
+        `insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, stage, terms)
+         values ($1, $2, 'counterparty', $3, 'paid', '{"kwh": 82, "amount": 2950, "currency": "GBP", "delivered": true}'::jsonb)`,
+        [id("audio"), id("audi"), id("buyer4")]);
+      const rows = await lines("offer_id = $1", [id("audio")]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        kind: "bought", make: "Audi", format: "pack", product_key: "broad:audi-any-packs", price: 2950, price_currency: "GBP",
+      });
+      const [facts] = await pg.queryPg<{ kwh_min: number; kwh_max: number }>(
+        `select kwh_min::float8, kwh_max::float8 from buyer_interest where offer_id = $1`, [id("audio")]);
+      expect(facts).toEqual({ kwh_min: 82, kwh_max: 82 });
+      expect(await pg.queryPg(`select 1 from buyer_interest_sync_errors where source_id = $1`, [id("audio")])).toEqual([]);
+    });
+
+    it("lets a mapped field or a stated make win over the title", async () => {
+      await pg.queryPg(
+        `insert into crm_bulk_listings (id, kind, party, summary, status, observed_on, spec, context)
+         values ($1, 'supply', 'Seller', 'Audi pack for Kia', 'open', '2026-06-16',
+           '{"energy_kwh": 64, "trade_kind": "packs", "makes": ["Kia"], "model": "Niro"}'::jsonb, '{"listing_title": "Audi pack"}'::jsonb)`, [id("title2")]);
+      await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, stage) values ($1, $2, 'counterparty', $3, 'paid')`,
+        [id("title2o"), id("title2"), id("buyer4")]);
+      expect((await lines("offer_id = $1", [id("title2o")])).map((row) => row.product_key)).toEqual(["model:kia-niro-64kwh"]);
+    });
+
+    it("still records a listing whose title names no make and states nothing else", async () => {
+      await pg.queryPg(
+        `insert into crm_bulk_listings (id, kind, party, summary, status, observed_on, spec, context)
+         values ($1, 'supply', 'Seller', 'Mixed lot, see photos', 'open', '2026-06-16', '{}'::jsonb, '{"listing_title": "Mixed lot"}'::jsonb)`, [id("title3")]);
+      await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, stage) values ($1, $2, 'counterparty', $3, 'paid')`,
+        [id("title3o"), id("title3"), id("buyer4")]);
+      expect(await lines("offer_id = $1", [id("title3o")])).toEqual([]);
+      expect(await pg.queryPg(`select operation from buyer_interest_sync_errors where source_id = $1`, [id("title3o")]))
+        .toEqual([{ operation: "no_product_facts" }]);
+    });
+  });
+
   describe("two writers on one source", () => {
     type Client = import("pg").PoolClient;
     const sleep = (ms: number) => new Promise((resolve) => { setTimeout(resolve, ms); });
