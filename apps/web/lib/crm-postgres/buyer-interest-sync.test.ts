@@ -357,6 +357,55 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     }
   });
 
+  describe("a listing's facts change under its offers", () => {
+    const setField = (lid: string, key: string, value: string) =>
+      pg.queryPg(
+        `insert into crm_bulk_listing_fields (bulk_listing_id, field_key, value, status, visibility)
+         values ($1, $2, $3, 'confirmed', 'teaser')
+         on conflict (bulk_listing_id, field_key) do update set value = excluded.value`, [lid, key, value]);
+
+    it("moves the bought and declined lines when a mapped model or capacity field changes", async () => {
+      await listing(id("lf1"), "supply", null, {});
+      await pg.queryPg(`insert into crm_bulk_listing_fields (bulk_listing_id, field_key, value, status, visibility)
+        values ($1, 'make', 'Kia', 'confirmed', 'teaser'), ($1, 'model', 'Niro', 'confirmed', 'teaser')`, [id("lf1")]);
+      await pg.queryPg(
+        `insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, stage)
+         values ($1, $3, 'counterparty', $4, 'paid'), ($2, $3, 'counterparty', $5, 'declined')`,
+        [id("lfo1"), id("lfo2"), id("lf1"), id("buyer1"), id("buyer2")]);
+      const keys = async () => (await lines("offer_id = any($1)", [[id("lfo1"), id("lfo2")]])).map((row) => `${row.kind}:${row.product_key}`).toSorted();
+      expect(await keys()).toEqual(["bought:broad:kia-any-batteries", "declined:broad:kia-any-batteries"]);
+
+      await setField(id("lf1"), "capacity_kwh", "64");  // insert
+      expect(await keys()).toEqual(["bought:model:kia-niro-64kwh", "declined:model:kia-niro-64kwh"]);
+
+      await setField(id("lf1"), "model", "EV6");  // update
+      await setField(id("lf1"), "capacity_kwh", "77.4");
+      expect(await keys()).toEqual(["bought:model:kia-ev6-77.4kwh", "declined:model:kia-ev6-77.4kwh"]);
+
+      await pg.queryPg(`delete from crm_bulk_listing_fields where bulk_listing_id = $1 and field_key in ('model', 'capacity_kwh')`, [id("lf1")]);  // delete
+      expect(await keys()).toEqual(["bought:broad:kia-any-batteries", "declined:broad:kia-any-batteries"]);
+    });
+
+    it("follows an edit of the supply listing's own spec and ignores an unrelated field", async () => {
+      await listing(id("lf2"), "supply", null, { makes: ["Audi"], chemistries: ["NMC"], formats: ["Packs"] });
+      await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, stage) values ($1, $2, 'counterparty', $3, 'paid')`,
+        [id("lfo3"), id("lf2"), id("buyer1")]);
+      expect((await lines("offer_id = $1", [id("lfo3")])).map((row) => row.product_key)).toEqual(["broad:audi-nmc-packs"]);
+      await pg.queryPg(`update crm_bulk_listings set spec = jsonb_set(spec, '{chemistries}', '["LFP"]') where id = $1`, [id("lf2")]);
+      expect((await lines("offer_id = $1", [id("lfo3")])).map((row) => row.product_key)).toEqual(["broad:audi-lfp-packs"]);
+      const before = (await lines("offer_id = $1", [id("lfo3")]))[0];
+      await setField(id("lf2"), "location", "Hamburg");
+      expect(await lines("offer_id = $1", [id("lfo3")])).toEqual([before]);
+    });
+
+    it("resyncs a demand listing's own lines when one of its fields changes", async () => {
+      await listing(id("lf3"), "demand", id("buyer3"), { intent: "request", makes: ["Audi"], formats: ["Packs"], volume: 5, volume_unit: "packs" });
+      await pg.queryPg(`update buyer_interest set quantity = 99 where demand_id = $1`, [id("lf3")]);  // drift a field write must repair
+      await setField(id("lf3"), "model", "Q4");
+      expect((await lines("demand_id = $1", [id("lf3")]))[0].quantity).toBe(5);
+    });
+  });
+
   describe("two writers on one source", () => {
     type Client = import("pg").PoolClient;
     const sleep = (ms: number) => new Promise((resolve) => { setTimeout(resolve, ms); });

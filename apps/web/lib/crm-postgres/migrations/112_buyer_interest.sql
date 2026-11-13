@@ -737,6 +737,87 @@ create trigger buyer_interest_offer_sync_update after update on crm_bulk_offers
     or new.counterpart_id is distinct from old.counterpart_id)
   execute function buyer_interest_sync_offer();
 
+-- ---------------------------------------------------------------------------
+-- A listing's facts changed: the offers on it follow
+-- ---------------------------------------------------------------------------
+
+-- An offer line is built from its listing's spec, context and mapped fields, so those edits resync the offers on that
+-- listing (and a demand row's own lines). Each sync takes its source's lock; offers go in id order so two listing
+-- edits queue instead of deadlocking.
+create or replace function buyer_interest_resync_listing(p_listing_id text) returns void language plpgsql as $$
+declare
+  offer_id_ text;
+  is_demand boolean;
+begin
+  if p_listing_id is null then return; end if;
+  select kind = 'demand' into is_demand from crm_bulk_listings where id = p_listing_id;
+  if coalesce(is_demand, false) then
+    perform buyer_interest_sync_demand_row(p_listing_id);
+  end if;
+  for offer_id_ in select id from crm_bulk_offers where bulk_listing_id = p_listing_id order by id loop
+    perform buyer_interest_sync_offer_row(offer_id_);
+  end loop;
+end $$;
+
+create or replace function buyer_interest_listing_fields_changed() returns trigger language plpgsql as $$
+declare
+  listing_ids text[] := '{}';
+  listing_id_ text;
+  fact_keys text[] := array['make', 'model', 'format', 'chemistry', 'capacity_kwh', 'kwh', 'part_numbers'];
+begin
+  begin
+    -- Only the keys a fact is read from; a note or a source label changes nothing a line holds.
+    if TG_OP <> 'DELETE' and lower(new.field_key) = any(fact_keys) then
+      listing_ids := listing_ids || new.bulk_listing_id;
+    end if;
+    if TG_OP <> 'INSERT' and lower(old.field_key) = any(fact_keys) then
+      listing_ids := listing_ids || old.bulk_listing_id;
+    end if;
+    select coalesce(array_agg(distinct x order by x), '{}') into listing_ids from unnest(listing_ids) x;
+    foreach listing_id_ in array listing_ids loop
+      perform buyer_interest_resync_listing(listing_id_);
+    end loop;
+  exception when others then
+    begin
+      insert into buyer_interest_sync_errors (source_table, source_id, operation, message)
+      values ('crm_bulk_listing_fields', coalesce(case when TG_OP <> 'DELETE' then new.bulk_listing_id end, old.bulk_listing_id), TG_OP, sqlerrm);
+    exception when others then null;
+    end;
+  end;
+  return null;
+end $$;
+
+drop trigger if exists buyer_interest_listing_fields_sync on crm_bulk_listing_fields;
+create trigger buyer_interest_listing_fields_sync after insert or update or delete on crm_bulk_listing_fields
+  for each row execute function buyer_interest_listing_fields_changed();
+
+-- The same for the listing row itself: its spec, context, summary or quantity feed the offers' facts. A demand row's
+-- own trigger already covers its lines, so this one is for supply listings only.
+create or replace function buyer_interest_listing_changed() returns trigger language plpgsql as $$
+declare
+  offer_id_ text;
+begin
+  begin
+    for offer_id_ in select id from crm_bulk_offers where bulk_listing_id = new.id order by id loop
+      perform buyer_interest_sync_offer_row(offer_id_);
+    end loop;
+  exception when others then
+    begin
+      insert into buyer_interest_sync_errors (source_table, source_id, operation, message)
+      values ('crm_bulk_listings', new.id, 'offers_' || TG_OP, sqlerrm);
+    exception when others then null;
+    end;
+  end;
+  return null;
+end $$;
+
+drop trigger if exists buyer_interest_listing_offers_sync on crm_bulk_listings;
+create trigger buyer_interest_listing_offers_sync after update on crm_bulk_listings
+  for each row when (new.kind = 'supply' and (new.spec is distinct from old.spec or new.context is distinct from old.context
+    or new.summary is distinct from old.summary or new.quantity is distinct from old.quantity
+    or new.observed_on is distinct from old.observed_on or old.kind is distinct from new.kind))
+  execute function buyer_interest_listing_changed();
+
 do $$ begin
   insert into crm_data_migrations (id) values ('112_buyer_interest') on conflict do nothing;
 end $$;
