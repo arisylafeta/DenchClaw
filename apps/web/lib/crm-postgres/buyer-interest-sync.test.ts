@@ -356,4 +356,82 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       await pg.queryPg(`alter table buyer_interest_paused_${run} rename to buyer_interest`);
     }
   });
+
+  describe("two writers on one source", () => {
+    type Client = import("pg").PoolClient;
+    const sleep = (ms: number) => new Promise((resolve) => { setTimeout(resolve, ms); });
+    const keysOf = async (demandId: string) => (await lines("demand_id = $1", [demandId])).map((row) => row.product_key);
+
+    const settled = (promise: Promise<unknown>) => {
+      const state = { done: false };
+      void promise.then(() => { state.done = true; }, () => { state.done = true; });
+      return state;
+    };
+
+    it("a backfill that starts after a live edit waits for it and writes the edit's facts", async () => {
+      await listing(id("race1"), "demand", id("buyer1"), { intent: "request", formats: ["Packs"], chemistries: ["LFP"] });
+      expect(await keysOf(id("race1"))).toEqual(["broad:lfp-packs"]);
+
+      const writer: Client = await pg.pgPool.connect();
+      const backfill: Client = await pg.pgPool.connect();
+      try {
+        await writer.query("begin");
+        await writer.query(`update crm_bulk_listings set spec = jsonb_set(spec, '{chemistries}', '["NMC"]') where id = $1`, [id("race1")]);
+        await backfill.query("begin");
+        const sync = backfill.query(`select buyer_interest_sync_demand_row($1)`, [id("race1")]);
+        const state = settled(sync);
+        await sleep(300);
+        expect(state.done).toBe(false);  // queued behind the writer's lock, not reading old facts
+        await writer.query("commit");
+        await sync;
+        await backfill.query("commit");
+      } finally {
+        writer.release();
+        backfill.release();
+      }
+      expect(await keysOf(id("race1"))).toEqual(["broad:nmc-packs"]);
+    });
+
+    it("a live edit that arrives while the backfill holds the source ends with the newest facts", async () => {
+      await listing(id("race2"), "demand", id("buyer1"), { intent: "request", formats: ["Packs"], chemistries: ["LFP"] });
+
+      const writer: Client = await pg.pgPool.connect();
+      const backfill: Client = await pg.pgPool.connect();
+      try {
+        await backfill.query("begin");
+        await backfill.query(`select buyer_interest_sync_demand_row($1)`, [id("race2")]);  // reads LFP and holds the lock
+        const edit = writer.query(`update crm_bulk_listings set spec = jsonb_set(spec, '{chemistries}', '["NMC"]') where id = $1`, [id("race2")]);
+        const state = settled(edit);
+        await sleep(300);
+        expect(state.done).toBe(false);  // the trigger queues behind the backfill's lock
+        await backfill.query("commit");
+        await edit;
+      } finally {
+        writer.release();
+        backfill.release();
+      }
+      expect(await keysOf(id("race2"))).toEqual(["broad:nmc-packs"]);
+    });
+
+    it("two offers on one buyer synced from separate transactions do not deadlock", async () => {
+      await listing(id("race3"), "supply", null, { makes: ["Audi"], chemistries: ["NMC"], formats: ["Packs"] });
+      await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, stage) values ($1, $2, 'counterparty', $3, 'paid'), ($4, $2, 'counterparty', $5, 'paid')`,
+        [id("race3a"), id("race3"), id("buyer1"), id("race3b"), id("buyer2")]);
+      const a: Client = await pg.pgPool.connect();
+      const b: Client = await pg.pgPool.connect();
+      try {
+        await a.query("begin");
+        await b.query("begin");
+        await a.query(`select buyer_interest_sync_offer_row($1)`, [id("race3a")]);
+        await b.query(`select buyer_interest_sync_offer_row($1)`, [id("race3b")]);
+        await a.query(`select buyer_interest_sync_offer_row($1)`, [id("race3a")]);
+        await Promise.all([a.query("commit"), b.query("commit")]);
+      } finally {
+        a.release();
+        b.release();
+      }
+      const rows = await lines("offer_id = any($1)", [[id("race3a"), id("race3b")]]);
+      expect(rows.map((row) => row.kind)).toEqual(["bought", "bought"]);
+    });
+  });
 });

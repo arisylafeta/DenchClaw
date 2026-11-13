@@ -421,7 +421,11 @@ declare
   expiry_sticky boolean := false;
   refs text[];
 begin
-  select * into row_ from crm_bulk_listings where id = p_id and kind = 'demand';
+  -- One writer per source: the trigger and the backfill queue here, and each reads the row after the lock is
+  -- granted, so the last one in always writes the newest facts. FOR KEY SHARE re-reads the current row version
+  -- without blocking an ordinary UPDATE, so a writer holding the row cannot deadlock with a sync waiting here.
+  perform pg_advisory_xact_lock(hashtext('demand:' || p_id));
+  select * into row_ from crm_bulk_listings where id = p_id and kind = 'demand' for key share;
   if row_.id is null then
     -- Deleted, or no longer a demand row: its lines no longer describe a buyer's wish.
     delete from buyer_interest where demand_id = p_id;
@@ -591,14 +595,16 @@ declare
   price_basis_v text;
   refs text[];
 begin
-  select * into offer from crm_bulk_offers where id = p_id;
+  -- Same single-writer rule as the demand sync: lock on the offer, then read offer, listing and fields.
+  perform pg_advisory_xact_lock(hashtext('offer:' || p_id));
+  select * into offer from crm_bulk_offers where id = p_id for key share;
   if offer.id is null then
     delete from buyer_interest where offer_id = p_id;
     return;
   end if;
 
   -- Only a counterparty (a buyer) on a supply listing describes a purchase. Our own contacts do not.
-  select * into listing from crm_bulk_listings where id = offer.bulk_listing_id;
+  select * into listing from crm_bulk_listings where id = offer.bulk_listing_id for key share;
   if coalesce(offer.role, '') <> 'counterparty' or offer.company_id is null or listing.id is null
       or listing.kind <> 'supply' then
     delete from buyer_interest where offer_id = offer.id;
