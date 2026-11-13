@@ -45,6 +45,42 @@ class ProductionGuard(unittest.TestCase):
         with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
             self.backfill.main(["--apply", "--dsn", DEFAULT_DSN])
 
+    def test_the_server_reported_name_decides_not_the_dsn(self):
+        refuse = self.backfill.refusal_for_database
+        self.assertIsNotNone(refuse("denchclaw", False))
+        self.assertIsNotNone(refuse("DenchClaw", False))
+        self.assertIsNone(refuse("denchclaw", True))
+        self.assertIsNone(refuse("denchclaw_rehearsal", False))
+
+
+class ConnectionGuard(unittest.TestCase):
+    """The disposable test database is also called denchclaw, on a port the DSN check does not call production."""
+
+    @classmethod
+    def setUpClass(cls):
+        import os
+        cls.dsn = os.environ.get("BULK_TRADES_TEST_DATABASE_URL")
+        if not cls.dsn:
+            raise unittest.SkipTest("needs the disposable CRM database (BULK_TRADES_TEST_DATABASE_URL)")
+        cls.backfill = load("backfill_buyer_interest")
+
+    def test_apply_to_a_database_named_denchclaw_is_refused_on_any_host(self):
+        self.assertFalse(self.backfill.is_production_dsn(self.dsn))  # the DSN looks harmless
+        out, err = io.StringIO(), io.StringIO()
+        with self.assertRaises(SystemExit) as raised, contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.backfill.main(["--apply", "--dsn", self.dsn])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("denchclaw", out.getvalue())          # host and database are printed before anything is written
+        self.assertIn("127.0.0.1", out.getvalue())
+        self.assertIn("--i-have-approval", err.getvalue())
+        self.assertNotIn("batch", out.getvalue())           # no batch ran
+
+    def test_a_dry_run_and_an_approved_apply_are_not_refused(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(self.backfill.main(["--dsn", self.dsn]), 0)
+        self.assertIn("dry run", out.getvalue())
+
 
 class Backfill(unittest.TestCase):
     @classmethod

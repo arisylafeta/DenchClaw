@@ -86,6 +86,21 @@ def is_production_dsn(dsn):
     return host in ("localhost", "127.0.0.1", "::1") and port == "5432"
 
 
+PRODUCTION_DATABASE = "denchclaw"
+
+
+def refusal_for_database(db_name, approved):
+    """Why a write must not start, from the name the server reports for the connection (None when it may).
+
+    The DSN is only what the caller typed: a tunnel, an alias or a changed port still lands on the live database, and
+    only current_database() says which one that is. Anything named denchclaw needs --i-have-approval, on any host.
+    """
+    if (db_name or "").strip().lower() == PRODUCTION_DATABASE and not approved:
+        return (f"the connection is to the database '{db_name}', the live CRM name; refusing to write without "
+                "--i-have-approval (a disposable copy should be restored under another name)")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
@@ -803,6 +818,11 @@ def main(argv=None):
 
     print(f"database {where['db']} via {target}"
           f"{' (PRODUCTION)' if production else ''}: {'apply' if args.apply else 'dry run'}")
+    if args.apply:
+        why = refusal_for_database(where["db"], args.i_have_approval)
+        if why:
+            conn.close()
+            parser.error(why)
     try:
         summary = run(conn, apply_writes=args.apply, batch_size=args.batch_size)
         for batch in summary["batches"]:
