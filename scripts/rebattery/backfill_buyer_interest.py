@@ -25,11 +25,15 @@ replays the write paths that already exist over the existing data, so nothing ha
 A source that states no product fact at all is not turned into a broad:any-batteries line: it is recorded in
 buyer_interest_sync_errors as operation 'no_product_facts' (with the source id) so a person can fix the source.
 
-Dry run by default: every batch runs inside one transaction that is rolled back at the end, so each batch sees
-what the earlier ones wrote and the counts are what an apply would leave. --apply writes one transaction per
-batch. Re-running is safe: every path upserts on its own unique key, and the dossier lines carry a deterministic id.
+Dry run by default: every batch (200 rows) runs in its own transaction and is rolled back, so no lock outlives a
+batch. A batch does not see what the one before it would have written, so the dry run's end total is the start plus
+the batches' own changes, a close estimate rather than the exact apply result. --apply writes one transaction per
+batch. Any run, dry or apply, against a connection whose current_database() is denchclaw needs --i-have-approval.
+The session runs with lock_timeout 3s and statement_timeout 60s; a row that hits a timeout or a deadlock is retried
+once, then recorded in buyer_interest_sync_errors (operation 'backfill_timeout'), reported, and the run continues.
+Re-running is safe: every path upserts on its own unique key, and the dossier lines carry a deterministic id.
 
-  backfill_buyer_interest.py                                  # dry run against the local CRM database
+  backfill_buyer_interest.py --dsn <dsn>                      # dry run (production needs --i-have-approval)
   backfill_buyer_interest.py --dsn <dsn> --apply              # write (production needs --i-have-approval)
   backfill_buyer_interest.py --dsn <dsn> --preview FILE.md    # write the approval preview, writes nothing
 """
@@ -90,13 +94,13 @@ PRODUCTION_DATABASE = "denchclaw"
 
 
 def refusal_for_database(db_name, approved):
-    """Why a write must not start, from the name the server reports for the connection (None when it may).
+    """Why a run (dry or apply) must not start, from the name the server reports for the connection (None when it may).
 
     The DSN is only what the caller typed: a tunnel, an alias or a changed port still lands on the live database, and
     only current_database() says which one that is. Anything named denchclaw needs --i-have-approval, on any host.
     """
     if (db_name or "").strip().lower() == PRODUCTION_DATABASE and not approved:
-        return (f"the connection is to the database '{db_name}', the live CRM name; refusing to write without "
+        return (f"the connection is to the database '{db_name}', the live CRM name; refusing to run without "
                 "--i-have-approval (a disposable copy should be restored under another name)")
     return None
 
@@ -145,6 +149,39 @@ def _ids(cur, sql, params=()):
 # ---------------------------------------------------------------------------
 # (a) Demand rows and offers: run the two sync functions the triggers call
 # ---------------------------------------------------------------------------
+LOCK_TIMEOUT = "3s"
+STATEMENT_TIMEOUT = "60s"
+# lock_not_available, deadlock_detected, query_canceled (statement_timeout)
+RETRYABLE = {"55P03", "40P01", "57014"}
+
+
+def _set_timeouts(cur):
+    """Per transaction batch: a rollback undoes a plain SET, so each batch sets them again."""
+    cur.execute(f"set lock_timeout = '{LOCK_TIMEOUT}'")
+    cur.execute(f"set statement_timeout = '{STATEMENT_TIMEOUT}'")
+
+
+def _run_row(cur, sql, params):
+    """Run one row's statement in its own savepoint. A timeout or deadlock is retried once.
+
+    Returns (ok, error). A non-retryable error comes back as (False, exc, False); a second timeout as
+    (False, exc, True), so the caller can tell a timeout from a failure.
+    """
+    last = None
+    for attempt in (1, 2):
+        cur.execute("savepoint bi_row")
+        try:
+            cur.execute(sql, params)
+            cur.execute("release savepoint bi_row")
+            return True, None, False
+        except Exception as exc:  # noqa: BLE001
+            cur.execute("rollback to savepoint bi_row")
+            last = exc
+            if getattr(exc, "pgcode", None) not in RETRYABLE:
+                return False, exc, False
+    return False, last, True
+
+
 def sync_source_rows(cur, source_table, ids):
     """One sync function per source row, in a savepoint, so one bad row cannot fail the batch.
 
@@ -153,18 +190,17 @@ def sync_source_rows(cur, source_table, ids):
     function = {"crm_bulk_listings": "buyer_interest_sync_demand_row",
                 "crm_bulk_offers": "buyer_interest_sync_offer_row"}[source_table]
     _clear_truncations(cur, ids)
-    synced, errors = 0, 0
+    synced, errors, timeouts = 0, 0, 0
     for row_id in ids:
-        cur.execute("savepoint bi_row")
-        try:
-            cur.execute(f"select {function}(%s)", (row_id,))
-            cur.execute("release savepoint bi_row")
+        ok, exc, timed_out = _run_row(cur, f"select {function}(%s)", (row_id,))
+        if ok:
             synced += 1
-        except Exception as exc:  # noqa: BLE001 - recorded, then the batch continues
-            cur.execute("rollback to savepoint bi_row")
-            _record_error(cur, source_table, row_id, "backfill", exc)
-            errors += 1
-    return {"rows": len(ids), "synced": synced, "errors": errors}
+            continue
+        # Recorded, then the batch continues.
+        _record_error(cur, source_table, row_id, "backfill_timeout" if timed_out else "backfill", exc)
+        errors += 1
+        timeouts += 1 if timed_out else 0
+    return {"rows": len(ids), "synced": synced, "errors": errors, "timeouts": timeouts}
 
 
 def demand_ids(cur):
@@ -557,7 +593,8 @@ def count_lines(cur):
 
 
 def _batch(cur, name, payload_ids, work, apply_writes, dry_run=False):
-    """One transaction per batch when applying; a dry run keeps every batch and rolls the whole run back at the end."""
+    """One transaction per batch: applied batches commit, a dry run's batches roll back, so no lock outlives a batch."""
+    _set_timeouts(cur)
     cur.execute("savepoint bi_batch")
     before = count_lines(cur)
     result = work(cur)
@@ -568,9 +605,6 @@ def _batch(cur, name, payload_ids, work, apply_writes, dry_run=False):
     if apply_writes:
         cur.execute("release savepoint bi_batch")
         cur.connection.commit()
-    elif dry_run:
-        # Kept inside the dry run's own transaction, so the next batch sees what this one would have written.
-        cur.execute("release savepoint bi_batch")
     else:
         cur.execute("rollback to savepoint bi_batch")
         cur.connection.rollback()
@@ -587,8 +621,7 @@ def run(conn, apply_writes=False, batch_size=BATCH):
         if not cur.fetchone()["name"]:
             raise SystemExit("buyer_interest does not exist: apply migration 112 first")
         summary["lines_at_start"] = count_lines(cur)
-        if dry_run:
-            cur.execute("savepoint bi_dry_run")
+        conn.rollback()
 
         def batch(name, work):
             summary["batches"].append(_batch(cur, name, None, work, apply_writes, dry_run))
@@ -616,12 +649,18 @@ def run(conn, apply_writes=False, batch_size=BATCH):
         # Last, so the buy boxes that other batches just covered are already excluded.
         batch("buy-box-1", lambda c: sync_buy_box_rows(c, buy_box_rows(c)))
 
-        summary["lines_at_end"] = count_lines(cur)
-        cur.execute("select count(*) as n from buyer_interest_sync_errors")
-        summary["sync_errors"] = cur.fetchone()["n"]
+        start_total = sum(summary["lines_at_start"].values())
         if dry_run:
-            cur.execute("rollback to savepoint bi_dry_run")
-            conn.rollback()
+            # Every batch was rolled back: the end is the start plus what each batch changed.
+            summary["lines_at_end"] = start_total + sum(b["lines_after"] - b["lines_before"] for b in summary["batches"])
+            summary["sync_errors"] = sum(b.get("errors", 0) for b in summary["batches"])
+        else:
+            summary["lines_at_end"] = sum(count_lines(cur).values())
+            cur.execute("select count(*) as n from buyer_interest_sync_errors")
+            summary["sync_errors"] = cur.fetchone()["n"]
+            conn.commit()
+        summary["lines_at_start"] = start_total
+        summary["timeouts"] = sum(b.get("timeouts", 0) for b in summary["batches"])
     return summary
 
 
@@ -791,7 +830,7 @@ def main(argv=None):
     parser.add_argument("--dsn", help="connection string (required with --apply)")
     parser.add_argument("--apply", action="store_true", help="write; without it every batch is rolled back")
     parser.add_argument("--i-have-approval", action="store_true",
-                        help="allow --apply against the production database")
+                        help="allow a run (dry or apply) against the production database")
     parser.add_argument("--batch-size", type=int, default=BATCH)
     parser.add_argument("--preview", help="write the approval preview markdown to this path; writes nothing")
     args = parser.parse_args(argv)
@@ -800,8 +839,9 @@ def main(argv=None):
     production = is_production_dsn(dsn)
     if args.apply and not args.dsn:
         parser.error("--apply needs an explicit --dsn")
-    if args.apply and production and not args.i_have_approval:
-        parser.error("refusing to write the production database; pass --i-have-approval to override")
+    if production and not args.i_have_approval:
+        parser.error("refusing to run against the production database (even a dry run holds locks); "
+                     "pass --i-have-approval to override")
     if args.apply and args.preview:
         parser.error("--preview writes nothing; run it without --apply")
 
@@ -818,17 +858,17 @@ def main(argv=None):
 
     print(f"database {where['db']} via {target}"
           f"{' (PRODUCTION)' if production else ''}: {'apply' if args.apply else 'dry run'}")
-    if args.apply:
-        why = refusal_for_database(where["db"], args.i_have_approval)
-        if why:
-            conn.close()
-            parser.error(why)
+    why = refusal_for_database(where["db"], args.i_have_approval)
+    if why:
+        conn.close()
+        parser.error(why)
     try:
         summary = run(conn, apply_writes=args.apply, batch_size=args.batch_size)
         for batch in summary["batches"]:
             print(f"  {batch['batch']:<14} {json.dumps({k: v for k, v in batch.items() if k != 'batch'})}")
         print(f"lines at start {summary['lines_at_start']} -> at end {summary['lines_at_end']}")
-        print(f"sync errors recorded: {summary['sync_errors']}")
+        print(f"sync errors {'in this dry run' if not args.apply else 'recorded'}: {summary['sync_errors']}")
+        print(f"rows that hit a lock or statement timeout twice (recorded as backfill_timeout): {summary['timeouts']}")
         if args.preview:
             text = preview(conn, source_note=f"database {where['db']} on {target}")
             Path(args.preview).write_text(text, encoding="utf-8")

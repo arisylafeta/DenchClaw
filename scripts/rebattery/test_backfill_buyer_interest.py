@@ -75,10 +75,23 @@ class ConnectionGuard(unittest.TestCase):
         self.assertIn("--i-have-approval", err.getvalue())
         self.assertNotIn("batch", out.getvalue())           # no batch ran
 
-    def test_a_dry_run_and_an_approved_apply_are_not_refused(self):
+    def test_a_dry_run_on_a_database_named_denchclaw_is_refused_without_approval(self):
+        out, err = io.StringIO(), io.StringIO()
+        with self.assertRaises(SystemExit) as raised, contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.backfill.main(["--dsn", self.dsn])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--i-have-approval", err.getvalue())
+        self.assertNotIn("batch", out.getvalue())
+
+    def test_the_default_database_is_refused_for_a_dry_run_too(self):
+        with self.assertRaises(SystemExit) as raised, contextlib.redirect_stderr(io.StringIO()):
+            self.backfill.main([])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_an_approved_dry_run_runs_and_writes_nothing(self):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            self.assertEqual(self.backfill.main(["--dsn", self.dsn]), 0)
+            self.assertEqual(self.backfill.main(["--dsn", self.dsn, "--i-have-approval"]), 0)
         self.assertIn("dry run", out.getvalue())
 
 
@@ -220,6 +233,83 @@ class Backfill(unittest.TestCase):
         with self.cursor() as cur:
             cur.execute("select message from buyer_interest_sync_errors where source_id = %s", (bad,))
             self.assertTrue(cur.fetchone()["message"])
+
+    def test_a_dry_run_rolls_back_every_batch_and_holds_no_transaction(self):
+        ids = [self.demand_row(spec={"makes": ["Tesla"], "chemistries": ["NMC"], "formats": ["Packs"]}) for _ in range(3)]
+        summary = self.backfill.run(self.conn, apply_writes=False, batch_size=1)
+        demand = [b for b in summary["batches"] if b["batch"].startswith("demand-")]
+        self.assertGreaterEqual(len(demand), 3)                     # one batch per row
+        self.assertTrue(all(b["lines_after"] >= b["lines_before"] for b in demand))
+        self.assertGreaterEqual(sum(b["lines_after"] - b["lines_before"] for b in demand), 3)
+        import psycopg2.extensions
+        self.assertEqual(self.conn.info.transaction_status, psycopg2.extensions.TRANSACTION_STATUS_IDLE)
+        self.assertEqual(self.lines(), [])                           # nothing written
+        self.assertFalse(summary["apply"])
+        self.assertEqual(len(ids), 3)
+
+    def test_a_dry_run_between_batches_leaves_the_source_row_free_for_a_writer(self):
+        # A writer on the demand row never waits for the whole run: after each batch the lock is gone.
+        import psycopg2
+        row_id = self.demand_row(spec={"makes": ["Tesla"], "formats": ["Packs"]})
+        other = psycopg2.connect(__import__("os").environ["BULK_TRADES_TEST_DATABASE_URL"])
+        try:
+            original = self.backfill._batch
+
+            def checking(cur, name, *args, **kwargs):
+                result = original(cur, name, *args, **kwargs)
+                with other.cursor() as probe:
+                    probe.execute("select pg_try_advisory_xact_lock(hashtext(%s))", ("demand:" + row_id,))
+                    self.assertTrue(probe.fetchone()[0], f"batch {name} left the lock held")
+                other.rollback()
+                return result
+            self.backfill._batch = checking
+            try:
+                self.backfill.run(self.conn, apply_writes=False, batch_size=1)
+            finally:
+                self.backfill._batch = original
+        finally:
+            other.close()
+
+    def test_a_row_that_hits_the_lock_timeout_is_retried_once_then_recorded_and_the_run_continues(self):
+        import psycopg2
+        import threading
+        import time
+        locked = self.demand_row(spec={"makes": ["Tesla"], "chemistries": ["NMC"], "formats": ["Packs"]})
+        free = self.demand_row(spec={"makes": ["Nissan"], "chemistries": ["NMC"], "formats": ["Packs"]})
+        holder = psycopg2.connect(__import__("os").environ["BULK_TRADES_TEST_DATABASE_URL"])
+        old = self.backfill.LOCK_TIMEOUT
+        self.backfill.LOCK_TIMEOUT = "300ms"
+        with self.cursor() as cur:
+            self.backfill._set_timeouts(cur)
+        self.conn.commit()
+        try:
+            with holder.cursor() as hold:
+                hold.execute("select pg_advisory_xact_lock(hashtext(%s))", ("demand:" + locked,))
+            result = self.sync([locked, free])
+            self.assertEqual(result["timeouts"], 1)
+            self.assertEqual(result["errors"], 1)
+            self.assertEqual(result["synced"], 1)
+            self.assertEqual([line["product_key"] for line in self.lines()], ["broad:nissan-nmc-packs"])
+            with self.cursor() as cur:
+                cur.execute("select operation from buyer_interest_sync_errors where source_id = %s", (locked,))
+                self.assertEqual(cur.fetchone()["operation"], "backfill_timeout")
+            self.conn.commit()
+
+            # Freed between the first attempt and the retry: the row syncs, nothing is recorded.
+            threading.Timer(0.45, holder.rollback).start()
+            started = time.time()
+            result = self.sync([locked])
+            self.assertGreater(time.time() - started, 0.3)           # the first attempt did wait and time out
+            self.assertEqual((result["synced"], result["errors"]), (1, 0))
+            self.assertEqual(len(self.lines()), 2)
+        finally:
+            self.backfill.LOCK_TIMEOUT = old
+            with self.cursor() as cur:
+                cur.execute("reset lock_timeout")
+                cur.execute("reset statement_timeout")
+            self.conn.commit()
+            holder.rollback()
+            holder.close()
 
     # --- (b) the profile path ---------------------------------------------
     def test_a_researched_row_becomes_an_inferred_line_from_its_observation_date(self):
