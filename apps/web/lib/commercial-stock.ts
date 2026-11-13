@@ -462,18 +462,18 @@ export function lotKeyFor(supplierId: string, groupKey: string, part: string, sc
  */
 export function partKey(value: string | null | undefined): string {
   const raw = (value ?? "").trim();
-  if (!raw) return "";
+  if (!raw) {return "";}
   const tokens = raw.split(/\s+/);
-  if (tokens.length > 5) return ""; // more than five tokens is prose or a run-on list
-  if (tokens.length === 1 && !/^[A-Za-z0-9][A-Za-z0-9./_#-]*$/.test(raw)) return "";
+  if (tokens.length > 5) {return "";} // more than five tokens is prose or a run-on list
+  if (tokens.length === 1 && !/^[A-Za-z0-9][A-Za-z0-9./_#-]*$/.test(raw)) {return "";}
   // A spaced code ("5QE 915 105 B") is made of plain alphanumeric tokens: no words, at least one token of 3+ characters.
   if (tokens.length > 1) {
-    if (tokens.some((token) => !/^[A-Za-z0-9]+$/.test(token) || /^[A-Za-z]{3,}$/.test(token))) return "";
-    if (!tokens.some((token) => token.length >= 3)) return "";
+    if (tokens.some((token) => !/^[A-Za-z0-9]+$/.test(token) || /^[A-Za-z]{3,}$/.test(token))) {return "";}
+    if (!tokens.some((token) => token.length >= 3)) {return "";}
   }
-  if (/[A-Za-z]{4}/.test(raw) && /[a-z]/.test(raw)) return ""; // a lower-case word (battery, Tesla), not a code
+  if (/[A-Za-z]{4}/.test(raw) && /[a-z]/.test(raw)) {return "";} // a lower-case word (battery, Tesla), not a code
   const folded = raw.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/O/g, "0");
-  if (folded.replace(/\D/g, "").length < 2) return ""; // every OEM code carries digits
+  if (folded.replace(/\D/g, "").length < 2) {return "";} // every OEM code carries digits
   return folded.length >= 5 && folded.length <= 14 ? folded : "";
 }
 
