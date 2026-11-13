@@ -275,6 +275,13 @@ returns text language sql immutable as $$
      and cardinality(regexp_split_to_array(btrim(part), '\s+')) >= 2
 $$;
 
+-- energy_kwh on a listing is the lot's energy, so it is one pack's capacity only when the listing is one pack
+-- (observed_quantity 1). A 24-pack lot's 2085 kWh is never a pack size.
+create or replace function buyer_interest_unit_kwh(p_spec jsonb, p_context jsonb) returns numeric language sql immutable as $$
+  select case when buyer_interest_number(p_spec->'observed_quantity') = 1
+    then coalesce(buyer_interest_number(p_spec->'energy_kwh'), buyer_interest_number(p_context->'energy_kwh')) end
+$$;
+
 -- The facts behind a key, from a source row's spec, context and trade fields. Never guesses: missing means missing.
 create or replace function buyer_interest_facts(p_spec jsonb, p_context jsonb default '{}'::jsonb, p_fields jsonb default '{}'::jsonb)
 returns jsonb language sql immutable as $$
@@ -290,18 +297,18 @@ returns jsonb language sql immutable as $$
     'kwh', coalesce(buyer_interest_number(p_spec->'kwh'), buyer_interest_number(p_spec->'capacity_kwh'),
       buyer_interest_number(p_context->'kwh'), buyer_interest_number(p_context->'capacity_kwh'),
       buyer_interest_number(p_fields->'capacity_kwh'), buyer_interest_number(p_fields->'kwh'),
-      buyer_interest_number(p_spec->'energy_kwh'), buyer_interest_number(p_context->'energy_kwh')),
+      buyer_interest_unit_kwh(p_spec, p_context)),
     -- A stated point capacity is its own range, so a line keyed broad still says 82 kWh.
     'kwh_min', coalesce(buyer_interest_number(p_spec->'kwh_min'), buyer_interest_number(p_context->'kwh_min'),
       buyer_interest_number(p_spec->'kwh'), buyer_interest_number(p_spec->'capacity_kwh'),
       buyer_interest_number(p_context->'kwh'), buyer_interest_number(p_context->'capacity_kwh'),
       buyer_interest_number(p_fields->'capacity_kwh'), buyer_interest_number(p_fields->'kwh'),
-      buyer_interest_number(p_spec->'energy_kwh'), buyer_interest_number(p_context->'energy_kwh')),
+      buyer_interest_unit_kwh(p_spec, p_context)),
     'kwh_max', coalesce(buyer_interest_number(p_spec->'kwh_max'), buyer_interest_number(p_context->'kwh_max'),
       buyer_interest_number(p_spec->'kwh'), buyer_interest_number(p_spec->'capacity_kwh'),
       buyer_interest_number(p_context->'kwh'), buyer_interest_number(p_context->'capacity_kwh'),
       buyer_interest_number(p_fields->'capacity_kwh'), buyer_interest_number(p_fields->'kwh'),
-      buyer_interest_number(p_spec->'energy_kwh'), buyer_interest_number(p_context->'energy_kwh')),
+      buyer_interest_unit_kwh(p_spec, p_context)),
     'cell_maker', coalesce(buyer_interest_first_text(p_spec->'cell_makers'), buyer_interest_first_text(p_spec->'cell_maker'),
       buyer_interest_first_text(p_context->'cell_maker')),
     'part_numbers', case when jsonb_typeof(coalesce(p_spec->'part_numbers', p_spec->'partNumbers', p_context->'part_numbers',
@@ -370,9 +377,9 @@ $$;
 -- The vehicle make a listing title names ("2024 Audi MEB 82 kWh pack"): the first make in the list that appears as a
 -- whole word. Only a listing with no mapped make falls back to it; a title never overrides a stated make.
 create or replace function buyer_interest_title_make(p_title text) returns text language sql immutable as $$
-  select case when m in ('bmw', 'mg', 'byd', 'ds', 'nio') then upper(m) when m = 'vw' then 'Volkswagen' else initcap(m) end
+  select case when m in ('bmw', 'mg', 'byd', 'nio') then upper(m) when m = 'vw' then 'Volkswagen' else initcap(m) end
   from (select (regexp_match(buyer_interest_unaccent(p_title),
-    '\y(volkswagen|vw|audi|skoda|seat|cupra|porsche|bmw|mini|mercedes-benz|mercedes|tesla|nissan|renault|dacia|peugeot|citroen|opel|vauxhall|fiat|jeep|ford|hyundai|kia|genesis|toyota|lexus|honda|mazda|mitsubishi|suzuki|subaru|volvo|polestar|jaguar|land rover|mg|byd|smart|lotus|lucid|rivian|nio|xpeng|zeekr|leapmotor|maxus|ds)\y'))[1] as m) found
+    '\y(volkswagen|vw|audi|skoda|cupra|porsche|bmw|mercedes-benz|mercedes|tesla|stellantis|nissan|renault|dacia|peugeot|citroen|opel|vauxhall|fiat|jeep|ford|hyundai|kia|genesis|toyota|lexus|honda|mazda|mitsubishi|suzuki|subaru|volvo|polestar|jaguar|land rover|mg|byd|lotus|lucid|rivian|nio|xpeng|zeekr|leapmotor|maxus)\y'))[1] as m) found
 $$;
 
 -- One fact set per stated make x chemistry x format, so every combination of a row's facts becomes a line instead

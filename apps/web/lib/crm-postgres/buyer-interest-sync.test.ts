@@ -412,7 +412,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
         `insert into crm_bulk_listings (id, kind, party, summary, status, observed_on, quantity, spec, context)
          values ($1, 'supply', 'Unknown seller', '2024 Audi MEB 82 kWh pack (12 x 8s modules), sold to Silent Classics.', 'open',
            '2026-06-16', '1 pack',
-           '{"basis": "stated", "energy_kwh": 82, "trade_kind": "packs", "module_series": "8s", "quantity_unit": "packs"}'::jsonb,
+           '{"basis": "stated", "energy_kwh": 82, "trade_kind": "packs", "module_series": "8s", "quantity_unit": "packs", "observed_quantity": 1}'::jsonb,
            '{"listing_title": "2024 Audi MEB 82 kWh pack"}'::jsonb)`, [id("audi")]);
       await pg.queryPg(
         `insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, stage, terms)
@@ -429,11 +429,25 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       expect(await pg.queryPg(`select 1 from buyer_interest_sync_errors where source_id = $1`, [id("audio")])).toEqual([]);
     });
 
+    it("never reads a lot's total energy as one pack's capacity", async () => {
+      await pg.queryPg(
+        `insert into crm_bulk_listings (id, kind, party, summary, status, observed_on, quantity, spec, context)
+         values ($1, 'supply', 'Seller', 'Stellantis LFP batch: 24 packs', 'open', '2026-04-08', '24 packs + 42 modules',
+           '{"energy_kwh": 2085.4, "trade_kind": "packs", "observed_quantity": 24}'::jsonb,
+           '{"listing_title": "Stellantis Serbia LFP: 24 packs and 42 modules, as is"}'::jsonb)`, [id("lot")]);
+      await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, stage) values ($1, $2, 'counterparty', $3, 'paid')`,
+        [id("loto"), id("lot"), id("buyer4")]);
+      const [row] = await lines("offer_id = $1", [id("loto")]);
+      expect(row).toMatchObject({ product_key: "broad:stellantis-any-packs", make: "Stellantis", format: "pack" });
+      const [kwh] = await pg.queryPg<{ kwh_min: number | null }>(`select kwh_min::float8 from buyer_interest where offer_id = $1`, [id("loto")]);
+      expect(kwh.kwh_min).toBeNull();
+    });
+
     it("lets a mapped field or a stated make win over the title", async () => {
       await pg.queryPg(
         `insert into crm_bulk_listings (id, kind, party, summary, status, observed_on, spec, context)
          values ($1, 'supply', 'Seller', 'Audi pack for Kia', 'open', '2026-06-16',
-           '{"energy_kwh": 64, "trade_kind": "packs", "makes": ["Kia"], "model": "Niro"}'::jsonb, '{"listing_title": "Audi pack"}'::jsonb)`, [id("title2")]);
+           '{"energy_kwh": 64, "trade_kind": "packs", "observed_quantity": 1, "makes": ["Kia"], "model": "Niro"}'::jsonb, '{"listing_title": "Audi pack"}'::jsonb)`, [id("title2")]);
       await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, stage) values ($1, $2, 'counterparty', $3, 'paid')`,
         [id("title2o"), id("title2"), id("buyer4")]);
       expect((await lines("offer_id = $1", [id("title2o")])).map((row) => row.product_key)).toEqual(["model:kia-niro-64kwh"]);
