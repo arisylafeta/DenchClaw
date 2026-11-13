@@ -5,9 +5,9 @@ import { DocumentDirtyContext } from "./document-dirty-context";
 import { MarkdownEditor } from "./markdown-editor";
 import { RichDocumentEditor } from "./rich-document-editor";
 
-const state = vi.hoisted(() => ({ html: "<p>original</p>", onUpdate: () => {}, editor: null as unknown }));
+const state = vi.hoisted(() => ({ html: "<p>original</p>", onUpdate: (_props?: unknown) => {}, editor: null as unknown }));
 vi.mock("@tiptap/react", () => ({
-  useEditor: (options: { onUpdate: () => void }) => { state.onUpdate = options.onUpdate; return state.editor; },
+  useEditor: (options: { onUpdate: (props?: unknown) => void }) => { state.onUpdate = options.onUpdate; return state.editor; },
   EditorContent: () => null,
 }));
 vi.mock("@tiptap/react/menus", () => ({ BubbleMenu: () => null }));
@@ -31,11 +31,12 @@ it.each(["markdown", "txt", "docx"])("reports actual dirty and saved clean state
     ? <MarkdownEditor content="original" filePath="/synthetic/report.md" tree={[]} />
     : <RichDocumentEditor mode={mode as "txt" | "docx"} initialHtml="<p>original</p>" filePath={`/synthetic/report.${mode}`} />}</DocumentDirtyContext.Provider>);
   expect(dirty).toHaveBeenLastCalledWith(false);
-  act(() => { state.html = "<p>edited</p>"; state.onUpdate(); });
+  act(() => { state.html = "<p>edited</p>"; state.onUpdate({ editor: state.editor }); });
   expect(dirty).toHaveBeenLastCalledWith(true);
   fireEvent.keyDown(document, { key: "s", ctrlKey: true });
   await waitFor(() => expect(dirty).toHaveBeenLastCalledWith(false));
-  expect(fetch).toHaveBeenCalledTimes(1);
+  // Markdown also reads the file first, to avoid overwriting a newer version.
+  expect(fetch).toHaveBeenCalledTimes(mode === "markdown" ? 2 : 1);
 });
 
 it("does not report saved clean if the user edits while a save is in flight", async () => {
@@ -43,9 +44,9 @@ it("does not report saved clean if the user edits while a save is in flight", as
   let finish!: (response: Response) => void;
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(resolve => { finish = resolve; })));
   render(<DocumentDirtyContext.Provider value={dirty}><RichDocumentEditor mode="txt" initialHtml="<p>original</p>" filePath="/synthetic/report.txt" /></DocumentDirtyContext.Provider>);
-  act(() => { state.html = "<p>first edit</p>"; state.onUpdate(); });
+  act(() => { state.html = "<p>first edit</p>"; state.onUpdate({ editor: state.editor }); });
   fireEvent.keyDown(document, { key: "s", ctrlKey: true });
-  act(() => { state.html = "<p>second edit</p>"; state.onUpdate(); });
+  act(() => { state.html = "<p>second edit</p>"; state.onUpdate({ editor: state.editor }); });
   await act(async () => finish(new Response("", { status: 200 })));
   expect(dirty).toHaveBeenLastCalledWith(true);
 });

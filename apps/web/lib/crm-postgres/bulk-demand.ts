@@ -1,6 +1,7 @@
 import { likelihoodScoreSql } from "../bulk-likelihood";
 import { randomUUID } from "node:crypto";
 import { queryPg } from "../postgres";
+import type { DemandLine } from "../demand-lines";
 import { todayInLondon } from "../bulk-trades";
 import type { Basis, ClosedReason, Demand, DemandInput, SuggestedBuyer } from "../bulk-demand";
 import type { Buyer, Proposal } from "../bulk-trade-details";
@@ -367,4 +368,19 @@ export async function addSuggestedBuyer(lotId: string, demandId: string, userId:
     [demandId, lotId, buyer.id],
   );
   return buyer;
+}
+
+/**
+ * Saves a request's pack types (`context.lines`, lib/demand-lines.ts) and nothing else in its context. An empty list
+ * removes them. Null when there is no such request.
+ */
+export async function setDemandLines(id: string, lines: DemandLine[]): Promise<DemandLine[] | null> {
+  const [row] = await queryPg<{ lines: DemandLine[] | null }>(
+    `update crm_bulk_listings
+     set context = case when jsonb_array_length($2::jsonb) = 0 then coalesce(context, '{}'::jsonb) - 'lines'
+                        else coalesce(context, '{}'::jsonb) || jsonb_build_object('lines', $2::jsonb) end,
+         updated_at = now()
+     where id = $1 and kind = 'demand'
+     returning context->'lines' as lines`, [id, JSON.stringify(lines)]);
+  return row ? row.lines ?? [] : null;
 }

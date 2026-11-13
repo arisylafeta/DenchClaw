@@ -7,6 +7,7 @@ import { BusyRegion } from "./bt-shimmer";
 import type { Registry } from "@/lib/bulk-registry";
 import { useRegistry } from "./use-registry";
 import { ListingDetails } from "./listing-details";
+import { DemandLinesEditor } from "./demand-lines-editor";
 import { demandFacts } from "@/lib/listing-facts";
 import { formatFee } from "@/lib/bulk-demand-score";
 import { shortDate } from "@/lib/bulk-trade-details";
@@ -48,7 +49,7 @@ const ago = (iso: string) => {
 const PACK_COVERED = ["product_family", "capacity", "chemistries", "formats", "makes", "origins"];
 
 /** The ask, field by field: what is filled, plus the gaps that block a deal. Then the buyer's own words. */
-function TheAsk({ demand, loading }: { demand: Demand; loading: boolean }) {
+function TheAsk({ demand, loading, onChanged }: { demand: Demand; loading: boolean; onChanged?: () => void }) {
   const registry = useRegistry();
   // Core demand facts do not need the attribute registry to be readable.
   const factRegistry = registry ?? { specLists: {}, specLabels: {}, specGroups: {}, specNumbers: {} } as Registry;
@@ -56,6 +57,7 @@ function TheAsk({ demand, loading }: { demand: Demand; loading: boolean }) {
   return (
     <div className="flex flex-col gap-4">
       <ListingDetails packs={packs} loading={loading ? [!demand.product_family && !packs.length && "product_family", !packs.length && demand.spec?.kwh_min == null && demand.spec?.kwh_max == null && "capacity"].filter((key): key is string => !!key) : false} facts={demandFacts(factRegistry, demand).filter((fact) => !packs.length || !PACK_COVERED.includes(fact.key)).map((fact) => fact.key === "capacity" ? { ...fact, critical: true } : fact)} />
+      {onChanged && <DemandLinesEditor demandId={demand.id} lines={demand.context?.lines ?? []} onSaved={onChanged} />}
       {demand.qualify_question && (
         <p className="text-[13px]"><span style={{ color: "var(--bt-muted)" }}>Question to ask: </span>{demand.qualify_question}
           {demand.qualify_asked_on && <span className={css.note}> · sent {shortDate(demand.qualify_asked_on)}</span>}</p>
@@ -134,10 +136,10 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
         <div data-preview-details className="flex w-full flex-col gap-6">
           <TheBuyer demand={demand} context={context} onOpenDemand={onOpenDemand}
             thread={<ListingConversation mail={context?.mail ?? []} conversation={conversation ?? null} loading={context === null || conversation === undefined} />} />
-          <TheAsk demand={demand} loading={false} />
+          <TheAsk demand={demand} loading={false} onChanged={onChanged} />
         </div>
       )}
-      <DemandMatchesTab demandId={demand.id} active={tab === "Matches"} onOpenOffers={() => setTab("Offers")} />
+      <DemandMatchesTab demandId={demand.id} active={tab === "Matches"} onOpenOffers={() => setTab("Offers")} onOpenDetails={() => setTab("Details")} />
       <MatchaTab listingId={demand.id} active={tab === "Matcha"} />
       {tab === "Documents" && <DocumentsTab listingId={demand.id} />}
       {tab === "Offers" && <OffersTab listingId={demand.id} demandId={demand.id} request onChanged={onChanged} />}

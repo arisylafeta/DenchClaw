@@ -1,6 +1,7 @@
+import { offerPositions } from "@/lib/bulk-offer-position";
 import { getListing } from "@/lib/crm-postgres/bulk-listings";
 import { markNoStock } from "@/lib/crm-postgres/bulk-offer-mail";
-import { OFFER_STAGES, OfferConflict, addThreadEntry, getOffer, linkOffer, offerThread, updateOffer, type OfferPatch, type OfferStage } from "@/lib/crm-postgres/bulk-offers";
+import { OFFER_STAGES, OfferConflict, addThreadEntry, getOffer, linkOffer, offerThread, updateOffer, type Offer, type OfferPatch, type OfferStage } from "@/lib/crm-postgres/bulk-offers";
 import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
 
 export const dynamic = "force-dynamic";
@@ -8,14 +9,21 @@ export const runtime = "nodejs";
 type Context = { params: Promise<{ id: string; offerId: string }> };
 const KINDS = ["note", "call", "quote", "mail", "whatsapp"] as const;
 
+/** The offer with where it stands, as the list shows it. */
+async function withPosition(listing: NonNullable<Awaited<ReturnType<typeof getListing>>>, offer: Offer) {
+  const position = (await offerPositions([offer], listing)).get(offer.id) ?? null;
+  return { ...offer, position, chase_due: position?.chase ?? false };
+}
+
 export async function GET(_req: Request, { params }: Context) {
   const guard = await guardBulkTrades();
   if ("response" in guard) return guard.response;
   const { id, offerId } = await params;
-  if (!await getListing(id)) return notFound("Listing");
+  const listing = await getListing(id);
+  if (!listing) return notFound("Listing");
   const offer = await getOffer(id, offerId, guard.userId);
   if (!offer) return notFound("Offer");
-  return Response.json({ offer, thread: await offerThread(offer, guard.userId) });
+  return Response.json({ offer: await withPosition(listing, offer), thread: await offerThread(offer, guard.userId) });
 }
 
 export async function PATCH(req: Request, { params }: Context) {
@@ -39,6 +47,9 @@ export async function PATCH(req: Request, { params }: Context) {
     if (reason.length > 500) { return badRequest("Keep the reason under 500 characters."); }
     patch.declinedReason = reason;
   }
+  if ("turn" in body) { if (body.turn !== null && body.turn !== "us" && body.turn !== "them") return badRequest("turn must be us, them or null."); patch.turn = body.turn as OfferPatch["turn"]; }
+  if ("chaseOff" in body) { if (body.chaseOff !== true) return badRequest("chaseOff must be true."); patch.chaseOff = true; }
+  if ("stageHintSkip" in body) { if (typeof body.stageHintSkip !== "string" || !body.stageHintSkip || body.stageHintSkip.length > 200) return badRequest("stageHintSkip must be a message id."); patch.stageHintSkip = body.stageHintSkip; }
   if ("terms" in body) { if (!body.terms || typeof body.terms !== "object" || Array.isArray(body.terms)) return badRequest("Terms must be an object."); patch.terms = body.terms as OfferPatch["terms"]; }
   if ("counterpartId" in body) {
     if (body.counterpartId != null && typeof body.counterpartId !== "string") return badRequest("counterpartId must be text or null.");
@@ -52,10 +63,10 @@ export async function PATCH(req: Request, { params }: Context) {
   if (offer.stage === "declined" || offer.stage === "lost") {
     if ((offer.declined_reason ?? "").trim().toLowerCase() === "no stock") {
       const noStock = await markNoStock(id, offerId, listing.kind === "demand" ? "demand" : "supply", guard.userId);
-      return Response.json({ offer, noStock });
+      return Response.json({ offer: await withPosition(listing, offer), noStock });
     }
   }
-  return Response.json({ offer });
+  return Response.json({ offer: await withPosition(listing, offer) });
 }
 
 /** Add a note, call or message to the thread. */

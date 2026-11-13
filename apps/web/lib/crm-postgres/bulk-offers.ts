@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { PositionMessage } from "../bulk-offer-position-core";
 import { queryPg } from "../postgres";
 
 export const OFFER_STAGES = ["candidate", "offered", "negotiating", "contract_out", "signed", "invoiced", "paid", "complete", "declined", "lost"] as const;
@@ -21,10 +22,17 @@ export type Offer = {
   last_touch_via: string | null;
   terms: OfferTerms;
   next_step: string | null;
+  /** When the next step was written. Older ones (from before this was kept) fall back to the last touch. */
+  next_step_at: string | null;
   next_due: string | null;
-  /** Who the next move is on: us (they spoke last, or we owe the step) or them (we spoke last). */
+  /** A move set by hand: who, and when (`waiting_set_at`). A stored flag without a time is ignored, as whose move is read from the messages. */
   waiting_on: "us" | "them" | null;
   waiting_since: string | null;
+  waiting_set_at: string | null;
+  /** "Don't chase" was pressed at this time: no chase until a newer message. */
+  chase_off_at: string | null;
+  /** The message a stage suggestion was skipped for ("Not yet"). */
+  stage_hint_skip: string | null;
   updated_at: string;
   last_message_at: string | null;
   messages: number;
@@ -54,17 +62,26 @@ export type ThreadEntry = {
   href: string | null;
 };
 
+/** WhatsApp messages with a person: the chats linked to them. `il.person_id` is the person; `wm` the message. */
+const CHAT_OF_PERSON = `whatsapp_message wm
+     join whatsapp_thread wt on wt.account_id = wm.account_id and wt.id = wm.thread_id
+     join whatsapp_identity_link il on il.account_id = wt.account_id and il.identity_id = wt.identity_id and il.valid_to is null`;
+
 const selectOffers = (user: string) => `select o.id, o.bulk_listing_id as listing_id, o.role, o.person_id, o.company_id,
   case when o.bulk_listing_id <> $1 then coalesce((select b.party from crm_bulk_listings b where b.id = o.bulk_listing_id), o.name) else o.name end as name, o.contact, o.stage,
-  o.declined_reason, o.wants, o.last_touch_on::text, o.last_touch_via, o.terms, o.data->>'next_step' as next_step,
+  o.declined_reason, o.wants, o.last_touch_on::text, o.last_touch_via, o.terms, coalesce(o.data->>'next_step', o.data->>'next_action') as next_step,
+  coalesce(o.data->>'next_step_at', case when o.last_touch_on is not null then (o.last_touch_on::text || 'T23:59:59Z') end) as next_step_at,
   o.data->>'next_due' as next_due,
-  case when o.data->>'waiting_on' in ('us','them') then o.data->>'waiting_on' end as waiting_on, o.data->>'waiting_since' as waiting_since, o.updated_at::text,
+  case when o.data->>'waiting_on' in ('us','them') then o.data->>'waiting_on' end as waiting_on, o.data->>'waiting_since' as waiting_since,
+  o.data->>'waiting_set_at' as waiting_set_at, o.data->>'chase_off_at' as chase_off_at, o.data->>'stage_hint_skip' as stage_hint_skip, o.updated_at::text,
   nullif(greatest(
     (select max(a.occurred_at) from crm_bulk_listing_activity a where a.offer_id = o.id),
-    (select max(coalesce(m.sent_at, m.created_at)) from mail_message m where m.crm_visible and (${user}::uuid is null or m.mailbox_owner_id = ${user}::uuid) and m.thread_id = any ((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed')))
+    (select max(coalesce(m.sent_at, m.created_at)) from mail_message m where m.state in ('received', 'accepted') and (${user}::uuid is null or m.mailbox_owner_id = ${user}::uuid) and m.thread_id = any ((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed'))),
+    (select max(wm.occurred_at) from ${CHAT_OF_PERSON} where il.person_id = o.person_id)
   ), '-infinity'::timestamptz)::text as last_message_at,
   ((select count(*) from crm_bulk_listing_activity a where a.offer_id = o.id)
-   + (select count(*) from mail_message m where m.crm_visible and (${user}::uuid is null or m.mailbox_owner_id = ${user}::uuid) and m.thread_id = any ((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed'))))::int as messages,
+   + (select count(*) from mail_message m where m.state in ('received', 'accepted') and (${user}::uuid is null or m.mailbox_owner_id = ${user}::uuid) and m.thread_id = any ((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed')))
+   + (select count(*) from ${CHAT_OF_PERSON} where il.person_id = o.person_id))::int as messages,
   array((select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb)) union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed')) as threads
   , (o.bulk_listing_id <> $1) as incoming, o.counterpart_id
   , case when o.bulk_listing_id <> $1 then (select b.kind from crm_bulk_listings b where b.id = o.bulk_listing_id) end as from_kind
@@ -77,15 +94,54 @@ const selectOffers = (user: string) => `select o.id, o.bulk_listing_id as listin
     else '[]'::jsonb end as link_options
   from crm_bulk_offers o`;
 
-/** Threads on a listing: the people we have offered it to (or asked), newest touch first. Contacts on the owner's side are not threads. */
-export async function listOffers(listingId: string, userId: string | null): Promise<Offer[]> {
+/**
+ * Threads on a listing: the people we have offered it to (or asked), newest touch first. Contacts on the owner's side
+ * are not threads. Everyone sees the same thing: the mail is all the CRM shows, not the signed-in person's own mailbox,
+ * so whose move it is reads the same for Alex and Sean. (`_userId` stays for the callers.)
+ */
+export async function listOffers(listingId: string, _userId: string | null): Promise<Offer[]> {
   return queryPg<Offer>(
     `${selectOffers("$2")} where (o.bulk_listing_id = $1 or o.counterpart_id = $1) and o.role = 'counterparty'
-     order by o.updated_at desc`, [listingId, userId]);
+     order by o.updated_at desc`, [listingId, null]);
 }
 
-export async function getOffer(listingId: string, offerId: string, userId: string | null): Promise<Offer | null> {
-  return (await queryPg<Offer>(`${selectOffers("$3")} where (o.bulk_listing_id = $1 or o.counterpart_id = $1) and o.id = $2`, [listingId, offerId, userId]))[0] ?? null;
+export async function getOffer(listingId: string, offerId: string, _userId: string | null): Promise<Offer | null> {
+  return (await queryPg<Offer>(`${selectOffers("$3")} where (o.bulk_listing_id = $1 or o.counterpart_id = $1) and o.id = $2`, [listingId, offerId, null]))[0] ?? null;
+}
+
+/**
+ * The newest messages with each offer's person, email and WhatsApp, for working out whose move it is. Email is the
+ * offer's own threads when it has any (linked to the offer on purpose, so they count even when the CRM inbox hides
+ * them), else the person's or their address's mail the CRM shows. Only mail that was sent or received counts. One query
+ * for the whole list.
+ */
+export async function recentMessages(offerIds: string[], perChannel = 6): Promise<Map<string, PositionMessage[]>> {
+  const out = new Map<string, PositionMessage[]>(offerIds.map((id) => [id, []]));
+  if (!offerIds.length) return out;
+  const rows = await queryPg<PositionMessage & { offer_id: string }>(
+    `with o as (
+       select o.id, o.person_id,
+         lower(substring(o.contact from '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}')) as email,
+         array(select jsonb_array_elements_text(coalesce(o.data->'threads', '[]'::jsonb))
+               union select l.thread_id from crm_bulk_thread_links l where l.offer_id = o.id and l.channel = 'mail' and l.state = 'confirmed') as threads
+       from crm_bulk_offers o where o.id = any($1::text[]))
+     select o.id as offer_id, x.id, x.channel, x.direction, x.at, x.subject, x.text from o cross join lateral (
+       (select m.id::text as id, 'mail' as channel, m.direction, coalesce(m.sent_at, m.created_at)::text as at, m.subject,
+          left(coalesce(m.body_text, m.body_preview, ''), 4000) as text
+        from mail_message m
+        where m.state in ('received', 'accepted')
+          and (case when cardinality(o.threads) > 0 then m.thread_id = any (o.threads)
+                else m.crm_visible and ((o.person_id is not null and m.person_id = o.person_id)
+                  or (o.email is not null and (lower(m.from_email) = o.email or lower(m.recipient_email) = o.email or o.email = any (select lower(x) from unnest(m.to_emails) x)))) end)
+        order by coalesce(m.sent_at, m.created_at) desc limit $2)
+       union all
+       (select wm.id::text, 'whatsapp', wm.direction, wm.occurred_at::text, null, left(wm.body, 4000)
+        from ${CHAT_OF_PERSON}
+        where o.person_id is not null and il.person_id = o.person_id and wm.deleted_at is null and wm.body is not null and wm.occurred_at is not null
+        order by wm.occurred_at desc limit $2)
+     ) x`, [offerIds, perChannel]);
+  for (const { offer_id, ...m } of rows) out.get(offer_id)?.push(m);
+  return out;
 }
 
 export type OfferInput = {
@@ -209,14 +265,30 @@ export async function linkOffer(listingId: string, offerId: string, targetId: st
   return getOffer(listingId, offerId, actorUserId);
 }
 
-export type OfferPatch = { stage?: OfferStage; nextStep?: string | null; nextDue?: string | null; wants?: string | null; terms?: OfferTerms; declinedReason?: string | null };
+export type OfferPatch = {
+  stage?: OfferStage; nextStep?: string | null; nextDue?: string | null; wants?: string | null; terms?: OfferTerms; declinedReason?: string | null;
+  /** Whose move, set by hand; null hands it back to the messages. */
+  turn?: "us" | "them" | null;
+  /** "Don't chase": no chase until a newer message. */
+  chaseOff?: boolean;
+  /** "Not yet" on a stage suggestion: the message it came from. */
+  stageHintSkip?: string;
+};
 
 export async function updateOffer(listingId: string, offerId: string, patch: OfferPatch, actorUserId: string | null): Promise<Offer | null> {
   const current = await getOffer(listingId, offerId, actorUserId);
   if (!current) return null;
   const data: Record<string, unknown> = {};
-  if ("nextStep" in patch) data.next_step = patch.nextStep?.trim() || null;
+  const now = new Date().toISOString();
+  if ("nextStep" in patch) { data.next_step = patch.nextStep?.trim() || null; data.next_step_at = data.next_step ? now : null; data.next_action = null; }
   if ("nextDue" in patch) data.next_due = patch.nextDue || null;
+  if ("turn" in patch) {
+    data.waiting_on = patch.turn ?? null;
+    data.waiting_set_at = patch.turn ? now : null;
+    data.waiting_since = patch.turn === "them" ? now.slice(0, 10) : null;
+  }
+  if (patch.chaseOff) data.chase_off_at = now;
+  if (patch.stageHintSkip) data.stage_hint_skip = patch.stageHintSkip;
   await queryPg(
     `update crm_bulk_offers set
        stage = case when $3::boolean then $4 else stage end,
@@ -228,6 +300,13 @@ export async function updateOffer(listingId: string, offerId: string, patch: Off
      where id = $2 and bulk_listing_id = $1`,
     [current.listing_id, offerId, "stage" in patch, patch.stage ?? null, "wants" in patch, patch.wants ?? null,
       "terms" in patch, JSON.stringify(patch.terms ?? {}), "declinedReason" in patch, patch.declinedReason ?? null, JSON.stringify(data)]);
+  // A price change goes on the thread, dated, so "How the price moved" can show it.
+  if ("terms" in patch && JSON.stringify(patch.terms ?? {}) !== JSON.stringify(current.terms ?? {})) {
+    await queryPg(
+      `insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, person_id, kind, title, data, actor_user_id)
+       values ($1, $2, $3, 'quote', $4, $5::jsonb, $6)`,
+      [current.listing_id, offerId, current.person_id, `${current.name ?? "Offer"} · price updated`, JSON.stringify({ from: current.terms ?? {}, terms: patch.terms ?? {} }), actorUserId]);
+  }
   if (patch.stage && patch.stage !== current.stage) {
     await queryPg(
       `insert into crm_bulk_listing_activity (bulk_listing_id, offer_id, person_id, kind, title, data, actor_user_id)
@@ -244,23 +323,22 @@ export const STAGE_LABEL: Record<OfferStage, string> = {
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 
-/** The full thread: logged activity on this offer, plus email (the signed-in user's mailbox) and WhatsApp with the same person. Newest first. */
-export async function offerThread(offer: Offer, userId: string | null): Promise<ThreadEntry[]> {
+/** The full thread: logged activity on this offer, plus email (all the CRM shows, the same for everyone) and WhatsApp with the same person. Newest first. */
+export async function offerThread(offer: Offer, _userId: string | null): Promise<ThreadEntry[]> {
+  const userId = null;
   const email = offer.contact?.match(EMAIL)?.[0]?.toLowerCase() ?? null;
   const activity = await queryPg<{ id: string; kind: string; title: string; body: string | null; at: string; ref_id: string | null }>(
     `select id::text, kind, title, body, occurred_at::text as at, ref_id from crm_bulk_listing_activity where offer_id = $1 order by occurred_at desc limit 100`, [offer.id]);
   const mail = offer.threads.length || offer.person_id || email ? await queryPg<{ id: string; direction: "inbound" | "outbound"; subject: string | null; body: string | null; at: string; thread_id: string | null }>(
-    `select m.id, m.direction, m.subject, coalesce(m.body_preview, left(m.body_text, 600)) as body,
+    `select m.id, m.direction, m.subject, left(coalesce(m.body_text, m.body_preview), 4000) as body,
        coalesce(m.sent_at, m.created_at)::text as at, m.thread_id
      from mail_message m
-     where m.crm_visible and ($3::uuid is null or m.mailbox_owner_id = $3::uuid)
-       and (case when cardinality($4::text[]) > 0 then m.thread_id = any ($4::text[]) else ((m.person_id is not null and m.person_id = $1) or ($2::text is not null and (lower(m.from_email) = $2 or lower(m.recipient_email) = $2 or $2 = any (select lower(x) from unnest(m.to_emails) x)))) end)
+     where m.state in ('received', 'accepted') and ($3::uuid is null or m.mailbox_owner_id = $3::uuid)
+       and (case when cardinality($4::text[]) > 0 then m.thread_id = any ($4::text[]) else m.crm_visible and ((m.person_id is not null and m.person_id = $1) or ($2::text is not null and (lower(m.from_email) = $2 or lower(m.recipient_email) = $2 or $2 = any (select lower(x) from unnest(m.to_emails) x)))) end)
      order by coalesce(m.sent_at, m.created_at) desc limit 60`, [offer.person_id, email, userId, offer.threads]) : [];
   const chat = offer.person_id ? await queryPg<{ id: string; direction: "inbound" | "outbound" | null; body: string | null; at: string }>(
     `select wm.id, wm.direction, wm.body, wm.occurred_at::text as at
-     from whatsapp_message wm
-     join whatsapp_thread wt on wt.account_id = wm.account_id and wt.id = wm.thread_id
-     join whatsapp_identity_link il on il.account_id = wt.account_id and il.identity_id = wt.identity_id and il.valid_to is null
+     from ${CHAT_OF_PERSON}
      where il.person_id = $1 and wm.deleted_at is null and wm.body is not null and wm.occurred_at is not null
      order by wm.occurred_at desc limit 40`, [offer.person_id]) : [];
   const channelOf = (kind: string): ThreadEntry["channel"] =>

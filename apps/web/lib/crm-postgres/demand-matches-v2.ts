@@ -7,6 +7,8 @@ import { queryPg } from "../postgres";
 import { requestCodeHit, requirementFor, scoreCandidate, vocabulary, type Candidate, type Match, type Requirement } from "../demand-match";
 import { askFor, countryName, fitMarks, holdsLine, rowCountry, sourceLine, unitsPhrase } from "../match/fit-marks";
 import { groupStock, groupSummary, packIdentities, type GroupInput, type IdentityInput, type PackIdentity, type StockExtra } from "../match/stock-groups";
+import { supplierView, type RowCandidates } from "../match/supplier-groups";
+import { parseLines } from "../demand-lines";
 import { chaseOffers } from "./bulk-offer-mail";
 import { inventoryFor } from "./demand-match-supply";
 import { getDemand } from "./bulk-demand";
@@ -408,7 +410,8 @@ function requirementView(requirement: Requirement, evidence: string[], demand: {
   };
 }
 
-export async function demandMatchesV2(demandId: string): Promise<MatchesResult | null> {
+/** `lines`: pack types to count against instead of the saved ones, to preview a proposed list before it is saved. */
+export async function demandMatchesV2(demandId: string, preview: { lines?: unknown } = {}): Promise<MatchesResult | null> {
   const demand = await getDemand(demandId);
   if (!demand) {
     return null;
@@ -508,6 +511,10 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
   });
   const rows = groupStock(inputs, requirement);
   const need = requirement.unitsNeeded;
+  // Group matches: the same rows, one per supplier, counted against the buyer's pack types when the request has them.
+  const parsedLines = parseLines(preview.lines ?? demand.context?.lines ?? []);
+  const candidateOf: RowCandidates = new Map(ranked.map(({ match: { candidate: c } }) => [c.key, { make: c.make, model: c.model, title: c.title, kwh: c.kwh, kwhEstimated: c.kwhEstimated, units: c.units }]));
+  const bySupplier = supplierView(rows, candidateOf, "error" in parsedLines ? [] : parsedLines.value);
 
   return {
     id: demandId,
@@ -521,6 +528,9 @@ export async function demandMatchesV2(demandId: string): Promise<MatchesResult |
       chips: requestChips(requirement, demand), outreach: outreach ? { ...outreach, chaseDue: chaseIds.size } : null,
       ...groupSummary(rows, inputs, requirement),
     },
+    buyer: demand.buyer,
+    lines: bySupplier.lines,
+    suppliers: bySupplier.suppliers,
     // Only stated quantities count towards the need; a line that has not said is counted apart.
     coverage: need ? {
       stated: scored.reduce((sum, row) => sum + (row.candidate.units ?? 0), 0),

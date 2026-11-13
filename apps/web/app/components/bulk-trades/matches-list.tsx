@@ -31,13 +31,15 @@ type Props = {
   onAdded: (row: MatchRow, offer: MatchOffer) => void;
   onNotAFit: (row: MatchRow, reason: string) => Promise<void>;
   onOpenOffers?: () => void;
+  /** Requests: opens Details, where the buyer's pack types are edited. */
+  onOpenDetails?: () => void;
 };
 
 /**
  * One ranked list, the same on a supply listing and on a request: rank, who, why it fits, what to check, the firm
  * price, and the two actions. Add to offers is the only button; Not a fit is a quiet action with quick reasons.
  */
-export function MatchesList({ result, loading, error, onRetry, offersEndpoint, onAdded, onNotAFit, onOpenOffers }: Props) {
+export function MatchesList({ result, loading, error, onRetry, offersEndpoint, onAdded, onNotAFit, onOpenOffers, onOpenDetails }: Props) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
@@ -77,7 +79,11 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
   const rows = showAll ? result.rows : result.rows.slice(0, 10);
   const hidden = result.rows.length - rows.length;
 
-  async function add(row: MatchRow) {
+  /**
+   * Adds one offer. `batch`: a supplier from Group matches, whose offer records every stock line on the buyer's pack
+   * types and is marked on each of their Per battery rows. A supplier is still one offer.
+   */
+  async function add(row: MatchRow, batch?: { stockIds: string[]; rowKeys: string[] }) {
     setAdding(row.key);
     setActionError(null);
     try {
@@ -94,13 +100,18 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
           // A grouped row is still one offer per supplier: the cheapest unit stays the offer's stock line (No stock marks it),
           // and every unit's stock line is kept for the unit picking that comes next (slice 4).
           ...(row.stockId ? { stock_opportunity_id: row.stockId } : {}),
-          ...(row.group?.stockIds.length ? { stock_opportunity_ids: row.group.stockIds } : {}),
+          ...(batch?.stockIds.length ? { stock_opportunity_ids: batch.stockIds } : row.group?.stockIds.length ? { stock_opportunity_ids: row.group.stockIds } : {}),
         },
       };
       const saved = await request<{ offer: { id: string; stage: string | null; updated_at: string } }>(offersEndpoint, {
         method: "POST", body: JSON.stringify(body),
       });
-      onAdded(row, { id: saved.offer.id, stage: saved.offer.stage ?? "candidate", date: saved.offer.updated_at.slice(0, 10) });
+      const offer = { id: saved.offer.id, stage: saved.offer.stage ?? "candidate", date: saved.offer.updated_at.slice(0, 10) };
+      if (batch) {
+        for (const each of result?.rows.filter((item) => batch.rowKeys.includes(item.key)) ?? []) onAdded(each, offer);
+      } else {
+        onAdded(row, offer);
+      }
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Could not add the offer.");
     } finally {
@@ -191,6 +202,18 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
         notAFitForm={notAFitForm}
         error={<ErrorText error={actionError} />}
         onOpenOffers={onOpenOffers}
+        onOpenDetails={onOpenDetails}
+        onAddSupplier={(supplier) => {
+          const first = result.rows.find((item) => supplier.rowKeys.includes(item.key));
+          if (!first) return;
+          // The buyer's types when it has them, else everything that matched.
+          const stock = supplier.cover.length && !supplier.otherOnly ? supplier.stock.filter((item) => item.line) : supplier.stock;
+          const stockIds = [...new Set(stock.flatMap((item) => item.stockIds))];
+          const packs = supplier.cover.length && !supplier.otherOnly ? supplier.onLines : supplier.other;
+          void add({ ...first, key: supplier.key, stockId: stockIds[0] ?? null, group: null,
+            reason: `Group match: ${packs} ${packs === 1 ? "pack" : "packs"} in ${stock.length} ${stock.length === 1 ? "type" : "types"}` },
+          { stockIds, rowKeys: supplier.rowKeys });
+        }}
       />
     );
   }
@@ -287,7 +310,7 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
 }
 
 /** Loads one listing's matches and owns the writes the list makes. */
-export function MatchesTab({ kind, id, active, onOpenOffers }: { kind: "supply" | "demand"; id: string; active: boolean; onOpenOffers?: () => void }) {
+export function MatchesTab({ kind, id, active, onOpenOffers, onOpenDetails }: { kind: "supply" | "demand"; id: string; active: boolean; onOpenOffers?: () => void; onOpenDetails?: () => void }) {
   const base = kind === "supply"
     ? `/api/bulk-listings/${encodeURIComponent(id)}/matches/v2`
     : `/api/bulk-trades/demand/${encodeURIComponent(id)}/matches/v2`;
@@ -328,13 +351,18 @@ export function MatchesTab({ kind, id, active, onOpenOffers }: { kind: "supply" 
       onRetry={() => void load()}
       offersEndpoint={offersEndpoint}
       onOpenOffers={onOpenOffers}
+      onOpenDetails={onOpenDetails}
+      // A supplier is one offer: adding any of their rows marks the supplier in Group matches too.
       onAdded={(row, offer) => setData((current) => current && {
         ...current,
         rows: current.rows.map((item) => (item.key === row.key ? { ...item, offer } : item)),
+        suppliers: current.suppliers?.map((s) => (s.rowKeys.includes(row.key) ? { ...s, offer } : s)) ?? current.suppliers,
       })}
       onNotAFit={async (row, reason) => {
         await request(base, { method: "POST", body: JSON.stringify({ key: row.key, label: row.name, reason }) });
         setData((current) => current && { ...current, rows: current.rows.filter((item) => item.key !== row.key) });
+        // The supplier view's counts change with it: read them again.
+        if (data?.suppliers?.length) void load();
       }}
     />
   );

@@ -35,6 +35,8 @@ export type MarkdownEditorProps = {
   onSave?: () => void;
   onDirty?: () => void;
   onNavigate?: (path: string) => void;
+  /** Leave edit mode and return to the live read view. */
+  onExit?: () => void;
   /** Optional search function from useSearchIndex for fuzzy @ mention search. */
   searchFn?: MentionSearchFn;
 };
@@ -42,6 +44,11 @@ export type MarkdownEditorProps = {
 // --- Main component ---
 
 /** Extract YAML frontmatter (if any) from raw file content. */
+function editorMarkdown(editor: { getHTML: () => string }): string {
+  const withMarkdown = editor as unknown as { getMarkdown?: () => string };
+  return typeof withMarkdown.getMarkdown === "function" ? withMarkdown.getMarkdown() : editor.getHTML();
+}
+
 function extractFrontmatter(raw: string): string {
   const match = raw.match(/^(---\s*\n[\s\S]*?\n---\s*\n)/);
   return match ? match[1] : "";
@@ -55,11 +62,19 @@ export function MarkdownEditor({
   onSave,
   onDirty,
   onNavigate,
+  onExit,
   searchFn,
 }: MarkdownEditorProps) {
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const [isDirty, setIsDirty] = useState(false);
+  // Someone else (an agent) changed the file on disk while this editor held unsaved edits.
+  const [diskNotice, setDiskNotice] = useState<string | null>(null);
+  // Markdown as last loaded or saved; dirty means the editor differs from it, so editor
+  // normalisation and programmatic loads never count as edits.
+  const baselineRef = useRef<string | null>(null);
+  // Raw file content as last seen on disk (loaded, or written by this editor).
+  const diskRef = useRef(rawContent ?? content);
   useDocumentDirty(isDirty);
   // Tracks the `content` prop so we can detect external updates (parent re-fetch).
   // Only updated when the prop itself changes -- never on save.
@@ -119,8 +134,13 @@ export function MarkdownEditor({
     content: preprocessReportBlocks(content),
     contentType: "markdown",
     immediatelyRender: false,
-    onUpdate: () => {
-      setIsDirty(true);
+    onCreate: ({ editor: created }) => {
+      baselineRef.current = editorMarkdown(created);
+    },
+    onUpdate: ({ editor: updated }) => {
+      const dirty = baselineRef.current === null || editorMarkdown(updated) !== baselineRef.current;
+      setIsDirty(dirty);
+      if (!dirty) {return;}
       setSaveStatus("idle");
       onDirty?.();
     },
@@ -294,14 +314,24 @@ export function MarkdownEditor({
   }, [editor, onNavigate]);
 
   // Save handler
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (force = false) => {
     if (!editor || saving) {return;}
 
-    const savedHtml = editor.getHTML();
+    const savedMarkdown = editorMarkdown(editor);
     setSaving(true);
     setSaveStatus("idle");
 
     try {
+      // Never overwrite a version this editor has not seen: an agent may have written since.
+      if (!force) {
+        const check = await fetch(`/api/workspace/file?path=${encodeURIComponent(filePath)}`, { cache: "no-store" });
+        const current = check.ok ? ((await check.json().catch(() => null)) as { content?: unknown } | null)?.content : undefined;
+        if (typeof current === "string" && current !== diskRef.current) {
+          setDiskNotice(current);
+          return;
+        }
+      }
+
       // Serialize editor content back to markdown
       // The Markdown extension adds getMarkdown() to the editor instance
       const editorAny = editor as unknown as { getMarkdown?: () => string };
@@ -327,7 +357,10 @@ export function MarkdownEditor({
 
       if (res.ok) {
         setSaveStatus("saved");
-        setIsDirty(editor.getHTML() !== savedHtml);
+        setDiskNotice(null);
+        diskRef.current = finalContent;
+        baselineRef.current = savedMarkdown;
+        setIsDirty(editorMarkdown(editor) !== savedMarkdown);
         // Sync the prop tracker to the body we just saved so the external-update
         // effect doesn't see a mismatch and reset the editor.
         lastPropContentRef.current = content;
@@ -344,32 +377,54 @@ export function MarkdownEditor({
     } finally {
       setSaving(false);
     }
-  }, [editor, filePath, saving, onSave]);
+  }, [editor, filePath, saving, onSave, content]);
 
   // Keyboard shortcut: Cmd/Ctrl+S
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
-        void handleSave();
+        void handleSave(diskNotice !== null);
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [handleSave]);
+  }, [handleSave, diskNotice]);
 
-  // Update content when file changes externally (parent re-fetched the file)
+  // The file changed on disk (parent re-fetched it). Follow it live unless there are unsaved edits.
   useEffect(() => {
-    if (!editor || isDirty) {return;}
-    if (content !== lastPropContentRef.current) {
-      lastPropContentRef.current = content;
-      // Also update frontmatter in case the raw content changed
-      frontmatterRef.current = extractFrontmatter(rawContent ?? "");
-      const processed = preprocessReportBlocks(content);
-      editor.commands.setContent(processed, { contentType: "markdown" });
-      setIsDirty(false);
+    if (!editor) {return;}
+    const raw = rawContent ?? content;
+    if (raw === diskRef.current) {return;} // our own save, or no change
+    if (isDirty) {
+      setDiskNotice(raw);
+      return;
     }
+    diskRef.current = raw;
+    lastPropContentRef.current = content;
+    frontmatterRef.current = extractFrontmatter(raw);
+    editor.commands.setContent(preprocessReportBlocks(content), { contentType: "markdown" });
+    baselineRef.current = editorMarkdown(editor);
+    setIsDirty(false);
+    setDiskNotice(null);
   }, [content, rawContent, editor, isDirty]);
+
+  /** Take the on-disk version and drop the unsaved edits. */
+  const adoptDiskVersion = useCallback(() => {
+    if (!editor || diskNotice === null) {return;}
+    const frontmatter = extractFrontmatter(diskNotice);
+    frontmatterRef.current = frontmatter;
+    diskRef.current = diskNotice;
+    editor.commands.setContent(preprocessReportBlocks(diskNotice.slice(frontmatter.length)), { contentType: "markdown" });
+    baselineRef.current = editorMarkdown(editor);
+    setIsDirty(false);
+    setDiskNotice(null);
+  }, [editor, diskNotice]);
+
+  const exitEditing = useCallback(() => {
+    if (isDirty && !window.confirm("Discard your unsaved changes?")) {return;}
+    onExit?.();
+  }, [isDirty, onExit]);
 
   if (!editor) {
     return (
@@ -408,14 +463,29 @@ export function MarkdownEditor({
           </span>
           <button
             type="button"
-            onClick={() => void handleSave()}
+            onClick={() => void handleSave(diskNotice !== null)}
             disabled={saving || !isDirty}
             className="editor-save-button"
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? "Saving..." : diskNotice !== null ? "Overwrite" : "Save"}
           </button>
+          {onExit && (
+            <button type="button" onClick={exitEditing} className="editor-mode-toggle" title="Back to the live view">
+              Done
+            </button>
+          )}
         </div>
       </div>
+
+      {diskNotice !== null && (
+        <div role="alert" className="flex items-center justify-between gap-3 px-4 py-2 text-xs" style={{ background: "var(--color-surface)", color: "var(--color-text)", borderBottom: "1px solid var(--color-border)" }}>
+          <span>This file changed on disk while you were editing.</span>
+          <span className="flex gap-2">
+            <button type="button" className="editor-mode-toggle" onClick={adoptDiskVersion}>Use the new version</button>
+            <button type="button" className="editor-mode-toggle" onClick={() => void handleSave(true)}>Overwrite with mine</button>
+          </span>
+        </div>
+      )}
 
       {/* Toolbar */}
       <EditorToolbar editor={editor} onUploadImages={insertUploadedImages} />

@@ -143,6 +143,80 @@ export type MatchesResult = {
   coverage?: MatchCoverage | null;
   /** Requests only: the "Matched on" chips and the outreach so far. */
   summary?: RequestSummary | null;
+  /** Requests: who is asking, as the Group matches heading names them ("R3 Robotics S.A."). */
+  buyer?: string | null;
+  /** Requests with pack types: each type, what was found against what is needed. Null when the request has none. */
+  lines?: LineCoverage[] | null;
+  /** Requests only: the same rows, one per supplier, with all their matching stock (Group matches). */
+  suppliers?: SupplierMatch[] | null;
+};
+
+/** One of the buyer's pack types, across every supplier: what was found against the need. */
+export type LineCoverage = {
+  id: string;
+  label: string;
+  /** "10–20" or "8". */
+  need: string;
+  qtyMin: number;
+  qtyMax: number | null;
+  /** Stated packs on this type, all suppliers. */
+  found: number;
+  /** Of `found`, the packs only close to it (capacity not stated, pack not confirmed). */
+  close: number;
+  suppliers: number;
+  /** fits: confirmed stock (found less close) reaches the fewest needed; close: some found; misses: none. */
+  state: "fits" | "close" | "misses";
+};
+
+/** One pack type a supplier holds: a Per battery row, seen from the supplier. */
+export type SupplierStock = {
+  /** The Per battery row it is. */
+  rowKey: string;
+  pack: string;
+  /** Stated packs; 0 with `stated` false when the source gives no number. */
+  count: number;
+  stated: boolean;
+  /** The buyer's pack type it counts towards, or null for other matching stock. */
+  line: { id: string; label: string } | null;
+  lineState: "fits" | "close" | null;
+  /** Why only close: "kWh not stated", "pack not confirmed". */
+  why: string | null;
+  /** "VW ID.4 12, Audi Q4 e-tron 4", when the type spans vehicles. */
+  vehicles: string | null;
+  /** Price, places, sources and when seen, as the Per battery row has it. */
+  meta: string | null;
+  price: string | null;
+  priceVaries: boolean;
+  stockIds: string[];
+  units: number;
+};
+
+/** A supplier with every matching pack type they hold (Group matches). */
+export type SupplierMatch = {
+  /** `company:<id>`, `person:<id>` or `name:<seller>`. */
+  key: string;
+  name: string;
+  countries: string[];
+  tags: MatchTag[];
+  sourceKinds: string[];
+  offer: MatchOffer | null;
+  companyId: string | null;
+  personId: string | null;
+  contact: string | null;
+  /** On the buyer's types first (in the request's order), then other matching stock. */
+  stock: SupplierStock[];
+  /** One entry per buyer pack type, in order: how many this supplier holds of it. */
+  cover: { id: string; label: string; count: number; state: "fits" | "close" | "none" }[];
+  /** Stated packs on the buyer's types, and other matching stock. */
+  onLines: number;
+  other: number;
+  linesCovered: number;
+  /** Confirmed packs that count towards the need: each type counted up to its most. Maybes do not count. */
+  needCovered: number;
+  /** Nothing on the buyer's types, only other matching stock. */
+  otherOnly: boolean;
+  /** The Per battery rows behind it, best first: the first is the one Add to offers records. */
+  rowKeys: string[];
 };
 
 /** One requirement chip; `strong` is the product itself. */

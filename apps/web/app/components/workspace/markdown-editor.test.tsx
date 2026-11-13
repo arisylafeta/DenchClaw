@@ -7,7 +7,8 @@ import userEvent from "@testing-library/user-event";
 import { MarkdownEditor } from "./markdown-editor";
 
 type EditorOptions = {
-  onUpdate?: () => void;
+  onCreate?: (props: { editor: unknown }) => void;
+  onUpdate?: (props: { editor: unknown }) => void;
 };
 
 let lastEditorOptions: EditorOptions | null = null;
@@ -116,6 +117,14 @@ vi.mock("@/lib/workspace-links", () => ({
   isWorkspaceLink: () => false,
 }));
 
+/** GET reads the file on disk (for the pre-save check); POST accepts the write. */
+function diskFetch(onDisk: string) {
+  return vi.fn((_url: string, init?: RequestInit) => Promise.resolve(new Response(
+    JSON.stringify(init?.method === "POST" ? { ok: true } : { content: onDisk }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  )));
+}
+
 describe("MarkdownEditor", () => {
   beforeEach(() => {
     const chain = createMockChain();
@@ -132,18 +141,13 @@ describe("MarkdownEditor", () => {
 
   function markDirty() {
     act(() => {
-      lastEditorOptions?.onUpdate?.();
+      lastEditorOptions?.onUpdate?.({ editor: currentEditor });
     });
   }
 
   it("saves home-relative markdown files through the real file API", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    global.fetch = fetchMock;
+    const fetchMock = diskFetch("# initial");
+    global.fetch = fetchMock as unknown as typeof fetch;
     const user = userEvent.setup();
 
     render(
@@ -165,13 +169,8 @@ describe("MarkdownEditor", () => {
   });
 
   it("keeps virtual markdown paths on the virtual-file API", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    global.fetch = fetchMock;
+    const fetchMock = diskFetch("# initial");
+    global.fetch = fetchMock as unknown as typeof fetch;
     const user = userEvent.setup();
 
     render(
@@ -190,5 +189,28 @@ describe("MarkdownEditor", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: "~skills/demo/SKILL.md", content: "# updated markdown" }),
     });
+  });
+
+  it("does not overwrite a file that changed on disk since it was loaded", async () => {
+    const fetchMock = diskFetch("# an agent wrote this");
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const user = userEvent.setup();
+    render(<MarkdownEditor content="# initial" filePath="cv/a.md" tree={[]} />);
+
+    markDirty();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(await screen.findByRole("alert")).toHaveTextContent("changed on disk");
+    await user.click(screen.getByRole("button", { name: "Overwrite with mine" }));
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true);
+  });
+
+  it("shows a Done button that leaves edit mode", async () => {
+    const onExit = vi.fn();
+    const user = userEvent.setup();
+    render(<MarkdownEditor content="# initial" filePath="cv/a.md" tree={[]} onExit={onExit} />);
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(onExit).toHaveBeenCalled();
   });
 });

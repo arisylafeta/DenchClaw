@@ -5,6 +5,8 @@ import enrichoAvatar from "@/public/profile-avatars/enricho.webp";
 import devonAvatar from "@/public/profile-avatars/devon.webp";
 import matchaAvatar from "@/public/profile-avatars/matcha.webp";
 import vangridAvatar from "@/public/profile-avatars/vangrid.webp";
+import sorcererAvatar from "@/public/profile-avatars/sorcerer.webp";
+import papajulesAvatar from "@/public/profile-avatars/papajules.webp";
 
 // Next emits imported images at content-hashed, immutable-cache URLs.
 // Legacy IDs remain useful for historical conversations after a profile rename.
@@ -18,6 +20,8 @@ const avatars: Record<string, { src: string } | string> = {
   devon: devonAvatar,
   matcha: matchaAvatar,
   vangrid: vangridAvatar,
+  sorcerer: sorcererAvatar,
+  papajules: papajulesAvatar,
 };
 
 export function bundledProfileAvatar(name: string): string | undefined {
