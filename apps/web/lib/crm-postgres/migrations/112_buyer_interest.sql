@@ -27,8 +27,12 @@
 --   cell:samsung-sdi-inr21700-50e cell maker + cell model
 --   broad:lfp-packs            chemistry + format
 --   broad:stellantis-nmc-packs the same bucket scoped to a stated make, used when no more specific key is proven
--- Apply only after a current backup and explicit schema approval.
+-- Apply only after a current backup and explicit schema approval, and outside the 08:00 importer window: the
+-- trigger and constraint changes below need locks on live tables, and lock_timeout makes the migration give up
+-- after 3 seconds (rolling everything back) instead of queueing every reader and writer behind an open importer
+-- transaction. Re-run it when it fails on the timeout.
 begin;
+set local lock_timeout = '3s';
 
 create table if not exists buyer_interest (
   id text primary key,
@@ -161,12 +165,16 @@ $$;
 -- a word is never mangled into a code ("Onyx Strata H4-15" is a product name, not a part). Mirrors partKey().
 create or replace function buyer_interest_part(value text) returns text language sql immutable as $$
   with raw as (select btrim(coalesce(value, '')) as text),
-       code as (select text, regexp_replace(upper(text), '[^A-Z0-9]', '', 'g') as folded from raw)
+       code as (select text, regexp_split_to_array(text, '\s+') as tokens,
+                       regexp_replace(upper(text), '[^A-Z0-9]', '', 'g') as folded from raw)
   select case
     when text = '' then null
-    when text !~ '^[A-Za-z0-9][A-Za-z0-9 ./_#-]*$' then null      -- only code characters
-    when text ~ '[a-z]{2}' then null                              -- a run of lower-case letters is a word
-    when cardinality(regexp_split_to_array(text, '\s+')) > 2 then null
+    when cardinality(tokens) = 1 and text !~ '^[A-Za-z0-9][A-Za-z0-9./_#-]*$' then null  -- only code characters
+    when cardinality(tokens) > 5 then null                        -- more than five tokens is prose or a run-on list
+    when cardinality(tokens) > 1 and exists (select 1 from unnest(tokens) t where t !~ '^[A-Za-z0-9]+$') then null
+    when text ~ '[A-Za-z]{4}' and text ~ '[a-z]' then null        -- a lower-case word (battery, Tesla), not a code
+    when cardinality(tokens) > 1 and exists (select 1 from unnest(tokens) t where t ~ '^[A-Za-z]{3,}$') then null
+    when cardinality(tokens) > 1 and not exists (select 1 from unnest(tokens) t where length(t) >= 3) then null
     when folded !~ '[0-9].*[0-9]' then null                       -- an OEM code carries digits
     when length(folded) not between 5 and 14 then null
     else replace(folded, 'O', '0') end
@@ -374,12 +382,12 @@ create or replace function buyer_interest_stated_list(p_list jsonb, p_first text
     array[null]::text[])
 $$;
 
--- The vehicle make a listing title names ("2024 Audi MEB 82 kWh pack"): the first make in the list that appears as a
--- whole word. Only a listing with no mapped make falls back to it; a title never overrides a stated make.
+-- The vehicle make a listing title names ("2024 Audi MEB 82 kWh pack"): the make that appears first in the text (the
+-- regex engine returns the leftmost whole-word match, whatever the list order). Only a listing with no mapped make falls back to it; a title never overrides a stated make.
 create or replace function buyer_interest_title_make(p_title text) returns text language sql immutable as $$
   select case when m in ('bmw', 'mg', 'byd', 'nio') then upper(m) when m = 'vw' then 'Volkswagen' else initcap(m) end
   from (select (regexp_match(buyer_interest_unaccent(p_title),
-    '\y(volkswagen|vw|audi|skoda|cupra|porsche|bmw|mercedes-benz|mercedes|tesla|stellantis|nissan|renault|dacia|peugeot|citroen|opel|vauxhall|fiat|jeep|ford|hyundai|kia|genesis|toyota|lexus|honda|mazda|mitsubishi|suzuki|subaru|volvo|polestar|jaguar|land rover|mg|byd|lotus|lucid|rivian|nio|xpeng|zeekr|leapmotor|maxus)\y'))[1] as m) found
+    '\y(volkswagen|vw|audi|mini|skoda|cupra|porsche|bmw|mercedes-benz|mercedes|tesla|stellantis|nissan|renault|dacia|peugeot|citroen|opel|vauxhall|fiat|jeep|ford|hyundai|kia|genesis|toyota|lexus|honda|mazda|mitsubishi|suzuki|subaru|volvo|polestar|jaguar|land rover|mg|byd|lotus|lucid|rivian|nio|xpeng|zeekr|leapmotor|maxus)\y'))[1] as m) found
 $$;
 
 -- One fact set per stated make x chemistry x format, so every combination of a row's facts becomes a line instead
@@ -851,9 +859,10 @@ end $$;
 
 drop trigger if exists buyer_interest_listing_offers_sync on crm_bulk_listings;
 create trigger buyer_interest_listing_offers_sync after update on crm_bulk_listings
-  for each row when (new.kind = 'supply' and (new.spec is distinct from old.spec or new.context is distinct from old.context
+  for each row when ((new.kind = 'supply' and (new.spec is distinct from old.spec or new.context is distinct from old.context
     or new.summary is distinct from old.summary or new.quantity is distinct from old.quantity
     or new.observed_on is distinct from old.observed_on or old.kind is distinct from new.kind))
+    or (old.kind = 'supply' and new.kind is distinct from 'supply'))
   execute function buyer_interest_listing_changed();
 
 do $$ begin
