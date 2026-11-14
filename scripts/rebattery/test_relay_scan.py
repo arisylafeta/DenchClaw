@@ -628,3 +628,61 @@ def test_new_lead_is_urgent():
     assert rs.compute_priority({"tab": "action"}, msgs, ctx(contact_type="logistics", first_contact=True), NOW)[0] != "urgent"
     replied = [msg("outbound", 2, "Which packs?"), msgs[0]]
     assert rs.compute_priority({"tab": "action"}, replied, ctx(contact_type="supplier", first_contact=True), NOW)[0] != "urgent"
+
+
+# ---------- 14 Nov lane fixes ----------
+
+def _jules_answer(mid="g20", **extra):
+    return msg("inbound", 1, "Gateshead area, tyne and wear.", frm="lee@gmail.example", to=["supply@rebattery.io"],
+               subject="Re: Your Nissan Leaf 24kWh packs", mid=mid, in_reply_to="<0a1b2c@mtasv.net>", **extra)
+
+
+def test_answer_to_jules_is_other_even_when_triage_says_action():
+    r = rs.classify_thread([_jules_answer()], ctx(known=False, triage={"automated_state": "1 Action"}), NOW)
+    assert r["tab"] == "other" and r["reason"] == "answer to Jules"
+
+
+def test_answer_to_jules_the_job_could_not_take_in_needs_alex():
+    m = _jules_answer()
+    r = rs.classify_thread([m], ctx(known=False, jules_needs_person={m["id"]}), NOW)
+    assert r["tab"] == "action"
+
+
+def test_answer_to_the_crms_own_postmark_send_is_not_jules():
+    r = rs.classify_thread([_jules_answer()], ctx(known=False, our_refs={"<0a1b2c@mtasv.net>"}), NOW)
+    assert r["tab"] == "action" and r["reason"] == "reply to our email"
+
+
+def test_jules_needs_person_reads_the_job_notes():
+    notes = {"pending": {"a": "chat"}, "unmatched": {"b": None}, "needs_human": {"c": 1}, "applied": ["d"]}
+    assert rs.jules_needs_person(notes) == {"a", "b", "c"}
+    assert rs.jules_needs_person({}) == set()
+
+
+def test_fresh_triage_archive_is_other_and_beats_an_older_action_label():
+    msgs = [msg("inbound", 1, "Could you share the attendee list? Please reply.", mid="g30")]
+    archived = {"automated_state": "1 Action", "proposed_state": None, "last_classified_message_id": "g30"}
+    r = rs.classify_thread(msgs, ctx(triage=archived), NOW)
+    assert r["tab"] == "other" and r["reason"] == "triage: archived"
+    # An archive of an earlier message says nothing about this one.
+    stale = {**archived, "last_classified_message_id": "g29", "automated_state": None}
+    assert rs.classify_thread(msgs, ctx(triage=stale), NOW)["tab"] == "action"
+
+
+def test_tagged_deal_files_a_counterparty_email_on_the_deal():
+    r3 = _listing("r3", "demand", "open", "8 Ioniq 5 77.4 kWh, 4 Zoe packs, ID.3 Pro", "fec@r3.example")
+    got = rs.tagged_deal({"r3"}, {"r3": r3}, "VW ID.3 Pro battery: you can collect Monday to Friday")
+    assert got["bulk_listing_id"] == "r3"
+    # choose_deal still never links it: only the email is filed.
+    assert rs.choose_deal("kempers@x.de", "supplier", {"r3"}, "ID.3 Pro battery", {}) is None
+
+
+def test_tagged_deal_needs_the_words_to_pick_one_of_several_and_skips_closed():
+    a = _listing("a", "demand", "open", "MEB packs for R3", "x@r3.example")
+    b = _listing("b", "supply", "open", "Stellantis van packs", "y@s.example")
+    closed = _listing("c", "demand", "closed", "Kona packs", "z@k.example")
+    listings = {"a": a, "b": b, "c": closed}
+    assert rs.tagged_deal({"a", "b"}, listings, "test reports for the MEB packs")["bulk_listing_id"] == "a"
+    assert rs.tagged_deal({"a", "b"}, listings, "hello there") is None
+    assert rs.tagged_deal({"c"}, listings, "Kona packs") is None
+    assert rs.tagged_deal({"missing"}, listings, "x") is None

@@ -64,6 +64,12 @@ SKIP_LABELS = {"SPAM", "TRASH", "DRAFT", "CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL
 # references one is a real reply to us: Gmail spam swallowed sellers answering supply@ this way.
 OUR_SEND_REF = re.compile(r"@mtasv\.net>", re.I)
 FYI_LABELS = {"CATEGORY_UPDATES", "CATEGORY_FORUMS"}
+# Answers to Jules, the marketplace's listing helper, which emails sellers from supply@ through Postmark. The hourly
+# Hermes job takes them in; its notes say which ones it could not and need a person. Same rule as relay-jules-core.ts.
+JULES_INBOXES = {"supply@rebattery.io", "support@rebattery.io"}
+JULES_SUBJECT = re.compile(r"^\s*(?:(?:re|aw|sv|antw|tr|fwd?)\s*:\s*)+(?:your\s(?:[^:]+\s)?(?:packs|modules|cells|batteries|listing is ready)"
+                           r"|we['’]ve received your\s[^:]+\sdetails)\s*$", re.I)
+JULES_NOTES = Path("/root/.hermes/workspace/jules-follow-ups/production/replies.json")
 FREEMAIL = {"gmail.com", "googlemail.com", "hotmail.com", "outlook.com", "live.com", "yahoo.com", "icloud.com",
             "me.com", "aol.com", "gmx.de", "gmx.net", "web.de", "proton.me", "protonmail.com", "seznam.cz", "wp.pl",
             "mail.ru", "yandex.ru", "msn.com", "hotmail.co.uk", "yahoo.co.uk", "btinternet.com", "orange.fr", "free.fr",
@@ -336,6 +342,24 @@ def replies_to_us(m: dict, messages: list[dict]) -> bool:
                and any(not is_own(e) for e in (o.get("to_emails") or []) + (o.get("cc_emails") or [])) for o in messages)
 
 
+def answers_jules(m: dict, our_refs: set[str]) -> bool:
+    """A seller answering Jules: to supply@ or support@, in reply to a Postmark send that is not one of the CRM's own
+    (those are in our_refs), with a Jules subject."""
+    to = {email_of(a) for a in (m.get("to_emails") or []) + (m.get("cc_emails") or [])}
+    ref = (m.get("in_reply_to") or "").strip() or (m.get("rfc_references") or "")
+    return bool(to & JULES_INBOXES and re.search(r"@mtasv\.net\b", ref, re.I) and (m.get("in_reply_to") or "").strip() not in our_refs
+                and JULES_SUBJECT.match(m.get("subject") or ""))
+
+
+def jules_needs_person(notes: dict) -> set[str]:
+    """Answers the Jules job read but could not take in (a question, an unclear answer, no chat to put it on)."""
+    out: set[str] = set()
+    for key in ("pending", "unmatched", "needs_human"):
+        v = notes.get(key) if isinstance(notes, dict) else None
+        out |= set(v) if isinstance(v, (dict, list)) else set()
+    return {x for x in out if isinstance(x, str)}
+
+
 def real_messages(messages: list[dict]) -> list[dict]:
     """Messages that count: sent or received, not campaigns, drafts, spam, internal or machine mail.
 
@@ -391,7 +415,15 @@ def classify_thread(msgs: list[dict], ctx: dict, now: dt.datetime, days: int = 1
         # Triage records its verdict as proposed_state and only moves it to automated_state when a later
         # pass sees the label stuck, so a first message triage labelled "1 Action" reads as proposed.
         triage_action = triage_state == TRIAGE_ACTION or (triage_fresh and triage.get("proposed_state") == TRIAGE_ACTION)
-        if triage_action:
+        # Triage records an archive as a fresh classification with no proposed label.
+        triage_archived = triage_fresh and not triage.get("proposed_state")
+        if answers_jules(last, ctx.get("our_refs") or set()):
+            # Alex, 14 Nov: answers to Jules are Jules's to take in, unless the job says it needs a person.
+            needs = last.get("id") in (ctx.get("jules_needs_person") or set())
+            tab, reason = ("action", "answer to Jules that Jules could not take in") if needs else ("other", "answer to Jules")
+        elif triage_archived:
+            tab, reason = "other", "triage: archived"
+        elif triage_action:
             tab, reason = "action", "triage: 1 Action"
         elif triage_state in TRIAGE_OTHER and triage_fresh:
             tab, reason = "other", f"triage: {triage_state}"
@@ -405,7 +437,7 @@ def classify_thread(msgs: list[dict], ctx: dict, now: dt.datetime, days: int = 1
             tab, reason = "action", "reply to our email"
         else:
             tab, reason = "other", "unsolicited or FYI"
-        limit = follow_days if tab == "action" and triage_action else days
+        limit = follow_days if tab == "action" and triage_action and not triage_archived else days
         if age_days > limit and not ctx.get("existing_open"):
             return {**out, "tab": None, "reason": "older than window", "done_reason": "expired"}
         if tab == "other" and age_days > days:
@@ -541,6 +573,16 @@ def load_threads(cur, owner_id: str, since: dt.datetime, extra_thread_ids: list[
     for r in cur.fetchall():
         threads[r["thread_id"]]["messages"].append(dict(r))
     return threads
+
+
+def load_our_refs(cur, threads: dict[str, dict]) -> set[str]:
+    """Message-IDs our inbound mail answers that the CRM itself sent (so they are not Jules's)."""
+    refs = sorted({(m.get("in_reply_to") or "").strip() for th in threads.values() for m in th["messages"]
+                   if m["direction"] == "inbound" and m.get("in_reply_to")} - {""})
+    if not refs:
+        return set()
+    cur.execute("select distinct rfc_message_id from mail_message where direction = 'outbound' and rfc_message_id = any(%s)", (refs,))
+    return {r["rfc_message_id"] for r in cur.fetchall()}
 
 
 def load_written_to(cur) -> tuple[set, set]:
@@ -691,6 +733,32 @@ def choose_deal(counterpart: str | None, contact_type: str | None, linked: set[s
     best = max(candidates, key=score)
     if best["id"] not in linked and best["status"] not in ("open", "qualifying") and score(best)[1] < 2:
         return None
+    return {"bulk_listing_id": best["id"], "summary": best["summary"], "quantity": best["quantity"]}
+
+
+def load_listings(cur, ids: set[str]) -> dict[str, dict]:
+    if not ids or not table_exists(cur, "crm_bulk_listings"):
+        return {}
+    cur.execute("select id, kind, status, summary, quantity, updated_at from crm_bulk_listings where id = any(%s)", (sorted(ids),))
+    return {r["id"]: dict(r) for r in cur.fetchall()}
+
+
+def tagged_deal(tagged: set[str], listings: dict[str, dict], text: str) -> dict | None:
+    """The open deal this thread is tagged with when the sender owns none: a supplier answering a buyer's request, or a
+    buyer on someone's lot. Alex, 14 Nov: show the email on that deal. It only files the email in Relay; the listing,
+    its stock and its matches are untouched (choose_deal's rule against counting stock twice still holds).
+    With several tags the email's words must pick one; a tie or no overlap links nothing."""
+    live = [listings[i] for i in sorted(tagged) if i in listings and listings[i]["status"] in ("open", "qualifying")]
+    if len(live) > 1:
+        words = set(WORD.findall(text.lower())) - STOP
+        scored = sorted(((len(words & (set(WORD.findall((c["summary"] or "").lower())) - STOP)), c) for c in live),
+                        key=lambda x: x[0], reverse=True)
+        if scored[0][0] < 1 or scored[0][0] == scored[1][0]:
+            return None
+        live = [scored[0][1]]
+    if not live:
+        return None
+    best = live[0]
     return {"bulk_listing_id": best["id"], "summary": best["summary"], "quantity": best["quantity"]}
 
 
@@ -965,10 +1033,12 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
             or purpose_type(person.get("purpose")) or purpose_type(company_row.get("purpose")) \
             or STREAM_TYPE.get(tri.get("automated_stream") or "") or (item or {}).get("contact_type")
         deal = ctx_global.get("relay_links", {}).get(tid) \
-            or choose_deal(counterpart, contact_type, ctx_global["deals"].get(tid, set()), thread_text, ctx_global.get("owned", {}))
+            or choose_deal(counterpart, contact_type, ctx_global["deals"].get(tid, set()), thread_text, ctx_global.get("owned", {})) \
+            or tagged_deal(ctx_global["deals"].get(tid, set()), ctx_global.get("listings", {}), thread_text)
         deal_linked = bool(deal) or counterpart in ctx_global.get("open_deal_emails", set())
         # "Owner wrote to them since" counts only a new email from him, not a reply in another conversation.
         ctx = {"triage": tri, "contact_type": contact_type, "deal_linked": deal_linked,
+               "our_refs": ctx_global.get("our_refs", set()), "jules_needs_person": ctx_global.get("jules_needs_person", set()),
                "last_to": ctx_global.get("last_new_to", ctx_global["last_to"]), "last_from": ctx_global["last_from"],
                "known": bool(person) or bool(company_row) or counterpart in ctx_global["last_to"],
                "first_contact": counterpart not in ctx_global["written_emails"] and domain_of(counterpart) not in ctx_global["written_domains"],
@@ -1172,6 +1242,9 @@ def main(argv: list[str] | None = None) -> int:
             "last_to": last_to, "last_from": last_from, "last_new_to": last_new_to,
         }
         ctx_global["written_emails"], ctx_global["written_domains"] = load_written_to(cur)
+        ctx_global["listings"] = load_listings(cur, set().union(*ctx_global["deals"].values()) if ctx_global["deals"] else set())
+        ctx_global["our_refs"] = load_our_refs(cur, threads)
+        ctx_global["jules_needs_person"] = jules_needs_person(load_json(JULES_NOTES, {}) or {})
         rows, jobs, seen = build_rows(threads, existing, ctx_global, now, args)
 
         llm_calls = 0
