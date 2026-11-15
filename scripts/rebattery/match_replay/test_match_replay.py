@@ -12,6 +12,7 @@ from pathlib import Path
 import caseworker
 import dossier
 import rules
+import run_replay
 
 
 DOSSIER = """---
@@ -103,6 +104,32 @@ class DossierFilterTest(unittest.TestCase):
         self.assertEqual(dossier.line_date("- 2026-01-10: x"), dossier.parse_date("2026-01-10"))
         self.assertIsNone(dossier.line_date("10 Jan 2026: x"))
         self.assertIsNone(dossier.line_date("None found. 2026-01-10: x"))
+
+
+class InterestLinesTest(unittest.TestCase):
+    """Lines for the replay come only from dossier rows known before the case date."""
+
+    def lines(self, as_of: str):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "buyer.md"
+            path.write_text(DOSSIER, encoding="utf-8")
+            return run_replay.lines_from_dossier(dossier.load_dossier(path, as_of))
+
+    def test_a_row_becomes_a_dated_line_with_its_kind_and_expiry(self) -> None:
+        (line,) = self.lines("2026-03-01")
+        self.assertEqual((line["kind"], line["seen"], line["part_number"], line["kwh"]), ("ask", "2026-01-10", "PN-1", 80))
+        self.assertEqual(line["expires_on"], "2026-04-10")
+
+    def test_rows_seen_on_or_after_the_case_date_give_no_line(self) -> None:
+        self.assertEqual(self.lines("2026-01-10"), [])
+        self.assertEqual([line["part_number"] for line in self.lines("2026-07-01")], ["PN-1", "PN-2"])
+
+    def test_a_bought_line_never_expires(self) -> None:
+        bought = [line for line in self.lines("2026-07-01") if line["kind"] == "bought"]
+        self.assertEqual(bought[0]["expires_on"], None)
+
+    def test_no_dossier_no_lines(self) -> None:
+        self.assertEqual(run_replay.lines_from_dossier(None), [])
 
 
 class RulesTest(unittest.TestCase):

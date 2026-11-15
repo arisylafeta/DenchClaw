@@ -660,15 +660,28 @@ function supplyProductFacts(supply: SupplyFacts): ProductFacts {
   };
 }
 
-const chainCache = new WeakMap<SupplyFacts, string[]>();
-/** The keys this lot line counts as, most specific first, ending with the plain broad key. */
-function lotKeys(supply: SupplyFacts): string[] {
-  let chain = chainCache.get(supply);
-  if (!chain) {
-    chain = broaderKeysFor(supplyProductFacts(supply));
-    chainCache.set(supply, chain);
+type LotKeys = { keys: Set<string>; plainBroad: Set<string> };
+const chainCache = new WeakMap<SupplyFacts, LotKeys>();
+/**
+ * The keys this lot line counts as: its own chain (part, pack, model, cell, make-scoped broad, plain broad), and the
+ * broad keys of a buyer who left chemistry or format unstated ("Audi packs", "LFP anything"), because an unstated
+ * fact is not a conflict. `plainBroad` are the make-less ones, which are the weakest evidence (tier 1).
+ */
+function lotKeys(supply: SupplyFacts): LotKeys {
+  let found = chainCache.get(supply);
+  if (!found) {
+    const facts = supplyProductFacts(supply);
+    const keys = new Set<string>();
+    const plainBroad = new Set<string>();
+    for (const variant of [facts, { ...facts, chemistry: null }, { ...facts, format: null }, { ...facts, chemistry: null, format: null }]) {
+      const chain = broaderKeysFor(variant);
+      for (const key of chain) { keys.add(key); }
+      plainBroad.add(chain[chain.length - 1]);
+    }
+    found = { keys, plainBroad };
+    chainCache.set(supply, found);
   }
-  return chain;
+  return found;
 }
 
 const day10 = (value: string | null | undefined) => (value ?? "").slice(0, 10);
@@ -700,12 +713,11 @@ function lineKwhFits(line: BuyerLine, supply: SupplyFacts): boolean {
 export function lineEvidence(supply: SupplyFacts, buyer: BuyerFacts, asOf: string): LineEvidence {
   const lines = buyer.lines;
   if (!lines?.length) { return NO_EVIDENCE; }
-  const chain = lotKeys(supply);
-  const plainBroad = chain[chain.length - 1];
+  const { keys: chain, plainBroad } = lotKeys(supply);
   const fits: FitLine[] = [];
   let declined: BuyerLine | null = null;
   for (const line of lines) {
-    if (!lineLive(line, asOf) || !chain.includes(line.productKey)) { continue; }
+    if (!lineLive(line, asOf) || !chain.has(line.productKey)) { continue; }
     const level = productKeyLevel(line.productKey);
     if (line.kind === "declined") {
       if (level !== "broad" && (!declined || day10(line.lastSeen) > day10(declined.lastSeen))) { declined = line; }
@@ -713,18 +725,21 @@ export function lineEvidence(supply: SupplyFacts, buyer: BuyerFacts, asOf: strin
     }
     if (level === "broad" && !lineKwhFits(line, supply)) { continue; }
     if (level === "broad" && line.kind === "inferred") { continue; }
-    const tier = level === "part" ? 4 : level === "broad" ? (line.productKey === plainBroad ? 1 : 2) : 3;
+    const tier = level === "part" ? 4 : level === "broad" ? (plainBroad.has(line.productKey) ? 1 : 2) : 3;
     fits.push({ line, tier, kindRank: LINE_KIND_RANK[line.kind] ?? 0, recency: dateNumber(line.lastSeen) });
   }
   if (!fits.length && !declined) { return NO_EVIDENCE; }
   fits.sort((a, b) => b.tier - a.tier || b.kindRank - a.kindRank || b.recency - a.recency);
   const best = fits[0] ?? null;
+  // A plain broad line (chemistry and format only) says what today's buy box already says, so it can lift an empty
+  // tier but does not break ties; only a line that names a make, model, part, pack or cell does.
+  const specific = !!best && best.tier >= 2;
   return {
     tier: best?.tier ?? 0,
-    kindRank: best?.kindRank ?? 0,
-    recency: best?.recency ?? 0,
+    kindRank: specific ? best.kindRank : 0,
+    recency: specific ? best.recency : 0,
     best,
-    also: fits.slice(1, 3),
+    also: fits.slice(1).filter((fit) => fit.tier >= 2).slice(0, 2),
     declined,
   };
 }
@@ -968,9 +983,11 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
     const size = supply.kwhMin != null ? `${supply.kwhMin}-${supply.kwhMax} kWh` : supply.kwh != null ? `${Math.round(supply.kwh * 100) / 100} kWh` : "";
     const product = [line ? kwhText(line) : size, supply.format, supply.chemistry ? supply.chemistry.toUpperCase() : null].filter(Boolean).join(" ");
     const evidence = lineEvidence(supply, buyer, asOf);
-    // The best specific line is the reason when there is one; otherwise today's wording.
     const today = [TIER_LABEL[best.row.productTier], product].filter(Boolean).join(": ");
-    const fits = lineFits(evidence, asOf, evidence.tier >= best.row.productTier ? null : today) ?? today;
+    const todayTier = productTier(supply, buyer, asOf);
+    // The line leads the row when it names something specific or lifts the tier; otherwise today's wording stays.
+    const lineLeads = !!evidence.best && (evidence.best.tier >= 2 || evidence.best.tier > todayTier);
+    const fits = lineLeads ? lineFits(evidence, asOf, evidence.tier >= todayTier ? null : today) ?? today : today;
     const checks = line && options.key ? checksFor(options.key, line, supply, buyer) : checksFor(options.key ?? emptyKey(), emptyLine(), supply, buyer);
     if (evidence.declined) { checks.push(declinedCheck(evidence.declined, asOf)); }
     rows.set(buyer.id, {

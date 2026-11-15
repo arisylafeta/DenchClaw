@@ -260,6 +260,21 @@ describe("buyer interest lines as evidence", () => {
       expect(rankBuyers(supplies, [withModel], { asOf: AS_OF_LIVE, key }).ranked[0].productTier).toBe(2);
     });
 
+    it("fits a make line that leaves chemistry and format unstated, and lifts an empty tier", () => {
+      const saved = buyer({ id: "s", name: "Saved search", profile: {}, lines: [line({ kind: "saved_search", productKey: "broad:toyota-any-batteries", make: "Toyota", format: null, firstSeen: "2026-10-03" })] });
+      const row = rankBuyers(supplies, [saved], { asOf: AS_OF_LIVE, key }).ranked[0];
+      expect(row.productTier).toBe(2);
+      expect(row.fits).toBe("Saved search: Toyota, active since 3 Oct");
+      const other = buyer({ id: "o", name: "Other make", profile: {}, lines: [line({ kind: "saved_search", productKey: "broad:tesla-any-batteries" })] });
+      expect(rankBuyers(supplies, [other], { asOf: AS_OF_LIVE, key }).ranked[0].productTier).toBe(0);
+    });
+
+    it("does not break a tie on a plain broad line, which only restates the buy box", () => {
+      const plainLine = plain("a", [line({ kind: "bought", productKey: "broad:nmc-packs" })]);
+      const bare = plain("b", null, { stage: "Customer" });
+      expect(rankBuyers(supplies, [plainLine, bare], { asOf: AS_OF_LIVE, key }).ranked.map((row) => row.companyId)).toEqual(["b", "a"]);
+    });
+
     it("never lifts above today's tier on a broad inferred line", () => {
       const inferred = plain("b", [line({ kind: "inferred", productKey: "broad:toyota-nmc-packs" })]);
       const ranked = rankBuyers(supplies, [inferred], { asOf: AS_OF_LIVE, key }).ranked[0];
@@ -307,17 +322,24 @@ describe("buyer interest lines as evidence", () => {
       const rich = plain("r", [
         line({ kind: "bought", productKey: "part:SU001B5189", make: "Toyota", model: "Proace", kwhMin: 50, kwhMax: 50, lastSeen: "2026-06-16", quantity: 3, quantityUnit: "packs", price: 2950, priceCurrency: "GBP", priceUnit: "pack" }),
         line({ kind: "ask", productKey: "broad:toyota-nmc-packs", lastSeen: "2026-09-02" }),
-        line({ kind: "saved_search", productKey: "broad:nmc-packs", firstSeen: "2026-10-03", lastSeen: "2026-11-01" }),
-        line({ kind: "interest", productKey: "broad:nmc-packs", lastSeen: "2026-08-01" }),
+        line({ kind: "saved_search", productKey: "broad:toyota-nmc-packs", firstSeen: "2026-10-03", lastSeen: "2026-11-01" }),
+        line({ kind: "interest", productKey: "broad:toyota-nmc-packs", lastSeen: "2026-08-01" }),
+        line({ kind: "standing", productKey: "broad:nmc-packs", lastSeen: "2026-10-30" }),
       ]);
       const row = rankBuyers(supplies, [rich], { asOf: AS_OF_LIVE, key }).ranked[0];
       expect(row.fits).toBe("Bought: Toyota Proace, packs, 50 kWh, 16 Jun, 3 packs, GBP 2,950/pack. Also: Ask: packs, 2 Sep; Saved search: packs, active since 3 Oct");
     });
 
+    it("names no line when the only fit is a plain chemistry-and-format line the buy box already states", () => {
+      const plainLine = plain("p", [line({ kind: "saved_search", productKey: "broad:nmc-packs" })]);
+      const row = rankBuyers(supplies, [plainLine], { asOf: AS_OF_LIVE, key }).ranked[0];
+      expect(row.fits).toBe("Chemistry and format only: 50 kWh packs NMC");
+    });
+
     it("keeps today's wording first when a line is weaker than today's tier", () => {
-      const weak = plain("w", [line({ kind: "saved_search", productKey: "broad:nmc-packs" })], { profile: { chemistries: ["NMC"], formats: ["Packs"], makes: ["Toyota"] } });
+      const weak = plain("w", [line({ kind: "saved_search", productKey: "broad:toyota-nmc-packs" })], { profile: { chemistries: ["NMC"], formats: ["Packs"], models: ["Proace"] } });
       const row = rankBuyers(supplies, [weak], { asOf: AS_OF_LIVE, key }).ranked[0];
-      expect(row.fits).toMatch(/^Same make: .*\. Also: Saved search: /);
+      expect(row.fits).toMatch(/^Same model or platform: .*\. Also: Saved search: /);
     });
 
     it("adds a check when the buyer declined this product before", () => {
