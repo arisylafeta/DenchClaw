@@ -26,8 +26,8 @@ def load(name):
 
 def product(**over):
     base = {key: None for key in ("make", "model", "platform", "part_number", "format", "chemistry", "kwh_min", "kwh_max",
-                                  "cell_format", "quantity", "quantity_unit", "cadence", "price", "price_currency",
-                                  "price_unit", "quote")}
+                                  "cell_format", "quantity", "quantity_unit", "cadence", "price", "price_max",
+                                  "price_currency", "price_unit", "quote")}
     base["status"] = "asked"
     base.update(over)
     return base
@@ -49,6 +49,25 @@ class Validation(unittest.TestCase):
                                                quantity_unit="packs", cadence="monthly", price=45, price_currency="EUR",
                                                price_unit="kWh", quote="Nissan Leaf 40kWh packs"), text)
         self.assertEqual((kept["make"], kept["kwh_min"], kept["quantity_unit"], kept["price_currency"]), ("Nissan", 40.0, "packs", "EUR"))
+
+    def test_a_flexible_price_is_kept_beside_the_target_and_stays_a_target(self):
+        text = "Prismatic cells; target landing cost under $30/kWh with flexibility up to $50/kWh"
+        raw = product(format="cell", price=30, price_max=50, price_currency="USD", price_unit="kWh", quote="target landing cost under $30/kWh")
+        kept = self.p.validate_product(raw, text)
+        self.assertEqual((kept["price"], kept["price_max"], kept["price_currency"], kept["price_unit"]), (30.0, 50.0, "USD", "kWh"))
+        self.reject({**raw, "price_max": 75}, text, "ungrounded:price_max")
+
+    def test_a_flexible_figure_needs_a_lower_target_beside_it(self):
+        text = "cells at $30/kWh, up to $50/kWh"
+        base = dict(format="cell", price_currency="USD", price_unit="kWh", quote="cells at $30/kWh")
+        self.assertIsNone(self.p.validate_product(product(price=30, price_max=30, **base), text)["price_max"])
+        self.assertIsNone(self.p.validate_product(product(price=50, price_max=30, **base), text)["price_max"])
+        self.assertIsNone(self.p.validate_product(product(price=None, price_max=50, **base), text)["price_max"])
+
+    def test_an_answer_cached_before_price_max_existed_still_validates(self):
+        raw = product(make="Tesla", quote="Tesla packs")
+        del raw["price_max"]
+        self.assertIsNone(self.p.validate_product(raw, "Tesla packs")["price_max"])
 
     def test_shape_is_strict(self):
         text = "Tesla packs"
@@ -217,16 +236,55 @@ class Keys(unittest.TestCase):
     def keys(self, *levels):
         return [{"key": f"{level}:x", "level": level} for level in levels]
 
+    def chain(self, make, model, kwh=None):
+        """The keys the app's builder lists for a make and model, most specific first, in their real shapes."""
+        stem = f"{make.lower()}-{model.lower().replace(' ', '')}"
+        keys = ([{"key": f"pack:{stem}-{kwh}kwh", "level": "pack"}, {"key": f"model:{stem}-{kwh}kwh", "level": "model"}] if kwh else [])
+        return keys + [{"key": f"model:{stem}", "level": "model"}, {"key": f"broad:{make.lower()}-any-packs", "level": "broad"},
+                       {"key": "broad:any-packs", "level": "broad"}]
+
     def test_a_pack_family_needs_a_stated_capacity_or_a_part(self):
-        keys = self.keys("pack", "model", "broad", "broad")
-        self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Renault", "model": "Zoe"}})["level"], "broad")  # no kWh: no guess
-        self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Renault", "model": "Zoe", "kwhMin": 40, "kwhMax": 52}})["level"], "broad")
-        self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Renault", "model": "Zoe", "kwh": 52}})["level"], "pack")
+        keys = self.chain("Renault", "Zoe", 52)
+        pick = lambda facts: self.p.pick_key(keys, {"ts": facts})["key"]  # noqa: E731
+        self.assertEqual(pick({"make": "Renault", "model": "Zoe", "kwh": 52}), "pack:renault-zoe-52kwh")
+        # no kWh: no guess at a capacity or a pack family, but the model itself is stated
+        self.assertEqual(pick({"make": "Renault", "model": "Zoe"}), "model:renault-zoe")
         self.assertEqual(self.p.pick_key(self.keys("part", "broad"), {"ts": {"partNumbers": ["X"]}})["level"], "part")
-        # a module's 5.3 kWh is not a pack's capacity, and cells have no pack family
-        self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Tesla", "model": "Model S", "kwh": 5.3, "format": "module"}})["level"], "broad")
-        self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Nissan", "model": "Leaf", "format": "cell", "cellMaker": "Nissan"}})["level"], "broad")
+        # a module's 5.3 kWh is not a pack's capacity: the model-level key still is the model
+        self.assertEqual(pick({"make": "Tesla", "model": "Model S", "kwh": 5.3, "format": "module"}), "model:renault-zoe")
+        # cells have no pack family and no model-level key: their maker and model make the key
+        self.assertEqual(self.p.pick_key(self.keys("model", "broad"), {"ts": {"make": "Nissan", "model": "Leaf", "format": "cell", "cellMaker": "Nissan"}})["level"], "broad")
         self.assertEqual(self.p.pick_key(self.keys("cell", "broad"), {"ts": {"make": "Molicel", "model": "P42A", "format": "cell", "cellMaker": "Molicel"}})["level"], "cell")
+
+    def test_a_model_with_no_kwh_is_a_model_level_line_and_a_bare_make_is_not(self):
+        keys = [{"key": "model:kia-ev3", "level": "model"}, {"key": "broad:kia-any-packs", "level": "broad"}]
+        self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Kia", "model": "EV3"}})["key"], "model:kia-ev3")
+        self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Kia", "model": "EV3", "kwhMin": 60, "kwhMax": 80}})["key"], "model:kia-ev3")
+        self.assertEqual(self.p.pick_key(keys[1:], {"ts": {"make": "Kia"}})["key"], "broad:kia-any-packs")
+        # a kWh-keyed model is only taken when the text states one figure on a pack
+        sized = [{"key": "model:kia-ev3-58kwh", "level": "model"}, {"key": "broad:kia-any-packs", "level": "broad"}]
+        self.assertEqual(self.p.pick_key(sized, {"ts": {"make": "Kia", "model": "EV3", "kwh": 58, "format": "module"}})["level"], "broad")
+
+    def test_a_model_names_its_maker_only_when_the_model_belongs_to_one(self):
+        self.assertEqual(self.p.implied_make("Leaf"), "Nissan")
+        self.assertEqual(self.p.implied_make("Bolt EV"), "Chevrolet")
+        self.assertIsNone(self.p.implied_make("Bolt"))
+        sets = self.p.fact_sets(product(model="Leaf", format="pack", quote="x"))
+        self.assertEqual(sets[0]["ts"]["make"], "Nissan")
+        self.assertNotIn("make", self.p.fact_sets(product(model="Bolt", format="pack", quote="x"))[0]["ts"])
+
+    def test_a_note_that_only_guesses_a_role_or_buys_new_only_states_no_want(self):
+        n = self.p.not_a_want
+        self.assertEqual(n("Likely trader/competitor: sources and resells used Leaf packs; could be a supplier or buyer of modules."), "role_guess")
+        self.assertEqual(n("Summary: Likely trader/competitor: resells Leaf packs.\nNote: Estimated from web research; not confirmed by the buyer."), "role_guess")
+        self.assertEqual(n("Premium new cylindrical cells (Molicel P42A); little fit for used EV modules except possibly cell-level reuse."), "new_only")
+        self.assertEqual(n("Small cylindrical cells only; poor fit."), "new_only")
+        self.assertEqual(n("Surplus new cells or modules, including excess inventory."), "new_only")
+        self.assertEqual(n("Summary: Bid on CALB cells: brand-new cells stored since 2022."), "new_only")
+        # a real want with a side remark, and the research boilerplate, are still wants
+        self.assertIsNone(n("Salvaged/used NMC modules and packs from Volt, Leaf, i3 for resale. Could be a volume outlet for tested second-life modules."))
+        self.assertIsNone(n("Summary: Donor modules/packs for Tesla and Bolt HV battery service.\nNote: Estimated from web research; not confirmed by the buyer. Ask on first contact."))
+        self.assertIsNone(n("Used Tesla/Bolt/Leaf modules and packs; both trader and buyer."))
 
     def test_a_broad_line_must_add_something(self):
         line = {"level": "broad", "kwh_min": None, "kwh_max": None, "model": None, "raw_product": None}
@@ -486,11 +544,11 @@ class Database(unittest.TestCase):
 
     def test_researched_text_is_inferred_and_dated_from_the_profile_when_no_change_is_logged(self):
         company = self.companies[1]
-        self.wants(company, "Used Transit packs for storage projects.", "researched")
+        self.wants(company, "Used Transit packs of 60 kWh for storage projects.", "researched")
         self.parse({"Transit": [product(make="Ford", model="Transit", format="pack", quote="Transit packs")]})  # Ford is not in the text
         self.assertEqual(self.lines(company), [])
         self.dir = tempfile.TemporaryDirectory()  # the first answer is cached; ask again
-        self.parse({"Transit": [product(model="Transit", format="pack", quote="Transit packs")]}, run_id="r2")
+        self.parse({"Transit": [product(model="Transit", format="pack", kwh_min=60, kwh_max=60, quote="Transit packs of 60 kWh")]}, run_id="r2")
         line = self.lines(company)[0]
         self.assertEqual((line["kind"], str(line["first_seen"])), ("inferred", "2026-11-01"))
 
@@ -502,7 +560,7 @@ class Database(unittest.TestCase):
         self.parse({"Leaf": [product(make="Nissan", model="Leaf", kwh_min=40, kwh_max=40, quote="Nissan Leaf 40kWh")],
                     "Model 3": [product(make="Tesla", model="Model 3", format="module", quote="Tesla Model 3 modules")]})
         by_key = {line["product_key"]: line for line in self.lines(company)}
-        leaf, tesla = by_key["model:nissan-leaf-40kwh"], by_key["broad:tesla-any-modules"]
+        leaf, tesla = by_key["model:nissan-leaf-40kwh"], by_key["model:tesla-model3"]
         self.assertEqual((leaf["kind"], str(leaf["first_seen"]), leaf["source_refs"][0]), ("interest", "2026-09-23", f"crm:{stated}"))
         self.assertEqual((tesla["kind"], str(tesla["first_seen"])), ("inferred", "2026-10-01"))
         self.assertIn(f"crm:{research}", tesla["source_refs"])
@@ -641,14 +699,105 @@ class Database(unittest.TestCase):
         report, sources = self.parse({"Finland": [product(format="pack", chemistry="LFP", quote="LFP packs")]})
         self.assertEqual((self.lines(company), report["lines"]["broad_only_skipped"], report["lines"]["added_total"]), ([], 1, 0))
 
-    def test_a_model_without_a_capacity_stays_a_broad_line_that_keeps_the_model(self):
+    def test_a_model_without_a_capacity_is_a_model_level_line(self):
         if not self.p.ts_available():
             self.skipTest("needs apps/web/node_modules")
         company = self.companies[0]
         self.wants(company, "Donor modules for Renault Zoe repairs", "researched", change_on="2026-10-01")
         self.parse({"Zoe": [product(make="Renault", model="Zoe", format="module", quote="Renault Zoe")]}, builder="ts")
         line = self.lines(company)[0]
-        self.assertEqual((line["product_key"], line["model"]), ("broad:renault-any-modules", "Zoe"))
+        self.assertEqual((line["product_key"], line["product_key_level"], line["model"], line["kwh_min"]), ("model:renault-zoe", "model", "Zoe", None))
+
+    def test_a_model_with_no_kwh_is_a_model_level_line_in_both_builders(self):
+        for builder in ("sql", "ts"):
+            if builder == "ts" and not self.p.ts_available():
+                continue
+            company = self.companies[0]
+            self.wants(company, "Autocraft wants Kia EV3 modules", "stated", change_on="2026-10-01")
+            self.parse({"EV3": [product(make="Kia", model="EV3", format="module", quote="Kia EV3 modules")]}, builder=builder,
+                       run_id=f"m_{builder}")
+            [line] = self.lines(company)
+            self.assertEqual((line["product_key"], line["product_key_level"], line["format"], line["kwh_min"]), ("model:kia-ev3", "model", "module", None), builder)
+            self.setUp()
+
+    def test_a_target_price_keeps_a_flexible_figure_and_stays_a_target(self):
+        company = self.companies[3]
+        self.demand(company, "Procurement of 3 MWh of prismatic cells; target landing cost under $30/kWh with flexibility up to $50/kWh",
+                    spec={"formats": ["Cells"]})
+        self.parse({"landing": [product(format="cell", kwh_min=3000, kwh_max=3000, price=30, price_max=50, price_currency="USD",
+                                        price_unit="kWh", quote="target landing cost under $30/kWh with flexibility up to $50/kWh")]})
+        [line] = self.lines(company)
+        self.assertEqual((float(line["price"]), float(line["price_max"]), line["price_currency"], line["price_unit"], line["price_basis"]),
+                         (30.0, 50.0, "USD", "kWh", "target"))
+
+    def test_a_flexible_figure_from_a_later_source_joins_the_same_line(self):
+        company = self.companies[4]
+        first = self.demand(company, "Prismatic cells 3 MWh", spec={"formats": ["Cells"]}, observed_on="2026-05-28")
+        second = self.demand(company, "Prismatic cells 3 MWh, under $30/kWh, flexible up to $50/kWh", spec={"formats": ["Cells"]}, observed_on="2026-06-12")
+        self.parse({"Prismatic cells 3 MWh": [product(format="cell", kwh_min=3000, kwh_max=3000, quote="Prismatic cells 3 MWh")],
+                    "Prismatic cells 3 MWh, under": [product(format="cell", kwh_min=3000, kwh_max=3000, price=30, price_max=50, price_currency="USD",
+                                                             price_unit="kWh", quote="under $30/kWh, flexible up to $50/kWh")]})
+        [line] = [l for l in self.lines(company) if l["kwh_min"] is not None]
+        self.assertEqual((float(line["price"]), float(line["price_max"]), line["price_basis"]), (30.0, 50.0, "target"))
+        self.assertEqual((str(line["first_seen"]), str(line["last_seen"])), ("2026-05-28", "2026-06-12"))
+        self.assertTrue(first and second)
+
+    def test_a_flexible_figure_joins_a_line_in_either_order_and_never_sits_below_the_price(self):
+        priced = product(format="cell", kwh_min=3000, kwh_max=3000, price=30, price_max=50, price_currency="USD", price_unit="kWh", quantity=None)
+        plain = product(format="cell", kwh_min=3000, kwh_max=3000)
+        line = {"key": "broad:any-cells", "level": "broad", "make": None, "model": None, "format": "cell", "chemistry": None,
+                "kwh_min": 3000, "kwh_max": 3000, "raw_product": None}
+        for n, order in enumerate(((plain, priced), (priced, plain))):
+            company = self.companies[n]
+            for step, item in enumerate(order):
+                source = {"company_id": company, "ref": f"crm:order_{n}_{step}", "date": f"2026-06-0{step + 1}"}
+                with self.cur() as cur:
+                    self.p.write_line(cur, source, "interest", line, item, "r1")
+            self.conn.commit()
+            [row] = self.lines(company)
+            self.assertEqual((float(row["price"]), float(row["price_max"])), (30.0, 50.0), order)
+        # an existing price above the new flexible figure leaves the line alone rather than breaking the table check
+        company = self.companies[2]
+        high = product(format="cell", kwh_min=3000, kwh_max=3000, price=40, price_currency="USD", price_unit="kWh")
+        low = {**priced, "price": 20.0, "price_max": 35.0}
+        for step, item in enumerate((high, low)):
+            with self.cur() as cur:
+                self.p.write_line(cur, {"company_id": company, "ref": f"crm:cap_{step}", "date": f"2026-06-0{step + 1}"}, "interest", line, item, "r1")
+            self.conn.commit()
+        [row] = self.lines(company)
+        self.assertEqual((float(row["price"]), row["price_max"]), (40.0, None))
+
+    def test_a_named_maker_stays_and_a_bare_bolt_is_dropped_never_any_packs(self):
+        company = self.companies[5]
+        text = "Donor modules/packs for Tesla and Bolt HV battery service."
+        self.wants(company, text, "researched", change_on="2026-10-16")
+        report, sources = self.parse({"Tesla and Bolt": [
+            product(make="Tesla", format="module", quote="Donor modules/packs for Tesla"),
+            product(make="Tesla", format="pack", quote="Donor modules/packs for Tesla"),
+            product(model="Bolt", format="module", quote="Donor modules/packs for Tesla and Bolt"),
+            product(model="Bolt", format="pack", quote="Donor modules/packs for Tesla and Bolt")]})
+        self.assertEqual([l["product_key"] for l in self.lines(company)], [])  # Tesla lines are the buy box's own broad lines
+        keys = {line["key"] for source in sources for line in source.get("lines") or []}
+        self.assertEqual(keys, {"broad:tesla-any-modules", "broad:tesla-any-packs"})
+        self.assertEqual(report["lines"]["added_total"], 0)
+
+    def test_a_bolt_ev_with_its_maker_is_a_chevrolet_model_line(self):
+        company = self.companies[5]
+        self.wants(company, "Chevrolet Bolt EV modules for repairs", "researched", change_on="2026-10-16")
+        self.parse({"Bolt": [product(make="Chevrolet", model="Bolt EV", format="module", quote="Chevrolet Bolt EV modules")]})
+        [line] = self.lines(company)
+        self.assertEqual(line["product_key"], "model:chevrolet-boltev")
+
+    def test_a_note_that_guesses_a_role_or_buys_new_only_is_skipped_before_the_model(self):
+        calls = []
+        for n, text in enumerate(("Likely trader/competitor: sources and resells used Leaf packs; could be a supplier or buyer of modules.",
+                                  "Premium new cylindrical cells (Molicel P42A); little fit for used EV modules except possibly cell-level reuse.")):
+            self.wants(self.companies[n], text, "researched", change_on="2026-10-16")
+        report, sources = self.parse({"Leaf": [product(make="Nissan", model="Leaf", format="pack", quote="resells used Leaf packs")],
+                                      "Molicel": [product(make="Molicel", model="P42A", format="cell", quote="Molicel P42A")]}, calls=calls)
+        self.assertEqual(calls, [])
+        self.assertEqual(report["skipped"], {"wants:role_guess": 1, "wants:new_only": 1})
+        self.assertEqual([self.lines(c) for c in self.companies[:2]], [[], []])
 
     def test_a_source_error_rolls_back_only_that_source(self):
         good, bad = self.companies[0], self.companies[1]

@@ -13,6 +13,13 @@ returns JSON only. Every answer is validated against a strict schema AND checked
 platform, part number, kWh figure, quantity, price, chemistry or format that the text does not state is rejected
 with a reason, never repaired. kWh is never invented. Text the model cannot parse stays exactly as it is.
 
+A price is always a target, never a hard limit: it is stored with price_basis 'target', and a flexible upper figure the text
+states beside it (\"under $30/kWh, flexible up to $50\") is kept as price_max. Matching never filters on either.
+
+Notes that only guess what kind of company this is (\"could be a supplier or buyer\", \"likely trader/competitor\"), and notes
+that say the company buys new cells only or has little fit for used stock, write no line. A named maker stays its own
+product: \"Donor modules/packs for Tesla and Bolt\" is Tesla modules and Tesla packs, never any modules or any packs.
+
 Accepted products become mastered lines through the same fact builder the importers use: kind 'interest' for what
 the buyer stated, 'inferred' for research-sourced text; first_seen = last_seen = the source date; source_refs = the
 source row plus parse:<run id>. The product key comes from the TypeScript builder (pack families included) through
@@ -60,8 +67,10 @@ MAX_TEXT = 1500
 FACT_COMBINATIONS = 12
 
 PRODUCT_KEYS = ("make", "model", "platform", "part_number", "format", "chemistry", "kwh_min", "kwh_max",
-                "cell_format", "quantity", "quantity_unit", "cadence", "price", "price_currency", "price_unit",
+                "cell_format", "quantity", "quantity_unit", "cadence", "price", "price_max", "price_currency", "price_unit",
                 "status", "quote")
+# Keys an earlier model answer (still in the cache) may lack: they read as null.
+OPTIONAL_KEYS = ("price_max",)
 FORMATS = ("pack", "module", "cell", "system")
 CHEMISTRIES = ("LFP", "NMC", "NCA", "LTO", "NiMH", "LMO")
 CURRENCIES = ("EUR", "USD", "GBP")
@@ -69,7 +78,7 @@ PRICE_UNITS = ("kWh", "pack", "cell")
 CADENCES = ("one_off", "weekly", "monthly", "quarterly", "yearly", "ongoing")
 STATUSES = ("asked", "said_interested")
 STRING_KEYS = ("make", "model", "platform", "part_number", "cell_format", "quantity_unit", "quote")
-NUMBER_KEYS = ("kwh_min", "kwh_max", "quantity", "price")
+NUMBER_KEYS = ("kwh_min", "kwh_max", "quantity", "price", "price_max")
 
 SYSTEM_PROMPT = """You read short free-text notes about what a buyer of used EV and industrial batteries wants and list the
 specific products each note states. You have no tools. Reply with ONLY a JSON object, no prose:
@@ -90,8 +99,10 @@ Every product has EXACTLY these keys (null when the note does not say):
   quantity      one number; null for a range or an unclear amount
   quantity_unit packs, modules, cells, units, kWh, MWh, systems, containers, vehicles (as the note says)
   cadence       one of "one_off", "weekly", "monthly", "quarterly", "yearly", "ongoing"; only when the note says so
-  price, price_currency ("EUR", "USD" or "GBP"), price_unit ("kWh", "pack" or "cell")  only what the buyer offers or
-                targets, one number; null for a range
+  price, price_currency ("EUR", "USD" or "GBP"), price_unit ("kWh", "pack" or "cell")  the price the buyer offers or
+                targets, one number; null for a range. A price is only ever a target, never a hard limit.
+  price_max     a flexible upper figure the note states beside the target, in the same currency and unit: "under $30/kWh,
+                flexible up to $50" is price 30 and price_max 50. Null when the note gives no such figure.
   status        "asked" when the note states a want or request, "said_interested" when it says they are open to or
                 interested in it
   quote         the exact words of the note this product comes from, copied character for character (3 to 300 characters)
@@ -99,6 +110,12 @@ Rules: one product per distinct thing wanted; a note that says "Tesla packs and 
 Use only what the note states. Never guess a chemistry or a capacity. Write out shorthand: "Model S/X and 3/Y" is Model S,
 Model X, Model 3 and Model Y; "37501-GI300/GI301" is two part numbers, 37501-GI300 and 37501-GI301.
 Ignore what the buyer sells, offers, refuses or does not want. A date in the note is not a quantity or a kWh figure.
+Keep the maker the note names: "Donor modules/packs for Tesla and Bolt" is Tesla modules and Tesla packs; a named maker is
+never reduced to a product with no make (any modules, any packs). A model that no single maker owns (Bolt on its own) is
+listed only when the note names its maker (Chevrolet Bolt, Bolt EV: make Chevrolet); otherwise leave that model out.
+Return no products for a note that only guesses what kind of company this is ("could be a supplier or buyer", "likely
+trader/competitor") without stating what it wants, and for a note that says the company buys new or unused cells only or has
+little or low fit for used batteries or modules.
 An empty products list is a good answer."""
 
 # ---------------------------------------------------------------------------
@@ -164,7 +181,7 @@ def number_in(value, numbers):
 IMPLIED_MAKES = {"leaf": "Nissan", "zoe": "Renault", "twizy": "Renault", "kangoo": "Renault", "prius": "Toyota",
                  "mirai": "Toyota", "ioniq": "Hyundai", "kona": "Hyundai", "i3": "BMW", "i4": "BMW", "ix3": "BMW", "taycan": "Porsche",
                  "etron": "Audi", "e208": "Peugeot", "e2008": "Peugeot", "corsae": "Vauxhall", "mokkae": "Vauxhall",
-                 "modelx": "Tesla", "models": "Tesla", "model3": "Tesla", "modely": "Tesla", "ampera": "Opel", "i-miev": "Mitsubishi", "imiev": "Mitsubishi", "eniro": "Kia", "niro": "Kia", "ev6": "Kia",
+                 "modelx": "Tesla", "models": "Tesla", "model3": "Tesla", "modely": "Tesla", "boltev": "Chevrolet", "ampera": "Opel", "i-miev": "Mitsubishi", "imiev": "Mitsubishi", "eniro": "Kia", "niro": "Kia", "ev6": "Kia",
                  "id3": "Volkswagen", "id4": "Volkswagen", "egolf": "Volkswagen",
                  "enyaq": "Skoda", "fluence": "Renault", "i-pace": "Jaguar", "ipace": "Jaguar"}
 
@@ -173,6 +190,12 @@ def make_implied(make, model):
     """The make a reviewed model name implies, when it is the make given: Leaf is a Nissan."""
     key = fold(model)
     return bool(key) and any(fold(make) == fold(IMPLIED_MAKES[prefix]) for prefix in IMPLIED_MAKES if key.startswith(fold(prefix)))
+
+
+def implied_make(model):
+    """The one maker a reviewed model name belongs to (Leaf: Nissan), or None. Used when the note names a model and no maker."""
+    key = fold(model)
+    return next((IMPLIED_MAKES[prefix] for prefix in IMPLIED_MAKES if key and key.startswith(fold(prefix))), None)
 
 
 MAKE_ALIASES = {"vw": ("vw", "volkswagen", "volkwagen"), "volkswagen": ("vw", "volkswagen", "volkwagen"),
@@ -284,12 +307,12 @@ def clean_product(raw):
     extra = set(raw) - set(PRODUCT_KEYS)
     if extra:
         raise Rejected("unknown_field:" + ",".join(sorted(extra)))
-    missing = [key for key in PRODUCT_KEYS if key not in raw]
+    missing = [key for key in PRODUCT_KEYS if key not in raw and key not in OPTIONAL_KEYS]
     if missing:
         raise Rejected("missing_field:" + ",".join(missing))
     product = {}
     for key in PRODUCT_KEYS:
-        value = raw[key]
+        value = raw.get(key)
         if isinstance(value, str):
             value = value.strip() or None
         if value is None:
@@ -312,6 +335,8 @@ def clean_product(raw):
                          ("price_unit", PRICE_UNITS), ("cadence", CADENCES), ("status", STATUSES)):
         if product[key] is not None and product[key] not in allowed:
             raise Rejected(f"bad_value:{key}")
+    if product["price_max"] is not None and (product["price"] is None or product["price_max"] <= product["price"]):
+        product["price_max"] = None  # a flexible figure is only kept beside a lower target
     if product["status"] is None:
         product["status"] = "asked"  # the note did not say how firm; the line kind comes from the source, not from this
     if product["kwh_min"] is not None and product["kwh_max"] is not None and product["kwh_min"] > product["kwh_max"]:
@@ -366,8 +391,10 @@ def ground_product(product, text):
             raise Rejected("ungrounded:price_currency")
         if product["price_unit"] and not any_word(UNIT_WORDS[product["price_unit"]], text):
             raise Rejected("ungrounded:price_unit")
+        if product["price_max"] is not None and not number_in(product["price_max"], numbers):
+            raise Rejected("ungrounded:price_max")
     else:
-        product["price_currency"] = product["price_unit"] = None
+        product["price_currency"] = product["price_unit"] = product["price_max"] = None
     return product
 
 
@@ -376,7 +403,7 @@ def validate_product(raw, text):
 
 
 def product_signature(product):
-    return tuple(product[key] for key in PRODUCT_KEYS if key not in ("quote", "status"))
+    return tuple(product.get(key) for key in PRODUCT_KEYS if key not in ("quote", "status"))
 
 
 def validate_response(payload, batch):
@@ -683,6 +710,31 @@ def parsed_refs(cur, refs):
     return {row["ref"] for row in cur.fetchall()}
 
 
+# A note that only guesses what kind of company this is, or that says the company buys new cells only or has little fit
+# for used stock, states no want we can use. These are the plain phrasings; the prompt asks the model for the same.
+ROLE_GUESS_LEAD = re.compile(r"^\W*(?:summary:\s*)?(?:likely|probably|possibly|perhaps|may be|might be|could be)\b[^.;:\n]{0,40}"
+                             r"\b(?:trader|competitor|supplier|reseller|broker|dealer|distributor|buyer)\b", re.I)
+ROLE_GUESS_ONLY = re.compile(r"\b(?:could|may|might) be (?:a |an )?(?:supplier|buyer|trader|competitor|reseller)(?: or (?:a |an )?(?:supplier|buyer|trader|competitor|reseller))\b"
+                             r"|\b(?:supplier|buyer) or (?:supplier|buyer)\b", re.I)
+NEW_ONLY = re.compile(r"\b(?:little|low|no|poor|limited)\s+fit\b|\bnot (?:a )?(?:good )?fit\b"
+                      r"|\bnew (?:cylindrical |prismatic |pouch )?(?:cells|batteries|modules|stock)\b[^.;\n]{0,60}\bonly\b"
+                      r"|\bonly (?:new|unused|brand[- ]new)\b|\b(?:premium|brand[- ]new|surplus new) (?:cylindrical |prismatic |pouch )?cells\b", re.I)
+
+
+def not_a_want(text):
+    """'role_guess' or 'new_only' when the text states no want worth a line, else None.
+
+    The role guess has to lead the note (\"Likely trader/competitor: ...\") or be all it says; a real want followed by a
+    side remark (\"... Could be a volume outlet for tested modules\") is still a want.
+    """
+    body = "\n".join(line for line in str(text or "").splitlines() if not re.match(r"\s*(?:note|demand audit|restored|quote)\b", line, re.I))
+    if ROLE_GUESS_LEAD.search(body):
+        return "role_guess"
+    if NEW_ONLY.search(body):
+        return "new_only"
+    return None
+
+
 def select_for_model(cur, sources):
     """Marks each source's skip reason; the rest are the ones to send."""
     done = parsed_refs(cur, [s["ref"] for s in sources])
@@ -695,6 +747,8 @@ def select_for_model(cur, sources):
             source["skip"] = "no_date"
         elif source["ref"] in done:
             source["skip"] = "already_parsed"
+        elif not_a_want(source["text"]):
+            source["skip"] = not_a_want(source["text"])
         elif not needs_parse(source["text"], source["spec"]):
             source["skip"] = "no_new_product_words"
     return [s for s in sources if not s["skip"]]
@@ -738,7 +792,8 @@ def split_makes(make):
 def fact_sets(product):
     """One fact dict per stated make (a product may name several), in the SQL builder's and the TS builder's names."""
     out = []
-    for make in split_makes(product["make"])[:FACT_COMBINATIONS]:
+    makes = split_makes(product["make"]) if product["make"] else [implied_make(product["model"])]
+    for make in makes[:FACT_COMBINATIONS]:
         kwh = product["kwh_min"] if product["kwh_min"] is not None and product["kwh_min"] == product["kwh_max"] else None
         model = product["model"] or product["platform"]
         sql = {"make": make, "model": model, "format": product["format"], "chemistry": product["chemistry"],
@@ -802,7 +857,11 @@ def pick_key(keys, fact):
         allowed |= {"pack", "model"}
     if ts.get("cellMaker") and ts.get("model"):
         allowed.add("cell")
-    return next((k for k in keys if k["level"] in allowed), keys[-1])
+    # A stated make and model with no kWh is the model-level key (model:kia-ev3, every pack size of the model). It
+    # states no capacity, so it is proven by the text whatever the format.
+    wide = bool(ts.get("make") and ts.get("model") and not ts.get("cellMaker"))
+    return next((k for k in keys if k["level"] in allowed or (wide and k["level"] == "model" and not k["key"].endswith("kwh"))),
+                keys[-1])
 
 
 def key_lines(cur, product, builder="sql", ts_table=None):
@@ -817,6 +876,9 @@ def key_lines(cur, product, builder="sql", ts_table=None):
         key, level = (ts["key"], ts["level"]) if ts else (keyed["key"], keyed["level"])
         if key == "broad:any-batteries":
             continue  # nothing that names a product
+        if (level == "broad" and keyed["model"] and not keyed["make"] and keyed["kwh_min"] is None and keyed["kwh_max"] is None
+                and not fact["ts"].get("partNumbers") and not product["platform"]):
+            continue  # a bare model no maker owns (\"Bolt\"): not a product, and never an any-pack line
         raw = keyed["raw_product"] or (f"platform {fact['platform_unused']}" if fact["platform_unused"] else None)
         lines.append({"key": key, "level": level, "make": keyed["make"], "model": keyed["model"], "format": keyed["format"],
                       "chemistry": keyed["chemistry"], "kwh_min": keyed["kwh_min"], "kwh_max": keyed["kwh_max"], "raw_product": raw})
@@ -852,16 +914,16 @@ def write_line(cur, source, kind, line, product, run_id):
     if existing is None:
         cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key, product_key_level, make, model,
                          raw_product, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit,
-                         quantity_basis, price, price_currency, price_unit, price_basis, source_refs, expires_on)
+                         quantity_basis, price, price_currency, price_unit, price_basis, price_max, source_refs, expires_on)
                        values (%s, %s, %s, 'mastered', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s::date, %s, %s, %s,
-                         %s, %s, %s, %s, %s::text[], %s::date + %s)""",
+                         %s, %s, %s, %s, %s, %s::text[], %s::date + %s)""",
                     (line_id(source["company_id"], kind, line["key"]), source["company_id"], kind, line["key"], line["level"],
                      line["make"], line["model"], line["raw_product"], line["format"], line["chemistry"], line["kwh_min"],
                      line["kwh_max"], seen, seen, quantity, product["quantity_unit"] if quantity is not None else None,
                      "stated" if quantity is not None else "not_stated", price,
                      product["price_currency"] if price is not None else None,
                      product["price_unit"] if price is not None else None, "target" if price is not None else None,
-                     refs, seen, EXPIRY_DAYS[kind]))
+                     product["price_max"] if price is not None else None, refs, seen, EXPIRY_DAYS[kind]))
         return "added"
     own = any(ref.startswith("parse:") for ref in existing["source_refs"] or [])
     if not own:
@@ -874,13 +936,14 @@ def write_line(cur, source, kind, line, product, run_id):
                      quantity_basis = case when quantity is null and %s::numeric is not null then 'stated' else quantity_basis end,
                      price = coalesce(price, %s), price_currency = coalesce(price_currency, %s),
                      price_unit = coalesce(price_unit, %s), price_basis = coalesce(price_basis, %s),
+                     price_max = coalesce(price_max, case when %s::numeric > coalesce(price, %s::numeric) then %s::numeric end),
                      source_refs = (select array_agg(distinct r order by r) from unnest(source_refs || %s::text[]) r),
                      updated_at = now()
                    where id = %s""",
                 (seen, seen, seen, EXPIRY_DAYS[kind], quantity, product["quantity_unit"] if quantity is not None else None,
                  quantity, price, product["price_currency"] if price is not None else None,
                  product["price_unit"] if price is not None else None, "target" if price is not None else None,
-                 refs, existing["id"]))
+                 product["price_max"], price, product["price_max"], refs, existing["id"]))
     return "merged"
 
 
@@ -1016,7 +1079,8 @@ def describe_line(line):
     if product["quantity"] is not None:
         bits.append(f"qty {fmt_num(product['quantity'])} {product['quantity_unit'] or ''}".strip())
     if product["price"] is not None:
-        bits.append(f"price {fmt_num(product['price'])} {product['price_currency'] or ''}/{product['price_unit'] or '?'}")
+        bits.append(f"target {fmt_num(product['price'])} {product['price_currency'] or ''}/{product['price_unit'] or '?'}"
+                    + (f", flexible to {fmt_num(product['price_max'])}" if product.get("price_max") is not None else ""))
     if product["cadence"]:
         bits.append(f"cadence {product['cadence']}")
     bits.append(product["status"])
