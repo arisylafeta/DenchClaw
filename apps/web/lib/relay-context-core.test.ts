@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
+import { callBefore,
   buildPack, callFromNote, callsText, callsWith, chatText, contactSince, crmText, day, dealsText, earlierEmails, filesText, knownBackground, marketText, NO_PACK, othersOnThread, ownText,
   sentBy, sinceFrom, sound, stripQuoted, type PackCall, type PackChat, type PackInput, type PackMarket, type PackMessage,
 } from "./relay-context-core";
@@ -497,5 +497,20 @@ describe("buildPack", () => {
     const pack = buildPack({ ...empty, withPerson: [mail("p1")], others: ["ops@haulier.co.uk"] });
     expect(pack.block).toContain("This thread also has ops@haulier.co.uk on it, outside their company");
     expect(buildPack({ ...empty, withPerson: [mail("p1")] }).block).not.toContain("This thread also has");
+  });
+});
+
+describe("callBefore", () => {
+  const call = (id: string, at: string, people: string[]) => ({ id, title: id, at, people, summary: "", unheard: [] });
+  const calls = [call("old", "2026-08-01T10:00:00Z", ["alex@rebattery.io", "hidde@modual.ch"]),
+    call("same-day", "2026-09-29T14:00:00Z", ["alex@rebattery.io", "hidde@modual.ch"]),
+    call("colleague", "2026-09-20T09:00:00Z", ["alex@rebattery.io", "eva@modual.ch"])];
+  it("finds the call with them in the 30 days before the email, the person before the company", () => {
+    expect(callBefore(calls, "hidde@modual.ch", "modual.ch", "2026-09-29T15:00:00Z")?.id).toBe("same-day");
+    expect(callBefore(calls, "anna@modual.ch", "modual.ch", "2026-09-29T15:00:00Z")?.id).toBe("same-day");
+  });
+  it("finds nothing outside the window or with no company match", () => {
+    expect(callBefore(calls, "hidde@modual.ch", "modual.ch", "2026-12-01T10:00:00Z")).toBeNull();
+    expect(callBefore(calls, "bob@gmail.com", null, "2026-09-29T15:00:00Z")).toBeNull();
   });
 });

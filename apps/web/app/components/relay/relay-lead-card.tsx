@@ -164,7 +164,7 @@ export function LeadCard({ card, answers, state, onState, onSend, onEdit, onSkip
       <div className={c.head}>
         <div className={c.tagrow}>
           <span className={cx(c.tag, data.side === "buyer" && c.buyer)}>New {data.side} lead{data.deal ? " · deal linked" : ""}</span>
-          <span className={c.from}>{who.name}{who.company && who.company !== who.name ? `, ${who.company}` : ""} · {arrived(who.at)}</span>
+          <span className={c.from}>{who.name}{who.company && who.company !== who.name ? `, ${who.company}` : ""} · {arrived(who.at)}{who.call ? ` · after your call on ${new Date(who.call.at).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : ""}</span>
         </div>
         <h1 className={c.h1}>{card.headline}</h1>
         <div className={c.rows}>

@@ -304,6 +304,15 @@ export function callsWith(calls: PackCall[], counterpart: string, domain: string
   };
 }
 
+/** The newest call with them (or, failing that, their company) in the days before an email: Alex, 15 Nov, an email
+ * that follows a call is a new lead marked "after your call" when no deal exists yet. */
+export function callBefore(calls: PackCall[], counterpart: string, domain: string | null, at: string, days = 30): PackCall | null {
+  const end = moment(at).getTime() + 12 * 3_600_000, start = moment(at).getTime() - days * 86_400_000;
+  const near = (c: PackCall) => { const t = moment(c.at).getTime(); return t >= start && t <= end; };
+  const { person, company } = callsWith(calls, counterpart, domain);
+  return person.find(near) ?? company.find(near) ?? null;
+}
+
 /** The newest calls' notes on lines starting with "| " (a note-taker's text, never a heading or an instruction), then
  * the dates of a few older ones. A figure the transcript does not hold is named as not to be stated. */
 export function callsText(calls: PackCall[], chars = CALL_CHARS): string {

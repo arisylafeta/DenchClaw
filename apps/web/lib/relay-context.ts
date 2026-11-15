@@ -8,7 +8,7 @@ import { visibleBody } from "./crm-postgres/whatsapp";
 import { getSupabaseAdminClient } from "./platform-admin/supabase";
 import { queryPg } from "./postgres";
 import { isPersonalDomain } from "./relay-identity";
-import { buildPack, callFromNote, callsWith, day, NO_PACK, othersOnThread, sentBy, type Pack, type PackCall, type PackChat, type PackDeal, type PackDismantler, type PackFile, type PackMarket, type PackMessage, type PackNote, type PackParties, type PackPerson } from "./relay-context-core";
+import { buildPack, callBefore, callFromNote, callsWith, day, NO_PACK, othersOnThread, sentBy, type Pack, type PackCall, type PackChat, type PackDeal, type PackDismantler, type PackFile, type PackMarket, type PackMessage, type PackNote, type PackParties, type PackPerson } from "./relay-context-core";
 
 const run = promisify(execFile);
 const ATTACHMENT_READER = process.env.RELAY_ATTACHMENT_READER || "/root/denchclaw/scripts-live/scripts/rebattery/relay_attachments.py";
@@ -143,6 +143,13 @@ async function marketplace(counterpart: string): Promise<PackMarket | null> {
  * Everything Relay looks up for a draft beyond the thread and the linked deal. Read-only, and it never fails a draft:
  * a part that cannot be read is left out. messages are the thread's shown messages, newest first.
  */
+/** The call with this sender, or their company, in the 30 days before an email (see callBefore). */
+export async function recentCallWith(email: string, at: string): Promise<PackCall | null> {
+  const sender = email.toLowerCase().trim();
+  const domain = sender.split("@")[1] ?? "";
+  return callBefore(await granolaCalls(), sender, domain && !isPersonalDomain(domain) ? domain : null, at);
+}
+
 export async function contextPack(counterpartEmail: string | null, messages: PackThreadMessage[], linkedDealId: string | null): Promise<Pack> {
   try {
     const counterpart = (counterpartEmail ?? "").toLowerCase().trim();

@@ -686,3 +686,48 @@ def test_tagged_deal_needs_the_words_to_pick_one_of_several_and_skips_closed():
     assert rs.tagged_deal({"a", "b"}, listings, "hello there") is None
     assert rs.tagged_deal({"c"}, listings, "Kona packs") is None
     assert rs.tagged_deal({"missing"}, listings, "x") is None
+
+
+# ---------- model check for emails triage was unsure about ----------
+
+def _row(mid, tab, reason, direction="inbound", priority="medium"):
+    return {"newest_message_id": mid, "tab": tab, "reason": reason, "priority": priority, "counterpart_email": "x@y.example",
+            "subject": "Hello", "last_message": {"direction": direction, "text": "We will send it this afternoon."}}
+
+
+def test_unsure_rows_are_only_keyword_decisions_on_their_email():
+    rows = [_row("a", "action", "inbound from a known contact"), _row("b", "action", "triage: 1 Action"),
+            _row("c", "other", "unsolicited or FYI"), _row("d", "action", "reply to our email", direction="outbound"),
+            _row("e", "follow", "needs no reply"), {**_row("f", None, "needs no reply")}]
+    assert [r["newest_message_id"] for r in rs.unsure_rows(rows)] == ["a", "c"]
+
+
+def test_parse_reply_checks_keeps_known_keys_with_a_yes_or_no():
+    text = 'ok [{"key": "a", "reply": false, "why": "status update"}, {"key": "z", "reply": true}, {"key": "c", "reply": "maybe"}]'
+    assert rs.parse_reply_checks(text, {"a", "c"}) == {"a": {"reply": False, "why": "status update"}}
+
+
+def test_check_unsure_asks_once_applies_and_keeps_the_answer(tmp_path):
+    path = tmp_path / "checks.json"
+    asked = []
+
+    def model(prompt):
+        asked.append(prompt)
+        return '[{"key": "a", "reply": false, "why": "status update"}, {"key": "c", "reply": true, "why": "offers 500 kWh of modules"}]'
+
+    rows = [_row("a", "action", "inbound from a known contact"), _row("c", "other", "unsolicited or FYI", priority="low")]
+    calls, errors = rs.check_unsure(rows, model, NOW, save=True, path=path)
+    assert (calls, errors) == (1, [])
+    assert [(r["tab"], r["priority"]) for r in rows] == [("other", "low"), ("action", "medium")]
+    assert rows[1]["reason"] == "model check: offers 500 kWh of modules"
+    again = [_row("a", "action", "inbound from a known contact")]
+    assert rs.check_unsure(again, model, NOW, save=False, path=path) == (0, [])
+    assert again[0]["tab"] == "other" and len(asked) == 1
+
+
+def test_check_unsure_keeps_the_keyword_tab_when_the_model_fails(tmp_path):
+    def broken(prompt):
+        raise RuntimeError("down")
+    rows = [_row("a", "action", "inbound from a known contact")]
+    calls, errors = rs.check_unsure(rows, broken, NOW, save=True, path=tmp_path / "c.json")
+    assert calls == 0 and errors and rows[0]["tab"] == "action"

@@ -2,7 +2,7 @@ import "server-only";
 import { queryPg, withPgTransaction } from "./postgres";
 import { activeGuide, activeRules, askAgent, cancelScheduledSend, createMailDraft, dealChecklistFor, dismantlersOf, parseJson, queueSend, readRelayItem, RelayError, SKIP_DRAFTS_SQL, type RelayItem } from "./relay";
 import { voiceGuideBlock } from "./relay-voice";
-import { HAS_FILES_SQL, threadFiles } from "./relay-context";
+import { HAS_FILES_SQL, recentCallWith, threadFiles } from "./relay-context";
 import { ownText } from "./relay-context-core";
 import { isPersonalDomain, replyIdentity, type ReplyIdentity } from "./relay-identity";
 import { readMailDraft } from "./crm-postgres/mail";
@@ -20,7 +20,8 @@ import { assembleLead, BULK_MIN_EUR, BULK_MIN_KWH, checkLeadReply, cleanAnswer, 
  * ("Add & polish") does the model word one of those answers, from the gist he typed (`polishLeadAnswer`).
  */
 
-export type LeadWho = { name: string; company: string | null; email: string; at: string };
+/** call: the call this email follows, when it got its card for that reason (Alex, 15 Nov). */
+export type LeadWho = { name: string; company: string | null; email: string; at: string; call?: { at: string; title: string | null } | null };
 type Stored = { lead: LeadData; who: LeadWho; identity: ReplyIdentity };
 export type LeadCardView = {
   id: string; item_id: string; status: "preparing" | "ready" | "failed"; error: string | null; headline: string;
@@ -155,7 +156,7 @@ Return only a JSON object:
  "other_questions": [{"quote": "..."}]}
 
 kind: seller_lead when the sender offers batteries for sale or wants them taken away; buyer_lead when the sender wants to buy batteries; other for anything else (someone selling us a service, a newsletter, an order already under way, a job application, a reply to something we sent, or an email too unclear to tell).
-lot: bulk for a trade lot of ${BULK_MIN_KWH} kWh or more in total, or worth €${BULK_MIN_EUR.toLocaleString("en-GB")} or more when a price is given, or a company with ongoing volume; small for anything under that (one battery or system, a few units, a lot under ${BULK_MIN_KWH} kWh) and for small-format batteries whatever the quantity (12 V auxiliary or starter batteries, e-bike, scooter, power-tool or consumer packs); unclear when the email gives no size or price.
+lot: bulk for a trade lot of ${BULK_MIN_KWH} kWh or more in total, or worth €${BULK_MIN_EUR.toLocaleString("en-GB")} or more when a price is given, or a company with ongoing volume; small for anything under that (one battery or system, a few units, a buyer asking about one battery or one marketplace listing, a lot under ${BULK_MIN_KWH} kWh) and for small-format batteries whatever the quantity (12 V auxiliary or starter batteries, e-bike, scooter, power-tool or consumer packs); unclear when the email gives no size or price.
 size_kwh: the total kWh of the whole lot or order. Work it out when the email gives the count and the size of one unit (120 modules of 6.6 kWh is 792) or the count, volts and amp-hours (72 cells of 2 V and 2,527 Ah is 364). Never the size of one unit alone: null when the count is not given.
 value_eur: the total price of the whole lot in euros when the email gives one (a pound is about 1.15 euros, a dollar about 0.85); null otherwise.
 role (sellers only): owner when the sender says the stock is theirs or their company's; broker when they say they act for the owner or a client; unknown otherwise.
@@ -195,7 +196,7 @@ export async function readLead(input: { from: string; subject: string; text: str
 type Built = { status: "ready"; stored: Stored } | { status: "not_lead"; why: string };
 
 /** Reads the newest inbound email of a thread into a card. Reads only: nothing is stored and nothing is sent. */
-export async function buildLead(item: Pick<RelayItem, "id" | "contact_type" | "counterpart_name" | "company" | "headline" | "bulk_listing_id">, messages: ThreadRow[], ownerId: string): Promise<Built> {
+export async function buildLead(item: Pick<RelayItem, "id" | "contact_type" | "counterpart_name" | "company" | "headline" | "bulk_listing_id">, messages: ThreadRow[], ownerId: string, call: LeadWho["call"] = null): Promise<Built> {
   const inbound = messages.filter((m) => m.direction === "inbound");
   const newest = inbound[0];
   const sender = (newest?.from_email ?? "").toLowerCase().trim();
@@ -222,7 +223,7 @@ export async function buildLead(item: Pick<RelayItem, "id" | "contact_type" | "c
     sent: !files.length ? null : files.every((a) => IMAGE.test(a.mediaType ?? "")) ? "photos" : "files", deal: !!item.bulk_listing_id,
     email: { subject: newest.subject ?? "", text: text.slice(0, 8000), at: newest.at_iso, files: files.map((a) => a.filename ?? "") },
   };
-  const who: LeadWho = { name: fromName || sender, company: company ?? item.company, email: sender, at: newest.at_iso };
+  const who: LeadWho = { name: fromName || sender, company: company ?? item.company, email: sender, at: newest.at_iso, call };
   return { status: "ready", stored: { lead, who, identity: replyIdentity(messages, item.contact_type) } };
 }
 
@@ -248,10 +249,12 @@ async function prepare(cardId: string, ownerId: string): Promise<void> {
         where m.direction = 'outbound' and m.state in ('accepted', 'received') and m.campaign_id is null and coalesce(m.purpose, '') <> 'marketing'
           and (regexp_replace(lower(a), '^.*<|>.*$', '', 'g') = $1 or ($2 <> '' and split_part(regexp_replace(lower(a), '^.*<|>.*$', '', 'g'), '@', 2) = $2)) limit 1`,
       [sender, isPersonalDomain(domain) ? "" : domain]);
-    if (known) return await settle("not_lead", null, "You have written to them before.");
+    // Someone we have written to gets a card only when this email follows a call with them and no deal exists yet.
+    const call = known && !item.bulk_listing_id ? await recentCallWith(sender, newest.at_iso).catch(() => null) : null;
+    if (known && !call) return await settle("not_lead", null, "You have written to them before.");
     if (item.contact_type === "supplier" && (await dismantlersOf([sender])).size) return await settle("not_lead", null, "A dismantler: their packs go through the dismantler channel.");
 
-    const built = await buildLead(item, messages, ownerId);
+    const built = await buildLead(item, messages, ownerId, call ? { at: call.at, title: call.title } : null);
     await (built.status === "ready" ? settle("ready", built.stored, null) : settle("not_lead", null, built.why));
   } catch (error) {
     if (!(error instanceof RelayError)) console.error("relay lead card", error);
