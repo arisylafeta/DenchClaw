@@ -504,7 +504,13 @@ def user_message(batch):
 
 
 class ModelRunner:
-    """Sends batches, caches the raw reply of each, and counts what it did."""
+    """Sends batches of texts, caches what the model said, and counts what it did.
+
+    Two caches sit under cache_dir: the raw reply of each batch (kept as the record of what the model returned) and, per
+    text, the raw products the model gave for it. A re-run forms its batches from the texts nobody has answered yet, so
+    it asks the model nothing it has already been asked. Answers are validated again on every read, never trusted
+    from the cache.
+    """
 
     def __init__(self, cache_dir, caller=None, key=None, cache_only=False, retries=2):
         self.cache_dir = Path(cache_dir)
@@ -517,28 +523,36 @@ class ModelRunner:
         self.failures = []
         self._lock = threading.Lock()
 
-    def _path(self, user):
-        digest = hashlib.sha256((SYSTEM_PROMPT + "\n\x00\n" + user).encode("utf-8")).hexdigest()
-        return self.cache_dir / f"{digest}.json"
+    @staticmethod
+    def _digest(*parts):
+        return hashlib.sha256("\n\x00\n".join(parts).encode("utf-8")).hexdigest()
 
-    def run(self, batch):
-        """Returns validate_response()'s map for the batch, or None with the reason in self.failures."""
+    def _batch_path(self, user):
+        return self.cache_dir / f"{self._digest(SYSTEM_PROMPT, user)}.json"
+
+    def _text_path(self, text):
+        return self.cache_dir / f"text-{self._digest(SYSTEM_PROMPT, text)}.json"
+
+    def _store_texts(self, batch, payload):
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        for item in payload.get("results") or []:
+            if isinstance(item, dict) and item.get("id") in batch and isinstance(item.get("products"), list):
+                self._text_path(batch[item["id"]]).write_text(json.dumps(
+                    {"text": batch[item["id"]], "products": item["products"]}, ensure_ascii=False))
+
+    def _answer(self, batch):
+        """The validated answer for these texts from the model (or the batch cache). Raises ValueError on failure."""
         user = user_message(batch)
-        path = self._path(user)
-        raw = None
-        if path.exists():
-            raw = json.loads(path.read_text())["reply"]
+        path = self._batch_path(user)
+        last = None
+        raw = json.loads(path.read_text())["reply"] if path.exists() else None
+        if raw is not None:
             with self._lock:
                 self.cache_hits += 1
-        elif self.cache_only:
-            with self._lock:
-                self.failures.append(("not_cached", list(batch)))
-            return None
-        last = None
         for attempt in range(self.retries + 1):
             if raw is None:
                 if self.cache_only:
-                    break
+                    raise ValueError("not_cached")
                 try:
                     with self._lock:
                         self.calls += 1
@@ -548,7 +562,8 @@ class ModelRunner:
                     time.sleep(min(2 ** attempt, 8))
                     continue
             try:
-                result = validate_response(json_object(raw), batch)
+                payload = json_object(raw)
+                validate_response(payload, batch)
             except (ValueError, json.JSONDecodeError) as exc:
                 last, raw = f"bad_answer:{exc}", None
                 if path.exists():
@@ -558,10 +573,37 @@ class ModelRunner:
             if not path.exists():
                 path.write_text(json.dumps({"at": dt.datetime.now(dt.timezone.utc).isoformat(), "ids": list(batch),
                                             "reply": raw}, ensure_ascii=False))
-            return result
-        with self._lock:
-            self.failures.append((last or "unknown", list(batch)))
-        return None
+            self._store_texts(batch, payload)
+            return payload
+        raise ValueError(last or "unknown")
+
+    def run(self, batch):
+        """({local id: validate_response entry or None}, failure reason or None) for one batch of {local id: text}."""
+        out, missing = {}, {}
+        for local, text in batch.items():
+            path = self._text_path(text)
+            if path.exists():
+                products = json.loads(path.read_text())["products"]
+                out[local] = validate_response({"results": [{"id": local, "products": products}]}, {local: text})[local]
+                with self._lock:
+                    self.cache_hits += 1
+            else:
+                missing[local] = text
+        if not missing:
+            return out, None
+        # The whole batch may be in the batch cache from an earlier run (it is the same request).
+        asked = batch if self._batch_path(user_message(batch)).exists() else missing
+        try:
+            payload = self._answer(asked)
+        except ValueError as exc:
+            reason = str(exc)
+            with self._lock:
+                self.failures.append((reason, list(missing)))
+            return {**out, **{local: None for local in missing}}, reason
+        answered = validate_response(payload, asked)
+        for local in missing:
+            out[local] = answered[local]
+        return out, None
 
 
 # ---------------------------------------------------------------------------
@@ -664,22 +706,30 @@ def run_model(sources, runner, per_call=TEXTS_PER_CALL, workers=3):
 
     def one(batch):
         local = {f"n{i + 1}": s["text"] for i, s in enumerate(batch)}
-        result = runner.run(local)
-        return batch, local, result
+        result, reason = runner.run(local)
+        return batch, result, reason
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        for batch, local, result in pool.map(one, batches):
+        for batch, result, reason in pool.map(one, batches):
             for i, source in enumerate(batch):
-                if result is None:
-                    reason = next((r for r, ids in runner.failures if set(ids) == set(local)), "model_failed")
-                    source["failure"] = reason
+                answer = result.get(f"n{i + 1}")
+                if answer is None:
+                    source["failure"] = reason or "model_failed"
                 else:
-                    source["result"] = result[f"n{i + 1}"]
+                    source["result"] = answer
 
 
 # ---------------------------------------------------------------------------
 # Facts and keys
 # ---------------------------------------------------------------------------
+# Makers of cells, so a vehicle make written beside a cell format ("Nissan Leaf cells") is never read as a cell maker.
+CELL_MAKERS = {fold(name) for name in (
+    "Samsung SDI", "Samsung", "LG Chem", "LG Energy Solution", "LG", "Panasonic", "Sanyo", "Molicel", "Murata", "Sony", "EVE",
+    "EVE Energy", "CATL", "CALB", "BYD", "A123", "SK On", "SK Innovation", "Toshiba", "Lishen", "Gotion", "REPT", "Tenpower",
+    "Sunwoda", "Farasis", "AESC", "Envision AESC", "Kokam", "Saft", "BAK", "Maxell", "Varta", "Headway", "Winston", "Hithium",
+    "Great Power", "Ganfeng", "SVOLT", "Cosmx", "Li-Fun", "Lithium Werks", "Primearth", "Prime Planet", "Lithium Energy Japan")}
+
+
 def split_makes(make):
     pieces = [p.strip() for p in re.split(r"\s*(?:,|/|&|\band\b)\s*", str(make or ""), flags=re.I) if p.strip()]
     return list(dict.fromkeys(pieces)) or [None]
@@ -694,7 +744,7 @@ def fact_sets(product):
         sql = {"make": make, "model": model, "format": product["format"], "chemistry": product["chemistry"],
                "kwh": kwh, "kwh_min": product["kwh_min"], "kwh_max": product["kwh_max"],
                "part_numbers": [product["part_number"]] if product["part_number"] else None,
-               "cell_maker": make if product["format"] == "cell" and model else None}
+               "cell_maker": make if product["format"] == "cell" and model and fold(make) in CELL_MAKERS else None}
         ts = {"make": make, "model": model, "format": product["format"], "chemistry": product["chemistry"], "kwh": kwh,
               "kwhMin": product["kwh_min"], "kwhMax": product["kwh_max"],
               "partNumbers": [product["part_number"]] if product["part_number"] else None,
@@ -1048,8 +1098,11 @@ def preview(conn, report, sources, source_note="", before_after=15, seed=7):
         for line in source["lines"]:
             if line["outcome"] == "added":
                 by_company.setdefault(source["company_id"], []).append((source, line))
-    pool = sorted(c for c in by_company if any(line["level"] != "broad" for _s, line in by_company[c]))
-    chosen = random.Random(seed).sample(pool, min(before_after, len(pool)))
+    specific = sorted(c for c in by_company if any(line["level"] != "broad" for _s, line in by_company[c]))
+    others = sorted(set(by_company) - set(specific))
+    rng = random.Random(seed)
+    chosen = rng.sample(specific, min(before_after, len(specific)))
+    chosen += rng.sample(others, min(before_after - len(chosen), len(others)))  # fill up with broad lines that carry a model or a range
     out += [f"## {len(chosen)} before and after", ""]
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         for company in chosen:
@@ -1059,8 +1112,11 @@ def preview(conn, report, sources, source_note="", before_after=15, seed=7):
                             order by kind, product_key""", (company,))
             after = cur.fetchall()
             old = set(report["before"].get(company, []))
-            out += [f"### {row['name']} (`{company}`)", "", "Free text:", ""] + ["> " + t for t in (row["wants"] or "").splitlines()] + [
-                "", f"Before ({len(old)} lines): " + (", ".join(f"`{k}`" for k in sorted(old)) or "none"), "", "After:", ""]
+            texts = list(dict.fromkeys((s["id"], s["date"], s["text"]) for s, _line in by_company[company]))
+            out += [f"### {row['name']} (`{company}`)", ""]
+            for source_id, when, text in texts:
+                out += [f"Text read ({source_id}, {when}):", ""] + ["> " + t for t in text.splitlines()] + [""]
+            out += [f"Before ({len(old)} lines): " + (", ".join(f"`{k}`" for k in sorted(old)) or "none"), "", "After:", ""]
             out.append(md_table(["kind", "key", "first seen", "last seen", "new?"],
                                 [(a["kind"], a["product_key"], a["first_seen"], a["last_seen"],
                                   "new" if any(r.startswith("parse:") for r in a["source_refs"] or []) else "") for a in after]))

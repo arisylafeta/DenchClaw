@@ -203,6 +203,11 @@ class Selection(unittest.TestCase):
         fact = self.p.fact_sets(product(make="Molicel", model="P42A", format="cell", quote="x"))[0]
         self.assertEqual(fact["sql"]["cell_maker"], "Molicel")
 
+    def test_a_vehicle_make_is_not_a_cell_maker(self):
+        fact = self.p.fact_sets(product(make="Nissan", model="Leaf", format="cell", quote="x"))[0]
+        self.assertNotIn("cell_maker", fact["sql"])
+        self.assertNotIn("cellMaker", fact["ts"])
+
 
 class Keys(unittest.TestCase):
     @classmethod
@@ -250,18 +255,42 @@ class Runner(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder:
             first = self.p.ModelRunner(folder, caller=caller, key="k")
-            self.assertEqual(first.run({"n1": "Tesla packs"})["n1"]["status"], "parsed")
+            out, reason = first.run({"n1": "Tesla packs"})
+            self.assertEqual((out["n1"]["status"], reason), ("parsed", None))
             second = self.p.ModelRunner(folder, caller=caller, key="k")
-            self.assertEqual(second.run({"n1": "Tesla packs"})["n1"]["status"], "parsed")
+            self.assertEqual(second.run({"n1": "Tesla packs"})[0]["n1"]["status"], "parsed")
             self.assertEqual((first.calls, second.calls, second.cache_hits, len(calls)), (1, 0, 1, 1))
-            self.assertEqual(len(list(Path(folder).glob("*.json"))), 1)
+            self.assertEqual(len(list(Path(folder).glob("*.json"))), 2)  # the raw reply and the per-text answer
+
+    def test_a_rerun_with_a_different_batch_asks_only_for_the_new_text(self):
+        calls = []
+
+        def caller(system, user, key):
+            calls.append(json.loads(user)["notes"])
+            return self.answer({note["id"]: 1 for note in json.loads(user)["notes"]})
+
+        with tempfile.TemporaryDirectory() as folder:
+            self.p.ModelRunner(folder, caller=caller, key="k").run({"n1": "Tesla packs", "n2": "Tesla modules"})
+            again = self.p.ModelRunner(folder, caller=caller, key="k")
+            out, _ = again.run({"n1": "Tesla modules", "n2": "Tesla cells"})  # the batch changed shape
+            self.assertEqual([n["text"] for n in calls[-1]], ["Tesla cells"])
+            self.assertEqual((again.calls, again.cache_hits, sorted(out)), (1, 1, ["n1", "n2"]))
+
+    def test_a_cached_answer_is_validated_again(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.p.ModelRunner(folder, caller=lambda s, u, k: self.answer({"n1": 1}), key="k").run({"n1": "Tesla packs"})
+            out, _ = self.p.ModelRunner(folder, cache_only=True, key="k").run({"n1": "Ford packs"})
+            self.assertIsNone(out["n1"])  # a different text is not answered by the other's cache
+            out, _ = self.p.ModelRunner(folder, cache_only=True, key="k").run({"n1": "Tesla packs"})
+            self.assertEqual(out["n1"]["products"][0]["make"], "Tesla")
 
     def test_a_malformed_answer_is_retried_then_left_unparsed(self):
         with tempfile.TemporaryDirectory() as folder:
             runner = self.p.ModelRunner(folder, caller=lambda s, u, k: "sorry, no", key="k", retries=1)
-            self.assertIsNone(runner.run({"n1": "Tesla packs"}))
+            out, reason = runner.run({"n1": "Tesla packs"})
+            self.assertEqual(out, {"n1": None})
             self.assertEqual(runner.calls, 2)
-            self.assertTrue(runner.failures[0][0].startswith("bad_answer"))
+            self.assertTrue(reason.startswith("bad_answer"))
             self.assertEqual(list(Path(folder).glob("*.json")), [])  # nothing bad is cached
 
     def test_a_gateway_error_is_a_failure_not_a_crash(self):
@@ -270,14 +299,14 @@ class Runner(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder:
             runner = self.p.ModelRunner(folder, caller=boom, key="k", retries=0)
-            self.assertIsNone(runner.run({"n1": "Tesla packs"}))
-            self.assertEqual(runner.failures[0][0], "model_error:OSError")
+            out, reason = runner.run({"n1": "Tesla packs"})
+            self.assertEqual((out, reason), ({"n1": None}, "model_error:OSError"))
 
     def test_cache_only_makes_no_call(self):
         with tempfile.TemporaryDirectory() as folder:
             runner = self.p.ModelRunner(folder, caller=lambda *a: self.fail("called"), key="k", cache_only=True)
-            self.assertIsNone(runner.run({"n1": "Tesla packs"}))
-            self.assertEqual((runner.calls, runner.failures[0][0]), (0, "not_cached"))
+            out, reason = runner.run({"n1": "Tesla packs"})
+            self.assertEqual((out, runner.calls, reason), ({"n1": None}, 0, "not_cached"))
 
     def test_the_prompt_asks_for_json_only_and_no_tools(self):
         self.assertIn("ONLY a JSON object", self.p.SYSTEM_PROMPT)
