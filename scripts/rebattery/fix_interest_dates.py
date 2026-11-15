@@ -92,7 +92,7 @@ def plan_line(row):
     else:
         return None, "no source date found"
     if found >= first:
-        return None, f"no older date ({source} {found} is not before first_seen)"
+        return None, f"no older date (source {source}: not before first_seen)"
     new_first = found
     if kind == "inferred":
         new_last = new_first
@@ -148,7 +148,7 @@ def build_plan(rows, today):
             "became_expired": dict(became_expired),
             "age_days": {"min": ages[0], "median": ages[len(ages) // 2], "max": ages[-1]} if ages else None,
             "updates": updates, "untouched": untouched,
-            "untouched_reasons": dict(collections.Counter(u["reason"].split(" (")[0] for u in untouched))}
+            "untouched_reasons": dict(collections.Counter(u["reason"] for u in untouched))}
 
 
 def fetch_candidates(conn):
@@ -235,7 +235,10 @@ def preview_text(plan, today, source_note, applied=None):
     else:
         lines += ["None: no line has an older source date than its current first_seen.", ""]
     lines += ["## Lines where no older date was found", "",
-              md_table(["reason", "lines"], sorted(plan["untouched_reasons"].items(), key=lambda kv: -kv[1])), ""]
+              md_table(["reason", "lines"], sorted(plan["untouched_reasons"].items(), key=lambda kv: -kv[1])), "",
+              "Lines listed as no older date already carry their source date: a research line's first_seen equals its "
+              "demand row's observed_on. A demand row's observed_on is the date of the research batch, so lines from "
+              "one batch share one date.", ""]
     return "\n".join(lines)
 
 
