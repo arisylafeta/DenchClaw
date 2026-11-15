@@ -1037,7 +1037,9 @@ def sample_sheet(parsed, percent, run_id, seed=1):
     """Markdown for Alex: the original text and the lines proposed, for a random percent of the parsed sources."""
     chosen = sample_sources(parsed, percent, seed)
     out = [f"# Interest parse: review sample ({percent:g}% of parsed sources)", "",
-           f"Run {run_id}. {len(chosen)} of {len(parsed)} parsed sources, drawn at random (seed {seed}).",
+           f"Run {run_id}. {len(chosen)} of {len(parsed)} parsed sources, drawn at random (seed {seed}). "
+           f"{sum(1 for s in chosen if any(l['outcome'] != 'broad_only' for l in s.get('lines') or []))} of them write at least one line; "
+           "the rest only restate a broad line the buy box already holds (shown, not written).",
            "For each: is every proposed line a want the original text states? Mark yes or no.", ""]
     for n, source in enumerate(chosen, 1):
         out += [f"## {n}. {source['company']} ({source['kind']}, {source['date']})", "",
@@ -1057,7 +1059,7 @@ def md_table(headers, rows):
     return "\n".join(out)
 
 
-def preview(conn, report, sources, source_note="", before_after=15, seed=7):
+def preview(conn, report, sources, source_note="", before_after=15, seed=7, notes=""):
     """parse-preview.md: what the run read, parsed, rejected and added, with before and after for some companies."""
     import psycopg2.extras
     status, lines = report["status"], report["lines"]
@@ -1121,6 +1123,8 @@ def preview(conn, report, sources, source_note="", before_after=15, seed=7):
                                 [(a["kind"], a["product_key"], a["first_seen"], a["last_seen"],
                                   "new" if any(r.startswith("parse:") for r in a["source_refs"] or []) else "") for a in after]))
             out.append("")
+    if notes:
+        out += ["## Notes", "", notes, ""]
     return "\n".join(out) + "\n"
 
 
@@ -1143,6 +1147,7 @@ def main(argv=None):
     parser.add_argument("--sample-out", default=str(DEFAULT_SAMPLE_OUT))
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--preview", help="write the preview markdown (counts, rejections, before and after) here")
+    parser.add_argument("--preview-note", help="text added to the preview under Notes (what the earlier runs cost, for instance)")
     parser.add_argument("--report", help="write the run report as JSON here")
     parser.add_argument("--detail", help="write every source with its text, products and lines as JSON here")
     args = parser.parse_args(argv)
@@ -1189,7 +1194,7 @@ def main(argv=None):
             Path(args.sample_out).write_text(sample_sheet(parsed, args.sample, report["run_id"], args.seed), encoding="utf-8")
             print(f"review sheet written to {args.sample_out}")
         if args.preview:
-            Path(args.preview).write_text(preview(conn, report, sources, f"database {where['db']} on {target}"), encoding="utf-8")
+            Path(args.preview).write_text(preview(conn, report, sources, f"database {where['db']} on {target}", notes=args.preview_note or ""), encoding="utf-8")
             print(f"preview written to {args.preview}")
         if args.report:
             Path(args.report).write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
