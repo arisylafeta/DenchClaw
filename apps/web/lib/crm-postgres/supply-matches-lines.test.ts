@@ -4,6 +4,9 @@ vi.mock("server-only", () => ({}));
 
 // Runs only against a disposable database: scripts/rebattery/crm-test-db.sh up prints the URL.
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
+// Before anything imports ../postgres: its pool reads DATABASE_URL once, and the first describe below imports it. Without
+// this the pool falls back to the live local socket and the tests insert their fixtures into the production CRM.
+if (TEST_URL) { process.env.DATABASE_URL = TEST_URL; }
 const TODAY = "2026-11-15";
 
 describe("buyerLinesEnabled", () => {
