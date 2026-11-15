@@ -866,10 +866,11 @@ def reply_check_prompt(records: list[dict]) -> str:
 
 
 def parse_reply_checks(text: str, keys: set[str]) -> dict[str, dict]:
-    start, end = text.find("["), text.rfind("]")
-    if start == -1 or end < start:
+    start = text.find("[")
+    if start == -1:
         raise ValueError("model reply contains no JSON array")
-    items = json.loads(text[start:end + 1])
+    # The first array only: the model sometimes adds a note after it.
+    items, _ = json.JSONDecoder().raw_decode(text[start:])
     return {str(i["key"]): {"reply": i["reply"], "why": str(i.get("why") or "").replace("—", ",").strip()[:100]}
             for i in (items if isinstance(items, list) else [])
             if isinstance(i, dict) and str(i.get("key")) in keys and isinstance(i.get("reply"), bool)}

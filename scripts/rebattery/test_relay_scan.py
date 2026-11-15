@@ -731,3 +731,8 @@ def test_check_unsure_keeps_the_keyword_tab_when_the_model_fails(tmp_path):
     rows = [_row("a", "action", "inbound from a known contact")]
     calls, errors = rs.check_unsure(rows, broken, NOW, save=True, path=tmp_path / "c.json")
     assert calls == 0 and errors and rows[0]["tab"] == "action"
+
+
+def test_parse_reply_checks_ignores_a_note_after_the_array():
+    text = '[{"key": "a", "reply": true, "why": "asks a price"}]\nNote: [b] was unclear.'
+    assert rs.parse_reply_checks(text, {"a"}) == {"a": {"reply": True, "why": "asks a price"}}
