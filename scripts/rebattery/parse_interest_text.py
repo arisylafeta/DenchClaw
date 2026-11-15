@@ -14,11 +14,14 @@ platform, part number, kWh figure, quantity, price, chemistry or format that the
 with a reason, never repaired. kWh is never invented. Text the model cannot parse stays exactly as it is.
 
 A price is always a target, never a hard limit: it is stored with price_basis 'target', and a flexible upper figure the text
-states beside it (\"under $30/kWh, flexible up to $50\") is kept as price_max. Matching never filters on either.
+states beside it (\"under $30/kWh, flexible up to $50\") is kept as price_max. Only a note that carries a price and a word
+like flexible or \"up to\" is asked a second, small question for the flexible figure (the main answers stay as cached).
+Matching never filters on either.
 
 Notes that only guess what kind of company this is (\"could be a supplier or buyer\", \"likely trader/competitor\"), and notes
-that say the company buys new cells only or has little fit for used stock, write no line. A named maker stays its own
-product: \"Donor modules/packs for Tesla and Bolt\" is Tesla modules and Tesla packs, never any modules or any packs.
+that say the company buys new cells only or has little fit for used stock, write no line (checked in code before the model is
+asked). A named maker stays its own product: \"Donor modules/packs for Tesla and Bolt\" is Tesla modules and Tesla packs; a
+bare model no maker owns (Bolt) is dropped, never written as any modules or any packs.
 
 Accepted products become mastered lines through the same fact builder the importers use: kind 'interest' for what
 the buyer stated, 'inferred' for research-sourced text; first_seen = last_seen = the source date; source_refs = the
@@ -66,6 +69,16 @@ DB_BATCH = 100
 MAX_TEXT = 1500
 FACT_COMBINATIONS = 12
 
+FLEX_PROMPT = """You read a short note about what a buyer of used EV and industrial batteries wants. Each item gives the note and the
+target price a reader already found in it. Say whether the note ALSO states a flexible upper figure for that same price, in the
+same currency and unit: "under $30/kWh, flexible up to $50/kWh" has target 30 and flexible figure 50. Reply with ONLY a JSON
+object, no prose:
+{"results": [{"id": "<item id>", "price_max": <number or null>, "quote": "<the exact words of the note that state it, or null>"}, ...]}
+Give one result for every item id. price_max is null unless the note states a higher figure the buyer would still accept.
+A range of the target itself ("10-15") is not flexibility. Never calculate, convert or estimate a figure the note does not give."""
+FLEX_WORDS = re.compile(r"flexib|up to|stretch|ceiling|at most|no more than|not more than|maximum|\bmax\b|as high as|could go|can go|willing to", re.I)
+FLEX_PER_CALL = 8
+
 PRODUCT_KEYS = ("make", "model", "platform", "part_number", "format", "chemistry", "kwh_min", "kwh_max",
                 "cell_format", "quantity", "quantity_unit", "cadence", "price", "price_max", "price_currency", "price_unit",
                 "status", "quote")
@@ -99,10 +112,8 @@ Every product has EXACTLY these keys (null when the note does not say):
   quantity      one number; null for a range or an unclear amount
   quantity_unit packs, modules, cells, units, kWh, MWh, systems, containers, vehicles (as the note says)
   cadence       one of "one_off", "weekly", "monthly", "quarterly", "yearly", "ongoing"; only when the note says so
-  price, price_currency ("EUR", "USD" or "GBP"), price_unit ("kWh", "pack" or "cell")  the price the buyer offers or
-                targets, one number; null for a range. A price is only ever a target, never a hard limit.
-  price_max     a flexible upper figure the note states beside the target, in the same currency and unit: "under $30/kWh,
-                flexible up to $50" is price 30 and price_max 50. Null when the note gives no such figure.
+  price, price_currency ("EUR", "USD" or "GBP"), price_unit ("kWh", "pack" or "cell")  only what the buyer offers or
+                targets, one number; null for a range
   status        "asked" when the note states a want or request, "said_interested" when it says they are open to or
                 interested in it
   quote         the exact words of the note this product comes from, copied character for character (3 to 300 characters)
@@ -110,15 +121,6 @@ Rules: one product per distinct thing wanted; a note that says "Tesla packs and 
 Use only what the note states. Never guess a chemistry or a capacity. Write out shorthand: "Model S/X and 3/Y" is Model S,
 Model X, Model 3 and Model Y; "37501-GI300/GI301" is two part numbers, 37501-GI300 and 37501-GI301.
 Ignore what the buyer sells, offers, refuses or does not want. A date in the note is not a quantity or a kWh figure.
-Keep the maker the note names: "Donor modules/packs for Tesla and Bolt" is Tesla modules and Tesla packs; a named maker is
-never reduced to a product with no make (any modules, any packs). A model that no single maker owns (Bolt on its own) is
-listed only when the note names its maker (Chevrolet Bolt, Bolt EV: make Chevrolet); otherwise leave out that one model and
-keep the other products.
-Return an empty products list for exactly two kinds of note. (a) A note that only guesses what kind of company this is
-("could be a supplier or buyer", "likely trader/competitor") and states no product it wants. (b) A note that says the
-company buys only new or unused cells (the note itself says only, solely or exclusively new/unused) or has little, low or poor
-fit for used batteries or modules. Every other note that names a product the company wants, repairs with, resells or sources
-stays a want, even when it also guesses at the company's role or describes the cells as new or surplus stock.
 An empty products list is a good answer."""
 
 # ---------------------------------------------------------------------------
@@ -607,6 +609,51 @@ class ModelRunner:
             return payload
         raise ValueError(last or "unknown")
 
+    def _flex_path(self, text, price):
+        return self.cache_dir / f"flex-{self._digest(FLEX_PROMPT, text, repr(float(price)))}.json"
+
+    def flex(self, items):
+        """{local id: (price_max or None, quote or None)} for {local id: (text, price)}; cached per text and price.
+
+        A reply that does not parse leaves its items out, so the caller keeps the target price alone."""
+        out, missing = {}, {}
+        for local, (text, price) in items.items():
+            path = self._flex_path(text, price)
+            if path.exists():
+                got = json.loads(path.read_text())
+                out[local] = (got["price_max"], got["quote"])
+                with self._lock:
+                    self.cache_hits += 1
+            else:
+                missing[local] = (text, price)
+        if not missing or self.cache_only:
+            return out
+        user = json.dumps({"items": [{"id": local, "text": text, "target_price": price} for local, (text, price) in missing.items()]},
+                          ensure_ascii=False)
+        for attempt in range(self.retries + 1):
+            try:
+                with self._lock:
+                    self.calls += 1
+                payload = json_object(self.caller(FLEX_PROMPT, user, self.key))
+                answers = {r["id"]: r for r in payload["results"] if isinstance(r, dict) and r.get("id") in missing}
+                break
+            except Exception as exc:  # noqa: BLE001
+                with self._lock:
+                    self.failures.append((f"flex_error:{type(exc).__name__}", list(missing)))
+                answers = {}
+                time.sleep(min(2 ** attempt, 8))
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        for local, (text, price) in missing.items():
+            answer = answers.get(local)
+            if answer is None:
+                continue
+            value, quote = answer.get("price_max"), answer.get("quote")
+            value = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
+            quote = quote if isinstance(quote, str) else None
+            self._flex_path(text, price).write_text(json.dumps({"text": text, "price": price, "price_max": value, "quote": quote}, ensure_ascii=False))
+            out[local] = (value, quote)
+        return out
+
     def run(self, batch):
         """({local id: validate_response entry or None}, failure reason or None) for one batch of {local id: text}."""
         out, missing = {}, {}
@@ -774,6 +821,25 @@ def run_model(sources, runner, per_call=TEXTS_PER_CALL, workers=3):
                     source["failure"] = reason or "model_failed"
                 else:
                     source["result"] = answer
+
+
+def apply_flex(sources, runner, per_call=FLEX_PER_CALL):
+    """Asks the second question for every priced product of a note that says flexible, up to, a ceiling, and keeps an answer
+    only when it is a higher figure the note states. Returns {"asked": n, "kept": n}."""
+    todo = [(source, product) for source in sources for product in source["result"]["products"]
+            if product["price"] is not None and FLEX_WORDS.search(source["text"])]
+    counts = {"asked": len(todo), "kept": 0}
+    for start in range(0, len(todo), per_call):
+        chunk = todo[start:start + per_call]
+        answers = runner.flex({f"f{i + 1}": (source["text"], product["price"]) for i, (source, product) in enumerate(chunk)})
+        for i, (source, product) in enumerate(chunk):
+            value, quote = answers.get(f"f{i + 1}", (None, None))
+            text = source["text"]
+            if (value is not None and value > product["price"] and number_in(value, text_numbers(text))
+                    and quote and 3 <= len(quote) <= 300 and squash(quote) in squash(text)):
+                product["price_max"] = float(value)
+                counts["kept"] += 1
+    return counts
 
 
 # ---------------------------------------------------------------------------
@@ -1046,6 +1112,7 @@ def run(conn, runner, run_id=None, apply_writes=False, builder="sql", limit=None
             bump(report["skipped"], f"{source['kind']}:{source['skip']}")
     report["sent"] = len(todo)
     run_model(todo, runner, per_call=per_call, workers=workers)
+    report["flex"] = apply_flex([s for s in todo if not s.get("failure")], runner)
     report["model"] = {"calls": runner.calls, "cache_hits": runner.cache_hits,
                        "failed_batches": [{"reason": reason, "texts": len(ids)} for reason, ids in runner.failures]}
     parsed = []

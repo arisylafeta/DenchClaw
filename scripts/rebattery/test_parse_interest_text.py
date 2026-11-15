@@ -69,6 +69,38 @@ class Validation(unittest.TestCase):
         del raw["price_max"]
         self.assertIsNone(self.p.validate_product(raw, "Tesla packs")["price_max"])
 
+    def flex_run(self, text, price, answer, cache=None):
+        calls = []
+
+        def caller(system, user, key):
+            calls.append(user)
+            return json.dumps({"results": [{"id": item["id"], "price_max": answer[0], "quote": answer[1]} for item in json.loads(user)["items"]]})
+
+        with tempfile.TemporaryDirectory() as folder:
+            runner = self.p.ModelRunner(cache or folder, caller=caller, key="k")
+            source = {"text": text, "result": {"products": [product(format="cell", price=price, price_currency="USD", price_unit="kWh", quote="x")]}}
+            counts = self.p.apply_flex([source], runner)
+            return source["result"]["products"][0]["price_max"], counts, len(calls)
+
+    def test_a_flexible_figure_is_kept_only_when_the_note_states_a_higher_one(self):
+        text = "Prismatic cells; target landing cost under $30/kWh with flexibility up to $50/kWh"
+        self.assertEqual(self.flex_run(text, 30, (50, "flexibility up to $50/kWh"))[:2], (50.0, {"asked": 1, "kept": 1}))
+        self.assertIsNone(self.flex_run(text, 30, (75, "flexibility up to $75/kWh"))[0])      # the figure is not in the note
+        self.assertIsNone(self.flex_run(text, 30, (50, "flexible up to fifty"))[0])           # the quote is not in the note
+        self.assertIsNone(self.flex_run(text, 30, (20, "flexibility up to $50/kWh"))[0])      # not above the target
+        self.assertIsNone(self.flex_run(text, 30, (None, None))[0])
+
+    def test_a_note_with_no_flexible_wording_or_no_price_is_not_asked(self):
+        self.assertEqual(self.flex_run("Prismatic cells at $30/kWh", 30, (50, "x"))[1:], ({"asked": 0, "kept": 0}, 0))
+        self.assertEqual(self.flex_run("Prismatic cells, flexible on price", None, (50, "x"))[1:], ({"asked": 0, "kept": 0}, 0))
+
+    def test_the_flexible_answer_is_cached_per_note_and_price(self):
+        text = "Cells under $30/kWh, flexible up to $50/kWh"
+        with tempfile.TemporaryDirectory() as folder:
+            first = self.flex_run(text, 30, (50, "flexible up to $50/kWh"), cache=folder)
+            second = self.flex_run(text, 30, (50, "flexible up to $50/kWh"), cache=folder)
+            self.assertEqual((first[0], first[2], second[0], second[2]), (50.0, 1, 50.0, 0))
+
     def test_shape_is_strict(self):
         text = "Tesla packs"
         self.reject({**product(make="Tesla", quote="Tesla packs"), "colour": "red"}, text, "unknown_field:colour")
@@ -502,11 +534,17 @@ class Database(unittest.TestCase):
         self.conn.commit()
         return row_id
 
-    def stub(self, mapping, calls=None):
-        """A model that answers from {text fragment: [products]}."""
+    def stub(self, mapping, calls=None, flex=None):
+        """A model that answers from {text fragment: [products]}, and the flexible-price question from {text fragment: (figure, quote)}."""
         def caller(system, user, key):
             if calls is not None:
                 calls.append(user)
+            if system == self.p.FLEX_PROMPT:
+                results = []
+                for item in json.loads(user)["items"]:
+                    found = next((answer for fragment, answer in (flex or {}).items() if fragment in item["text"]), (None, None))
+                    results.append({"id": item["id"], "price_max": found[0], "quote": found[1]})
+                return json.dumps({"results": results})
             notes = json.loads(user)["notes"]
             results = []
             for note in notes:
@@ -518,8 +556,8 @@ class Database(unittest.TestCase):
             return json.dumps({"results": results})
         return caller
 
-    def parse(self, mapping, *, apply_writes=True, builder="sql", companies=None, calls=None, run_id="r1", batch_size=100):
-        runner = self.p.ModelRunner(self.dir.name, caller=self.stub(mapping, calls), key="k")
+    def parse(self, mapping, *, apply_writes=True, builder="sql", companies=None, calls=None, run_id="r1", batch_size=100, flex=None):
+        runner = self.p.ModelRunner(self.dir.name, caller=self.stub(mapping, calls, flex), key="k")
         report, sources = self.p.run(self.conn, runner, run_id=run_id, apply_writes=apply_writes, builder=builder,
                                      workers=1, only_companies=companies or self.companies, batch_size=batch_size)
         return report, sources
@@ -726,8 +764,9 @@ class Database(unittest.TestCase):
         company = self.companies[3]
         self.demand(company, "Procurement of 3 MWh of prismatic cells; target landing cost under $30/kWh with flexibility up to $50/kWh",
                     spec={"formats": ["Cells"]})
-        self.parse({"landing": [product(format="cell", kwh_min=3000, kwh_max=3000, price=30, price_max=50, price_currency="USD",
-                                        price_unit="kWh", quote="target landing cost under $30/kWh with flexibility up to $50/kWh")]})
+        self.parse({"landing": [product(format="cell", kwh_min=3000, kwh_max=3000, price=30, price_currency="USD",
+                                        price_unit="kWh", quote="target landing cost under $30/kWh with flexibility up to $50/kWh")]},
+                   flex={"landing": (50, "flexibility up to $50/kWh")})
         [line] = self.lines(company)
         self.assertEqual((float(line["price"]), float(line["price_max"]), line["price_currency"], line["price_unit"], line["price_basis"]),
                          (30.0, 50.0, "USD", "kWh", "target"))
@@ -737,8 +776,9 @@ class Database(unittest.TestCase):
         first = self.demand(company, "Prismatic cells 3 MWh", spec={"formats": ["Cells"]}, observed_on="2026-05-28")
         second = self.demand(company, "Prismatic cells 3 MWh, under $30/kWh, flexible up to $50/kWh", spec={"formats": ["Cells"]}, observed_on="2026-06-12")
         self.parse({"Prismatic cells 3 MWh": [product(format="cell", kwh_min=3000, kwh_max=3000, quote="Prismatic cells 3 MWh")],
-                    "Prismatic cells 3 MWh, under": [product(format="cell", kwh_min=3000, kwh_max=3000, price=30, price_max=50, price_currency="USD",
-                                                             price_unit="kWh", quote="under $30/kWh, flexible up to $50/kWh")]})
+                    "Prismatic cells 3 MWh, under": [product(format="cell", kwh_min=3000, kwh_max=3000, price=30, price_currency="USD",
+                                                             price_unit="kWh", quote="under $30/kWh, flexible up to $50/kWh")]},
+                   flex={"under $30": (50, "flexible up to $50/kWh")})
         [line] = [l for l in self.lines(company) if l["kwh_min"] is not None]
         self.assertEqual((float(line["price"]), float(line["price_max"]), line["price_basis"]), (30.0, 50.0, "target"))
         self.assertEqual((str(line["first_seen"]), str(line["last_seen"])), ("2026-05-28", "2026-06-12"))
