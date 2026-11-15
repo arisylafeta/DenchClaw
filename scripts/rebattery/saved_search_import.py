@@ -49,6 +49,60 @@ CELL_MAKERS = {
 }
 
 
+# Vehicle models a search or request may name, by the platform's own manufacturer name. Reviewed and short on purpose:
+# a search for a model on this list is that model's line (`model:kia-ev3`); anything else stays a make or broad line.
+KNOWN_MODELS = {
+    "Kia": ["EV3", "EV4", "EV5", "EV6", "EV9", "Niro", "e-Niro", "Soul"],
+    "Hyundai": ["Kona", "Ioniq", "Ioniq 5", "Ioniq 6", "Ioniq 9"],
+    "Renault": ["Zoe", "Twingo", "Megane", "Kangoo", "Twizy", "Fluence"],
+    "Toyota": ["Corolla", "Prius", "RAV4", "Yaris", "C-HR", "Mirai", "Auris"],
+    "Tesla": ["Model S", "Model X", "Model 3", "Model Y"],
+    "Nissan": ["Leaf"],
+    "Volkswagen": ["ID.3", "ID.4", "ID.5", "e-Golf", "e-Up"],
+    "Skoda": ["Enyaq"],
+    "Audi": ["e-tron", "Q4 e-tron", "Q8 e-tron"],
+    "BMW": ["i3", "i4", "iX", "iX3"],
+    "Peugeot": ["e-208", "e-2008"],
+    "Vauxhall": ["Corsa-e", "Mokka-e"],
+    "Volvo": ["XC40"],
+    "MG": ["MG4", "ZS EV"],
+    "Porsche": ["Taycan"],
+    "Jaguar": ["I-Pace"],
+    "Ford": ["Mustang Mach-E"],
+    "Chevrolet": ["Bolt", "Bolt EV", "Volt"],
+}
+# Names that also mean something else: a search for them needs its maker (the manufacturer filter, or in the text).
+AMBIGUOUS_MODELS = {"bolt", "volt", "soul", "2", "id"}
+MANUFACTURER_NAMES = {"vw": "Volkswagen", "mercedes": "Mercedes-Benz", "citroën": "Citroen", "škoda": "Skoda"}
+
+
+def _fold(text):
+    return "".join(ch for ch in str(text or "").lower() if ch.isalnum())
+
+
+def search_model(filters):
+    """{make, model} when the search text names a known vehicle model, else None. Never guesses a make or a kWh.
+
+    The text may be the model alone with its maker in the manufacturer filter (\"EV3\" + Kia), the maker and model together
+    (\"Hyundai kona\"), or a model only one listed maker owns (\"zoe\"). Extra words (\"polestar 2 78 kwh front wheel drive\")
+    are not a model name, so they stay a note.
+    """
+    query = _fold(filters.get("q"))
+    if not query:
+        return None
+    named = {MANUFACTURER_NAMES.get(str(n).strip().lower(), str(n).strip()).lower() for n in as_list(filters.get("manufacturer"))}
+    found = []
+    for make, models in KNOWN_MODELS.items():
+        for model in models:
+            with_make = query == _fold(make) + _fold(model)
+            hit = with_make or (query == _fold(model) and (bool(named) or _fold(model) not in AMBIGUOUS_MODELS))
+            if hit and (not named or make.lower() in named):
+                found.append({"make": make, "model": model})
+    if len({(hit["make"], hit["model"]) for hit in found}) != 1:
+        return None
+    return found[0]
+
+
 def as_list(value):
     if value is None:
         return []
@@ -144,6 +198,7 @@ def map_saved_search(search):
 
     confirmed = str(search["confirmed_at"])[:10]
     return {
+        "interest_model": search_model(search.get("filters") or {}),
         "kind": "standing", "basis": "stated", "email": email, "contact": None,
         "wants": search.get("label") or "Any battery listing", "quantity": None, "location": None,
         "spec": spec, "note": "\n".join(notes), "observed_on": confirmed,
@@ -232,6 +287,7 @@ def map_sourcing_request(request):
                  f"Asked us to source it from {asked_from} on rebattery.io.")
 
     return {
+        "interest_model": search_model(filters),
         "kind": "request", "basis": None, "status": "qualifying", "email": email, "contact": None,
         "wants": (request.get("wants") or "Battery").strip(),
         "quantity": request_quantity(request), "timing": timing or None,

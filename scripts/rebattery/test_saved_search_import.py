@@ -61,6 +61,26 @@ class SavedSearchImportTest(unittest.TestCase):
         self.assertIsNone(saved.map_saved_search(search(email="alex@rebattery.io")))
         self.assertIsNone(saved.map_saved_search(search(email="qa-buyer@example.com")))
 
+    def test_a_search_for_a_known_model_names_the_model(self):
+        model = lambda **filters: saved.search_model(filters)  # noqa: E731
+        self.assertEqual(model(q="EV3", manufacturer=["Kia"]), {"make": "Kia", "model": "EV3"})
+        self.assertEqual(model(q="Hyundai kona"), {"make": "Hyundai", "model": "Kona"})
+        self.assertEqual(model(q="TOYOTA COROLLA", manufacturer=["Toyota"]), {"make": "Toyota", "model": "Corolla"})
+        self.assertEqual(model(q="zoe"), {"make": "Renault", "model": "Zoe"})  # one listed maker owns it
+        self.assertEqual(model(q="model 3", manufacturer=["Tesla", "Kokam"]), {"make": "Tesla", "model": "Model 3"})
+        # not a model: a maker alone, a part number, a cell, a model of another maker, a sentence
+        self.assertIsNone(model(q="tesla"))
+        self.assertIsNone(model(q="1104429-00-P", manufacturer=["Tesla"]))
+        self.assertIsNone(model(q="Samsung sdi"))
+        self.assertIsNone(model(q="EV3", manufacturer=["Hyundai"]))
+        self.assertIsNone(model(q="polestar 2  78 kwh front wheel drive"))
+        self.assertIsNone(model(manufacturer=["Kia"]))
+        self.assertIsNone(model(q="bolt"))  # a bare Bolt could be anything: it needs its maker
+        self.assertEqual(model(q="bolt", manufacturer=["Chevrolet"]), {"make": "Chevrolet", "model": "Bolt"})
+        self.assertEqual(model(q="Chevrolet Bolt EV"), {"make": "Chevrolet", "model": "Bolt EV"})
+        self.assertEqual(saved.map_saved_search(search(filters={"q": "EV3", "manufacturer": ["Kia"]}))["interest_model"], {"make": "Kia", "model": "EV3"})
+        self.assertEqual(saved.map_saved_search(search(filters={"q": "EV3", "manufacturer": ["Kia"]}))["spec"], {"makes": ["Hyundai or Kia"]})
+
     def test_marks_unsubscribed_searches_for_skipping(self):
         self.assertTrue(saved.map_saved_search(search(status="unsubscribed"))["unsubscribed"])
         self.assertFalse(saved.map_saved_search(search(status="paused"))["unsubscribed"])

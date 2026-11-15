@@ -592,8 +592,9 @@ The story.
 """.format(company=self.dossier_company))
         self.convert()
         [line] = self.lines(self.dossier_company)
-        self.assertEqual(line["product_key"], "broad:proterra-any-packs")
-        self.assertEqual(line["product_key_level"], "broad")
+        # A product name is not a part key, but it is a stated model with no kWh: the model-level key.
+        self.assertEqual(line["product_key"], "model:proterra-onyxstratah415")
+        self.assertEqual(line["product_key_level"], "model")
         self.assertEqual(line["raw_product"], "Onyx Strata H4-15")
         self.assertEqual(line["model"], "Onyx Strata H4-15")
 

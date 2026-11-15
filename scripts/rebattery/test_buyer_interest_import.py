@@ -199,6 +199,38 @@ class InterestLines(unittest.TestCase):
         matching = [line for line in self.lines("saved_search") if line["product_key"] == "broad:lfp-packs"]
         self.assertEqual(len(matching), 1)
 
+    def test_a_search_for_a_known_model_is_that_models_line_and_replaces_the_broad_ones(self):
+        filters = {"q": "EV3", "manufacturer": ["Kia"], "format": ["module", "pack"]}
+        search = self.saved.map_saved_search(self.saved_search(id="ev3-0000-4000-8000-000000000001", label="\"EV3\" · Kia · Module · Pack", filters=filters))
+        search["company_id"] = self.company
+        mine = lambda: [line for line in self.lines("saved_search") if line["saved_search_id"] == "ev3-0000-4000-8000-000000000001"]  # noqa: E731
+        self.addCleanup(self.forget, "ev3-0000-4000-8000-000000000001")
+        old = {**search, "interest_model": None}   # what the importer wrote before it read the text as a model
+        with self.cursor() as cur:
+            self.lifecycle.upsert_saved_search_interest(cur, old, today=dt.date(2026, 11, 12))
+        self.conn.commit()
+        self.assertEqual(sorted(line["product_key"] for line in mine()),
+                         ["broad:hyundai-or-kia-any-modules", "broad:hyundai-or-kia-any-packs"])
+        for _ in range(2):
+            with self.cursor() as cur:
+                self.lifecycle.upsert_saved_search_interest(cur, search, today=dt.date(2026, 11, 12))
+            self.conn.commit()
+        [line] = mine()
+        self.assertEqual((line["product_key"], line["product_key_level"], line["make"], line["model"]), ("model:kia-ev3", "model", "Kia", "EV3"))
+        self.assertEqual((line["format"], line["kwh_min"], line["kwh_max"]), (None, None, None))   # two formats: neither; no kWh invented
+        self.assertEqual(line["source_refs"], ["saved_search:ev3-0000-4000-8000-000000000001"])
+
+    def test_a_model_search_keeps_the_kwh_range_its_own_filter_states(self):
+        filters = {"q": "zoe", "manufacturer": ["Renault"], "kwh_min": 51.5, "kwh_max": 55.49}
+        search = self.saved.map_saved_search(self.saved_search(id="zoe-0000-4000-8000-000000000001", filters=filters))
+        search["company_id"] = self.company
+        self.addCleanup(self.forget, "zoe-0000-4000-8000-000000000001")
+        with self.cursor() as cur:
+            self.lifecycle.upsert_saved_search_interest(cur, search, today=dt.date(2026, 11, 12))
+        self.conn.commit()
+        [line] = [line for line in self.lines("saved_search") if line["saved_search_id"] == "zoe-0000-4000-8000-000000000001"]
+        self.assertEqual((line["product_key"], float(line["kwh_min"]), float(line["kwh_max"])), ("model:renault-zoe", 51.5, 55.49))
+
     def test_a_line_that_cannot_be_written_does_not_abort_the_importer(self):
         # A negative price breaks a table check: the line is dropped, the importer's transaction survives.
         facts = {"formats": ["Packs"], "chemistries": ["LFP"]}
@@ -210,6 +242,11 @@ class InterestLines(unittest.TestCase):
             cur.execute("select 1 as ok")
             self.assertEqual(cur.fetchone()["ok"], 1)
         self.conn.rollback()
+
+    def forget(self, search_id):
+        with self.cursor() as cur:
+            cur.execute("delete from buyer_interest where saved_search_id = %s", (search_id,))
+        self.conn.commit()
 
     def saved_search(self, **over):
         base = {

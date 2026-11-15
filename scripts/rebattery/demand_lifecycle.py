@@ -252,6 +252,23 @@ def interest_facts(spec):
     return facts
 
 
+def model_interest_facts(spec, model):
+    """One fact dict for a saved search that names a vehicle model: `model:kia-ev3`, whatever pack size.
+
+    `model` is {make, model} as the search names them (the platform's own manufacturer name, not the buy-box group, so
+    the key is the one a \"Kia EV3\" lot rolls up to). A format or chemistry is kept only when the search states exactly
+    one, because the model key says nothing about either and two formats would collapse into one line. kWh is only what
+    the search's own filter states; it is never filled in from the model.
+    """
+    spec = spec or {}
+    formats = _stated_values(spec.get('formats'), spec.get('format'))
+    chemistries = _stated_values(spec.get('chemistries'), spec.get('chemistry'))
+    return {'make': model['make'], 'model': model['model'],
+            'format': formats[0] if len(formats) == 1 else None,
+            'chemistry': chemistries[0] if len(chemistries) == 1 else None,
+            'kwh_min': spec.get('kwh_min') or spec.get('kwhMin'), 'kwh_max': spec.get('kwh_max') or spec.get('kwhMax')}
+
+
 def interest_fact_total(spec):
     """How many combinations the spec states before the cap, for the truncation note."""
     spec = spec or {}
@@ -367,13 +384,22 @@ def upsert_saved_search_interest(cur, row, unsubscribed=False, today=None):
     last_seen = str(row.get('unsubscribed_on') or today_iso)[:10] if unsubscribed else today_iso
     search_id = str(row.get('source_id') or '').removeprefix('saved_search:') or None
     spec = row.get('spec') or {}
+    named = row.get('interest_model')
+    # A search for a known model is that model's line, not every pack of its maker's group.
+    fact_list = [model_interest_facts(spec, named)] if named else interest_facts(spec)
     lines = [upsert_interest(cur, company_id=row.get('company_id'), kind='saved_search', facts=facts,
                              person_id=row.get('person_id'), first_seen=confirmed, last_seen=last_seen,
                              expires_on=last_seen if unsubscribed else None, saved_search_id=search_id,
                              source_refs=[f'saved_search:{search_id}'] if search_id else [])
-             for facts in interest_facts(spec)]
-    _record_truncation(cur, row.get('source_id'), interest_fact_total(spec))
-    return next((line for line in lines if line), None)
+             for facts in fact_list]
+    written = [line for line in lines if line]
+    if named and written and search_id and row.get('company_id') and interest_table_ready(cur):
+        # The lines this search wrote before it was read as a model are replaced, not left beside the new one.
+        cur.execute("delete from buyer_interest where kind = 'saved_search' and saved_search_id = %s and company_id = %s "
+                    "and id <> all(%s::text[])", (search_id, row['company_id'], written))
+    if not named:
+        _record_truncation(cur, row.get('source_id'), interest_fact_total(spec))
+    return written[0] if written else None
 
 
 def merge_profile(cur, row, basis='stated'):
