@@ -6,7 +6,9 @@ One email per driver, only on weekdays and only when something is due today or o
 Sends through rebattery-mail (identity hello, Postmark transactional). Dry run unless --apply: prints who would get what.
 A state file stops a second send to the same person on the same day (cron retries).
 
-  bulk_next_action_digest.py [--apply] [--today YYYY-MM-DD] [--force] [--only Alex] [--to-override you@rebattery.io]
+  bulk_next_action_digest.py [--apply] [--today YYYY-MM-DD] [--force] [--only Alex] [--to-override you@rebattery.io] [--at-hour 8]
+
+Scheduled at 07:00 and 08:00 UTC on weekdays with --at-hour 8, so it sends at 08:00 London time in summer and winter.
 """
 import argparse
 import html
@@ -144,10 +146,14 @@ def main():
     ap.add_argument("--force", action="store_true", help="send at the weekend too, and again on a day already sent")
     ap.add_argument("--only", help="one driver, e.g. Alex")
     ap.add_argument("--to-override", help="send every email to this address instead (tests)")
+    ap.add_argument("--at-hour", type=int, help="only run when the London hour is this (cron runs at both UTC hours)")
     ap.add_argument("--approved-by", default="Alex", help="named human whose standing approval covers these sends")
     args = ap.parse_args()
 
-    today = args.today or datetime.now(ZoneInfo("Europe/London")).date().isoformat()
+    now = datetime.now(ZoneInfo("Europe/London"))
+    if args.at_hour is not None and now.hour != args.at_hour and not args.force:
+        return 0  # the other UTC slot: silent, nothing to do
+    today = args.today or now.date().isoformat()
     if date.fromisoformat(today).weekday() >= 5 and not args.force:
         print(json.dumps({"today": today, "skipped": "weekend"}))
         return 0
