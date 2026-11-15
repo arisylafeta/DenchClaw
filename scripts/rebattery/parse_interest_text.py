@@ -112,10 +112,13 @@ Model X, Model 3 and Model Y; "37501-GI300/GI301" is two part numbers, 37501-GI3
 Ignore what the buyer sells, offers, refuses or does not want. A date in the note is not a quantity or a kWh figure.
 Keep the maker the note names: "Donor modules/packs for Tesla and Bolt" is Tesla modules and Tesla packs; a named maker is
 never reduced to a product with no make (any modules, any packs). A model that no single maker owns (Bolt on its own) is
-listed only when the note names its maker (Chevrolet Bolt, Bolt EV: make Chevrolet); otherwise leave that model out.
-Return no products for a note that only guesses what kind of company this is ("could be a supplier or buyer", "likely
-trader/competitor") without stating what it wants, and for a note that says the company buys new or unused cells only or has
-little or low fit for used batteries or modules.
+listed only when the note names its maker (Chevrolet Bolt, Bolt EV: make Chevrolet); otherwise leave out that one model and
+keep the other products.
+Return an empty products list for exactly two kinds of note. (a) A note that only guesses what kind of company this is
+("could be a supplier or buyer", "likely trader/competitor") and states no product it wants. (b) A note that says the
+company buys only new or unused cells (the note itself says only, solely or exclusively new/unused) or has little, low or poor
+fit for used batteries or modules. Every other note that names a product the company wants, repairs with, resells or sources
+stays a want, even when it also guesses at the company's role or describes the cells as new or surplus stock.
 An empty products list is a good answer."""
 
 # ---------------------------------------------------------------------------
@@ -718,7 +721,7 @@ ROLE_GUESS_ONLY = re.compile(r"\b(?:could|may|might) be (?:a |an )?(?:supplier|b
                              r"|\b(?:supplier|buyer) or (?:supplier|buyer)\b", re.I)
 NEW_ONLY = re.compile(r"\b(?:little|low|no|poor|limited)\s+fit\b|\bnot (?:a )?(?:good )?fit\b"
                       r"|\bnew (?:cylindrical |prismatic |pouch )?(?:cells|batteries|modules|stock)\b[^.;\n]{0,60}\bonly\b"
-                      r"|\bonly (?:new|unused|brand[- ]new)\b|\b(?:premium|brand[- ]new|surplus new) (?:cylindrical |prismatic |pouch )?cells\b", re.I)
+                      r"|\bonly (?:new|unused|brand[- ]new)\b", re.I)
 
 
 def not_a_want(text):
@@ -727,7 +730,7 @@ def not_a_want(text):
     The role guess has to lead the note (\"Likely trader/competitor: ...\") or be all it says; a real want followed by a
     side remark (\"... Could be a volume outlet for tested modules\") is still a want.
     """
-    body = "\n".join(line for line in str(text or "").splitlines() if not re.match(r"\s*(?:note|demand audit|restored|quote)\b", line, re.I))
+    body = "\n".join(line for line in str(text or "").splitlines() if not re.match(r"\s*(?:note:\s*estimated from web research|demand audit|restored to history|quote:)", line, re.I))
     if ROLE_GUESS_LEAD.search(body):
         return "role_guess"
     if NEW_ONLY.search(body):

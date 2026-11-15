@@ -279,8 +279,10 @@ class Keys(unittest.TestCase):
         self.assertEqual(n("Summary: Likely trader/competitor: resells Leaf packs.\nNote: Estimated from web research; not confirmed by the buyer."), "role_guess")
         self.assertEqual(n("Premium new cylindrical cells (Molicel P42A); little fit for used EV modules except possibly cell-level reuse."), "new_only")
         self.assertEqual(n("Small cylindrical cells only; poor fit."), "new_only")
-        self.assertEqual(n("Surplus new cells or modules, including excess inventory."), "new_only")
-        self.assertEqual(n("Summary: Bid on CALB cells: brand-new cells stored since 2022."), "new_only")
+        self.assertEqual(n("Note: Only unused, non-repurposed products; not second-life or dismantled modules."), "new_only")
+        # new or surplus stock they ask for is still a want unless the note says new only
+        self.assertIsNone(n("Summary: EVE LF100MA Prismatic Cells LFP 100 Ah, New Surplus"))
+        self.assertIsNone(n("Summary: Bid on CALB cells: brand-new cells stored since 2022."))
         # a real want with a side remark, and the research boilerplate, are still wants
         self.assertIsNone(n("Salvaged/used NMC modules and packs from Volt, Leaf, i3 for resale. Could be a volume outlet for tested second-life modules."))
         self.assertIsNone(n("Summary: Donor modules/packs for Tesla and Bolt HV battery service.\nNote: Estimated from web research; not confirmed by the buyer. Ask on first contact."))
