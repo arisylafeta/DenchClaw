@@ -131,7 +131,10 @@ def text_numbers(text):
     clean = ISO_DATE.sub(" ", str(text or ""))
     numbers = set()
     for token in re.findall(r"\d+(?:[.,]\d+)*", clean):
-        for variant in (token.replace(",", ""), token.replace(",", ".")):
+        variants = [token.replace(",", ""), token.replace(",", ".")]
+        if re.fullmatch(r"\d{1,3}(?:[.,]\d{3})+", token):
+            variants.append(re.sub(r"[.,]", "", token))  # 10.000 and 10,000 are ten thousand
+        for variant in variants:
             try:
                 numbers.add(float(variant))
             except ValueError:
@@ -193,9 +196,19 @@ def part_fold(value):
     return fold(value).replace("o", "0")
 
 
+GENERIC_MODEL_WORDS = {"model", "series", "gen", "generation", "phase", "type", "class"}
+
+
 def code_grounded(value, text):
-    """A model name, platform or part number as the text writes it, ignoring case, spaces and hyphens."""
-    return bool(fold(value)) and fold(value) in fold(text)
+    """A model name or platform as the text writes it, ignoring case, spaces and hyphens. Slash shorthand counts:
+    \"Model S/X\" holds Model S, because the S stands in the text as its own word."""
+    if not fold(value):
+        return False
+    if fold(value) in fold(text):
+        return True
+    parts = words(value) - GENERIC_MODEL_WORDS
+    return bool(parts) and len(parts) <= 2 and parts <= words(text) and all(
+        len(part) > 1 or re.search(rf"(?<![a-z0-9]){part}(?![a-z0-9])", str(text).lower()) for part in parts)
 
 
 SHORTHAND = re.compile(r"([A-Za-z0-9][A-Za-z0-9-]{4,})((?:\s*[/,]\s*[A-Za-z0-9-]{2,8})+)")
@@ -300,7 +313,7 @@ def clean_product(raw):
         if product[key] is not None and product[key] not in allowed:
             raise Rejected(f"bad_value:{key}")
     if product["status"] is None:
-        raise Rejected("bad_value:status")
+        product["status"] = "asked"  # the note did not say how firm; the line kind comes from the source, not from this
     if product["kwh_min"] is not None and product["kwh_max"] is not None and product["kwh_min"] > product["kwh_max"]:
         raise Rejected("bad_value:kwh_range")
     if product["quote"] is None:
@@ -727,14 +740,19 @@ def ts_key_table(products, tsx=None):
 
 def pick_key(keys, fact):
     """The most specific key the TEXT proves. The app's builder can match a pack family on a model alone, which
-    quietly supplies a capacity the buyer never stated; a part number or one stated kWh figure is needed for a
-    part, pack, model or cell key, otherwise the broad key (make-scoped when a make is stated) is used."""
-    if fact["ts"].get("partNumbers"):
-        return keys[0]
-    single = fact["ts"].get("kwh") is not None or fact["ts"].get("cellMaker")
-    if single:
-        return keys[0]
-    return next((k for k in keys if k["level"] == "broad"), keys[-1])
+    quietly supplies a capacity the buyer never stated, and it reads one kWh figure as a pack's capacity whatever the
+    format. So: a part number gives a part key; one stated kWh figure on a pack, a system or an unstated format gives
+    a pack or model key; a cell maker plus model gives a cell key; everything else is the broad key (make-scoped when
+    a make is stated)."""
+    ts = fact["ts"]
+    allowed = {"broad"}
+    if ts.get("partNumbers"):
+        allowed.add("part")
+    if ts.get("kwh") is not None and ts.get("format") in (None, "pack", "system"):
+        allowed |= {"pack", "model"}
+    if ts.get("cellMaker") and ts.get("model"):
+        allowed.add("cell")
+    return next((k for k in keys if k["level"] in allowed), keys[-1])
 
 
 def key_lines(cur, product, builder="sql", ts_table=None):

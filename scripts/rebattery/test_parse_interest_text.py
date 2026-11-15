@@ -88,6 +88,19 @@ class Validation(unittest.TestCase):
         self.reject(product(make="Toyota", model="Leaf", quote="Used Leaf packs"), "Used Leaf packs for reuse", "ungrounded:make")
         self.reject(product(make="Ford", model="Transit", quote="Transit packs"), "Transit packs", "ungrounded:make")
 
+    def test_slash_shorthand_models_and_european_thousands(self):
+        kept = self.p.validate_product(product(make="Tesla", model="Model X", quote="Tesla S/X modules"), "Used Tesla S/X modules for repair")
+        self.assertEqual(kept["model"], "Model X")
+        self.reject(product(make="Tesla", model="Model 3", quote="Tesla S/X modules"), "Used Tesla S/X modules for repair", "ungrounded:model")
+        kept = self.p.validate_product(product(format="cell", quantity=10000, quantity_unit="cells", quote="10.000 single cell"), "10.000 single cell 18650")
+        self.assertEqual(kept["quantity"], 10000.0)
+        self.reject(product(format="pack", kwh_min=774, kwh_max=774, quote="77.4 kWh packs"), "77.4 kWh packs", "ungrounded:kwh_min")
+
+    def test_a_note_without_a_status_defaults_to_asked(self):
+        raw = product(make="Tesla", quote="Tesla packs")
+        raw["status"] = None
+        self.assertEqual(self.p.validate_product(raw, "Tesla packs")["status"], "asked")
+
     def test_slash_shorthand_part_numbers_are_read_out(self):
         text = "Ioniq 5 37501-GI300/GI301/GI351; Kia EV6 37501-CV051/CV151"
         for part in ("37501-GI301", "37501GI351", "37501-CV151"):
@@ -205,6 +218,10 @@ class Keys(unittest.TestCase):
         self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Renault", "model": "Zoe", "kwhMin": 40, "kwhMax": 52}})["level"], "broad")
         self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Renault", "model": "Zoe", "kwh": 52}})["level"], "pack")
         self.assertEqual(self.p.pick_key(self.keys("part", "broad"), {"ts": {"partNumbers": ["X"]}})["level"], "part")
+        # a module's 5.3 kWh is not a pack's capacity, and cells have no pack family
+        self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Tesla", "model": "Model S", "kwh": 5.3, "format": "module"}})["level"], "broad")
+        self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Nissan", "model": "Leaf", "format": "cell", "cellMaker": "Nissan"}})["level"], "broad")
+        self.assertEqual(self.p.pick_key(self.keys("cell", "broad"), {"ts": {"make": "Molicel", "model": "P42A", "format": "cell", "cellMaker": "Molicel"}})["level"], "cell")
 
     def test_a_broad_line_must_add_something(self):
         line = {"level": "broad", "kwh_min": None, "kwh_max": None, "model": None, "raw_product": None}
