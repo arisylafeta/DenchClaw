@@ -8,6 +8,7 @@
 // A missing fact never rules anyone out. A disputed fact (a `conflict` field in the product key) is treated as
 // missing, because a disputed figure must not decide who is ruled out.
 import type { KeyFormat, ProductKey, ProductLine } from "./product-key";
+import { broaderKeysFor, productKeyLevel, type ProductFacts } from "./product-key-for";
 
 export type SupplyFacts = {
   title?: string | null;
@@ -49,12 +50,41 @@ export type BuyerFacts = {
   basis: string | null;
   lastTouch: string | null;
   dossier: DossierView | null;
+  /**
+   * Dated `buyer_interest` lines, current as of the ranking date. Absent or empty means today's ranking exactly:
+   * lines only add evidence, they never rule anyone out or lower a tier.
+   */
+  lines?: BuyerLine[] | null;
+};
+
+/** One `buyer_interest` line as the rules read it. Facts and dates only; expiry is checked against the ranking date. */
+export type BuyerLine = {
+  kind: string;
+  productKey: string;
+  make?: string | null;
+  model?: string | null;
+  format?: string | null;
+  chemistry?: string | null;
+  kwhMin?: number | null;
+  kwhMax?: number | null;
+  firstSeen: string;
+  lastSeen: string;
+  expiresOn?: string | null;
+  quantity?: number | null;
+  quantityUnit?: string | null;
+  price?: number | null;
+  priceCurrency?: string | null;
+  priceUnit?: string | null;
+  declineReason?: string | null;
 };
 
 export type RankedBuyer = {
   companyId: string;
   name: string;
   productTier: number;
+  /** Kind rank and recency of the best fitting line; 0 when no line fits. Tie-breaks ahead of price. */
+  lineKind?: number;
+  lineRecency?: number;
   priceFit: number;
   priceBasis: number;
   priceMargin: number;
@@ -594,6 +624,161 @@ function lastTouchKey(value: string): number {
 
 export const isLead = (buyer: BuyerFacts) => buyer.basis !== "stated" && (!buyer.stage || buyer.stage === "Identified");
 
+// --- Interest lines as evidence ----------------------------------------------------------------------------------
+
+/** Best line kind first. Used as the first tie-break after the product tier. */
+export const LINE_KIND_RANK: Record<string, number> = {
+  bought: 6, ask: 5, standing: 4, saved_search: 3, interest: 2, inferred: 1,
+};
+const LINE_KIND_LABEL: Record<string, string> = {
+  bought: "Bought", ask: "Ask", standing: "Standing want", saved_search: "Saved search", interest: "Interest",
+  inferred: "Inferred", declined: "Declined",
+};
+const LINE_KWH_TOLERANCE = 0.15;
+
+export type FitLine = { line: BuyerLine; tier: number; kindRank: number; recency: number };
+export type LineEvidence = {
+  /** Tier the best fitting line gives; 0 when none lifts. The product tier is the better of this and today's. */
+  tier: number;
+  kindRank: number;
+  recency: number;
+  best: FitLine | null;
+  /** Up to two more fitting lines worth naming. */
+  also: FitLine[];
+  /** A declined line on one of the lot's specific keys. */
+  declined: BuyerLine | null;
+};
+const NO_EVIDENCE: LineEvidence = { tier: 0, kindRank: 0, recency: 0, best: null, also: [], declined: null };
+
+/** The lot line as the facts the product key is built from; the same builder buyer lines were keyed with. */
+function supplyProductFacts(supply: SupplyFacts): ProductFacts {
+  return {
+    partNumbers: supply.partNumber ? [supply.partNumber] : null,
+    make: supply.make ?? null, model: supply.model ?? null,
+    format: supply.format ?? null, chemistry: supply.chemistry ?? null,
+    kwh: supply.kwh ?? null, kwhMin: supply.kwhMin ?? null, kwhMax: supply.kwhMax ?? null,
+  };
+}
+
+const chainCache = new WeakMap<SupplyFacts, string[]>();
+/** The keys this lot line counts as, most specific first, ending with the plain broad key. */
+function lotKeys(supply: SupplyFacts): string[] {
+  let chain = chainCache.get(supply);
+  if (!chain) {
+    chain = broaderKeysFor(supplyProductFacts(supply));
+    chainCache.set(supply, chain);
+  }
+  return chain;
+}
+
+const day10 = (value: string | null | undefined) => (value ?? "").slice(0, 10);
+const dateNumber = (value: string) => Number(day10(value).replace(/-/g, "")) || 0;
+
+/** A line counts when it has started and has not expired as of the ranking date. */
+function lineLive(line: BuyerLine, asOf: string): boolean {
+  if (line.firstSeen && day10(line.firstSeen) > asOf) { return false; }
+  return !line.expiresOn || day10(line.expiresOn) >= asOf;
+}
+
+/** A kWh range on a broad line fits when the lot's capacity is inside it, with today's 15% tolerance. */
+function lineKwhFits(line: BuyerLine, supply: SupplyFacts): boolean {
+  const lo = line.kwhMin ?? null;
+  const hi = line.kwhMax ?? null;
+  const range = supplyRange(supply);
+  if (!range || (lo == null && hi == null)) { return true; }
+  if (lo != null && range[1] < lo * (1 - LINE_KWH_TOLERANCE)) { return false; }
+  if (hi != null && range[0] > hi * (1 + LINE_KWH_TOLERANCE)) { return false; }
+  return true;
+}
+
+/**
+ * What the buyer's current lines say about this lot line. A line fits when its key is one the lot counts as
+ * (the lot's own key or any broader one); a broad line also needs the lot's kWh inside its range. The tier follows
+ * the key level: part 4, pack/model/cell 3, make-scoped broad 2, plain broad 1. A broad `inferred` line is a copy
+ * of the generic buy box, so it never lifts a tier or leads the row text.
+ */
+export function lineEvidence(supply: SupplyFacts, buyer: BuyerFacts, asOf: string): LineEvidence {
+  const lines = buyer.lines;
+  if (!lines?.length) { return NO_EVIDENCE; }
+  const chain = lotKeys(supply);
+  const plainBroad = chain[chain.length - 1];
+  const fits: FitLine[] = [];
+  let declined: BuyerLine | null = null;
+  for (const line of lines) {
+    if (!lineLive(line, asOf) || !chain.includes(line.productKey)) { continue; }
+    const level = productKeyLevel(line.productKey);
+    if (line.kind === "declined") {
+      if (level !== "broad" && (!declined || day10(line.lastSeen) > day10(declined.lastSeen))) { declined = line; }
+      continue;
+    }
+    if (level === "broad" && !lineKwhFits(line, supply)) { continue; }
+    if (level === "broad" && line.kind === "inferred") { continue; }
+    const tier = level === "part" ? 4 : level === "broad" ? (line.productKey === plainBroad ? 1 : 2) : 3;
+    fits.push({ line, tier, kindRank: LINE_KIND_RANK[line.kind] ?? 0, recency: dateNumber(line.lastSeen) });
+  }
+  if (!fits.length && !declined) { return NO_EVIDENCE; }
+  fits.sort((a, b) => b.tier - a.tier || b.kindRank - a.kindRank || b.recency - a.recency);
+  const best = fits[0] ?? null;
+  return {
+    tier: best?.tier ?? 0,
+    kindRank: best?.kindRank ?? 0,
+    recency: best?.recency ?? 0,
+    best,
+    also: fits.slice(1, 3),
+    declined,
+  };
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "16 Jun" in the ranking year, "16 Jun 2025" otherwise. */
+function shortDate(value: string, asOf: string): string {
+  const text = day10(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!match) { return text; }
+  const base = `${Number(match[3])} ${MONTHS[Number(match[2]) - 1] ?? match[2]}`;
+  return match[1] === asOf.slice(0, 4) ? base : `${base} ${match[1]}`;
+}
+
+/** "Audi MEB 82 kWh, packs, NMC" from the facts the line stores. */
+function lineProduct(line: BuyerLine): string {
+  const parts: string[] = [];
+  const vehicle = [line.make, line.model].filter(Boolean).join(" ");
+  if (vehicle) { parts.push(vehicle); }
+  if (line.format) { parts.push(line.format.toLowerCase().replace(/s?$/, "s")); }
+  if (line.chemistry) { parts.push(line.chemistry.toUpperCase()); }
+  const lo = line.kwhMin ?? null;
+  const hi = line.kwhMax ?? null;
+  if (lo != null && hi != null) { parts.push(lo === hi ? `${lo} kWh` : `${lo}-${hi} kWh`); }
+  else if (lo != null) { parts.push(`${lo}+ kWh`); }
+  else if (hi != null) { parts.push(`up to ${hi} kWh`); }
+  return parts.length ? parts.join(", ") : line.productKey.replace(/^[a-z]+:/, "").replace(/-/g, " ");
+}
+
+const PRICE_UNIT_TEXT: Record<string, string> = { kWh: "/kWh", pack: "/pack", cell: "/cell" };
+
+/** One line as one phrase: what, when, and the quantity and price when the line has them. */
+export function lineText(line: BuyerLine, asOf: string): string {
+  const label = LINE_KIND_LABEL[line.kind] ?? line.kind;
+  const product = lineProduct(line);
+  const when = line.kind === "saved_search" ? `active since ${shortDate(line.firstSeen, asOf)}` : shortDate(line.lastSeen, asOf);
+  const quantity = line.quantity != null && line.quantityUnit ? `${line.quantity} ${line.quantityUnit}` : null;
+  const price = line.price != null && line.priceCurrency
+    ? `${line.priceCurrency} ${line.price.toLocaleString("en-GB")}${PRICE_UNIT_TEXT[line.priceUnit ?? ""] ?? ""}` : null;
+  return [`${label}: ${product}`, when, quantity, price].filter(Boolean).join(", ");
+}
+
+/** The row text a line gives: the best specific line, then up to two more. Null when no line fits. */
+function lineFits(evidence: LineEvidence, asOf: string, lead: string | null): string | null {
+  if (!evidence.best) { return null; }
+  // A weaker line than today's tier does not lead the row: today's wording stays first and the line follows as "Also".
+  const all = [evidence.best, ...evidence.also].map((fit) => lineText(fit.line, asOf));
+  if (lead) { return `${lead}. Also: ${all.slice(0, 2).join("; ")}`; }
+  return all.length > 1 ? `${all[0]}. Also: ${all.slice(1).join("; ")}` : all[0];
+}
+
+const declinedCheck = (line: BuyerLine, asOf: string) =>
+  `Declined before: ${line.declineReason?.trim() || "no reason given"}, ${shortDate(line.lastSeen, asOf)}`;
+
 const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
@@ -607,14 +792,18 @@ export function rankA1(supply: SupplyFacts, buyers: BuyerFacts[], asOf: string, 
       continue;
     }
     const price = priceKey(supply, buyer);
+    const evidence = lineEvidence(supply, buyer, asOf);
     ranked.push({
       companyId: buyer.id, name: buyer.name,
-      productTier: productTier(supply, buyer, asOf, bodyFallback),
+      productTier: Math.max(productTier(supply, buyer, asOf, bodyFallback), evidence.tier),
+      lineKind: evidence.kindRank, lineRecency: evidence.recency,
       priceFit: price[0], priceBasis: price[1], priceMargin: price[2],
       stage: buyer.stage, basis: buyer.basis, lastTouch: lastTouch(buyer, asOf), isLead: isLead(buyer),
     });
   }
   ranked.sort((a, b) => b.productTier - a.productTier
+    || (b.lineKind ?? 0) - (a.lineKind ?? 0)
+    || (b.lineRecency ?? 0) - (a.lineRecency ?? 0)
     || b.priceFit - a.priceFit
     || b.priceBasis - a.priceBasis
     || b.priceMargin - a.priceMargin
@@ -751,14 +940,19 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
       const out = ruleOut(supply, buyer);
       if (out) { lastRule = out; continue; }
       const price = priceKey(supply, buyer);
+      const evidence = lineEvidence(supply, buyer, asOf);
       const candidate: RankedBuyer = {
         companyId: buyer.id, name: buyer.name,
-        productTier: productTier(supply, buyer, asOf), priceFit: price[0], priceBasis: price[1], priceMargin: price[2],
+        productTier: Math.max(productTier(supply, buyer, asOf), evidence.tier),
+        lineKind: evidence.kindRank, lineRecency: evidence.recency,
+        priceFit: price[0], priceBasis: price[1], priceMargin: price[2],
         stage: buyer.stage, basis: buyer.basis, lastTouch: lastTouch(buyer, asOf), isLead: isLead(buyer),
       };
-      if (!best || candidate.productTier > best.row.productTier
-        || (candidate.productTier === best.row.productTier && candidate.priceFit > best.row.priceFit)
-        || (candidate.productTier === best.row.productTier && candidate.priceFit === best.row.priceFit && candidate.priceMargin > best.row.priceMargin)) {
+      if (!best || (candidate.productTier - best.row.productTier
+        || (candidate.lineKind ?? 0) - (best.row.lineKind ?? 0)
+        || (candidate.lineRecency ?? 0) - (best.row.lineRecency ?? 0)
+        || candidate.priceFit - best.row.priceFit
+        || candidate.priceMargin - best.row.priceMargin) > 0) {
         best = { row: candidate, line: index };
       }
     }
@@ -773,12 +967,17 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
     const supply = supplies[best.line];
     const size = supply.kwhMin != null ? `${supply.kwhMin}-${supply.kwhMax} kWh` : supply.kwh != null ? `${Math.round(supply.kwh * 100) / 100} kWh` : "";
     const product = [line ? kwhText(line) : size, supply.format, supply.chemistry ? supply.chemistry.toUpperCase() : null].filter(Boolean).join(" ");
-    const fits = [TIER_LABEL[best.row.productTier], product].filter(Boolean).join(": ");
+    const evidence = lineEvidence(supply, buyer, asOf);
+    // The best specific line is the reason when there is one; otherwise today's wording.
+    const today = [TIER_LABEL[best.row.productTier], product].filter(Boolean).join(": ");
+    const fits = lineFits(evidence, asOf, evidence.tier >= best.row.productTier ? null : today) ?? today;
+    const checks = line && options.key ? checksFor(options.key, line, supply, buyer) : checksFor(options.key ?? emptyKey(), emptyLine(), supply, buyer);
+    if (evidence.declined) { checks.push(declinedCheck(evidence.declined, asOf)); }
     rows.set(buyer.id, {
       ...best.row,
       rank: 0,
       fits,
-      checks: line && options.key ? checksFor(options.key, line, supply, buyer) : checksFor(options.key ?? emptyKey(), emptyLine(), supply, buyer),
+      checks,
       priceBand: options.key ? priceBand(options.key, supply, buyer) : null,
       hasDossier: hasDossier(buyer),
       userVerdict: verdict,
@@ -788,6 +987,8 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
   const ordered = [...rows.values()].toSorted((a, b) =>
     Number(b.userVerdict === "shortlist") - Number(a.userVerdict === "shortlist")
     || b.productTier - a.productTier
+    || (b.lineKind ?? 0) - (a.lineKind ?? 0)
+    || (b.lineRecency ?? 0) - (a.lineRecency ?? 0)
     || b.priceFit - a.priceFit
     || b.priceBasis - a.priceBasis
     || b.priceMargin - a.priceMargin
