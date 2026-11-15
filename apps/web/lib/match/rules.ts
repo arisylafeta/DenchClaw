@@ -75,6 +75,10 @@ export type BuyerLine = {
   price?: number | null;
   priceCurrency?: string | null;
   priceUnit?: string | null;
+  /** `target` for a buyer's wanted price (never a hard limit), `bid` and `paid` for what they offered or paid. */
+  priceBasis?: string | null;
+  /** A flexible upper figure stated beside a target: "under $30/kWh, flexible up to $50". Shown, never filtered on. */
+  priceMax?: number | null;
   declineReason?: string | null;
 };
 
@@ -636,6 +640,8 @@ const LINE_KIND_LABEL: Record<string, string> = {
   inferred: "Inferred", declined: "Declined",
 };
 const LINE_KWH_TOLERANCE = 0.15;
+/** `model:kia-ev3` (no kWh suffix) covers every pack size of the model, so the line's own kWh range still has to fit. */
+const isModelWideKey = (key: string) => key.startsWith("model:") && !/kwh$/.test(key);
 
 export type FitLine = { line: BuyerLine; tier: number; kindRank: number; recency: number };
 export type LineEvidence = {
@@ -724,7 +730,7 @@ export function lineEvidence(supply: SupplyFacts, buyer: BuyerFacts, asOf: strin
       if (level !== "broad" && (!declined || day10(line.lastSeen) > day10(declined.lastSeen))) { declined = line; }
       continue;
     }
-    if (level === "broad" && !lineKwhFits(line, supply)) { continue; }
+    if ((level === "broad" || isModelWideKey(line.productKey)) && !lineKwhFits(line, supply)) { continue; }
     if (level === "broad" && line.kind === "inferred") { continue; }
     const tier = level === "part" ? 4 : level === "broad" ? (plainBroad.has(line.productKey) ? 1 : 2) : 3;
     fits.push({ line, tier, kindRank: LINE_KIND_RANK[line.kind] ?? 0, recency: dateNumber(line.lastSeen) });
@@ -798,6 +804,18 @@ function lineProduct(line: BuyerLine): string {
 }
 
 const PRICE_UNIT_TEXT: Record<string, string> = { kWh: "/kWh", pack: "/pack", cell: "/cell" };
+const CURRENCY_SYMBOL: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
+
+/** A target price reads \"target $30/kWh, flexible to $50\": a target is a wish, never a limit, so the flexible figure is said beside it. */
+function linePrice(line: BuyerLine): string[] {
+  if (line.price == null || !line.priceCurrency) { return []; }
+  const unit = PRICE_UNIT_TEXT[line.priceUnit ?? ""] ?? "";
+  if (line.priceBasis !== "target") { return [`${line.priceCurrency} ${line.price.toLocaleString("en-GB")}${unit}`]; }
+  const symbol = CURRENCY_SYMBOL[line.priceCurrency] ?? `${line.priceCurrency} `;
+  const money = (value: number) => `${symbol}${value.toLocaleString("en-GB")}`;
+  const main = `target ${money(line.price)}${unit}`;
+  return line.priceMax != null && line.priceMax > line.price ? [main, `flexible to ${money(line.priceMax)}`] : [main];
+}
 
 /** One line as one phrase: what, when, and the quantity and price when the line has them. */
 export function lineText(line: BuyerLine, asOf: string): string {
@@ -805,9 +823,7 @@ export function lineText(line: BuyerLine, asOf: string): string {
   const product = lineProduct(line);
   const when = line.kind === "saved_search" ? `active since ${shortDate(line.firstSeen, asOf)}` : shortDate(line.lastSeen, asOf);
   const quantity = line.quantity != null && line.quantityUnit ? `${line.quantity} ${line.quantityUnit}` : null;
-  const price = line.price != null && line.priceCurrency
-    ? `${line.priceCurrency} ${line.price.toLocaleString("en-GB")}${PRICE_UNIT_TEXT[line.priceUnit ?? ""] ?? ""}` : null;
-  return [`${label}: ${product}`, when, quantity, price].filter(Boolean).join(", ");
+  return [`${label}: ${product}`, when, quantity, ...linePrice(line)].filter(Boolean).join(", ");
 }
 
 /** The row text a line gives: the best specific line, then up to two more. Null when no line fits. */

@@ -244,6 +244,29 @@ describe("buyer interest lines as evidence", () => {
       expect(range(10, 40)).toBeNull();
     });
 
+    it("never filters or orders on a target price or its flexible figure", () => {
+      const at = (price: number | null, priceMax: number | null) => rankBuyers(supplies, [plain("b", [line({
+        kind: "interest", productKey: "part:SU001B5189", price, priceMax, priceCurrency: price == null ? null : "EUR", priceUnit: price == null ? null : "kWh", priceBasis: price == null ? null : "target",
+      })])], { asOf: AS_OF_LIVE, key }).ranked[0];
+      const none = at(null, null);
+      for (const row of [at(1, 2), at(30, 50), at(5000, 9000)]) {
+        expect(row.productTier).toBe(none.productTier);
+        expect([row.priceFit, row.priceBasis, row.priceMargin]).toEqual([none.priceFit, none.priceBasis, none.priceMargin]);
+        expect(row.ruledOut ?? null).toBe(none.ruledOut ?? null);
+      }
+    });
+
+    it("fits a model-level line on a lot of that model at any size, and still checks the line's kWh range", () => {
+      const ev3 = { ...lot, partNumber: null, make: "Kia", model: "Kia EV3 81.4 kWh pack", chemistry: "NMC", kwh: 81.4 };
+      const fit = (lines: BuyerLine[]) => lineEvidence(ev3, plain("b", lines), AS_OF_LIVE).best;
+      expect(fit([line({ kind: "interest", productKey: "model:kia-ev3" })])?.tier).toBe(3);
+      expect(fit([line({ kind: "interest", productKey: "model:kia-ev4" })])).toBeNull();
+      expect(fit([line({ kind: "interest", productKey: "model:kia-ev3", kwhMin: 50, kwhMax: 60 })])).toBeNull();
+      expect(fit([line({ kind: "interest", productKey: "model:kia-ev3", kwhMin: 70, kwhMax: 90 })])).not.toBeNull();
+      // A model with a stated size is still matched on that size alone.
+      expect(fit([line({ kind: "interest", productKey: "model:kia-ev3-58kwh" })])).toBeNull();
+    });
+
     it("ignores an expired line and a line that has not started", () => {
       expect(lineEvidence(lot, plain("b", [line({ expiresOn: "2026-11-14" })]), AS_OF_LIVE).best).toBeNull();
       expect(lineEvidence(lot, plain("b", [line({ expiresOn: "2026-11-15" })]), AS_OF_LIVE).best).not.toBeNull();
@@ -400,6 +423,13 @@ describe("buyer interest lines as evidence", () => {
       ]);
       const row = rankBuyers(supplies, [rich], { asOf: AS_OF_LIVE, key }).ranked[0];
       expect(row.fits).toBe("Bought: Toyota Proace, packs, 50 kWh, 16 Jun, 3 packs, GBP 2,950/pack. Also: Ask: packs, 2 Sep; Saved search: packs, active since 3 Oct");
+    });
+
+    it("shows a target price with its flexible figure, and a plain price as before", () => {
+      const target = plain("t", [line({ kind: "interest", productKey: "part:SU001B5189", price: 30, priceCurrency: "USD", priceUnit: "kWh", priceBasis: "target", priceMax: 50 })]);
+      expect(rankBuyers(supplies, [target], { asOf: AS_OF_LIVE, key }).ranked[0].fits).toMatch(/, target \$30\/kWh, flexible to \$50$/);
+      const bare = plain("b", [line({ kind: "interest", productKey: "part:SU001B5189", price: 30, priceCurrency: "EUR", priceUnit: "kWh", priceBasis: "target" })]);
+      expect(rankBuyers(supplies, [bare], { asOf: AS_OF_LIVE, key }).ranked[0].fits).toMatch(/, target €30\/kWh$/);
     });
 
     it("names no line when the only fit is a plain chemistry-and-format line the buy box already states", () => {
