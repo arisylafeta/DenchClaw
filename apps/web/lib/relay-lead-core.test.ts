@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleLead, asksFor, checkLeadReply, cleanAnswer, cleanLeadState, EMPTY_STATE, leadChips, leadFirstName, numbersKnown, priceWarning, questionId, quoteIn, verifyLead, verifyPolish,
+import { assembleLead, asksFor, lotByBar, checkLeadReply, cleanAnswer, cleanLeadState, EMPTY_STATE, leadChips, leadFirstName, numbersKnown, priceWarning, questionId, quoteIn, verifyLead, verifyPolish,
   type LeadData, type LeadState } from "./relay-lead-core";
 
 // A made-up seller lead in the shape of the real ones: a broker with a lot overseas, three standard questions.
@@ -364,5 +364,37 @@ describe("verifyPolish", () => {
   });
   it("turns a dash into a comma and drops quote marks around the answer", () => {
     expect(polish("“Yes, I can check our network — nothing fits right now.”")).toBe("Yes, I can check our network, nothing fits right now.");
+  });
+});
+
+describe("the bulk bar (400 kWh, or €20k when priced)", () => {
+  const email = "Hello, we have 10 Powerpack 2 modules of 5.2 kWh each in Las Vegas, asking $21,500 for the lot. Also 120 modules at 6.6 kWh per module.";
+  const read = (extra: Record<string, unknown>) => verifyLead({ kind: "seller_lead", lot: "bulk", unit: "modules", ...extra }, email);
+  it("makes a stated lot under the bar small, even when the reader called it bulk", () => {
+    const r = read({ size_kwh: 52, size_quote: "10 Powerpack 2 modules of 5.2 kWh each", value_eur: 18275, value_quote: "asking $21,500 for the lot" });
+    expect(r.lot).toBe("small");
+    expect(r.size_kwh).toBe(52);
+  });
+  it("keeps a lot that clears either bar", () => {
+    expect(read({ size_kwh: 792, size_quote: "120 modules at 6.6 kWh per module" }).lot).toBe("bulk");
+    expect(read({ size_kwh: 52, size_quote: "10 Powerpack 2 modules of 5.2 kWh each", value_eur: 25000, value_quote: "asking $21,500 for the lot" }).lot).toBe("bulk");
+  });
+  it("leaves the reader's call when nothing is stated, and keeps small-format small", () => {
+    expect(read({}).lot).toBe("bulk");
+    expect(read({ lot: "unclear" }).lot).toBe("unclear");
+    expect(read({ lot: "small", size_kwh: 768, size_quote: "120 modules at 6.6 kWh per module" }).lot).toBe("small");
+  });
+  it("ignores a size or price with no words from the email behind it", () => {
+    const r = read({ size_kwh: 5000, size_quote: "5 MWh of packs", value_eur: 90000, value_quote: null });
+    expect(r.size_kwh).toBeNull();
+    expect(r.value_eur).toBeNull();
+    expect(r.lot).toBe("bulk");
+  });
+  it("lotByBar on its own", () => {
+    expect(lotByBar("unclear", 399, null)).toBe("small");
+    expect(lotByBar("unclear", 400, null)).toBe("bulk");
+    expect(lotByBar("unclear", null, 19999)).toBe("small");
+    expect(lotByBar("unclear", 100, 20000)).toBe("bulk");
+    expect(lotByBar("unclear", null, null)).toBe("unclear");
   });
 });

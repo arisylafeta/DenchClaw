@@ -232,7 +232,20 @@ export function leadFirstName(fromName: string | null | undefined, fromEmail: st
 }
 
 export type LeadReading = { kind: "seller_lead" | "buyer_lead" | "other"; lot: "bulk" | "small" | "unclear"; why: string; unit: LeadUnit; role: LeadRole;
-  summary: string | null; facts: LeadFact[]; asked: LeadAsked[]; other: LeadOther[] };
+  summary: string | null; facts: LeadFact[]; asked: LeadAsked[]; other: LeadOther[]; size_kwh: number | null; value_eur: number | null };
+
+/** Alex, 15 Nov 2026: a bulk trade lead is 400 kWh or more, or €20k or more when a price is given. Anything smaller goes to
+ * the marketplace. With neither stated it stays a possible lead until asked. */
+export const BULK_MIN_KWH = 400;
+export const BULK_MIN_EUR = 20_000;
+
+/** The lot as the bar sees it: "small" when what is stated falls under it, "bulk" when something stated clears it,
+ * otherwise the reader's own call. */
+export function lotByBar(lot: LeadReading["lot"], sizeKwh: number | null, valueEur: number | null): LeadReading["lot"] {
+  if ((sizeKwh !== null && sizeKwh >= BULK_MIN_KWH) || (valueEur !== null && valueEur >= BULK_MIN_EUR)) return lot === "small" ? "small" : "bulk";
+  if (sizeKwh !== null || valueEur !== null) return "small";
+  return lot;
+}
 
 const str = (v: unknown, max = 200) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
 const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === "object") : []);
@@ -268,8 +281,12 @@ export function verifyLead(raw: Record<string, unknown>, email: string, attached
   const other = [...asked.filter((a) => !fits(a.topic)), ...list(raw.other_questions).filter((q) => quoteIn(q.quote, email) && str(q.quote, 300).length >= 8).slice(0, 4)]
     .map((q) => str(q.quote, 300)).filter((quote) => !quotes.has(quote) && !!quotes.add(quote)).map((quote, i) => ({ id: `other:${i + 1}`, quote }));
   const summary = str(raw.summary, 160);
-  return { kind, lot: raw.lot === "bulk" || raw.lot === "small" ? raw.lot : "unclear", why: str(raw.why, 120), unit, role,
-    summary: summary && numbersKnown(summary, all) ? summary : null, facts, asked: asked.filter((a) => fits(a.topic)), other };
+  // A size or value counts only with words from the email behind it; the reader may work the total out from them.
+  const amount = (v: unknown, quote: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 && quoteIn(quote, all) && /\d/.test(str(quote)) ? v : null);
+  const size_kwh = amount(raw.size_kwh, raw.size_quote), value_eur = amount(raw.value_eur, raw.value_quote);
+  const lot = lotByBar(raw.lot === "bulk" || raw.lot === "small" ? raw.lot : "unclear", size_kwh, value_eur);
+  return { kind, lot, why: str(raw.why, 120), unit, role,
+    summary: summary && numbersKnown(summary, all) ? summary : null, facts, asked: asked.filter((a) => fits(a.topic)), other, size_kwh, value_eur };
 }
 
 /** The facts for the "We have" row, most telling first. */
