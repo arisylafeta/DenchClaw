@@ -411,3 +411,12 @@ describe("cardLot", () => {
     expect(cardLot(r({ lot: "bulk" }), true)).toBe("bulk");
   });
 });
+
+describe("the bulk bar, quotes in other words", () => {
+  it("takes a size whose figures are all in the email, and drops one whose figures are not", () => {
+    const email = "We are looking to purchase TWO complete high-voltage EV battery packs, 60–80 kWh each.";
+    const read = (q: string) => verifyLead({ kind: "buyer_lead", lot: "unclear", size_kwh: 160, size_quote: q }, email);
+    expect(read("two packs of 60-80 kWh").lot).toBe("small");
+    expect(read("two packs of 90 kWh").size_kwh).toBeNull();
+  });
+});

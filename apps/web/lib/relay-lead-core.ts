@@ -290,7 +290,8 @@ export function verifyLead(raw: Record<string, unknown>, email: string, attached
     .map((q) => str(q.quote, 300)).filter((quote) => !quotes.has(quote) && !!quotes.add(quote)).map((quote, i) => ({ id: `other:${i + 1}`, quote }));
   const summary = str(raw.summary, 160);
   // A size or value counts only with words from the email behind it; the reader may work the total out from them.
-  const amount = (v: unknown, quote: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 && quoteIn(quote, all) && /\d/.test(str(quote)) ? v : null);
+  // Every figure in its quote must be in the email; the quote's wording may differ ("60-80 kWh" for "60–80 kWh").
+  const amount = (v: unknown, quote: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 && /\d/.test(str(quote)) && numbersKnown(str(quote), all) ? v : null);
   const size_kwh = amount(raw.size_kwh, raw.size_quote), value_eur = amount(raw.value_eur, raw.value_quote);
   const lot = lotByBar(raw.lot === "bulk" || raw.lot === "small" ? raw.lot : "unclear", size_kwh, value_eur);
   return { kind, lot, why: str(raw.why, 120), unit, role,
