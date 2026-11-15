@@ -21,7 +21,8 @@ case "${1:-}" in
     fi
     docker run -d --rm --name "$NAME" -p "127.0.0.1:${PORT}:5432" \
       -e POSTGRES_PASSWORD=test -e POSTGRES_DB=denchclaw postgres:16 >/dev/null
-    for _ in $(seq 1 30); do docker exec "$NAME" pg_isready -U postgres -q && break; sleep 1; done
+    # The image starts a temporary server for its init scripts, then restarts; wait for the final one.
+    for _ in $(seq 1 60); do docker logs "$NAME" 2>&1 | grep -q 'init process complete' && docker exec "$NAME" pg_isready -U postgres -q && break; sleep 1; done
     # schema.sql, then migrations in file-name order (two files share the 003 prefix; both load).
     # A few early migrations (046_dismantler_stock_sync, 047_stock_opportunity_rejected) reference
     # crm_stock_opportunities, which 076 creates; a failed file is retried once after the rest, so the
