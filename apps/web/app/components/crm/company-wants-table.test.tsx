@@ -45,6 +45,19 @@ describe("Wants table", () => {
     expect(within(region).getByLabelText("Edit LFP, packs")).toBeInTheDocument();
   });
 
+  it("shows a target price with its flexible figure", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true, json: async () => ({ interests: [
+        line({ price: 30, price_max: 50, price_currency: "USD", price_unit: "kWh", price_basis: "target" }),
+        line({ id: "bi_3", price: 30, price_max: null, price_currency: "USD", price_unit: "kWh", price_basis: "target", label: "Other" }),
+      ] }),
+    });
+    render(<WantsTable companyId="co_1" />);
+    const region = screen.getByRole("region", { name: "Wants" });
+    await waitFor(() => expect(region).toHaveTextContent("USD 30 / kWh, flexible to 50"));
+    expect(region).toHaveTextContent("USD 30 / kWh");
+  });
+
   it("adds a want with the facts it was given", async () => {
     fetchMock
       .mockResolvedValueOnce({ ok: true, json: async () => ({ interests: [] }) })

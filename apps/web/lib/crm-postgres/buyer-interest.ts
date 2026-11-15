@@ -51,6 +51,8 @@ export type BuyerInterest = {
   price_currency: string | null;
   price_unit: string | null;
   price_basis: string | null;
+  /** A flexible upper figure beside a target price ("under $30/kWh, flexible up to $50"). A target is never a hard limit. */
+  price_max: number | null;
   source_refs: string[];
   expires_on: string | null;
   demand_id: string | null;
@@ -75,6 +77,7 @@ const SELECT = `select interest.id, interest.company_id, interest.person_id, int
   interest.kwh_min::float8 as kwh_min, interest.kwh_max::float8 as kwh_max,
   interest.first_seen::text, interest.last_seen::text, interest.quantity::float8 as quantity, interest.quantity_unit,
   interest.quantity_basis, interest.price::float8 as price, interest.price_currency, interest.price_unit, interest.price_basis,
+  interest.price_max::float8 as price_max,
   interest.source_refs, interest.expires_on::text, interest.demand_id, interest.offer_id, offer.bulk_listing_id as offer_listing_id,
   interest.saved_search_id, interest.decline_reason, interest.created_at::text, interest.updated_at::text
   from buyer_interest interest left join crm_bulk_offers offer on offer.id = interest.offer_id`;
@@ -145,6 +148,7 @@ export type InterestInput = {
   price_currency?: string | null;
   price_unit?: string | null;
   price_basis?: string | null;
+  price_max?: number | null;
   expires_on?: string | null;
   source_refs?: string[] | null;
 };
@@ -219,12 +223,16 @@ function clean(input: InterestInput, creating: boolean): Clean {
   if (kwhMin !== null && kwhMax !== null && kwhMin > kwhMax) {throw new InterestInvalid("Minimum kWh is above maximum kWh.");}
   const quantity = number(input.quantity, "Quantity");
   const price = number(input.price, "Price");
+  const priceMax = number(input.price_max, "Flexible price");
   const empty = (value: string | null) => value === null;
   if (empty(text(input.quantity_unit)) !== (quantity === null)) {
     throw new InterestInvalid("Give a quantity and its unit together, or neither.");
   }
   if (empty(text(input.price_currency)) !== (price === null) || empty(text(input.price_unit)) !== (price === null)) {
     throw new InterestInvalid("Give a price with its currency and unit, or none.");
+  }
+  if (priceMax !== null && (price === null || priceMax < price)) {
+    throw new InterestInvalid("A flexible price needs a price and must not be below it.");
   }
   const refs = (input.source_refs ?? []).map((ref) => String(ref).trim()).filter(Boolean);
   for (const ref of refs) {
@@ -249,6 +257,7 @@ function clean(input: InterestInput, creating: boolean): Clean {
     price_currency: oneOf(input.price_currency, CURRENCIES, "Currency"),
     price_unit: oneOf(input.price_unit, PRICE_UNITS, "Price unit"),
     price_basis: oneOf(input.price_basis, PRICE_BASES, "Price basis") ?? (price === null ? null : "target"),
+    price_max: priceMax,
     expires_on: isoDate(input.expires_on, "Expires on"),
     source_refs: refs,
     product_key: productKey,
@@ -283,8 +292,8 @@ export async function createBuyerInterest(companyId: string, input: InterestInpu
   const [row] = await queryPg<BuyerInterest>(
     `insert into buyer_interest (id, company_id, person_id, kind, ownership, product_key, product_key_level,
        make, model, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit, quantity_basis,
-       price, price_currency, price_unit, price_basis, source_refs, expires_on)
-     values ($1, $2, $3, $4, 'mastered', $5, $6, $7, $8, $9, $10, $11, $12, $13::date, $13::date, $14, $15, $16, $17, $18, $19, $20, $21, $22::date)
+       price, price_currency, price_unit, price_basis, price_max, source_refs, expires_on)
+     values ($1, $2, $3, $4, 'mastered', $5, $6, $7, $8, $9, $10, $11, $12, $13::date, $13::date, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23::date)
      on conflict (company_id, product_key, kind) where ownership = 'mastered' do update set
        person_id = coalesce(excluded.person_id, buyer_interest.person_id),
        make = coalesce(excluded.make, buyer_interest.make),
@@ -300,19 +309,20 @@ export async function createBuyerInterest(companyId: string, input: InterestInpu
        price_currency = coalesce(excluded.price_currency, buyer_interest.price_currency),
        price_unit = coalesce(excluded.price_unit, buyer_interest.price_unit),
        price_basis = coalesce(excluded.price_basis, buyer_interest.price_basis),
+       price_max = coalesce(excluded.price_max, buyer_interest.price_max),
        source_refs = coalesce((select array_agg(distinct ref order by ref) from unnest(buyer_interest.source_refs || excluded.source_refs) ref), '{}'),
        expires_on = greatest(coalesce(excluded.expires_on, buyer_interest.expires_on), buyer_interest.expires_on),
        last_seen = greatest(buyer_interest.last_seen, excluded.last_seen),
        updated_at = now()
      returning id, company_id, person_id, kind, ownership, product_key, product_key_level, make, model, format, chemistry,
        kwh_min::float8 as kwh_min, kwh_max::float8 as kwh_max, first_seen::text, last_seen::text, quantity::float8 as quantity,
-       quantity_unit, quantity_basis, price::float8 as price, price_currency, price_unit, price_basis, source_refs,
+       quantity_unit, quantity_basis, price::float8 as price, price_currency, price_unit, price_basis, price_max::float8 as price_max, source_refs,
        expires_on::text, demand_id, offer_id, null::text as offer_listing_id, saved_search_id, decline_reason,
        created_at::text, updated_at::text`,
     [randomUUID(), companyId, value.person_id, value.kind, value.product_key, value.product_key_level,
       value.make, value.model, value.format, value.chemistry, value.kwh_min, value.kwh_max,
       today, value.quantity, value.quantity_unit, value.quantity_basis, value.price, value.price_currency,
-      value.price_unit, value.price_basis, value.source_refs, expiryFor(value.kind as MasteredKind, today, value.expires_on ?? null)]);
+      value.price_unit, value.price_basis, value.price_max, value.source_refs, expiryFor(value.kind as MasteredKind, today, value.expires_on ?? null)]);
   return toLine(row, today);
 }
 
@@ -346,6 +356,7 @@ export async function updateBuyerInterest(companyId: string, id: string, input: 
     price_currency: pick("price_currency", current.price_currency),
     price_unit: pick("price_unit", current.price_unit),
     price_basis: pick("price_basis", current.price_basis),
+    price_max: pick("price_max", current.price_max),
     expires_on: pick("expires_on", current.expires_on),
     source_refs: pick("source_refs", current.source_refs),
   };
@@ -357,18 +368,18 @@ export async function updateBuyerInterest(companyId: string, id: string, input: 
     `update buyer_interest set person_id = $3, make = $4, model = $5, format = $6, chemistry = $7, kwh_min = $8, kwh_max = $9,
        quantity = $10, quantity_unit = $11, quantity_basis = $12, price = $13, price_currency = $14, price_unit = $15,
        price_basis = $16, expires_on = $17::date, source_refs = $18,
-       product_key = $19, product_key_level = $20, last_seen = greatest(last_seen, $21::date), updated_at = now()
+       product_key = $19, product_key_level = $20, last_seen = greatest(last_seen, $21::date), price_max = $22, updated_at = now()
      where id = $1 and company_id = $2 and ownership = 'mastered'
      returning id, company_id, person_id, kind, ownership, product_key, product_key_level, make, model, format, chemistry,
        kwh_min::float8 as kwh_min, kwh_max::float8 as kwh_max, first_seen::text, last_seen::text, quantity::float8 as quantity,
-       quantity_unit, quantity_basis, price::float8 as price, price_currency, price_unit, price_basis, source_refs,
+       quantity_unit, quantity_basis, price::float8 as price, price_currency, price_unit, price_basis, price_max::float8 as price_max, source_refs,
        expires_on::text, demand_id, offer_id, null::text as offer_listing_id, saved_search_id, decline_reason,
        created_at::text, updated_at::text`,
     [id, companyId, value.person_id, value.make, value.model, value.format, value.chemistry, value.kwh_min,
       value.kwh_max, value.quantity, value.quantity_unit, value.quantity_basis, value.price, value.price_currency,
       value.price_unit, value.price_basis, expiryFor(value.kind as MasteredKind, today, value.expires_on ?? null),
       value.source_refs, factsChanged ? value.product_key : current.product_key,
-      factsChanged ? value.product_key_level : current.product_key_level, today]);
+      factsChanged ? value.product_key_level : current.product_key_level, today, value.price_max]);
   return row ? toLine(row, today) : null;
 }
 
@@ -379,7 +390,7 @@ export async function expireBuyerInterest(companyId: string, id: string, today =
      where id = $1 and company_id = $2 and ownership = 'mastered'
      returning id, company_id, person_id, kind, ownership, product_key, product_key_level, make, model, format, chemistry,
        kwh_min::float8 as kwh_min, kwh_max::float8 as kwh_max, first_seen::text, last_seen::text, quantity::float8 as quantity,
-       quantity_unit, quantity_basis, price::float8 as price, price_currency, price_unit, price_basis, source_refs,
+       quantity_unit, quantity_basis, price::float8 as price, price_currency, price_unit, price_basis, price_max::float8 as price_max, source_refs,
        expires_on::text, demand_id, offer_id, null::text as offer_listing_id, saved_search_id, decline_reason,
        created_at::text, updated_at::text`,
     [id, companyId, today]);

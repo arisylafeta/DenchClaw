@@ -44,6 +44,27 @@ describe.skipIf(!TEST_URL)("buyer interest wants api", () => {
     expect(line.label).toBe("packs, LFP");
   });
 
+  it("keeps a flexible price beside a target price, edits it, and refuses one with no price or below it", async () => {
+    const line = await interests.createBuyerInterest(id("co1"), {
+      kind: "standing", chemistry: "NMC", format: "cell", price: 30, price_max: 50, price_currency: "USD", price_unit: "kWh",
+    }, TODAY);
+    expect(line).toMatchObject({ price: 30, price_max: 50, price_basis: "target", price_currency: "USD", product_key: "broad:nmc-cells" });
+    const raised = await interests.updateBuyerInterest(id("co1"), line.id, { price_max: 60 }, TODAY);
+    expect(raised).toMatchObject({ price: 30, price_max: 60, price_basis: "target" });
+    const cleared = await interests.updateBuyerInterest(id("co1"), line.id, { price_max: null }, TODAY);
+    expect(cleared?.price_max).toBeNull();
+    await expect(interests.createBuyerInterest(id("co1"), { kind: "standing", chemistry: "NMC", price_max: 50 }, TODAY))
+      .rejects.toThrow(/flexible price/i);
+    await expect(interests.createBuyerInterest(id("co1"), {
+      kind: "standing", chemistry: "NMC", format: "module", price: 30, price_max: 20, price_currency: "USD", price_unit: "kWh",
+    }, TODAY)).rejects.toThrow(/flexible price/i);
+  });
+
+  it("keys a model with no kWh at model level", async () => {
+    const line = await interests.createBuyerInterest(id("co2"), { kind: "interest", make: "Kia", model: "EV3" }, TODAY);
+    expect(line).toMatchObject({ product_key: "model:kia-ev3", product_key_level: "model", label: "Kia EV3" });
+  });
+
   it("merges a repeated want instead of duplicating it", async () => {
     const first = await interests.createBuyerInterest(id("co1"), { kind: "standing", chemistry: "LFP", format: "pack" }, TODAY);
     const again = await interests.createBuyerInterest(id("co1"), {

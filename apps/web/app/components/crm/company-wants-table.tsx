@@ -45,6 +45,7 @@ type Draft = {
   quantity: string;
   quantity_unit: string;
   price: string;
+  price_max: string;
   price_currency: string;
   price_unit: string;
   expires_on: string;
@@ -52,7 +53,7 @@ type Draft = {
 
 const EMPTY: Draft = {
   kind: "standing", make: "", model: "", part_numbers: "", chemistry: "", format: "", kwh_min: "", kwh_max: "",
-  quantity: "", quantity_unit: "", price: "", price_currency: "", price_unit: "", expires_on: "",
+  quantity: "", quantity_unit: "", price: "", price_max: "", price_currency: "", price_unit: "", expires_on: "",
 };
 
 function toDraft(line: BuyerInterestLine): Draft {
@@ -68,6 +69,7 @@ function toDraft(line: BuyerInterestLine): Draft {
     quantity: line.quantity === null ? "" : String(line.quantity),
     quantity_unit: line.quantity_unit ?? "",
     price: line.price === null ? "" : String(line.price),
+    price_max: typeof line.price_max === "number" ? String(line.price_max) : "",
     price_currency: line.price_currency ?? "",
     price_unit: line.price_unit ?? "",
     expires_on: line.expires_on ?? "",
@@ -89,16 +91,19 @@ function toBody(draft: Draft) {
     quantity: number(draft.quantity),
     quantity_unit: draft.quantity_unit || null,
     price: number(draft.price),
+    price_max: draft.price ? number(draft.price_max) : null,
     price_currency: draft.price ? draft.price_currency || null : null,
     price_unit: draft.price ? draft.price_unit || null : null,
     expires_on: draft.expires_on || null,
   };
 }
 
+/** "USD 30 / kWh, flexible to 50": a target is a wish, never a limit, so the flexible figure shows beside it. */
 function priceText(line: BuyerInterestLine): string | null {
   if (line.price === null) {return null;}
-  return `${line.price_currency ?? ""} ${line.price.toLocaleString("en-GB", { maximumFractionDigits: 2 })} / ${line.price_unit ?? "unit"}`
-    .replace(/^\s+/, "");
+  const figure = (value: number) => value.toLocaleString("en-GB", { maximumFractionDigits: 2 });
+  const main = `${line.price_currency ?? ""} ${figure(line.price)} / ${line.price_unit ?? "unit"}`.replace(/^\s+/, "");
+  return typeof line.price_max === "number" && line.price_max > line.price ? `${main}, flexible to ${figure(line.price_max)}` : main;
 }
 
 export function WantsTable({ companyId }: { companyId: string }) {
@@ -226,6 +231,7 @@ export function WantsTable({ companyId }: { companyId: string }) {
             </select>
           </label>
           {field("price", "Price", { type: "number", step: "0.01", min: "0" })}
+          {field("price_max", "Flexible up to", { type: "number", step: "0.01", min: "0" })}
           <label className="flex flex-col gap-1 text-[12px]" style={muted}>
             Currency
             <select aria-label="Currency" value={draft.price_currency} onChange={set("price_currency")} className={inputClass} style={inputStyle}>

@@ -31,13 +31,14 @@ type LineRow = {
   format: string | null; chemistry: string | null; kwh_min: number | null; kwh_max: number | null;
   first_seen: string; last_seen: string; expires_on: string | null; quantity: number | null;
   quantity_unit: string | null; price: number | null; price_currency: string | null; price_unit: string | null;
-  decline_reason: string | null;
+  price_basis: string | null; price_max: number | null; decline_reason: string | null;
 };
 
 /** Every current line for some companies, read by company_id (index `buyer_interest_company_idx`). */
 export const BUYER_LINES_SQL = `select company_id, kind, product_key, make, model, format, chemistry, kwh_min::float8 as kwh_min,
             kwh_max::float8 as kwh_max, first_seen::text, last_seen::text, expires_on::text, quantity::float8 as quantity,
-            quantity_unit, price::float8 as price, price_currency, price_unit, decline_reason
+            quantity_unit, price::float8 as price, price_currency, price_unit, price_basis,
+            price_max::float8 as price_max, decline_reason
      from buyer_interest
      where company_id = any($1::text[]) and (expires_on is null or expires_on >= $2::date)`;
 
@@ -51,7 +52,8 @@ export async function loadBuyerLines(companyIds: string[], asOf: string): Promis
       kind: row.kind, productKey: row.product_key, make: row.make, model: row.model, format: row.format,
       chemistry: row.chemistry, kwhMin: row.kwh_min, kwhMax: row.kwh_max, firstSeen: row.first_seen,
       lastSeen: row.last_seen, expiresOn: row.expires_on, quantity: row.quantity, quantityUnit: row.quantity_unit,
-      price: row.price, priceCurrency: row.price_currency, priceUnit: row.price_unit, declineReason: row.decline_reason,
+      price: row.price, priceCurrency: row.price_currency, priceUnit: row.price_unit,
+      priceBasis: row.price_basis, priceMax: row.price_max, declineReason: row.decline_reason,
     });
     lines.set(row.company_id, list);
   }
