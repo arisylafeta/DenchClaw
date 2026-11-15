@@ -1,8 +1,24 @@
 import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from "pg";
 
-const poolConfig: PoolConfig = process.env.DATABASE_URL
-  ? { connectionString: process.env.DATABASE_URL }
-  : { host: "/var/run/postgresql", database: "denchclaw" };
+// Tests must never reach the live CRM: under Vitest only a disposable TCP database on a non-default port is allowed
+// (scripts/rebattery/crm-test-db.sh). Anything else gets a pool that cannot connect, so imports still work.
+function isDisposableTestUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return Boolean(parsed.port) && parsed.port !== "5432";
+  } catch {
+    return false;
+  }
+}
+
+const refuseLiveInTests = Boolean(process.env.VITEST) && !isDisposableTestUrl(process.env.DATABASE_URL);
+
+const poolConfig: PoolConfig = refuseLiveInTests
+  ? { host: "/nonexistent/live-crm-refused-in-tests", database: "refused_in_tests" }
+  : process.env.DATABASE_URL
+    ? { connectionString: process.env.DATABASE_URL }
+    : { host: "/var/run/postgresql", database: "denchclaw" };
 
 export const pgPool = new Pool({
   ...poolConfig,
