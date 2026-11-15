@@ -241,6 +241,14 @@ export const BULK_MIN_EUR = 20_000;
 
 /** The lot as the bar sees it: "small" when what is stated falls under it, "bulk" when something stated clears it,
  * otherwise the reader's own call. */
+/** The lot a card decision uses. Only stated numbers may rule a company's buyer out: with no size or price given, a buyer
+ * writing from a company address keeps the card even when the reader called it small (a one-off buyer on a personal
+ * address does not). */
+export function cardLot(reading: Pick<LeadReading, "kind" | "lot" | "size_kwh" | "value_eur">, personalSender: boolean): LeadReading["lot"] {
+  if (reading.lot === "small" && reading.kind === "buyer_lead" && !personalSender && reading.size_kwh === null && reading.value_eur === null) return "unclear";
+  return reading.lot;
+}
+
 export function lotByBar(lot: LeadReading["lot"], sizeKwh: number | null, valueEur: number | null): LeadReading["lot"] {
   if ((sizeKwh !== null && sizeKwh >= BULK_MIN_KWH) || (valueEur !== null && valueEur >= BULK_MIN_EUR)) return lot === "small" ? "small" : "bulk";
   if (sizeKwh !== null || valueEur !== null) return "small";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleLead, asksFor, lotByBar, checkLeadReply, cleanAnswer, cleanLeadState, EMPTY_STATE, leadChips, leadFirstName, numbersKnown, priceWarning, questionId, quoteIn, verifyLead, verifyPolish,
+import { assembleLead, asksFor, cardLot, lotByBar, checkLeadReply, cleanAnswer, cleanLeadState, EMPTY_STATE, leadChips, leadFirstName, numbersKnown, priceWarning, questionId, quoteIn, verifyLead, verifyPolish,
   type LeadData, type LeadState } from "./relay-lead-core";
 
 // A made-up seller lead in the shape of the real ones: a broker with a lot overseas, three standard questions.
@@ -396,5 +396,18 @@ describe("the bulk bar (400 kWh, or €20k when priced)", () => {
     expect(lotByBar("unclear", null, 19999)).toBe("small");
     expect(lotByBar("unclear", 100, 20000)).toBe("bulk");
     expect(lotByBar("unclear", null, null)).toBe("unclear");
+  });
+});
+
+describe("cardLot", () => {
+  const r = (extra: Record<string, unknown>) => ({ kind: "buyer_lead" as const, lot: "small" as const, size_kwh: null, value_eur: null, ...extra });
+  it("keeps a company buyer with no stated size or price", () => {
+    expect(cardLot(r({}), false)).toBe("unclear");
+  });
+  it("leaves personal senders, sellers and anything with a stated number as the reader and the bar said", () => {
+    expect(cardLot(r({}), true)).toBe("small");
+    expect(cardLot(r({ kind: "seller_lead" }), false)).toBe("small");
+    expect(cardLot(r({ size_kwh: 52 }), false)).toBe("small");
+    expect(cardLot(r({ lot: "bulk" }), true)).toBe("bulk");
   });
 });

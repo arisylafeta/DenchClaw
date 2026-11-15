@@ -7,7 +7,7 @@ import { ownText } from "./relay-context-core";
 import { isPersonalDomain, replyIdentity, type ReplyIdentity } from "./relay-identity";
 import { readMailDraft } from "./crm-postgres/mail";
 import { UNDO_SEND_SECONDS } from "./relay-send-time";
-import { assembleLead, BULK_MIN_EUR, BULK_MIN_KWH, checkLeadReply, cleanAnswer, cleanLeadState, EMPTY_STATE, FACT_KEYS, leadFirstName, questionId, quoteIn, REGIONS, verifyLead, verifyPolish,
+import { assembleLead, BULK_MIN_EUR, BULK_MIN_KWH, cardLot, checkLeadReply, cleanAnswer, cleanLeadState, EMPTY_STATE, FACT_KEYS, leadFirstName, questionId, quoteIn, REGIONS, verifyLead, verifyPolish,
   type LeadData, type LeadSide, type LeadState } from "./relay-lead-core";
 
 /**
@@ -209,7 +209,7 @@ export async function buildLead(item: Pick<RelayItem, "id" | "contact_type" | "c
 
   const { reading, company } = await readLead({ from: newest.from_header || sender, subject: newest.subject ?? "", text, files: files.map((a) => a.filename ?? ""), attached });
   if (reading.kind === "other") return { status: "not_lead", why: reading.why || "Not a new seller or buyer lead." };
-  if (reading.lot === "small") return { status: "not_lead", why: reading.why || "A small lot, not a trade lead." };
+  if (cardLot(reading, isPersonalDomain(sender.split("@")[1] ?? "")) === "small") return { status: "not_lead", why: reading.why || "A small lot, not a trade lead." };
 
   const side: LeadSide = reading.kind === "seller_lead" ? "seller" : "buyer";
   const have = new Set(reading.facts.map((f) => f.key));
