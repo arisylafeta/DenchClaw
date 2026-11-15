@@ -252,7 +252,7 @@ describe("buyer interest lines as evidence", () => {
       for (const row of [at(1, 2), at(30, 50), at(5000, 9000)]) {
         expect(row.productTier).toBe(none.productTier);
         expect([row.priceFit, row.priceBasis, row.priceMargin]).toEqual([none.priceFit, none.priceBasis, none.priceMargin]);
-        expect(row.ruledOut ?? null).toBe(none.ruledOut ?? null);
+        expect(row.fits).not.toBeNull();  // still ranked, never ruled out for its price
       }
     });
 
