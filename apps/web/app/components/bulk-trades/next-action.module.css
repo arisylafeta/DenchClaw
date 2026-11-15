@@ -1,0 +1,77 @@
+/* Next action: a grey well holding one white tile (header), and the same task row in Today. */
+.well { display: grid; gap: 0; padding: 4px; border-radius: 14px; background: color-mix(in srgb, var(--bt-text) 5%, var(--bt-surface)); min-width: 0; }
+.wellHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 10px 6px; font-size: 12px; font-weight: 600; color: var(--bt-text-2); }
+.tile { min-width: 0; padding: 12px 12px 12px 10px; border-radius: 10px; background: var(--bt-surface); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bt-text) 6%, transparent), 0 1px 2px color-mix(in srgb, var(--bt-text) 5%, transparent); }
+
+.task { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.body { flex: 1; min-width: 0; }
+.side { flex: none; display: flex; align-items: center; gap: 8px; }
+@media (max-width: 520px) { .task { flex-wrap: wrap; } .side { width: 100%; padding-left: 32px; } }
+
+.checkHit { flex: none; display: grid; place-items: center; width: 32px; height: 32px; margin: -5px -5px -5px -6px; border-radius: 999px; }
+@media (pointer: coarse) { .checkHit { width: 44px; height: 44px; margin: -11px -11px -11px -12px; } }
+.check { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 999px; border: 1.5px solid var(--bt-border-strong); color: transparent; transition: border-color .12s, background-color .12s, color .12s; }
+.checkHit:hover .check { border-color: var(--bt-text); color: var(--bt-muted); }
+.checkDone { background: var(--bt-green); border-color: var(--bt-green); color: #fff; }
+.checkEmpty { border-style: dashed; }
+.small .check { width: 18px; height: 18px; }
+
+.text { display: block; max-width: 100%; text-align: left; font-size: 15px; font-weight: 500; line-height: 1.35; letter-spacing: -0.005em; overflow-wrap: anywhere; }
+.textButton:hover .textInner { text-decoration: underline; text-decoration-color: var(--bt-border-strong); text-underline-offset: 3px; }
+.pencil { display: inline-block; margin-left: 6px; vertical-align: -1px; color: var(--bt-muted); opacity: 0; transition: opacity .12s; }
+.textButton:hover .pencil, .textButton:focus-visible .pencil { opacity: 1; }
+.rowText { font-size: 14px; }
+.placeholder { color: var(--bt-muted); font-weight: 400; }
+.meta { margin-top: 3px; font-size: 12px; color: var(--bt-muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kind { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 5px; font-size: 11px; font-weight: 500; color: var(--bt-text-2); background: var(--bt-segment); }
+
+.due { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px 0 9px; border-radius: 8px; border: 1px solid var(--bt-border); background: var(--bt-surface); font-size: 12px; font-weight: 500; color: var(--bt-text-2); white-space: nowrap; }
+.due[data-tone="overdue"] { color: var(--bt-red); background: var(--bt-red-bg); border-color: var(--bt-red-border); font-weight: 600; }
+.due[data-tone="today"] { color: var(--bt-blue); background: var(--bt-blue-bg); border-color: var(--bt-blue-border); font-weight: 600; }
+@media (pointer: coarse) { .due { height: 40px; } }
+
+.popWrap { position: relative; }
+.popover { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: 240px; padding: 6px; border-radius: 12px; background: var(--bt-surface); box-shadow: 0 0 0 1px color-mix(in srgb, var(--bt-text) 10%, transparent), 0 6px 16px color-mix(in srgb, var(--bt-text) 8%, transparent); }
+.menuItem { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; padding: 0 10px; border-radius: 7px; font-size: 13px; text-align: left; }
+.menuItem:hover, .menuItem:focus-visible { background: var(--bt-segment); outline: none; }
+.menuItem small { font-size: 12px; color: var(--bt-muted); }
+.sep { height: 1px; margin: 4px 0; background: var(--bt-divider); }
+.dateInput { width: 100%; height: 34px; padding: 0 8px; border: 1px solid var(--bt-border); border-radius: 7px; background: var(--bt-surface); font-size: 13px; color: var(--bt-text); }
+
+.doneLine { display: flex; align-items: center; gap: 10px; min-width: 0; padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px solid var(--bt-divider); font-size: 13px; color: var(--bt-muted); }
+.doneLine s { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link { font-size: 12px; font-weight: 500; color: var(--bt-text); text-decoration: underline; text-underline-offset: 3px; }
+.warn { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 12px; font-weight: 600; color: var(--bt-amber); }
+.dot { width: 7px; height: 7px; flex: none; border-radius: 999px; background: currentColor; }
+
+.composer { display: grid; gap: 10px; min-width: 0; }
+.label { font-size: 12px; font-weight: 600; color: var(--bt-text-2); }
+.field { width: 100%; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--bt-border); border-radius: 8px; background: var(--bt-surface); font-size: 14px; color: var(--bt-text); }
+.field:focus { outline: none; border-color: var(--bt-text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bt-text) 7%, transparent); }
+.field::placeholder { color: var(--bt-muted); opacity: .8; }
+.inlineField { height: 32px; font-size: 14px; font-weight: 500; }
+.controlsRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.spacer { flex: 1; }
+.quick { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 9px; background: var(--bt-segment); }
+.quick button { height: 28px; padding: 0 10px; border-radius: 7px; font-size: 12px; font-weight: 500; color: var(--bt-text-2); white-space: nowrap; }
+.quick button:hover { color: var(--bt-text); }
+.quick button[aria-pressed="true"] { background: var(--bt-surface); color: var(--bt-text); box-shadow: 0 1px 2px color-mix(in srgb, var(--bt-text) 10%, transparent), 0 0 0 1px color-mix(in srgb, var(--bt-text) 5%, transparent); }
+.quickDate { position: relative; display: inline-flex; }
+.quickDate input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.select { height: 34px; padding: 0 8px; border: 1px solid var(--bt-border); border-radius: 8px; background: var(--bt-surface); font-size: 13px; font-weight: 500; color: var(--bt-text); }
+.selectMissing { border-color: var(--bt-amber-border); color: var(--bt-amber); }
+.primary { height: 34px; padding: 0 14px; border-radius: 8px; background: var(--bt-accent); color: var(--bt-on-accent); font-size: 13px; font-weight: 600; }
+.primary:hover:not(:disabled) { background: var(--bt-accent-hover); }
+.primary:disabled { opacity: .5; cursor: default; }
+.ghost { height: 34px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--bt-text-2); }
+.ghost:hover { background: var(--bt-segment); }
+@media (pointer: coarse) { .quick button, .select, .primary, .ghost { min-height: 40px; } }
+.error { font-size: 12px; color: var(--bt-red); }
+
+.root button:focus-visible, .root input:focus-visible, .root select:focus-visible { outline: 2px solid var(--bt-text); outline-offset: 2px; }
+
+/* Today rows */
+.item { display: block; padding: 12px 16px; }
+.item:hover { background: var(--bt-row-hover); }
+.chev { color: var(--bt-muted); }
+.inlineComposer { margin-top: 10px; padding-left: 32px; }

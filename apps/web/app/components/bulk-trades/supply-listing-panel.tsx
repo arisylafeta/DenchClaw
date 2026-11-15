@@ -61,8 +61,12 @@ export function SupplyListingPanel({ listing, today, onChanged, onClose, onOpenL
   ).values());
   const busy = context === null || conversation === undefined || fields === null;
   return <div role="region" aria-label="Supply listing detail" className={`${css.panel} flex w-full min-w-0 flex-col gap-3`}>
-    <div className={css.card}><ListingHeader listing={listing} onBack={onClose} onChanged={onChanged} /><SheetTabs tabs={TABS} icons={ICONS} centered value={tab} onChange={setTab} /></div>
+    <div className={css.card}><ListingHeader listing={listing} today={today} onBack={onClose} onChanged={onChanged} /><SheetTabs tabs={TABS} icons={ICONS} centered value={tab} onChange={setTab} /></div>
     {tab === "Details" && <BusyRegion busy={busy} label="Loading supply details" className="flex w-full min-w-0 flex-col gap-6">
+      {(listing.summary || listing.note) && <section aria-label="About this listing" className="flex flex-col gap-1.5">
+        <h3 className="text-[13px] font-semibold">About</h3>
+        {[listing.summary, listing.note].filter(Boolean).map((text, index) => <p key={index} className="whitespace-pre-line text-[13px] leading-relaxed" style={{ color: "var(--bt-text-2)" }}>{text}</p>)}
+      </section>}
       <PartyCard loading={context === null} role="Seller" name={listing.party} companyId={listing.company_id} personId={listing.person_id} person={context?.person ?? null} contact={listing.contact} email={listing.email}>
         <section aria-label={`Conversation with ${listing.party}`}><h3 className="mb-3 text-[13px] font-semibold">Conversation with {listing.party}</h3>
           {conversationFailed && <ErrorText error="Could not load the conversation. Reload to try again." />}

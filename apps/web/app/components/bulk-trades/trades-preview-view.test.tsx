@@ -92,8 +92,9 @@ describe("Trades Preview sheet", () => {
     expect(screen.getByRole("tab", { name: "Today" })).toHaveAttribute("aria-selected", "true");
     expect(within(screen.getByRole("group", { name: "Driver" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["All", "Alex", "Sean", "Ari"]);
     expect(screen.getByRole("region", { name: "Pipeline against quarter target" })).toHaveTextContent("£54k (≈ €62k)");
-    expect(within(today).getByRole("button", { name: /Edit next action: Call the buyer/ })).toBeInTheDocument();
-    const none = screen.getByRole("region", { name: "No next action" });
+    expect(within(today).getByRole("button", { name: "Call the buyer" })).toBeInTheDocument();
+    expect(within(today).getAllByRole("button", { name: "Mark done" })).toHaveLength(1);
+    const none = screen.getByRole("region", { name: "Needs a next action" });
     expect(within(none).getByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
     expect(within(none).getByRole("button", { name: /3 hybrid packs/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Selling" })).not.toBeInTheDocument();
@@ -145,30 +146,39 @@ describe("Trades Preview sheet", () => {
     expect(within(demand).getByRole("button", { name: "Add next action" })).toBeInTheDocument();
   });
 
-  it("edits the next action in place on Today without opening the row", async () => {
+  it("adds a next action and ticks one done on Today without opening the row", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "/api/bulk-listings/d1/next" || url === "/api/bulk-listings/bt_1/next") return new Response(JSON.stringify({}));
+      if (/^\/api\/bulk-listings\/(d1|bt_1)\/(next|owner)$/.test(url)) return new Response(JSON.stringify({}));
       return mockApi()(url, init);
     });
     vi.stubGlobal("fetch", fetchMock);
     render(<TradesPreviewView />);
-    await screen.findByRole("region", { name: "No next action" });
-    await userEvent.click(within(rowOf(/12 Ioniq packs/)).getByRole("button", { name: "Add next action" }));
-    await userEvent.type(screen.getByLabelText("Next action"), "Send price list{Enter}");
+    await screen.findByRole("region", { name: "Needs a next action" });
+    const tomorrow = new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+
+    // A listing with no driver needs one before the action can be added.
+    const ioniq = rowOf(/^Open .*12 Ioniq packs/);
+    await userEvent.click(within(ioniq).getByRole("button", { name: "Add next action" }));
+    await userEvent.type(within(ioniq).getByLabelText("Next action"), "Send price list");
+    const add = within(ioniq).getByRole("button", { name: "Add" });
+    expect(add).toBeDisabled();
+    await userEvent.selectOptions(within(ioniq).getByLabelText("Driver"), "Sean");
+    await userEvent.click(add);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-listings/d1/next", expect.objectContaining({
-      method: "PUT", body: JSON.stringify({ next_action: "Send price list", next_due: null }),
+      method: "PUT", body: JSON.stringify({ next_action: "Send price list", next_due: tomorrow }),
     })));
-    // It now has an undated next action.
-    expect(within(await screen.findByRole("region", { name: "No date" })).getByRole("button", { name: "Edit next action: Send price list" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-listings/d1/owner", expect.objectContaining({ method: "PUT", body: JSON.stringify({ owner: "Sean" }) }));
+    expect(await screen.findByRole("button", { name: "Send price list" })).toBeInTheDocument();
     expect(params().get("listing")).toBeNull();
 
-    await userEvent.click(screen.getByRole("button", { name: /Edit next action: Call the buyer/ }));
-    const input = screen.getByLabelText("Next action");
-    await userEvent.clear(input);
-    await userEvent.type(input, "Chase the bid{Enter}");
+    // Ticking asks what is next and saves both in one step.
+    await userEvent.click(within(rowOf(/^Call the buyer$/)).getByRole("button", { name: "Mark done" }));
+    await userEvent.type(screen.getByLabelText("Next action"), "Chase the bid{Enter}");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-listings/bt_1/next", expect.objectContaining({
-      method: "PUT", body: JSON.stringify({ next_action: "Chase the bid", next_due: today }),
+      method: "POST", body: JSON.stringify({ done: "Call the buyer", next_action: "Chase the bid", next_due: tomorrow }),
     })));
+    expect(await screen.findByRole("button", { name: "Chase the bid" })).toBeInTheDocument();
+    expect(params().get("listing")).toBeNull();
   });
 
   it("filters Supply by search, keeps it in the URL, and clears back to the tab", async () => {

@@ -12,9 +12,10 @@ import { valueAndFee } from "@/lib/bulk-sheet";
 import { CopyIdButton } from "./copy-id-button";
 import { WaitingBadge } from "./opportunities-sheet";
 import css from "./demand-header.module.css";
+import { NextActionPanel } from "./next-action";
+import { dealOwner } from "@/lib/bulk-owner";
 
-export function ListingHeader({ listing, onBack, onChanged }: { listing: BulkListingView; onBack: () => void; onChanged?: () => void }) {
-  const [open, setOpen] = useState(false);
+export function ListingHeader({ listing, today, onBack, onChanged }: { listing: BulkListingView; today: string; onBack: () => void; onChanged?: () => void }) {
   const [menu, setMenu] = useState<"closed" | "menu" | "confirm">("closed");
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -23,9 +24,6 @@ export function ListingHeader({ listing, onBack, onChanged }: { listing: BulkLis
     try { await request(`/api/bulk-listings/${encodeURIComponent(listing.id)}/remove`, { method: "POST" }); onBack(); }
     catch (err) { setRemoveError(err instanceof Error ? err.message : "Could not remove it."); setRemoving(false); }
   }
-  const description = [listing.summary, listing.note].filter(Boolean).join("\n\n");
-  const words = description.split(/\s+/);
-  const long = words.length > 42;
   return <header className={css.root}>
     <button type="button" onClick={onBack} className={css.back}><ArrowLeft size={13} aria-hidden /> Bulk Trades</button>
     <div className={css.titleRow}>
@@ -48,13 +46,12 @@ export function ListingHeader({ listing, onBack, onChanged }: { listing: BulkLis
         </div>}
       </div>}
     </div>
-    <div className={css.controls} data-deal-controls>{listing.waiting_on && <WaitingBadge row={listing} />}<OwnerPicker listingId={listing.id} owner={listing.context.owner} onChanged={onChanged} /><FeeInput listingId={listing.id} fee={listing.context.fee_eur} defaultFee={valueAndFee(listing.kind, listing.spec).fee_eur} onChanged={onChanged} /><LikelihoodPicker listingId={listing.id} likelihood={listing.context.likelihood} onChanged={onChanged} /></div>
+    {listing.status !== "closed" && <NextActionPanel listingId={listing.id} today={today} onChanged={onChanged}
+      value={{ next_action: listing.next_action, next_due: listing.next_due?.slice(0, 10) ?? null, owner: dealOwner(listing.context.owner) }} />}
+    <div className={css.controls} data-deal-controls>{listing.waiting_on && <WaitingBadge row={listing} />}<OwnerPicker key={String(listing.context.owner ?? "")} listingId={listing.id} owner={listing.context.owner} onChanged={onChanged} /><FeeInput listingId={listing.id} fee={listing.context.fee_eur} defaultFee={valueAndFee(listing.kind, listing.spec).fee_eur} onChanged={onChanged} /><LikelihoodPicker listingId={listing.id} likelihood={listing.context.likelihood} onChanged={onChanged} /></div>
     <dl className={css.facts}>{[
       ["Seller", listing.party], ["Quantity", listing.quantity], ["Location", listing.location],
       ["Started", shortDate((listing.observed_on ?? listing.created_at).slice(0, 10))],
     ].map(([label, value]) => <div key={label} className={css.fact}><dt>{label}</dt><dd className={value ? undefined : css.quiet}>{value || "Not recorded"}</dd></div>)}</dl>
-    {description && <div className={css.brief} data-open={open}><p>{long && !open ? `${words.slice(0, 42).join(" ")}…` : description}</p>
-      {long && <button type="button" aria-expanded={open} className={css.more} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show more"}</button>}
-    </div>}
   </header>;
 }

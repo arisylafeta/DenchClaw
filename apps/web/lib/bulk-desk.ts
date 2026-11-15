@@ -78,7 +78,7 @@ export function boardRows(rows: SheetRow[]): SheetRow[] {
 
 export type TodayGroupKey = "overdue" | "today" | "upcoming" | "undated" | "none";
 export type TodayGroup = { key: TodayGroupKey; label: string; rows: SheetRow[] };
-const GROUP_LABEL: Record<TodayGroupKey, string> = { overdue: "Overdue", today: "Today", upcoming: "Upcoming", undated: "No date", none: "No next action" };
+const GROUP_LABEL: Record<TodayGroupKey, string> = { overdue: "Overdue", today: "Today", upcoming: "Upcoming", undated: "No date", none: "Needs a next action" };
 
 /**
  * Next actions by when they are due: Overdue, Today, Upcoming, No date, then the open listings with no next action.
