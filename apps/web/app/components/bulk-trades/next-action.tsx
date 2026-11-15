@@ -13,11 +13,8 @@ type Draft = { text: string; due: string | null; owner: DealOwner | null };
 
 const nextUrl = (id: string) => `/api/bulk-listings/${encodeURIComponent(id)}/next`;
 
-async function putNext(id: string, text: string | null, due: string | null) {
-  await request(nextUrl(id), { method: "PUT", body: JSON.stringify({ next_action: text, next_due: text ? due : null }) });
-}
-async function putOwner(id: string, owner: DealOwner) {
-  await request(`/api/bulk-listings/${encodeURIComponent(id)}/owner`, { method: "PUT", body: JSON.stringify({ owner }) });
+async function putNext(id: string, text: string | null, due: string | null, owner?: DealOwner | null) {
+  await request(nextUrl(id), { method: "PUT", body: JSON.stringify({ next_action: text, next_due: text ? due : null, ...(owner ? { owner } : {}) }) });
 }
 async function postDone(id: string, done: string, draft: Draft | null, ownerChanged: boolean) {
   await request(nextUrl(id), { method: "POST", body: JSON.stringify({
@@ -37,39 +34,45 @@ export function CheckButton({ done = false, empty = false, label, onClick, small
 export function DuePicker({ due, today, onChange }: { due: string | null; today: string; onChange: (day: string | null) => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLSpanElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!open) return;
+    ref.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
     const close = (event: MouseEvent) => { if (!ref.current?.contains(event.target as Node)) setOpen(false); };
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { setOpen(false); trigger.current?.focus(); } };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", escape);
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
   }, [open]);
   async function pick(day: string | null) {
-    setBusy(true);
-    try { await onChange(day); setOpen(false); } finally { setBusy(false); }
+    setBusy(true); setError(null);
+    try { await onChange(day); setOpen(false); trigger.current?.focus(); } catch (err) { setError(message(err)); } finally { setBusy(false); }
   }
   const label = dueLabel(due, today);
   return (
     <span ref={ref} className={css.popWrap} onClick={(event) => event.stopPropagation()}>
-      <button type="button" className={css.due} data-tone={label.tone ?? undefined} aria-haspopup="menu" aria-expanded={open}
+      <button ref={trigger} type="button" className={css.due} data-tone={label.tone ?? undefined} aria-haspopup="menu" aria-expanded={open}
         aria-label={`Due: ${label.text}. Change date`} disabled={busy} onClick={() => setOpen(!open)}>
         {label.text}<ChevronDown size={12} aria-hidden />
       </button>
       {open && (
-        <div role="menu" className={css.popover}>
+        <div className={css.popover}>
+          <div role="menu" aria-label="Due date">
           {quickDays(today).map((quick) => (
             <button key={quick.day} type="button" role="menuitem" className={css.menuItem} onClick={() => void pick(quick.day)}>
               {quick.label}<small>{quick.label === "Today" || quick.label === "Tomorrow" ? weekdayDay(quick.day) : ""}</small>
             </button>
           ))}
+          {due && <button type="button" role="menuitem" className={css.menuItem} onClick={() => void pick(null)}>Clear date</button>}
+          </div>
           <div className={css.sep} />
           <label className="block px-1 pb-1 text-[12px]" style={{ color: "var(--bt-muted)" }}>
             <span className="mb-1 block px-1">Pick a date</span>
             <input type="date" className={css.dateInput} min={today} value={due ?? ""} onChange={(event) => event.target.value && void pick(event.target.value)} />
           </label>
-          {due && <><div className={css.sep} /><button type="button" role="menuitem" className={css.menuItem} onClick={() => void pick(null)}>Clear date</button></>}
+          {error && <p role="alert" className={`${css.error} px-2 pb-1`}>{error}</p>}
         </div>
       )}
     </span>
@@ -84,6 +87,10 @@ export function NextComposer({ today, owner, label, placeholder, submitLabel, on
   const [text, setText] = useState("");
   const [due, setDue] = useState<string | null>(addDays(today, 1));
   const [driver, setDriver] = useState<DealOwner | null>(owner);
+  const [driverTouched, setDriverTouched] = useState(false);
+  // The listing's driver can change elsewhere (the Driver control) while this is open; follow it unless picked here.
+  useEffect(() => { if (!driverTouched) setDriver(owner); }, [owner, driverTouched]);
+  const dateInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fieldId = useId();
@@ -94,7 +101,7 @@ export function NextComposer({ today, owner, label, placeholder, submitLabel, on
     setBusy(true); setError(null);
     try { await fn(); } catch (err) { setError(message(err)); setBusy(false); }
   }
-  const submit = () => ready && void run(() => onSubmit({ text: text.trim().slice(0, 300), due, owner: driver }, driver !== owner));
+  const submit = () => ready && void run(() => onSubmit({ text: text.trim().slice(0, 300), due, owner: driver }, driverTouched && driver !== owner));
   return (
     <div className={css.composer} onClick={(event) => event.stopPropagation()}>
       {label && <label className={css.label} htmlFor={fieldId}>{label}</label>}
@@ -105,13 +112,14 @@ export function NextComposer({ today, owner, label, placeholder, submitLabel, on
         <div className={css.quick} role="group" aria-label="Due">
           {quick.map((q) => <button key={q.day} type="button" aria-pressed={due === q.day} onClick={() => setDue(q.day)}>{q.label}</button>)}
           <span className={css.quickDate}>
-            <button type="button" tabIndex={-1} aria-pressed={!!custom}>{custom ? shortDue(custom, today) : "Date…"}</button>
-            <input type="date" aria-label="Pick a date" min={today} value={custom ?? ""} onChange={(event) => event.target.value && setDue(event.target.value)} />
+            <button type="button" aria-pressed={!!custom} aria-label={custom ? `Due ${shortDue(custom, today)}, pick another date` : "Pick a date"}
+              onClick={() => { const input = dateInput.current; if (!input) return; try { input.showPicker(); } catch { input.focus(); } }}>{custom ? shortDue(custom, today) : "Date…"}</button>
+            <input ref={dateInput} tabIndex={-1} aria-hidden type="date" min={today} value={custom ?? ""} onChange={(event) => event.target.value && setDue(event.target.value)} />
           </span>
         </div>
         {(!compact || !owner) && (
           <select aria-label="Driver" className={`${css.select} ${driver ? "" : css.selectMissing}`} value={driver ?? ""}
-            onChange={(event) => setDriver(dealOwner(event.target.value))}>
+            onChange={(event) => { setDriverTouched(true); setDriver(dealOwner(event.target.value)); }}>
             {!driver && <option value="">Pick driver</option>}
             {DEAL_OWNERS.map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
@@ -164,7 +172,7 @@ export function NextActionPanel({ listingId, value, today, onChanged }: { listin
   let body: React.ReactNode;
   if (completing && action) {
     body = <>
-      <div className={css.doneLine}><CheckButton done small label="Done" /><s>{action}</s>
+      <div className={css.doneLine}><CheckButton done small label="Done" /><s><span className="sr-only">Done: </span>{action}</s>
         <button type="button" className={css.link} onClick={() => setCompleting(false)}>Undo</button></div>
       <NextComposer autoFocus today={today} owner={state.owner} label="What's next?" placeholder="e.g. Send the EXW terms" submitLabel="Save"
         onSubmit={async (draft, ownerChanged) => { await postDone(listingId, action, draft, ownerChanged); after({ next_action: draft.text, next_due: draft.due, owner: draft.owner }); }}
@@ -175,8 +183,7 @@ export function NextActionPanel({ listingId, value, today, onChanged }: { listin
       <p className={css.warn}><span className={css.dot} />No next action. Add one so it shows in Today.</p>
       <NextComposer today={today} owner={state.owner} placeholder="e.g. Call the seller to confirm the quantity" submitLabel="Add"
         onSubmit={async (draft, ownerChanged) => {
-          if (ownerChanged && draft.owner) await putOwner(listingId, draft.owner);
-          await putNext(listingId, draft.text, draft.due);
+          await putNext(listingId, draft.text, draft.due, ownerChanged ? draft.owner : null);
           after({ next_action: draft.text, next_due: draft.due, owner: draft.owner });
         }} />
     </>;
@@ -208,7 +215,7 @@ export function TodayTask({ id, value, kind, where, today, onOpen, onUpdate }: {
   return (
     <li className={`${css.root} ${css.item}`} data-task={id}>
       {mode === "completing" && action ? <>
-        <div className={css.doneLine} style={{ margin: 0, padding: 0, border: 0 }}><CheckButton done small label="Done" /><s>{action}</s>
+        <div className={css.doneLine} style={{ margin: 0, padding: 0, border: 0 }}><CheckButton done small label="Done" /><s><span className="sr-only">Done: </span>{action}</s>
           <button type="button" className={css.link} onClick={() => setMode("view")}>Undo</button></div>
         <div className={css.inlineComposer}>
           <NextComposer autoFocus compact today={today} owner={value.owner} placeholder={`What's next on ${where}?`} submitLabel="Save"
@@ -235,8 +242,7 @@ export function TodayTask({ id, value, kind, where, today, onOpen, onUpdate }: {
         <div className={css.inlineComposer}>
           <NextComposer autoFocus compact today={today} owner={value.owner} placeholder={`Next action for ${where}`} submitLabel="Add"
             onSubmit={async (draft, ownerChanged) => {
-              if (ownerChanged && draft.owner) await putOwner(id, draft.owner);
-              await putNext(id, draft.text, draft.due);
+              await putNext(id, draft.text, draft.due, ownerChanged ? draft.owner : null);
               done({ next_action: draft.text, next_due: draft.due, owner: draft.owner });
             }} />
         </div>

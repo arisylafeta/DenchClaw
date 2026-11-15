@@ -23,20 +23,32 @@ describe.skipIf(!TEST_URL)("completeListingNext", () => {
   });
 
   it("logs the done action in Story and sets the next one with its driver", async () => {
-    expect(await next.completeListingNext("nxt_1", { done: "Ask David", next_action: "Send terms", next_due: "2026-11-18", owner: "Sean" }, null)).toBe(true);
+    expect(await next.completeListingNext("nxt_1", { done: "Ask David", next_action: "Send terms", next_due: "2026-11-18", owner: "Sean" }, null)).toBe("ok");
     expect(await listing()).toEqual({ next_action: "Send terms", next_due: "2026-11-18", owner: "Sean" });
     const [story] = await pg.queryPg<{ kind: string; title: string; data: Record<string, unknown> }>(
       "select kind, title, data from crm_bulk_listing_activity where bulk_listing_id = 'nxt_1' order by id desc limit 1");
     expect(story).toMatchObject({ kind: "note", title: "Done: Ask David", data: { next_done: "Ask David", was_due: "2026-11-02", next_action: "Send terms" } });
   });
 
+  it("does nothing when the action changed since it was seen (retry, other tab)", async () => {
+    const before = (await pg.queryPg("select count(*)::int n from crm_bulk_listing_activity where bulk_listing_id = 'nxt_1'"))[0].n;
+    expect(await next.completeListingNext("nxt_1", { done: "Ask David", next_action: "Again", next_due: null }, null)).toBe("conflict");
+    expect((await pg.queryPg("select count(*)::int n from crm_bulk_listing_activity where bulk_listing_id = 'nxt_1'"))[0].n).toBe(before);
+    expect((await listing()).next_action).toBe("Send terms");
+  });
+
   it("clears the action and its date when there is no next one, and keeps the driver", async () => {
-    expect(await next.completeListingNext("nxt_1", { done: "Send terms", next_action: null, next_due: "2026-11-20" }, null)).toBe(true);
+    expect(await next.completeListingNext("nxt_1", { done: "Send terms", next_action: null, next_due: "2026-11-20" }, null)).toBe("ok");
     expect(await listing()).toEqual({ next_action: null, next_due: null, owner: "Sean" });
   });
 
-  it("returns false for a missing listing and writes nothing", async () => {
-    expect(await next.completeListingNext("nxt_missing", { done: "x", next_action: null, next_due: null }, null)).toBe(false);
+  it("sets action, date and driver in one statement", async () => {
+    expect(await next.setListingNext("nxt_1", { next_action: "Call", next_due: "2026-11-19", owner: "Alex" })).toBe(true);
+    expect(await listing()).toEqual({ next_action: "Call", next_due: "2026-11-19", owner: "Alex" });
+  });
+
+  it("returns missing for a missing listing and writes nothing", async () => {
+    expect(await next.completeListingNext("nxt_missing", { done: "x", next_action: null, next_due: null }, null)).toBe("missing");
     expect((await pg.queryPg("select 1 from crm_bulk_listing_activity where bulk_listing_id = 'nxt_missing'")).length).toBe(0);
   });
 });

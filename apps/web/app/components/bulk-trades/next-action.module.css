@@ -57,7 +57,7 @@
 .quick button:hover { color: var(--bt-text); }
 .quick button[aria-pressed="true"] { background: var(--bt-surface); color: var(--bt-text); box-shadow: 0 1px 2px color-mix(in srgb, var(--bt-text) 10%, transparent), 0 0 0 1px color-mix(in srgb, var(--bt-text) 5%, transparent); }
 .quickDate { position: relative; display: inline-flex; }
-.quickDate input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.quickDate input { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
 .select { height: 34px; padding: 0 8px; border: 1px solid var(--bt-border); border-radius: 8px; background: var(--bt-surface); font-size: 13px; font-weight: 500; color: var(--bt-text); }
 .selectMissing { border-color: var(--bt-amber-border); color: var(--bt-amber); }
 .primary { height: 34px; padding: 0 14px; border-radius: 8px; background: var(--bt-accent); color: var(--bt-on-accent); font-size: 13px; font-weight: 600; }
