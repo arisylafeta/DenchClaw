@@ -77,7 +77,8 @@ specific products each note states. You have no tools. Reply with ONLY a JSON ob
 Give one result for every note id you were sent; products is [] when the note names no product.
 Every product has EXACTLY these keys (null when the note does not say):
   make          vehicle maker or, for cells, the cell maker, exactly as the note names it (Tesla, Nissan, Samsung SDI,
-                Molicel). Only when written in the note.
+                Molicel). Only when the note names it, or when the model it names belongs to exactly one maker
+                (Leaf is Nissan, Zoe is Renault, Model 3 is Tesla, i3 is BMW). Never guess a maker otherwise.
   model         vehicle or cell model as written (Leaf, Corsa-e, 50E)
   platform      shared platform or pack family as written (MEB, e-CMP, CMP)
   part_number   an OEM part number as written
@@ -95,7 +96,8 @@ Every product has EXACTLY these keys (null when the note does not say):
                 interested in it
   quote         the exact words of the note this product comes from, copied character for character (3 to 300 characters)
 Rules: one product per distinct thing wanted; a note that says "Tesla packs and Nissan Leaf 40 kWh" is two products.
-Use only what the note states. Never add a make because a model implies it, never guess a chemistry or a capacity.
+Use only what the note states. Never guess a chemistry or a capacity. Write out shorthand: "Model S/X and 3/Y" is Model S,
+Model X, Model 3 and Model Y; "37501-GI300/GI301" is two part numbers, 37501-GI300 and 37501-GI301.
 Ignore what the buyer sells, offers, refuses or does not want. A date in the note is not a quantity or a kWh figure.
 An empty products list is a good answer."""
 
@@ -155,6 +157,21 @@ def number_in(value, numbers):
     return any(abs(value - known) <= 0.0501 + abs(known) * 1e-9 for known in numbers)
 
 
+# Vehicle models that belong to one maker only, so a note that names the model implies the make. Reviewed, short on purpose.
+IMPLIED_MAKES = {"leaf": "Nissan", "zoe": "Renault", "twizy": "Renault", "kangoo": "Renault", "prius": "Toyota",
+                 "mirai": "Toyota", "ioniq": "Hyundai", "kona": "Hyundai", "i3": "BMW", "i4": "BMW", "ix3": "BMW", "taycan": "Porsche",
+                 "etron": "Audi", "e208": "Peugeot", "e2008": "Peugeot", "corsae": "Vauxhall", "mokkae": "Vauxhall",
+                 "modelx": "Tesla", "models": "Tesla", "model3": "Tesla", "modely": "Tesla", "ampera": "Opel", "i-miev": "Mitsubishi", "imiev": "Mitsubishi", "eniro": "Kia", "niro": "Kia", "ev6": "Kia",
+                 "id3": "Volkswagen", "id4": "Volkswagen", "egolf": "Volkswagen",
+                 "enyaq": "Skoda", "fluence": "Renault", "i-pace": "Jaguar", "ipace": "Jaguar"}
+
+
+def make_implied(make, model):
+    """The make a reviewed model name implies, when it is the make given: Leaf is a Nissan."""
+    key = fold(model)
+    return bool(key) and any(fold(make) == fold(IMPLIED_MAKES[prefix]) for prefix in IMPLIED_MAKES if key.startswith(fold(prefix)))
+
+
 MAKE_ALIASES = {"vw": ("vw", "volkswagen", "volkwagen"), "volkswagen": ("vw", "volkswagen", "volkwagen"),
                 "mercedes": ("mercedes", "mercedesbenz", "mb"), "mercedesbenz": ("mercedes", "mercedesbenz", "mb"),
                 "citroen": ("citroen", "citroën"), "skoda": ("skoda", "škoda"), "gm": ("gm", "generalmotors")}
@@ -181,8 +198,23 @@ def code_grounded(value, text):
     return bool(fold(value)) and fold(value) in fold(text)
 
 
+SHORTHAND = re.compile(r"([A-Za-z0-9][A-Za-z0-9-]{4,})((?:\s*[/,]\s*[A-Za-z0-9-]{2,8})+)")
+
+
 def part_grounded(value, text):
-    return len(part_fold(value)) >= 4 and part_fold(value) in part_fold(text)
+    """The code as the text writes it, or as its slash shorthand writes it: 37501-GI300/GI301 holds 37501-GI301."""
+    wanted = part_fold(value)
+    if len(wanted) < 4:
+        return False
+    if wanted in part_fold(text):
+        return True
+    for first, rest in SHORTHAND.findall(text):
+        base = part_fold(first)
+        for suffix in re.findall(r"[A-Za-z0-9-]+", rest):
+            tail = part_fold(suffix)
+            if tail and len(tail) < len(base) and base[:len(base) - len(tail)] + tail == wanted:
+                return True
+    return False
 
 
 CHEMISTRY_WORDS = {
@@ -203,7 +235,7 @@ CURRENCY_WORDS = {"EUR": r"€|\beur\b|\beuros?\b", "USD": r"\$|\busd\b|\bdollar
 UNIT_WORDS = {"kWh": r"kwh", "pack": r"packs?\b", "cell": r"cells?\b"}
 CADENCE_WORDS = {
     "weekly": r"week", "monthly": r"month", "quarterly": r"quarter", "yearly": r"year|annual|p\.a\.",
-    "ongoing": r"ongoing|on-going|regular|recurring|continu|steady|standing", "one_off": r"one[\s-]*off|once|single|just one|trial|test",
+    "ongoing": r"ongoing|on-going|regular|recurring|continu|steady|standing|repeat", "one_off": r"one[\s-]*off|once|single|just one|trial|test",
 }
 UNIT_STEMS = {"packs": "pack", "modules": "module", "cells": "cell", "units": "unit", "systems": "system",
               "containers": "container", "vehicles": "vehicle", "kwh": "kwh", "mwh": "mwh"}
@@ -287,7 +319,8 @@ def ground_product(product, text):
     if not (3 <= len(product["quote"]) <= 300) or squash(product["quote"]) not in squash(text):
         raise Rejected("quote_not_in_text")
     if product["make"] and not make_grounded(product["make"], text):
-        raise Rejected("ungrounded:make")
+        if not (product["model"] and code_grounded(product["model"], text) and make_implied(product["make"], product["model"])):
+            raise Rejected("ungrounded:make")
     for key in ("model", "platform", "cell_format"):
         if product[key] and not code_grounded(product[key], text):
             raise Rejected(f"ungrounded:{key}")
@@ -659,13 +692,13 @@ def fact_sets(product):
 
 
 def ts_keys(facts_list, tsx=None):
-    """The app's own builder (pack families included), one subprocess for the whole list. Returns the first key per input."""
+    """The app's own builder (pack families included), one subprocess for the whole list. Returns every key per input."""
     tsx = tsx or str(WEB / "node_modules" / ".bin" / "tsx")
     done = subprocess.run([tsx, "lib/match/product-key-cli.ts"], cwd=WEB, input=json.dumps(facts_list), text=True,
                           capture_output=True, timeout=120)
     if done.returncode != 0:
         raise RuntimeError("product-key-cli failed: " + done.stderr.strip()[:300])
-    return [entry[0] for entry in json.loads(done.stdout)]
+    return json.loads(done.stdout)
 
 
 def ts_available():
@@ -685,18 +718,30 @@ def sql_keyed(cur, facts):
 
 
 def ts_key_table(products, tsx=None):
-    """{json of ts facts: first key} for every fact set of these products, from one subprocess call."""
+    """{json of ts facts: [keys, most specific first]} for every fact set of these products, from one subprocess call."""
     unique = list(dict.fromkeys(json.dumps(f["ts"], sort_keys=True) for p in products for f in fact_sets(p)))
     if not unique:
         return {}
     return dict(zip(unique, ts_keys([json.loads(u) for u in unique], tsx)))
 
 
+def pick_key(keys, fact):
+    """The most specific key the TEXT proves. The app's builder can match a pack family on a model alone, which
+    quietly supplies a capacity the buyer never stated; a part number or one stated kWh figure is needed for a
+    part, pack, model or cell key, otherwise the broad key (make-scoped when a make is stated) is used."""
+    if fact["ts"].get("partNumbers"):
+        return keys[0]
+    single = fact["ts"].get("kwh") is not None or fact["ts"].get("cellMaker")
+    if single:
+        return keys[0]
+    return next((k for k in keys if k["level"] == "broad"), keys[-1])
+
+
 def key_lines(cur, product, builder="sql", ts_table=None):
     """The lines one accepted product becomes: [{key, level, make, model, format, chemistry, kwh_min, kwh_max, raw_product}]."""
     lines = []
     sets = fact_sets(product)
-    ts_first = [(ts_table or {}).get(json.dumps(f["ts"], sort_keys=True)) if builder == "ts" else None for f in sets]
+    ts_first = [pick_key((ts_table or {})[json.dumps(f["ts"], sort_keys=True)], f) if builder == "ts" else None for f in sets]
     for fact, ts in zip(sets, ts_first):
         keyed = sql_keyed(cur, fact["sql"])
         if not keyed or not keyed["stated"]:
@@ -715,6 +760,12 @@ def key_lines(cur, product, builder="sql", ts_table=None):
 # ---------------------------------------------------------------------------
 def line_id(company_id, kind, key):
     return "bi_parse_" + hashlib.sha1(f"{company_id}|{kind}|{key}".encode("utf-8")).hexdigest()[:24]
+
+
+def adds_information(line, product):
+    """A broad line only earns a row when it carries something the buy box's own broad line lacks."""
+    return (line["level"] != "broad" or line["kwh_min"] is not None or line["kwh_max"] is not None
+            or bool(line["model"]) or bool(line["raw_product"]) or product["quantity"] is not None or product["price"] is not None)
 
 
 def write_line(cur, source, kind, line, product, run_id):
@@ -798,6 +849,10 @@ def write_sources(conn, parsed, report, run_id, builder, apply_writes, batch_siz
                     for product in source["result"]["products"]:
                         for line in key_lines(cur, product, builder, ts_table):
                             kind = source["line_kind"]
+                            if not adds_information(line, product):
+                                source["lines"].append({**line, "kind": kind, "outcome": "broad_only", "product": product})
+                                report["lines"]["broad_only_skipped"] = report["lines"].get("broad_only_skipped", 0) + 1
+                                continue
                             outcome = write_line(cur, source, kind, line, product, run_id)
                             marker = (source["company_id"], line["key"], kind)
                             if outcome == "added" and not apply_writes:
@@ -897,6 +952,9 @@ def describe_line(line):
     if product["cadence"]:
         bits.append(f"cadence {product['cadence']}")
     bits.append(product["status"])
+    note = {"broad_only": "not written: broad only", "present": "already a line", "merged": "merged into an earlier parsed line"}.get(line.get("outcome"))
+    if note:
+        bits.append(f"*{note}*")
     return "; ".join(bits)
 
 
@@ -963,7 +1021,8 @@ def preview(conn, report, sources, source_note="", before_after=15, seed=7):
             md_table(["kind"] + list(levels) + ["total"], [[k] + [lines["added"].get(f"{k}:{lv}", 0) for lv in levels]
                                                             + [sum(lines["added"].get(f"{k}:{lv}", 0) for lv in levels)] for k in kinds]), "",
             f"Total added: {lines['added_total']}. Merged into a line this parser wrote earlier: {lines['merged']}. "
-            f"Already present (another writer's line, left alone): {lines['present']}.", "",
+            f"Already present (another writer's line, left alone): {lines['present']}. "
+            f"Broad-only lines not written (nothing beyond the buy box's own broad line): {lines.get('broad_only_skipped', 0)}.", "",
             f"Companies gaining at least one specific (non-broad) line: {report.get('companies_gaining_specific', 0)}", ""]
     done = [s for s in sources if s.get("lines")]
     by_company = {}
@@ -1011,6 +1070,7 @@ def main(argv=None):
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--preview", help="write the preview markdown (counts, rejections, before and after) here")
     parser.add_argument("--report", help="write the run report as JSON here")
+    parser.add_argument("--detail", help="write every source with its text, products and lines as JSON here")
     args = parser.parse_args(argv)
 
     from backfill_buyer_interest import DEFAULT_DSN, _dsn_params, is_production_dsn, refusal_for_database
@@ -1059,6 +1119,14 @@ def main(argv=None):
             print(f"preview written to {args.preview}")
         if args.report:
             Path(args.report).write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
+        if args.detail:
+            Path(args.detail).write_text(json.dumps([
+                {"id": s["id"], "company_id": s["company_id"], "date": s["date"], "kind": s["line_kind"], "skip": s["skip"],
+                 "text": s["text"], "status": (s.get("result") or {}).get("status"),
+                 "lines": [{k: v for k, v in line.items() if k != "product"} | {"quote": line["product"]["quote"]}
+                           for line in s.get("lines") or []],
+                 "rejected": [[raw, reason] for raw, reason in (s.get("result") or {}).get("rejected", [])]} for s in sources],
+                indent=1, default=str), encoding="utf-8")
     finally:
         conn.rollback()
         conn.close()

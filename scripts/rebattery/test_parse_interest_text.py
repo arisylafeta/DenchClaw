@@ -80,7 +80,19 @@ class Validation(unittest.TestCase):
         self.assertEqual(kept["kwh_min"], 1260.0)
 
     def test_a_make_the_text_does_not_name_is_rejected(self):
-        self.reject(product(make="Nissan", model="Leaf", quote="Leaf 40kWh"), "Leaf 40kWh packs", "ungrounded:make")
+        self.reject(product(make="Ford", model="Transit", quote="Transit 40kWh"), "Transit 40kWh packs", "ungrounded:make")
+
+    def test_a_model_that_belongs_to_one_maker_implies_the_make(self):
+        kept = self.p.validate_product(product(make="Nissan", model="Leaf", quote="Used Leaf packs"), "Used Leaf packs for reuse")
+        self.assertEqual(kept["make"], "Nissan")
+        self.reject(product(make="Toyota", model="Leaf", quote="Used Leaf packs"), "Used Leaf packs for reuse", "ungrounded:make")
+        self.reject(product(make="Ford", model="Transit", quote="Transit packs"), "Transit packs", "ungrounded:make")
+
+    def test_slash_shorthand_part_numbers_are_read_out(self):
+        text = "Ioniq 5 37501-GI300/GI301/GI351; Kia EV6 37501-CV051/CV151"
+        for part in ("37501-GI301", "37501GI351", "37501-CV151"):
+            self.assertEqual(self.p.validate_product(product(part_number=part, quote="Ioniq 5 37501-GI300"), text)["part_number"], part)
+        self.reject(product(part_number="37501-GI999", quote="Ioniq 5 37501-GI300"), text, "ungrounded:part_number")
 
     def test_make_aliases_and_lists(self):
         self.assertTrue(self.p.make_grounded("Volkswagen", "VW ID.3 packs"))
@@ -177,6 +189,31 @@ class Selection(unittest.TestCase):
     def test_a_cell_names_its_maker(self):
         fact = self.p.fact_sets(product(make="Molicel", model="P42A", format="cell", quote="x"))[0]
         self.assertEqual(fact["sql"]["cell_maker"], "Molicel")
+
+
+class Keys(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.p = load("parse_interest_text")
+
+    def keys(self, *levels):
+        return [{"key": f"{level}:x", "level": level} for level in levels]
+
+    def test_a_pack_family_needs_a_stated_capacity_or_a_part(self):
+        keys = self.keys("pack", "model", "broad", "broad")
+        self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Renault", "model": "Zoe"}})["level"], "broad")  # no kWh: no guess
+        self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Renault", "model": "Zoe", "kwhMin": 40, "kwhMax": 52}})["level"], "broad")
+        self.assertEqual(self.p.pick_key(keys, {"ts": {"make": "Renault", "model": "Zoe", "kwh": 52}})["level"], "pack")
+        self.assertEqual(self.p.pick_key(self.keys("part", "broad"), {"ts": {"partNumbers": ["X"]}})["level"], "part")
+
+    def test_a_broad_line_must_add_something(self):
+        line = {"level": "broad", "kwh_min": None, "kwh_max": None, "model": None, "raw_product": None}
+        plain = product(format="pack", chemistry="LFP", quote="LFP packs")
+        self.assertFalse(self.p.adds_information(line, plain))
+        self.assertTrue(self.p.adds_information({**line, "kwh_min": 55}, plain))
+        self.assertTrue(self.p.adds_information({**line, "model": "Leaf"}, plain))
+        self.assertTrue(self.p.adds_information(line, {**plain, "quantity": 4.0}))
+        self.assertTrue(self.p.adds_information({**line, "level": "model"}, plain))
 
 
 class Runner(unittest.TestCase):
@@ -403,11 +440,11 @@ class Database(unittest.TestCase):
 
     def test_researched_text_is_inferred_and_dated_from_the_profile_when_no_change_is_logged(self):
         company = self.companies[1]
-        self.wants(company, "Used Leaf packs for storage projects.", "researched")
-        self.parse({"Leaf": [product(make="Nissan", model="Leaf", format="pack", quote="Leaf packs")]})  # Nissan is not in the text
+        self.wants(company, "Used Transit packs for storage projects.", "researched")
+        self.parse({"Transit": [product(make="Ford", model="Transit", format="pack", quote="Transit packs")]})  # Ford is not in the text
         self.assertEqual(self.lines(company), [])
         self.dir = tempfile.TemporaryDirectory()  # the first answer is cached; ask again
-        self.parse({"Leaf": [product(model="Leaf", format="pack", quote="Leaf packs")]}, run_id="r2")
+        self.parse({"Transit": [product(model="Transit", format="pack", quote="Transit packs")]}, run_id="r2")
         line = self.lines(company)[0]
         self.assertEqual((line["kind"], str(line["first_seen"])), ("inferred", "2026-11-01"))
 
@@ -551,6 +588,21 @@ class Database(unittest.TestCase):
                                                   quote="Vauxhall Corsa-e 50kWh packs")]}, builder="ts")
         self.assertEqual([line["product_key"] for line in self.lines(company)], ["pack:stellantis-ecmp-50kwh"])
         self.assertEqual(report["lines"]["added"], {"interest:pack": 1})
+
+    def test_a_broad_only_line_is_not_written(self):
+        company = self.companies[0]
+        self.wants(company, "Mostly LFP packs from Finland", "stated", change_on="2026-10-01")
+        report, sources = self.parse({"Finland": [product(format="pack", chemistry="LFP", quote="LFP packs")]})
+        self.assertEqual((self.lines(company), report["lines"]["broad_only_skipped"], report["lines"]["added_total"]), ([], 1, 0))
+
+    def test_a_model_without_a_capacity_stays_a_broad_line_that_keeps_the_model(self):
+        if not self.p.ts_available():
+            self.skipTest("needs apps/web/node_modules")
+        company = self.companies[0]
+        self.wants(company, "Donor modules for Renault Zoe repairs", "researched", change_on="2026-10-01")
+        self.parse({"Zoe": [product(make="Renault", model="Zoe", format="module", quote="Renault Zoe")]}, builder="ts")
+        line = self.lines(company)[0]
+        self.assertEqual((line["product_key"], line["model"]), ("broad:renault-any-modules", "Zoe"))
 
     def test_a_source_error_rolls_back_only_that_source(self):
         good, bad = self.companies[0], self.companies[1]
