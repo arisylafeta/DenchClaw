@@ -66,7 +66,7 @@ describe("Today groups", () => {
     const groups = todayGroups(rows, today);
     expect(groups.map((g) => [g.label, g.rows.map((r) => r.id)])).toEqual([
       ["Overdue", ["late1", "late2"]], ["Today", ["now"]], ["Upcoming", ["soon"]],
-      ["No date", ["someday-high", "someday-low", "done-but-busy"]], ["No next action", ["idle", "idle-unscored"]],
+      ["No date", ["someday-high", "someday-low", "done-but-busy"]], ["Needs a next action", ["idle", "idle-unscored"]],
     ]);
   });
 });

@@ -16,6 +16,7 @@ import { DemandDialog } from "./demand-editor";
 import { OpportunitiesSheet, SheetFilterBar } from "./opportunities-sheet";
 import { BulkBoard } from "./bulk-board";
 import { TodayView } from "./today-view";
+import type { NextFields } from "./next-action";
 import { ProposalRow } from "./proposal-row";
 import { ErrorText, request, buttonClass, buttonStyle, sharedGet } from "./trade-ui";
 import { BULK_TRADES_PARAMS, TRADES_PREVIEW_PATH, previewTab, type PreviewTab } from "@/lib/bulk-trades-url";
@@ -144,6 +145,11 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
     setRows((current) => current.map((item) => (item.key === row.key ? { ...item, next_action: text, next_due: text ? item.next_due : null } : item)));
   }
 
+  /** A Today row changed its action, date or driver: update it in place. */
+  function updateNext(row: SheetRow, next: NextFields) {
+    setRows((current) => current.map((item) => (item.key === row.key ? { ...item, next_action: next.next_action, next_due: next.next_due, owner: next.owner } : item)));
+  }
+
   if (route.listing) {
     return (
       <div className="bulk-trades bt-preview h-full overflow-auto px-2 pb-3 pt-2">
@@ -193,7 +199,7 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
         <ErrorText error={actionError} />
         {tab === "today" ? (
           <TodayView rows={shown} owner={filters.owner} loading={!sheetLoaded && !sheetError} error={sheetError} today={today}
-            onOpen={open} onNext={saveNext} onOpenBoard={() => setTab("board")}
+            onOpen={open} onUpdate={updateNext} onOpenBoard={() => setTab("board")}
             onOpenCompany={onOpenEntry ? (id) => onOpenEntry("company", id) : undefined} />
         ) : tab === "board" ? (
           <div className="flex flex-col gap-4">

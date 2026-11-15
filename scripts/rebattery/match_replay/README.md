@@ -13,7 +13,8 @@ metrics file plus a report. No Postgres writes, no email, no WhatsApp.
 | A1 | The same rules layer plus product keywords from dated body lines and dated `past_asks`. Top 30. |
 | B0 | One caseworker call over A1's top 30, using `buyer_profile` JSON, stage, tier and basis only. |
 | B1 | The same call over the same top 30, with strict as-of dossiers for the ten pilot buyers. |
-| TS | The production rules layer: the real `apps/web/lib/match/rules.ts` run over the same fixtures. The phase 4 gate. |
+| TS | The production rules layer: the real `apps/web/lib/match/rules.ts` run over the same fixtures, without interest lines (what `MATCH_BUYER_LINES=off` ranks). Must equal A1. The phase 4 gate. |
+| TSL | TS plus each buyer's interest lines, built by `run_replay.lines_from_dossier` from the as-of dossier rows (status bought/asked/said_interested/declined, dated by `seen`, expiry from that date, checked as of the case date) and keyed with the production `productKeyFor`. Runs with `--arms TS`. Gate: 11 of 12, no violations, and no positive that TS has in the top 5 may leave it. |
 
 ## Inputs
 
@@ -35,7 +36,7 @@ All data stays outside git. Pass paths explicitly:
 ```
 
 The phase 4 gate runs the TypeScript rules instead of the Python A1 arm and
-fails when they differ from it, when fewer than 11 of the 12 positive cases
+fails when they differ from it (TS, no lines; the TSL arm adds the interest lines and is gated on being at least TS), when fewer than 11 of the 12 positive cases
 put the real buyer in the top 5, or when any ranked company is one the rules
 rule out:
 

@@ -11,6 +11,8 @@ import { Sh } from "./bt-shimmer";
 import { ErrorText, sharedGet } from "./trade-ui";
 import { PreviewDemandPanel } from "./preview-demand-panel";
 import { SupplyListingPanel } from "./supply-listing-panel";
+import { NextActionPanel } from "./next-action";
+import { dealOwner } from "@/lib/bulk-owner";
 
 /** One bad listing must not take the whole page down: the URL keeps the listing open, so a render crash would survive every reload. */
 class ListingBoundary extends Component<{ id: string; onClose: () => void; children: ReactNode }, { failed: string | null }> {
@@ -52,7 +54,7 @@ function ListingDetailInner({ id, today, onClose, onOpenListing, onLoaded }: {
   }, [id]);
   useEffect(() => { void load(); return () => { latest.current++; }; }, [load]);
   const listing = result?.id === id ? result.listing : null;
-  if (listing?.kind === "demand" && listing.demand) return <PreviewDemandPanel key={id} demand={listing.demand} today={today} onChanged={load} onClose={onClose} onOpenTrade={onOpenListing} onOpenSupply={onOpenListing} onOpenDemand={onOpenListing} isTrade={listing.is_trade} waiting={listing} ownerPicker={<><OwnerPicker listingId={listing.id} owner={listing.context.owner} onChanged={load} /><FeeInput listingId={listing.id} fee={listing.context.fee_eur} defaultFee={valueAndFee(listing.kind, listing.spec).fee_eur} onChanged={load} /><LikelihoodPicker listingId={listing.id} likelihood={listing.context.likelihood} onChanged={load} /><CantSourceControl listingId={listing.id} reason={listing.context.cant_source} onChanged={load} /></>} />;
+  if (listing?.kind === "demand" && listing.demand) return <PreviewDemandPanel key={id} demand={listing.demand} today={today} onChanged={load} onClose={onClose} onOpenTrade={onOpenListing} onOpenSupply={onOpenListing} onOpenDemand={onOpenListing} isTrade={listing.is_trade} waiting={listing} nextAction={listing.status === "closed" ? null : <NextActionPanel listingId={listing.id} today={today} onChanged={load} value={{ next_action: listing.next_action, next_due: listing.next_due?.slice(0, 10) ?? null, owner: dealOwner(listing.context.owner) }} />} ownerPicker={<><OwnerPicker key={String(listing.context.owner ?? "")} listingId={listing.id} owner={listing.context.owner} onChanged={load} /><FeeInput listingId={listing.id} fee={listing.context.fee_eur} defaultFee={valueAndFee(listing.kind, listing.spec).fee_eur} onChanged={load} /><LikelihoodPicker listingId={listing.id} likelihood={listing.context.likelihood} onChanged={load} /><CantSourceControl listingId={listing.id} reason={listing.context.cant_source} onChanged={load} /></>} />;
   if (listing?.kind === "supply") return <SupplyListingPanel key={id} listing={listing} today={today} onChanged={load} onClose={onClose} onOpenListing={onOpenListing} />;
   return <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-3">
     <button type="button" onClick={onClose} className="w-fit text-[13px] hover:underline" style={{ color: "var(--bt-muted)" }}>← Bulk Trades</button>

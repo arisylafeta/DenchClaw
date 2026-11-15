@@ -14,6 +14,7 @@ replay directory; it never writes to Postgres.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import subprocess
 import sys
@@ -120,6 +121,40 @@ def buyer_views(case: dict[str, Any], buyers: list[dict[str, Any]], dossiers: di
     return views
 
 
+# What a dossier product row's `status` becomes as a buyer_interest line, and how long it stays current without being
+# seen again (plan: ask 90 days like a standing want, interest 180, bought and declined are history and never expire).
+LINE_KIND_FOR_STATUS = {"bought": "bought", "asked": "ask", "said_interested": "interest", "declined": "declined"}
+LINE_EXPIRY_DAYS = {"ask": 90, "interest": 180}
+
+
+def lines_from_dossier(view: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Raw interest lines for one as-of dossier view: one per product row (and per kWh figure it states).
+
+    The view is already strict (`dossier.py`): only rows seen strictly before the case date are left, so every line
+    here was known at the offer. Expiry is set from the row's own date and checked against the case date by the rules.
+    """
+    if not view:
+        return []
+    out: list[dict[str, Any]] = []
+    for product in (view.get("frontmatter") or {}).get("products") or []:
+        kind = LINE_KIND_FOR_STATUS.get(str(product.get("status") or ""))
+        seen = dossier_mod.parse_date(product.get("seen"))
+        if not kind or seen is None:
+            continue
+        expires = (seen + dt.timedelta(days=LINE_EXPIRY_DAYS[kind])).isoformat() if kind in LINE_EXPIRY_DAYS else None
+        base = {
+            "kind": kind, "seen": seen.isoformat(), "expires_on": expires,
+            "part_number": product.get("part_number"), "make": product.get("make"), "model": product.get("model"),
+            "format": product.get("format"), "chemistry": product.get("chemistry"),
+            "kwh_min": product.get("kwh_min"), "kwh_max": product.get("kwh_max"),
+        }
+        values = product.get("kwh")
+        values = values if isinstance(values, list) else ([values] if isinstance(values, (int, float)) else [])
+        for kwh in values or [None]:
+            out.append({**base, "kwh": kwh})
+    return out
+
+
 def run_ts(
     cases: list[dict[str, Any]],
     buyers: list[dict[str, Any]],
@@ -127,7 +162,8 @@ def run_ts(
     out_dir: Path,
     arm: str = "TS",
 ) -> dict[str, Any]:
-    """The TypeScript rules layer on the same fixtures: the gate against the A1 arm it was ported from."""
+    """The TypeScript rules layer on the same fixtures, once without lines (arm TS: the gate against the A1 arm it was
+    ported from) and once with each buyer's interest lines built from the as-of dossier (arm TSL)."""
     payload = {
         "cases": [{"id": case["id"], "as_of": case["as_of"], "listing": case["listing"]} for case in cases],
         "buyers": [
@@ -138,6 +174,11 @@ def run_ts(
         ],
         "dossiers": {
             case["id"]: {view["id"]: view["dossier"] for view in buyer_views(case, buyers, dossiers) if view.get("dossier")}
+            for case in cases
+        },
+        "lines": {
+            case["id"]: {view["id"]: lines_from_dossier(view["dossier"]) for view in buyer_views(case, buyers, dossiers)
+                         if view.get("dossier")}
             for case in cases
         },
     }
@@ -153,13 +194,19 @@ def run_ts(
     run = subprocess.run(["node", str(out_dir / "a1_parity.mjs"), str(input_path)], check=True, capture_output=True, text=True)
     ts = json.loads(run.stdout)["cases"]
     out: dict[str, Any] = {}
+    out_lines: dict[str, Any] = {}
     for case in cases:
         rows = ts[case["id"]]["ranked"]
         for index, row in enumerate(rows):
             row["rank"] = index + 1
         out[case["id"]] = {"ranked": rows, "ts_violations": ts[case["id"]]["violations"]}
+        rows_lines = ts[case["id"]]["ranked_lines"]
+        for index, row in enumerate(rows_lines):
+            row["rank"] = index + 1
+        out_lines[case["id"]] = {"ranked": rows_lines, "ts_violations": ts[case["id"]]["violations_lines"]}
     dump_json(out_dir / f"{arm.lower()}.json", {"cases": out})
-    return out
+    dump_json(out_dir / f"{arm.lower()}l.json", {"cases": out_lines})
+    return {arm: out, f"{arm}L": out_lines}
 
 
 def run_a1(
@@ -367,9 +414,37 @@ def compute_metrics(
 
 
 def evaluate_gate(cases: list[dict[str, Any]], arms: dict[str, Any], expected: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-    """The phase 4 gate: 11 of 12 positives in the top 5, no rule violations, and identical to A1."""
-    ts = arms.get("TS", {})
-    a1 = arms.get("A1")
+    """The replay gate: 11 of 12 positives in the top 5 and no rule violations.
+
+    TS (no lines) must also be identical to A1. TSL (with the buyers' interest lines) must be at least TS: no
+    positive case that TS has in the top 5 may fall out of it, and no positive may move down more than it moves up
+    in total. Lines only add evidence, so any worse result than TS is a regression.
+    """
+    ts_gate = _gate_arm(cases, arms.get("TS", {}), expected, arms.get("A1"))
+    gate = {**ts_gate}
+    if "TSL" in arms:
+        lined = _gate_arm(cases, arms["TSL"], expected, None)
+        regressions = []
+        for case in cases:
+            case_id = case["id"]
+            for item in expected[case_id]:
+                if item["outcome"] not in POSITIVE_OUTCOMES:
+                    continue
+                before = rank_of(arms["TS"].get(case_id, {}).get("ranked", []), item["company_id"])
+                after = rank_of(arms["TSL"].get(case_id, {}).get("ranked", []), item["company_id"])
+                if before and before <= 5 and not (after and after <= 5):
+                    regressions.append({"case": case_id, "company": item["company"], "ts_rank": before, "tsl_rank": after})
+        lined["same_or_better_than_ts"] = not regressions and lined["recall_at_5_hits"] >= ts_gate["recall_at_5_hits"]
+        lined["regressions_out_of_top5"] = regressions
+        lined["ok"] = lined["ok"] and lined["same_or_better_than_ts"]
+        gate["lines"] = lined
+        gate["ok"] = gate["ok"] and lined["ok"]
+    return gate
+
+
+def _gate_arm(
+    cases: list[dict[str, Any]], ts: dict[str, Any], expected: dict[str, list[dict[str, Any]]], a1: dict[str, Any] | None,
+) -> dict[str, Any]:
     per_case: dict[str, Any] = {}
     hits = 0
     positive_cases = 0
@@ -421,7 +496,7 @@ def main() -> None:
     parser.add_argument("--ts-script", default=str(Path(__file__).with_name("a0_parity.ts")))
     parser.add_argument("--ts-rules-script", default=str(TS_SCRIPT))
     parser.add_argument("--esbuild", default=str(TS_ESBUILD))
-    parser.add_argument("--arms", default="A0,A1S,A1,B0,B1")
+    parser.add_argument("--arms", default="A0,A1S,A1,B0,B1", help="TS also runs TSL, the TS rules with interest lines")
     parser.add_argument("--gate", action="store_true", help="fail when the TypeScript rules miss the phase 4 gate")
     parser.add_argument("--judgements", default=None)
     args = parser.parse_args()
@@ -452,8 +527,8 @@ def main() -> None:
         if "A1" not in arms:
             arms["A1"] = load_json(out_dir / "a1.json")["cases"]
         arms.update(run_b(cases, pool, dossiers, arms["A1"], out_dir, cache_dir, b_arms))
-    if "TS" in arms_wanted:
-        arms["TS"] = run_ts(cases, pool, dossiers, out_dir)
+    if "TS" in arms_wanted or "TSL" in arms_wanted:
+        arms.update(run_ts(cases, pool, dossiers, out_dir))
 
     judgements = {}
     if args.judgements:
@@ -474,6 +549,8 @@ def main() -> None:
         metrics["ts_gate"] = gate
         dump_json(out_dir / "metrics.json", metrics)
         print(json.dumps({"gate": {key: gate[key] for key in ("ok", "recall_at_5_hits", "positive_cases", "violation_count", "same_as_a1")}}))
+        if "lines" in gate:
+            print(json.dumps({"gate_lines": {key: gate["lines"][key] for key in ("ok", "recall_at_5_hits", "violation_count", "same_or_better_than_ts", "regressions_out_of_top5")}}))
         if args.gate and not gate["ok"]:
             print(json.dumps(gate["violations"][:10]), file=sys.stderr)
             raise SystemExit("Phase 4 replay gate failed")

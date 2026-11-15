@@ -5,7 +5,7 @@ import "server-only";
 // Read only, except the Not a fit verdicts the route records.
 import { queryPg } from "../postgres";
 import { buildProductKey, keyLine, type FieldFact, type ProductKey } from "../match/product-key";
-import { rankBuyers, supplyFactsFromKey, type RankedBuyerRow } from "../match/rules";
+import { rankBuyers, supplyFactsFromKey, type BuyerLine, type RankedBuyerRow } from "../match/rules";
 import { countryFromText, requirementFor, scoreCandidate, vocabulary, type Candidate, type Check } from "../demand-match";
 import { priceLabel } from "../bulk-demand";
 import { matchVerdicts, verdictKey, type FeedRow } from "./demand-match-supply";
@@ -18,6 +18,59 @@ type CompanyRow = {
   id: string; name: string; stage: string | null; tier: string | null; basis: string | null;
   profile: Record<string, unknown>; dossier: Record<string, unknown> | null; last_touch: string | null;
 };
+
+/**
+ * `MATCH_BUYER_LINES=off` restores the ranking exactly as it was before buyer interest lines. On by default.
+ * Production runs self-hosted and reads this once per request from the process environment, so switching it needs a
+ * restart through the deploy tool (scripts/denchclaw-deploy.py); rolling the feature back is a deploy rollback.
+ */
+export const buyerLinesEnabled = () => (process.env.MATCH_BUYER_LINES ?? "on").trim().toLowerCase() !== "off";
+
+type LineRow = {
+  company_id: string; kind: string; product_key: string; make: string | null; model: string | null;
+  format: string | null; chemistry: string | null; kwh_min: number | null; kwh_max: number | null;
+  first_seen: string; last_seen: string; expires_on: string | null; quantity: number | null;
+  quantity_unit: string | null; price: number | null; price_currency: string | null; price_unit: string | null;
+  decline_reason: string | null;
+};
+
+/** Every current line for some companies, read by company_id (index `buyer_interest_company_idx`). */
+export const BUYER_LINES_SQL = `select company_id, kind, product_key, make, model, format, chemistry, kwh_min::float8 as kwh_min,
+            kwh_max::float8 as kwh_max, first_seen::text, last_seen::text, expires_on::text, quantity::float8 as quantity,
+            quantity_unit, price::float8 as price, price_currency, price_unit, decline_reason
+     from buyer_interest
+     where company_id = any($1::text[]) and (expires_on is null or expires_on >= $2::date)`;
+
+/** Every current line for these companies, one indexed read (company_id), grouped by company. */
+export async function loadBuyerLines(companyIds: string[], asOf: string): Promise<Map<string, BuyerLine[]>> {
+  const rows = companyIds.length ? await queryPg<LineRow>(BUYER_LINES_SQL, [companyIds, asOf]) : [];
+  const lines = new Map<string, BuyerLine[]>();
+  for (const row of rows) {
+    const list = lines.get(row.company_id) ?? [];
+    list.push({
+      kind: row.kind, productKey: row.product_key, make: row.make, model: row.model, format: row.format,
+      chemistry: row.chemistry, kwhMin: row.kwh_min, kwhMax: row.kwh_max, firstSeen: row.first_seen,
+      lastSeen: row.last_seen, expiresOn: row.expires_on, quantity: row.quantity, quantityUnit: row.quantity_unit,
+      price: row.price, priceCurrency: row.price_currency, priceUnit: row.price_unit, declineReason: row.decline_reason,
+    });
+    lines.set(row.company_id, list);
+  }
+  return lines;
+}
+
+/** The buyer pool: the buy box, or (with lines on) a current line of any kind but a decline. */
+export function buyerPoolSql(withLines: boolean): string {
+  const lineTest = withLines
+    ? ` or exists (select 1 from buyer_interest i where i.company_id = c.id and i.kind <> 'declined'
+                     and (i.expires_on is null or i.expires_on >= $2::date))`
+    : "";
+  return `select c.id, c.name, c.buyer_stage as stage, c.buyer_tier as tier, c.buyer_profile_basis as basis,
+              c.buyer_profile as profile, c.buyer_profile -> 'dossier' as dossier
+       from crm_companies c
+       where (c.buyer_profile <> '{}'::jsonb${lineTest}) and c.buyer_exclusion_reason is null
+         and coalesce(c.relationship_stage, '') <> 'Excluded'
+         and ($1::text is null or c.id <> $1)`;
+}
 
 const gapOf = (checks: Check[]) => {
   const bad = checks.find((check) => check.state === "fail")
@@ -152,18 +205,16 @@ export async function supplyMatchesV2(listingId: string): Promise<MatchesResult 
     location: feed.location ?? listing.location, href: feed.href, seen: feed.seen,
   });
 
+  const asOf = new Date().toISOString().slice(0, 10);
+  const withLines = buyerLinesEnabled();
   const [demand, verdicts, companies] = await Promise.all([
     listDemand(),
     matchVerdicts(listingId),
-    queryPg<CompanyRow>(
-      `select c.id, c.name, c.buyer_stage as stage, c.buyer_tier as tier, c.buyer_profile_basis as basis,
-              c.buyer_profile as profile, c.buyer_profile -> 'dossier' as dossier
-       from crm_companies c
-       where c.buyer_profile <> '{}'::jsonb and c.buyer_exclusion_reason is null
-         and coalesce(c.relationship_stage, '') <> 'Excluded'
-         and ($1::text is null or c.id <> $1)`,
-      [listing.company_id]),
+    withLines
+      ? queryPg<CompanyRow>(buyerPoolSql(true), [listing.company_id, asOf])
+      : queryPg<CompanyRow>(buyerPoolSql(false), [listing.company_id]),
   ]);
+  const lines = withLines ? await loadBuyerLines(companies.map((company) => company.id), asOf) : new Map<string, BuyerLine[]>();
   // Current last contact per company: the newest email in or out with anyone there.
   const touches = await queryPg<{ company_id: string; last: string }>(
     `select p.company_id, max(coalesce(m.sent_at, m.created_at))::text as last
@@ -235,9 +286,10 @@ export async function supplyMatchesV2(listingId: string): Promise<MatchesResult 
       dossier: company.dossier && typeof company.dossier === "object"
         ? { frontmatter: company.dossier as Record<string, unknown>, body: null }
         : null,
+      lines: lines.get(company.id) ?? null,
     }));
   const ranked = rankBuyers(supplies, buyers, {
-    asOf: new Date().toISOString().slice(0, 10), top: 30, verdicts: companyVerdicts, key,
+    asOf, top: 30, verdicts: companyVerdicts, key,
   });
 
   // The main contact we can actually write to, so the offer carries a real address.

@@ -6,9 +6,8 @@ import { formatEurCompact, type SheetRow } from "@/lib/bulk-sheet";
 import type { DealOwner } from "@/lib/bulk-owner";
 import { isBoardStage } from "@/lib/bulk-listing";
 import { BusyRegion, Sh } from "./bt-shimmer";
-import { NextActionCell } from "./next-action-cell";
-import { ProgressChip } from "./opportunities-sheet";
-import { DriverAvatar, DueText } from "./desk-bits";
+import { TodayTask, type NextFields } from "./next-action";
+import { dealOwner } from "@/lib/bulk-owner";
 import { ErrorText } from "./trade-ui";
 import { DossiersToReview } from "./dossiers-to-review";
 
@@ -68,35 +67,16 @@ export function QuarterTarget({ rows, owner, loading, onOpenBoard }: { rows: She
   );
 }
 
-const GROUP_TONE: Partial<Record<TodayGroupKey, string>> = { overdue: "var(--bt-red)", today: "var(--bt-blue)" };
+const GROUP_TONE: Partial<Record<TodayGroupKey, string>> = { overdue: "var(--bt-red)", today: "var(--bt-blue)", none: "var(--bt-amber)" };
 
 /** What the row is: a request, a supply lot, or a deal once it is offered. */
 const kindLabel = (row: SheetRow) => (isBoardStage(row.progress) ? "Deal" : row.kind === "demand" ? "Request" : "Supply");
 
-/** One task: the next action to do, where it belongs underneath, when it is due and who drives it on the right. */
-function ActionRow({ row, today, onOpen, onNext }: { row: SheetRow; today: string; onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void> }) {
-  return (
-    <li onClick={() => onOpen(row)}
-      className="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-[var(--bt-row-hover)] focus-within:bg-[var(--bt-row-hover)]">
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="min-w-0"><NextActionCell large value={row.next_action} due={null} today={today} onSave={(text) => onNext(row, text)} /></span>
-        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px]" style={{ color: "var(--bt-muted)" }}>
-          <span>{kindLabel(row)}</span><span aria-hidden="true">·</span>
-          <button type="button" title={row.title} className="min-w-0 max-w-full truncate text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]">
-            {row.company ? `${row.company}: ` : ""}{row.title}
-          </button>
-          {row.likelihood != null && <><span aria-hidden="true">·</span><span>{row.likelihood}% chance</span></>}
-        </span>
-      </span>
-      <span className="flex shrink-0 flex-col items-end gap-1.5">
-        <span className="flex items-center gap-2">
-          <DueText due={row.next_action ? row.next_due : null} today={today} />
-          <DriverAvatar owner={row.owner} size={22} />
-        </span>
-        <ProgressChip row={row} />
-      </span>
-    </li>
-  );
+/** One task: tick it, open its listing, change its date. A listing with no action gets an add row. */
+function ActionRow({ row, today, onOpen, onUpdate }: { row: SheetRow; today: string; onOpen: (row: SheetRow) => void; onUpdate: (row: SheetRow, next: NextFields) => void }) {
+  return <TodayTask id={row.id} kind={kindLabel(row)} where={`${row.company ? `${row.company}: ` : ""}${row.title}`} today={today}
+    value={{ next_action: row.next_action, next_due: row.next_due?.slice(0, 10) ?? null, owner: dealOwner(row.owner) }}
+    onOpen={() => onOpen(row)} onUpdate={(next) => onUpdate(row, next)} />;
 }
 
 /** "Alex has 6 requests and 4 supply lots; 3 are deals. 9 next actions: 1 overdue, 3 due today." Same counts as the tabs. */
@@ -112,9 +92,9 @@ function summary(rows: SheetRow[], owner: DealOwner | "all", groups: { key: Toda
 }
 
 /** Today: the quarter target, then every open listing's next action by when it is due. Nothing else. */
-export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, onOpenBoard, onOpenCompany }: {
+export function TodayView({ rows, owner, loading, error, today, onOpen, onUpdate, onOpenBoard, onOpenCompany }: {
   rows: SheetRow[]; owner: DealOwner | "all"; loading: boolean; error: string | null; today: string;
-  onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void>; onOpenBoard: () => void;
+  onOpen: (row: SheetRow) => void; onUpdate: (row: SheetRow, next: NextFields) => void; onOpenBoard: () => void;
   onOpenCompany?: (id: string) => void;
 }) {
   const groups = useMemo(() => todayGroups(rows, today), [rows, today]);
@@ -144,7 +124,7 @@ export function TodayView({ rows, owner, loading, error, today, onOpen, onNext, 
               {group.label} <span className="font-normal tabular-nums" style={{ color: "var(--bt-muted)" }}>({group.rows.length})</span>
             </h3>
             <ul className="divide-y divide-[var(--bt-divider)] border-b" style={{ borderColor: "var(--bt-divider)" }}>
-              {group.rows.map((row) => <ActionRow key={row.key} row={row} today={today} onOpen={onOpen} onNext={onNext} />)}
+              {group.rows.map((row) => <ActionRow key={row.key} row={row} today={today} onOpen={onOpen} onUpdate={onUpdate} />)}
             </ul>
           </section>
         ))}

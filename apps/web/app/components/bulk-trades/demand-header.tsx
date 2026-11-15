@@ -29,8 +29,10 @@ export function ScoreRing({ score }: { score: number | null }) {
 }
 
 /** Score, headline, buyer, status, three facts and a short brief. A fact we don't have says so quietly. */
-export function DemandHeader({ demand, supply, actions, onBack, isTrade = false, loadingSupply = false, waiting = null, ownerPicker = null }: {
+export function DemandHeader({ demand, supply, actions, onBack, isTrade = false, loadingSupply = false, waiting = null, ownerPicker = null, nextAction = null }: {
   ownerPicker?: React.ReactNode;
+  /** The next action panel, under the title. */
+  nextAction?: React.ReactNode;
   isTrade?: boolean; waiting?: { waiting_on: "us" | "them" | null; waiting_since: string | null } | null; demand: Demand; supply: DemandSupply | null; actions: React.ReactNode; loadingSupply?: boolean; onBack?: () => void;
 }) {
   const value = demandValue(demand);
@@ -56,6 +58,7 @@ export function DemandHeader({ demand, supply, actions, onBack, isTrade = false,
         </div>
         <div className={`${css.status} ${css.actions}`}>{actions}</div>
       </div>
+      {nextAction}
       {(waiting?.waiting_on || ownerPicker) && (
         <div className={css.controls} data-deal-controls>{waiting?.waiting_on && <WaitingBadge row={waiting} />}{ownerPicker}</div>
       )}
