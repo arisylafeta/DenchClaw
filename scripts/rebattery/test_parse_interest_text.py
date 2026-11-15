@@ -742,6 +742,14 @@ class Database(unittest.TestCase):
         self.assertEqual((str(line["first_seen"]), str(line["last_seen"])), ("2026-05-28", "2026-06-12"))
         self.assertTrue(first and second)
 
+    def test_two_formats_of_one_model_are_one_line_with_the_format_left_open(self):
+        company = self.companies[0]
+        self.wants(company, "Donor Kia EV3 modules and packs", "researched", change_on="2026-10-16")
+        self.parse({"EV3": [product(make="Kia", model="EV3", format="module", quote="Donor Kia EV3 modules and packs"),
+                            product(make="Kia", model="EV3", format="pack", quote="Donor Kia EV3 modules and packs")]})
+        [line] = self.lines(company)
+        self.assertEqual((line["product_key"], line["format"]), ("model:kia-ev3", None))
+
     def test_a_flexible_figure_joins_a_line_in_either_order_and_never_sits_below_the_price(self):
         priced = product(format="cell", kwh_min=3000, kwh_max=3000, price=30, price_max=50, price_currency="USD", price_unit="kWh", quantity=None)
         plain = product(format="cell", kwh_min=3000, kwh_max=3000)

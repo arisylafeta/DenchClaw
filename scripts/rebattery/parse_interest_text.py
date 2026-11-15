@@ -905,7 +905,7 @@ def write_line(cur, source, kind, line, product, run_id):
     """
     refs = sorted({source["ref"], f"parse:{run_id}"})
     seen = source["date"][:10]
-    cur.execute("""select id, source_refs from buyer_interest
+    cur.execute("""select id, source_refs, format from buyer_interest
                     where company_id = %s and product_key = %s and kind = %s and ownership = 'mastered' for update""",
                 (source["company_id"], line["key"], kind))
     existing = cur.fetchone()
@@ -928,6 +928,9 @@ def write_line(cur, source, kind, line, product, run_id):
     own = any(ref.startswith("parse:") for ref in existing["source_refs"] or [])
     if not own:
         return "present"
+    if existing["format"] is not None and existing["format"] != line["format"]:
+        # A model-level key covers every format, so a second format on the same line leaves the format open.
+        cur.execute("update buyer_interest set format = null, updated_at = now() where id = %s", (existing["id"],))
     if set(refs) <= set(existing["source_refs"] or []):
         return "present"
     cur.execute("""update buyer_interest set first_seen = least(first_seen, %s::date), last_seen = greatest(last_seen, %s::date),
