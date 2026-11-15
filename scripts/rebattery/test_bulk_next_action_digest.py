@@ -42,3 +42,36 @@ def test_html_escapes_listing_text():
     group = {"today": [row("x", action="<b>Ask</b> & go")], "overdue": [], "needs": []}
     _, page = digest.render("Alex", group)
     assert "<b>Ask</b>" not in page and "&lt;b&gt;Ask&lt;/b&gt; &amp; go" in page
+
+
+def test_a_pending_send_is_never_retried_and_a_second_run_sends_nothing(tmp_path, monkeypatch, capsys):
+    import json, sys
+    monkeypatch.setattr(digest, "STATE", tmp_path / "sent.json")
+    monkeypatch.setattr(digest, "load_rows", lambda conn: [row("a1"), row("s1", owner="Sean")])
+    class Conn:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    monkeypatch.setitem(sys.modules, "psycopg2", type("pg", (), {"connect": staticmethod(lambda dsn: Conn())}))
+    sent = []
+    def fake_send(to, *a):
+        if to == "sean@rebattery.io":
+            raise RuntimeError("timeout")
+        sent.append(to); return "m1"
+    monkeypatch.setattr(digest, "send", fake_send)
+    argv = ["x", "--apply", "--today", TODAY, "--approved-by", "Alex"]
+    monkeypatch.setattr(sys, "argv", argv)
+    assert digest.main() == 1
+    state = json.loads((tmp_path / "sent.json").read_text())
+    assert state == {f"{TODAY}:alex@rebattery.io": "m1", f"{TODAY}:sean@rebattery.io": "pending"}
+    capsys.readouterr()
+    assert digest.main() == 0
+    assert sent == ["alex@rebattery.io"]
+    out = json.loads(capsys.readouterr().out)
+    assert [e["skipped"] for e in out["emails"]] == ["already sent today", "an earlier send may have gone out; not retried"]
+
+
+def test_apply_needs_a_named_approver(monkeypatch):
+    import sys, pytest
+    monkeypatch.setattr(sys, "argv", ["x", "--apply", "--today", TODAY])
+    with pytest.raises(SystemExit):
+        digest.main()

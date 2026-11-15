@@ -4,11 +4,16 @@
 One email per driver, only on weekdays and only when something is due today or overdue. Unassigned listings
 (no context.owner) go to the fallback driver (Alex). Each line links to its listing in the CRM.
 Sends through rebattery-mail (identity hello, Postmark transactional). Dry run unless --apply: prints who would get what.
-A state file stops a second send to the same person on the same day (cron retries).
+A state file stops a second send to the same person on the same day (cron retries). It is written under a lock, atomically, and
+marked "pending" before each send: a send that may have gone out (timeout, crash) is never retried automatically.
+--approved-by is required with --apply: the named person whose standing approval covers the schedule.
 
-  bulk_next_action_digest.py [--apply] [--today YYYY-MM-DD] [--force] [--only Alex] [--to-override you@rebattery.io]
+  bulk_next_action_digest.py [--apply] [--today YYYY-MM-DD] [--force] [--only Alex] [--to-override you@rebattery.io] [--at-hour 8]
+
+Scheduled at 07:00 and 08:00 UTC on weekdays with --at-hour 8, so it sends at 08:00 London time in summer and winter.
 """
 import argparse
+import fcntl
 import html
 import json
 import os
@@ -119,7 +124,7 @@ def render(driver, group):
             f'{h1}{h2}{h3}'
             f'<p style="margin:20px 0 0"><a href="{html.escape(today_url)}" style="display:inline-block;background:#e7f346;color:#0a0a0a;'
             f'font-weight:600;padding:10px 16px;border-radius:8px;text-decoration:none">Open Today</a></p>'
-            f'<p style="margin:18px 0 0;font-size:11px;color:#5c5c5c">Sent because you drive these listings in Bulk Trades.</p></div>')
+            f'<p style="margin:18px 0 0;font-size:11px;color:#5c5c5c">Your listings in Bulk Trades{", plus listings with no driver or driven by Ari" if driver == FALLBACK else ""}.</p></div>')
     return text, page
 
 
@@ -137,6 +142,12 @@ def send(to, subj, text, page, approved_by):
     return draft
 
 
+def save_state(state):
+    tmp = STATE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=1))
+    os.replace(tmp, STATE)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--apply", action="store_true", help="send for real")
@@ -144,10 +155,16 @@ def main():
     ap.add_argument("--force", action="store_true", help="send at the weekend too, and again on a day already sent")
     ap.add_argument("--only", help="one driver, e.g. Alex")
     ap.add_argument("--to-override", help="send every email to this address instead (tests)")
-    ap.add_argument("--approved-by", default="Alex", help="named human whose standing approval covers these sends")
+    ap.add_argument("--at-hour", type=int, help="only run when the London hour is this (cron runs at both UTC hours)")
+    ap.add_argument("--approved-by", help="named human whose standing approval covers these sends (required with --apply)")
     args = ap.parse_args()
+    if args.apply and not args.approved_by:
+        ap.error("--apply needs --approved-by <name>")
 
-    today = args.today or datetime.now(ZoneInfo("Europe/London")).date().isoformat()
+    now = datetime.now(ZoneInfo("Europe/London"))
+    if args.at_hour is not None and now.hour != args.at_hour and not args.force:
+        return 0  # the other UTC slot: silent, nothing to do
+    today = args.today or now.date().isoformat()
     if date.fromisoformat(today).weekday() >= 5 and not args.force:
         print(json.dumps({"today": today, "skipped": "weekend"}))
         return 0
@@ -158,6 +175,9 @@ def main():
     if args.only:
         digests = {k: v for k, v in digests.items() if k == args.only}
 
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    lock = open(f"{STATE}.lock", "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)  # two overlapping runs must not both send
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
     report, failed = [], False
     for driver, group in sorted(digests.items()):
@@ -170,14 +190,14 @@ def main():
         if not args.apply:
             entry["preview"] = text
         elif key in state and not args.force:
-            entry["skipped"] = "already sent today"
+            entry["skipped"] = "already sent today" if state[key] != "pending" else "an earlier send may have gone out; not retried"
         else:
+            state[key] = "pending"
+            save_state(state)
             try:
-                entry["mail_id"] = send(to, subj, text, page, args.approved_by)
-                state[key] = entry["mail_id"]
-                STATE.parent.mkdir(parents=True, exist_ok=True)
-                STATE.write_text(json.dumps(state, indent=1))
-            except Exception as err:  # keep going for the other drivers, exit 1 at the end
+                entry["mail_id"] = state[key] = send(to, subj, text, page, args.approved_by)
+                save_state(state)
+            except Exception as err:  # keep going for the other drivers, exit 1 at the end; the key stays pending
                 entry["error"] = str(err)
                 failed = True
         report.append(entry)

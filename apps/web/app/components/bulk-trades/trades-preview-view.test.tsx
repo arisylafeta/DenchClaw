@@ -165,9 +165,8 @@ describe("Trades Preview sheet", () => {
     await userEvent.selectOptions(within(ioniq).getByLabelText("Driver"), "Sean");
     await userEvent.click(add);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/bulk-listings/d1/next", expect.objectContaining({
-      method: "PUT", body: JSON.stringify({ next_action: "Send price list", next_due: tomorrow }),
+      method: "PUT", body: JSON.stringify({ next_action: "Send price list", next_due: tomorrow, owner: "Sean" }),
     })));
-    expect(fetchMock).toHaveBeenCalledWith("/api/bulk-listings/d1/owner", expect.objectContaining({ method: "PUT", body: JSON.stringify({ owner: "Sean" }) }));
     expect(await screen.findByRole("button", { name: "Send price list" })).toBeInTheDocument();
     expect(params().get("listing")).toBeNull();
 
