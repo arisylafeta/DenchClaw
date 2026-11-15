@@ -44,14 +44,36 @@ describe("productKeyFor", () => {
     expect(kwhKeyText(77.04)).toBe("77");
   });
 
-  it("does not guess a model key from a kWh range", () => {
-    const key = productKeyFor({ make: "Hyundai", model: "Ioniq 5", kwhMin: 50, kwhMax: 60, format: "Packs" });
-    // The range is not a pack, but the stated make still scopes the bucket rather than being dropped.
-    expect(key).toBe("broad:hyundai-any-packs");
-    expect(broaderKeysFor({ make: "Hyundai", model: "Ioniq 5", kwhMin: 50, kwhMax: 60, format: "Packs" }))
-      .toEqual(["broad:hyundai-any-packs", "broad:any-packs"]);
+  it("keys a model with a kWh range at model level, never inventing a capacity", () => {
+    const facts = { make: "Hyundai", model: "Ioniq 5", kwhMin: 50, kwhMax: 60, format: "Packs" };
+    // The range is not a pack, so no kWh enters the key; the model still covers every size.
+    expect(productKeyFor(facts)).toBe("model:hyundai-ioniq5");
+    expect(broaderKeysFor(facts)).toEqual(["model:hyundai-ioniq5", "broad:hyundai-any-packs", "broad:any-packs"]);
     // An equal range is one figure, so it still names the pack.
     expect(productKeyFor({ make: "Nissan", model: "Leaf", kwhMin: 40, kwhMax: 40 })).toBe("pack:nissan-leaf-40kwh");
+  });
+
+  it("keys a stated model with no kWh at model level, covering every pack size", () => {
+    expect(productKeyFor({ make: "Kia", model: "EV3" })).toBe("model:kia-ev3");
+    expect(productKeyFor({ make: "Kia", model: "Kia EV3", format: "module" })).toBe("model:kia-ev3");
+    expect(productKeyLevel("model:kia-ev3")).toBe("model");
+    // A reviewed pack family matches a model alone, so the parser never takes that key without a stated kWh; the
+    // model-level key is still in the chain for it to take.
+    expect(broaderKeysFor({ make: "Vauxhall", model: "Corsa-e", format: "packs" })).toContain("model:vauxhall-corsae");
+    // A lot of that model, at any size, counts as the model-level key as well as its own.
+    expect(broaderKeysFor({ make: "Kia", model: "Kia EV3 81.4 kWh pack", kwh: 81.4, format: "pack", chemistry: "NMC" }))
+      .toEqual(["model:kia-ev3", "broad:kia-nmc-packs", "broad:nmc-packs"]);
+    expect(broaderKeysFor({ make: "Kia", model: "EV3", kwh: 81.4, format: "pack" }))
+      .toEqual(["model:kia-ev3-81.4kwh", "model:kia-ev3", "broad:kia-any-packs", "broad:any-packs"]);
+    expect(broaderKeysFor({ make: "Kia", model: "EV3 pack" })).toContain("model:kia-ev3");
+  });
+
+  it("does not make a model-level key from a bare model, a prose model, a cell or a part number", () => {
+    expect(productKeyFor({ model: "Bolt", format: "packs" })).toBe("broad:any-packs");
+    expect(productKeyFor({ make: "BMW", model: "hybrid 2015-2022 (225xe, 330e)" })).toBe("broad:bmw-any-batteries");
+    expect(productKeyFor({ cellMaker: "Molicel", make: "Molicel", model: "P42A", format: "cells" })).toBe("cell:molicel-p42a");
+    expect(productKeyFor({ partNumbers: ["37501-GI300"], make: "Hyundai", model: "Kona" })).toBe("part:37501GI300");
+    expect(productKeyFor({ make: "Tesla", format: "packs" })).toBe("broad:tesla-any-packs");
   });
 
   it("uses cell maker + cell model for cells", () => {
@@ -69,7 +91,7 @@ describe("productKeyFor", () => {
   it("rolls a specific key up to every broader key it counts as", () => {
     const keys = broaderKeysFor({ make: "Vauxhall", model: "Corsa-e", chemistry: "NMC", format: "packs", kwh: 50 });
     expect(keys).toEqual([
-      "pack:stellantis-ecmp-50kwh", "model:vauxhall-corsae-50kwh", "broad:vauxhall-nmc-packs", "broad:nmc-packs",
+      "pack:stellantis-ecmp-50kwh", "model:vauxhall-corsae-50kwh", "model:vauxhall-corsae", "broad:vauxhall-nmc-packs", "broad:nmc-packs",
     ]);
     const part = broaderKeysFor({ partNumbers: ["37501-Q4052"], make: "Kia", model: "Niro", kwh: 64.8, chemistry: "NMC", format: "packs" });
     expect(part[0]).toBe("part:37501Q4052");

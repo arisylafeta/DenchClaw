@@ -5,6 +5,7 @@
  *   1. OEM part number                    part:SU001B5189
  *   2. pack family (battery graph pack_key, else the reviewed list)   pack:stellantis-ecmp-50kwh
  *   3. make + model + one kWh figure      model:hyundai-ioniq5-77.4kwh
+ *      make + model, no single kWh figure   model:kia-ev3   (every pack size of the model; a lot of any size rolls up to it)
  *   4. cell maker + cell model            cell:samsung-sdi-inr21700-50e
  *   5. chemistry + format                 broad:lfp-packs
  *      with a stated make and nothing more specific:   broad:stellantis-nmc-packs
@@ -188,6 +189,30 @@ function modelKey(facts: ProductFacts): string | null {
   return make && model && kwh ? `model:${make}-${model}-${kwh}kwh` : null;
 }
 
+/** The model as a model-level key writes it: no kWh figure, no battery/pack/module word, no repeated make. Mirrors buyer_interest_model_wide_text() in SQL. */
+export function modelWideText(make: string | null | undefined, model: string | null | undefined): string | null {
+  const text = (model ?? "")
+    .replace(/\b\d+(?:\.\d+)?\s*kwh\b/gi, " ")
+    .replace(/\b(?:hv\s+)?(?:battery|batteries|packs?|modules?)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalModel(make ?? null, text || null) ?? (text || null);
+}
+
+/**
+ * The model-level key: a stated model with no single kWh figure (none stated, or a range) and no part number covers every pack
+ * size of that model. A lot of that model, at any capacity, counts as it (see `productKeysFor`). Needs a make: a bare
+ * model name ("Bolt") is not a product. Never invents a capacity.
+ */
+function modelWideKey(facts: ProductFacts): string | null {
+  if (facts.cellMaker) {return null;}  // a cell is keyed by its maker and model
+  const make = makeKey(facts.make ?? null);
+  const text = modelWideText(facts.make, facts.model);
+  if (!make || !text || isProseModel(text)) {return null;}
+  const model = fold(text);
+  return model ? `model:${make}-${model}` : null;
+}
+
 function cellKey(facts: ProductFacts): string | null {
   const maker = slug(facts.cellMaker ?? null);
   if (isProseModel(facts.model ?? null)) {return null;}
@@ -277,6 +302,9 @@ export function productKeysFor(facts: ProductFacts): ProductKey[] {
   const family = packFamilyFor(facts);
   if (family) {add(`pack:${family.id}`, "pack");}
   add(modelKey(facts), "model");
+  // A model with no single kWh is the model-level key; a model with one is also covered by it, so a buyer who asked for
+  // "Kia EV3" without a size still counts for a lot "Kia EV3 81.4 kWh pack".
+  add(modelWideKey(facts), "model");
   add(cellKey(facts), "cell");
   // The make-scoped bucket is the roll-up of every specific key, so a Tesla model pack still answers a buyer
   // who asked for "Tesla NMC packs", and the plain bucket stays the last, broadest key.

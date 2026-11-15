@@ -174,6 +174,38 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     }
   });
 
+  it("keys a model with no single kWh figure at model level, the same way in SQL and in the TypeScript builder", async () => {
+    const sqlKey = async (facts: Record<string, unknown>) =>
+      (await pg.queryPg<{ key: string }>("select buyer_interest_product_key($1::jsonb) as key", [JSON.stringify(facts)]))[0].key;
+    const cases: [string, Record<string, unknown>, Parameters<typeof productKeyFor>[0], string][] = [
+      ["model alone", { make: "Kia", model: "EV3" }, { make: "Kia", model: "EV3" }, "model:kia-ev3"],
+      ["capacity and pack words in the text", { make: "Kia", model: "Kia EV3 81.4 kWh pack" }, { make: "Kia", model: "Kia EV3 81.4 kWh pack" }, "model:kia-ev3"],
+      ["a group alias make", { make: "VW", model: "ID.3", format: "module" }, { make: "VW", model: "ID.3", format: "module" }, "model:volkswagen-id3"],
+      ["a range", { make: "Hyundai", model: "Ioniq 5", kwh_min: 50, kwh_max: 60 }, { make: "Hyundai", model: "Ioniq 5", kwhMin: 50, kwhMax: 60 }, "model:hyundai-ioniq5"],
+      ["no make", { model: "Bolt" }, { model: "Bolt" }, "broad:any-batteries"],
+      ["a prose model", { make: "BMW", model: "hybrid 2015-2022 (225xe, 330e)" }, { make: "BMW", model: "hybrid 2015-2022 (225xe, 330e)" }, "broad:bmw-any-batteries"],
+      ["a part number wins", { make: "Hyundai", model: "Kona", part_numbers: ["37501-GI300"] }, { make: "Hyundai", model: "Kona", partNumbers: ["37501-GI300"] }, "part:37501GI300"],
+    ];
+    for (const [label, sql, ts, expected] of cases) {
+      expect({ label, sql: await sqlKey(sql) }).toEqual({ label, sql: expected });
+      // A reviewed pack family may upgrade a SQL model line later, but the SQL key stays in the roll-up.
+      expect({ label, ts: broaderKeysFor(ts) }).toEqual({ label, ts: expect.arrayContaining([expected]) });
+    }
+  });
+
+  it("keeps a flexible price only beside a target price, and never below it", async () => {
+    const base = ["interest", "mastered", "bi_pm_", "model:kia-ev3"] as const;
+    const insert = (suffix: string, price: number | null, max: number | null) => pg.queryPg(
+      `insert into buyer_interest (id, company_id, kind, ownership, product_key, first_seen, last_seen, price, price_currency, price_unit, price_basis, price_max)
+       values ($1, $2, $3, $4, $5, '2026-11-01', '2026-11-01', $6, $7, $8, $9, $10)`,
+      [`${base[2]}${suffix}`, id("buyer1"), base[0], base[1], `${base[3]}-${suffix}`, price, price == null ? null : "USD", price == null ? null : "kWh", price == null ? null : "target", max]);
+    await insert("ok", 30, 50);
+    await expect(insert("below", 30, 20)).rejects.toThrow(/price_max_check/);
+    await expect(insert("orphan", null, 50)).rejects.toThrow(/price_max_check/);
+    const [row] = await pg.queryPg<{ price: string; price_max: string; price_basis: string }>("select price, price_max, price_basis from buyer_interest where id = $1", [`${base[2]}ok`]);
+    expect(row).toEqual({ price: "30", price_max: "50", price_basis: "target" });
+  });
+
   it("syncs through the app's demand writers (addDemand, closeDemand)", async () => {
     const [user] = await pg.queryPg<{ id: string }>(
       `insert into crm_users (email, display_name, password_hash)
@@ -374,7 +406,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
          values ($1, $3, 'counterparty', $4, 'paid'), ($2, $3, 'counterparty', $5, 'declined')`,
         [id("lfo1"), id("lfo2"), id("lf1"), id("buyer1"), id("buyer2")]);
       const keys = async () => (await lines("offer_id = any($1)", [[id("lfo1"), id("lfo2")]])).map((row) => `${row.kind}:${row.product_key}`).toSorted();
-      expect(await keys()).toEqual(["bought:broad:kia-any-batteries", "declined:broad:kia-any-batteries"]);
+      expect(await keys()).toEqual(["bought:model:kia-niro", "declined:model:kia-niro"]);
 
       await setField(id("lf1"), "capacity_kwh", "64");  // insert
       expect(await keys()).toEqual(["bought:model:kia-niro-64kwh", "declined:model:kia-niro-64kwh"]);
