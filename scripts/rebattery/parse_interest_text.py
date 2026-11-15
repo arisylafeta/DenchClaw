@@ -967,6 +967,21 @@ def adds_information(line, product):
             or bool(line["model"]) or bool(line["raw_product"]) or product["quantity"] is not None or product["price"] is not None)
 
 
+def synced_keys(cur, source):
+    """Keys the demand row already syncs (its own ask lines); empty for a wants source or a row with no synced lines."""
+    ref = source.get("ref") or ""
+    if not ref.startswith("crm:"):
+        return set()
+    cur.execute("select product_key from buyer_interest where demand_id = %s and ownership = 'synced'", (ref[4:],))
+    return {row["product_key"] for row in cur.fetchall()}
+
+
+def covered_by_ask(line, keys):
+    """A demand row that syncs its own lines only gains a parsed line that says more: the same key or a make-less
+    'any' key repeats the ask (SLS Energy's row gave 'any modules' next to its own ask lines)."""
+    return bool(keys) and (line["key"] in keys or line["key"].startswith("broad:any-"))
+
+
 def write_line(cur, source, kind, line, product, run_id):
     """Insert the line, or merge the dates and refs of one this parser already wrote. Returns 'added', 'merged' or 'present'.
 
@@ -1049,12 +1064,17 @@ def write_sources(conn, parsed, report, run_id, builder, apply_writes, batch_siz
                 cur.execute("savepoint parse_source")
                 try:
                     source["lines"] = []
+                    asked = synced_keys(cur, source)
                     for product in source["result"]["products"]:
                         for line in key_lines(cur, product, builder, ts_table):
                             kind = source["line_kind"]
                             if not adds_information(line, product):
                                 source["lines"].append({**line, "kind": kind, "outcome": "broad_only", "product": product})
                                 report["lines"]["broad_only_skipped"] = report["lines"].get("broad_only_skipped", 0) + 1
+                                continue
+                            if covered_by_ask(line, asked):
+                                source["lines"].append({**line, "kind": kind, "outcome": "covered_by_ask", "product": product})
+                                bump(report["lines"], "covered_by_ask")
                                 continue
                             outcome = write_line(cur, source, kind, line, product, run_id)
                             marker = (source["company_id"], line["key"], kind)

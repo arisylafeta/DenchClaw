@@ -873,3 +873,22 @@ class Database(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CoveredByAskTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.p = load("parse_interest_text")
+
+    def test_repeat_of_the_ask_is_covered(self):
+        keys = {"broad:nmc-modules", "broad:lfp-cells"}
+        self.assertTrue(self.p.covered_by_ask({"key": "broad:any-modules"}, keys))
+        self.assertTrue(self.p.covered_by_ask({"key": "broad:lfp-cells"}, keys))
+
+    def test_more_specific_line_is_kept(self):
+        keys = {"broad:nmc-cells"}
+        self.assertFalse(self.p.covered_by_ask({"key": "cell:lg-chem-e78"}, keys))
+        self.assertFalse(self.p.covered_by_ask({"key": "broad:calb-any-cells"}, keys))
+
+    def test_no_synced_lines_keeps_everything(self):
+        self.assertFalse(self.p.covered_by_ask({"key": "broad:any-modules"}, set()))
