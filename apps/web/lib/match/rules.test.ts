@@ -288,24 +288,96 @@ describe("buyer interest lines as evidence", () => {
       expect(ranked.ranked.map((row) => [row.companyId, row.productTier])).toEqual([["x", 4]]);
     });
 
-    it("never rules anyone out: the rules still decide", () => {
-      const lfp = buyer({ id: "l", name: "LFP only", profile: { chemistries: ["LFP"], formats: ["Packs"] }, lines: [line({ kind: "bought" })] });
-      const ranked = rankBuyers(supplies, [lfp], { asOf: AS_OF_LIVE, key });
+    it("never rules anyone out: the other rules still decide", () => {
+      // A stated kWh bound on the same format stands even when a line fits.
+      const small = buyer({ id: "k", name: "Small packs", profile: { chemistries: ["NMC"], formats: ["Packs"], kwh_min: 5, kwh_max: 10 }, lines: [line({ kind: "bought", lastSeen: "2026-10-01" })] });
+      const ranked = rankBuyers(supplies, [small], { asOf: AS_OF_LIVE, key });
+      expect(ranked.ranked).toHaveLength(0);
+      expect(ranked.ruledOut[0].code).toBe("kwh");
+    });
+  });
+
+  describe("a line against the flat buy box", () => {
+    const lfpBox = { chemistries: ["LFP"], formats: ["Packs"] };
+    const asLfp = (lines: BuyerLine[] | null, overrides: Partial<BuyerFacts> = {}) =>
+      buyer({ id: "l", name: "LFP only", profile: lfpBox, lines, ...overrides });
+    const rank = (entry: BuyerFacts) => rankBuyers(supplies, [entry], { asOf: AS_OF_LIVE, key });
+
+    it("lets a live specific bought, ask or standing line on the lot's own key beat a chemistry rule-out, and says so", () => {
+      for (const kind of ["bought", "ask", "standing"]) {
+        const ranked = rank(asLfp([line({ kind, lastSeen: "2026-06-16" })]));
+        expect(ranked.ruledOut, kind).toHaveLength(0);
+        expect(ranked.ranked[0].productTier).toBe(4);
+      }
+      const row = rank(asLfp([line({ kind: "bought", lastSeen: "2026-06-16" })])).ranked[0];
+      expect(row.checks).toContain("Buy box says LFP only; they bought this NMC pack on 16 Jun");
+    });
+
+    it("lets it beat a format rule-out, and still applies the other rules", () => {
+      const row = rank(buyer({ id: "f", name: "Modules only", profile: { chemistries: ["NMC"], formats: ["Modules"] }, lines: [line({ kind: "ask" })] }));
+      expect(row.ranked[0].checks).toContain("Buy box says modules only; they asked for this pack on 1 Oct");
+      const small = buyer({ id: "k", name: "Small", profile: { ...lfpBox, kwh_min: 5, kwh_max: 10 }, lines: [line({ kind: "bought" })] });
+      expect(rank(small).ruledOut[0].code).toBe("kwh");
+    });
+
+    it("never beats an explicit dossier rules_out", () => {
+      const dossier = { frontmatter: { rules_out: { chemistries: [{ value: "NMC", seen: "2026-05-01", src: "gmail_msg_test" }] } }, body: "" };
+      const ranked = rank(buyer({ id: "d", name: "Dossier", dossier, lines: [line({ kind: "bought" })] }));
       expect(ranked.ranked).toHaveLength(0);
       expect(ranked.ruledOut[0].code).toBe("chemistry");
+    });
+
+    it("needs a live, specific bought, ask or standing line whose key is the lot's own", () => {
+      const ruledOut = (lines: BuyerLine[]) => rank(asLfp(lines)).ruledOut.length === 1;
+      expect(ruledOut([line({ kind: "interest" })])).toBe(true);
+      expect(ruledOut([line({ kind: "saved_search" })])).toBe(true);
+      expect(ruledOut([line({ kind: "inferred" })])).toBe(true);
+      expect(ruledOut([line({ kind: "declined" })])).toBe(true);
+      expect(ruledOut([line({ kind: "bought", productKey: "broad:nmc-packs" })])).toBe(true);
+      expect(ruledOut([line({ kind: "bought", productKey: "broad:toyota-nmc-packs" })])).toBe(true);
+      expect(ruledOut([line({ kind: "bought", productKey: "part:OTHER123" })])).toBe(true);
+      expect(ruledOut([line({ kind: "bought", expiresOn: "2026-11-14" })])).toBe(true);
+      expect(ruledOut([line({ kind: "bought", firstSeen: "2026-12-01" })])).toBe(true);
+      expect(ruledOut([line({ kind: "bought", expiresOn: "2026-11-15" })])).toBe(false);
+    });
+
+    it("does nothing without lines", () => {
+      expect(rank(asLfp(null)).ruledOut[0].code).toBe("chemistry");
+      expect(rankA1(lot, [asLfp([line({ kind: "bought" })])], AS_OF_LIVE).map((row) => row.companyId)).toEqual(["l"]);
     });
   });
 
   describe("ordering", () => {
     const order = (buyers: BuyerFacts[]) => rankBuyers(supplies, buyers, { asOf: AS_OF_LIVE, key }).ranked.map((row) => row.companyId);
 
-    it("breaks a tier tie by line kind, then recency, ahead of price and stage", () => {
-      const priced = { dossier: { frontmatter: { products: [], price: [{ eur_per_kwh: 99, basis: "paid", seen: "2026-01-01" }] }, body: "" } };
-      const standing = plain("standing", [line({ kind: "standing" })], { stage: "Customer", ...priced });
+    const priced = (value: number, basis = "paid") => ({ dossier: { frontmatter: { products: [], price: [{ eur_per_kwh: value, basis, seen: "2026-01-01" }] }, body: "" } });
+
+    it("breaks a tier tie on price first, then line kind, then recency, ahead of stage", () => {
+      const standing = plain("standing", [line({ kind: "standing" })], { stage: "Customer", ...priced(99) });
       const bought = plain("bought", [line({ kind: "bought" })], { stage: "Contacted" });
       const askOld = plain("ask-old", [line({ kind: "ask", lastSeen: "2026-09-01" })]);
       const askNew = plain("ask-new", [line({ kind: "ask", lastSeen: "2026-11-01" })]);
-      expect(order([standing, askOld, bought, askNew])).toEqual(["bought", "ask-new", "ask-old", "standing"]);
+      // The one with a price comes first even though its line kind is the weakest; the rest fall back to kind, then recency.
+      expect(order([standing, askOld, bought, askNew])).toEqual(["standing", "bought", "ask-new", "ask-old"]);
+    });
+
+    it("lets a line buyer with a worse price fit fall below a no-line buyer with a better one", () => {
+      const toyota = { chemistries: ["NMC"], formats: ["Packs"], makes: ["Toyota"] };
+      const saved = plain("saved", [line({ kind: "saved_search", productKey: "broad:toyota-nmc-packs" })], { profile: toyota });
+      const noLine = plain("no-line", null, { profile: toyota, ...priced(99) });
+      expect(order([saved, noLine])).toEqual(["no-line", "saved"]);
+    });
+
+    it("ignores an inferred line when breaking ties, but not for the tier", () => {
+      const inferred = plain("inferred", [line({ kind: "inferred", productKey: "part:SU001B5189", lastSeen: "2026-11-10" })], { stage: "Contacted" });
+      const ask = plain("ask", [line({ kind: "ask", lastSeen: "2026-01-01" })], { stage: "Contacted" });
+      expect(lineEvidence(lot, inferred, AS_OF_LIVE)).toMatchObject({ tier: 4, kindRank: 0, recency: 0 });
+      expect(order([inferred, ask])).toEqual(["ask", "inferred"]);
+      const mixed = plain("mixed", [
+        line({ kind: "inferred", productKey: "part:SU001B5189", lastSeen: "2026-11-10" }),
+        line({ kind: "interest", productKey: "broad:toyota-nmc-packs", lastSeen: "2026-03-01" }),
+      ]);
+      expect(lineEvidence(lot, mixed, AS_OF_LIVE)).toMatchObject({ tier: 4, kindRank: 2, recency: 20260301 });
     });
 
     it("keeps today's order among buyers with no fitting line", () => {

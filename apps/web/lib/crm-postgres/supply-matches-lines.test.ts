@@ -83,18 +83,20 @@ describe.skipIf(!TEST_URL)("supply matches pool and lines", () => {
     expect((await v2.loadBuyerLines([], TODAY)).size).toBe(0);
   });
 
-  it("the line read uses the company_id index", async () => {
-    const plan = await pg.pgPool.connect();
-    try {
-      await plan.query("begin");
-      await plan.query("set local enable_seqscan = off");
-      const result = await plan.query(
-        `explain select company_id from buyer_interest where company_id = any($1::text[]) and (expires_on is null or expires_on >= $2::date)`,
-        [[id("boxed")], TODAY]);
-      expect(result.rows.map((row) => row["QUERY PLAN"]).join("\n")).toMatch(/buyer_interest_company_idx/);
-    } finally {
-      await plan.query("rollback");
-      plan.release();
-    }
-  });
+  it("the line read for a pool-sized set of companies uses the company_id index", async () => {
+    // A table the size of production's order (100k lines over 2,000 companies) so the planner has a reason to prefer
+    // the index. The companies stay in the disposable database (deleting one trips the frozen party trigger); the
+    // lines are removed in afterAll.
+    await pg.queryPg(`insert into crm_companies (id, name) select 'fill_' || n || '_${run}', 'fill' from generate_series(1, 2000) n`);
+    await pg.queryPg(
+      `insert into buyer_interest (id, company_id, kind, ownership, product_key, product_key_level, first_seen, last_seen)
+       select 'fill_' || c || '_' || k || '_${run}', 'fill_' || c || '_${run}', 'inferred', 'mastered', 'broad:fill-' || k, 'broad', '2026-10-01', '2026-10-01'
+       from generate_series(1, 2000) c, generate_series(1, 50) k`);
+    await pg.queryPg("analyze buyer_interest");
+    const ids = Array.from({ length: 30 }, (_, n) => `fill_${n + 1}_${run}`);
+    const plan = (await pg.queryPg<{ "QUERY PLAN": string }>(`explain ${v2.BUYER_LINES_SQL}`, [ids, TODAY]))
+      .map((row) => row["QUERY PLAN"]).join("\n");
+    expect(plan).toMatch(/(Index (Only )?Scan|Bitmap Index Scan) .*buyer_interest_company_idx/);
+    expect(plan).not.toMatch(/Seq Scan on buyer_interest/);
+  }, 60_000);
 });

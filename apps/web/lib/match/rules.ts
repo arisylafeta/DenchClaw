@@ -82,7 +82,7 @@ export type RankedBuyer = {
   companyId: string;
   name: string;
   productTier: number;
-  /** Kind rank and recency of the best fitting line; 0 when no line fits. Tie-breaks ahead of price. */
+  /** Kind rank and recency of the best specific, non-inferred line; 0 when none. Tie-breaks after the price keys. */
   lineKind?: number;
   lineRecency?: number;
   priceFit: number;
@@ -468,10 +468,11 @@ function withinProfileKwh(supply: SupplyFacts, buyer: BuyerFacts, tolerance: num
   return true;
 }
 
-export type RuleOut = { code: string; detail: string };
+/** `buyBox` marks the flat legacy buy box lists (chemistries, formats), the only rule-outs a live line can override. */
+export type RuleOut = { code: string; detail: string; buyBox?: boolean; stated?: string };
 
 /** Why this buyer is ruled out of this lot, or null. Only a conflict both sides state rules anyone out. */
-export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts): RuleOut | null {
+export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts, ignoreBuyBoxLists = false): RuleOut | null {
   const isDossier = hasDossier(buyer);
   const rules = isDossier ? dossierRules(buyer) : {};
   const profile = buyer.profile;
@@ -487,14 +488,14 @@ export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts): RuleOut | null 
     if (fmt && ruledFormats.includes(fmt)) {
       return { code: "format", detail: `rules_out.formats includes ${fmt}` };
     }
-  } else {
+  } else if (!ignoreBuyBoxLists) {
     const stated = list(profile.chemistries).map((value) => value.toUpperCase());
     if (chem && stated.length && !stated.includes(chem)) {
-      return { code: "chemistry", detail: `buy profile chemistries are ${stated.join("/")}` };
+      return { code: "chemistry", detail: `buy profile chemistries are ${stated.join("/")}`, buyBox: true, stated: stated.join("/") };
     }
     const statedFormats = list(profile.formats).map((value) => value.toLowerCase());
     if (fmt && statedFormats.length && !statedFormats.includes(fmt)) {
-      return { code: "format", detail: `buy profile formats are ${statedFormats.join("/")}` };
+      return { code: "format", detail: `buy profile formats are ${statedFormats.join("/")}`, buyBox: true, stated: statedFormats.join("/") };
     }
   }
 
@@ -732,16 +733,43 @@ export function lineEvidence(supply: SupplyFacts, buyer: BuyerFacts, asOf: strin
   fits.sort((a, b) => b.tier - a.tier || b.kindRank - a.kindRank || b.recency - a.recency);
   const best = fits[0] ?? null;
   // A plain broad line (chemistry and format only) says what today's buy box already says, so it can lift an empty
-  // tier but does not break ties; only a line that names a make, model, part, pack or cell does.
-  const specific = !!best && best.tier >= 2;
+  // tier but does not break ties; only a line that names a make, model, part, pack or cell does. An inferred line
+  // is a copy of the buy box and never breaks ties either, so the tie-break reads the best other specific line.
+  const breaker = fits.find((fit) => fit.tier >= 2 && fit.line.kind !== "inferred") ?? null;
   return {
     tier: best?.tier ?? 0,
-    kindRank: specific ? best.kindRank : 0,
-    recency: specific ? best.recency : 0,
+    kindRank: breaker?.kindRank ?? 0,
+    recency: breaker?.recency ?? 0,
     best,
     also: fits.slice(1).filter((fit) => fit.tier >= 2).slice(0, 2),
     declined,
   };
+}
+
+const OVERRIDE_KINDS = new Set(["bought", "ask", "standing"]);
+export type BuyBoxOverride = { rule: RuleOut; line: BuyerLine };
+
+/**
+ * A live, specific bought, ask or standing line whose key is the lot's own (part, pack, model or cell, not a broad
+ * key) beats a rule-out that only comes from the flat legacy buy box lists: the buyer has shown what they take. It
+ * never beats an explicit dossier `rules_out`, which `ruleOut` keeps returning for dossier buyers.
+ */
+export function buyBoxOverride(supply: SupplyFacts, buyer: BuyerFacts, asOf: string): BuyBoxOverride | null {
+  if (!buyer.lines?.length) { return null; }
+  const rule = ruleOut(supply, buyer);
+  if (!rule?.buyBox) { return null; }
+  const own = new Set(broaderKeysFor(supplyProductFacts(supply)).filter((key) => productKeyLevel(key) !== "broad"));
+  let found: BuyerLine | null = null;
+  for (const line of buyer.lines) {
+    if (!OVERRIDE_KINDS.has(line.kind) || !lineLive(line, asOf) || !own.has(line.productKey)) { continue; }
+    if (!found || dateNumber(line.lastSeen) > dateNumber(found.lastSeen)) { found = line; }
+  }
+  return found ? { rule, line: found } : null;
+}
+
+/** Rule-out with line overrides applied: the buy box lists are skipped when a line overrides them. */
+export function ruleOutWithLines(supply: SupplyFacts, buyer: BuyerFacts, asOf: string): RuleOut | null {
+  return buyBoxOverride(supply, buyer, asOf) ? ruleOut(supply, buyer, true) : ruleOut(supply, buyer);
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -791,6 +819,16 @@ function lineFits(evidence: LineEvidence, asOf: string, lead: string | null): st
   return all.length > 1 ? `${all[0]}. Also: ${all.slice(1).join("; ")}` : all[0];
 }
 
+const BOUGHT_VERB: Record<string, string> = { bought: "bought", ask: "asked for", standing: "want" };
+const FORMAT_NOUN: Record<string, string> = { packs: "pack", modules: "module", cells: "cell", systems: "system" };
+const overrideCheck = (override: BuyBoxOverride, supply: SupplyFacts, asOf: string) => {
+  const chem = String(supply.chemistry ?? "").toUpperCase();
+  const fmt = String(supply.format ?? "").toLowerCase();
+  const noun = FORMAT_NOUN[fmt] ?? fmt ?? "lot";
+  const what = [override.rule.code === "chemistry" ? chem : null, noun || "lot"].filter(Boolean).join(" ");
+  return `Buy box says ${override.rule.stated} only; they ${BOUGHT_VERB[override.line.kind] ?? override.line.kind} this ${what} on ${shortDate(override.line.lastSeen, asOf)}`;
+};
+
 const declinedCheck = (line: BuyerLine, asOf: string) =>
   `Declined before: ${line.declineReason?.trim() || "no reason given"}, ${shortDate(line.lastSeen, asOf)}`;
 
@@ -803,7 +841,7 @@ const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 export function rankA1(supply: SupplyFacts, buyers: BuyerFacts[], asOf: string, top = 30, bodyFallback = true): RankedBuyer[] {
   const ranked: RankedBuyer[] = [];
   for (const buyer of buyers) {
-    if (ruleOut(supply, buyer)) {
+    if (ruleOutWithLines(supply, buyer, asOf)) {
       continue;
     }
     const price = priceKey(supply, buyer);
@@ -817,11 +855,11 @@ export function rankA1(supply: SupplyFacts, buyers: BuyerFacts[], asOf: string, 
     });
   }
   ranked.sort((a, b) => b.productTier - a.productTier
-    || (b.lineKind ?? 0) - (a.lineKind ?? 0)
-    || (b.lineRecency ?? 0) - (a.lineRecency ?? 0)
     || b.priceFit - a.priceFit
     || b.priceBasis - a.priceBasis
     || b.priceMargin - a.priceMargin
+    || (b.lineKind ?? 0) - (a.lineKind ?? 0)
+    || (b.lineRecency ?? 0) - (a.lineRecency ?? 0)
     || (STAGE_RANK[b.stage ?? ""] ?? 0) - (STAGE_RANK[a.stage ?? ""] ?? 0)
     || lastTouchKey(a.lastTouch) - lastTouchKey(b.lastTouch)
     || compareText(a.companyId, b.companyId));
@@ -952,7 +990,7 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
     let lastRule: RuleOut | null = null;
     for (let index = 0; index < supplies.length; index += 1) {
       const supply = supplies[index];
-      const out = ruleOut(supply, buyer);
+      const out = ruleOutWithLines(supply, buyer, asOf);
       if (out) { lastRule = out; continue; }
       const price = priceKey(supply, buyer);
       const evidence = lineEvidence(supply, buyer, asOf);
@@ -964,10 +1002,10 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
         stage: buyer.stage, basis: buyer.basis, lastTouch: lastTouch(buyer, asOf), isLead: isLead(buyer),
       };
       if (!best || (candidate.productTier - best.row.productTier
-        || (candidate.lineKind ?? 0) - (best.row.lineKind ?? 0)
-        || (candidate.lineRecency ?? 0) - (best.row.lineRecency ?? 0)
         || candidate.priceFit - best.row.priceFit
-        || candidate.priceMargin - best.row.priceMargin) > 0) {
+        || candidate.priceMargin - best.row.priceMargin
+        || (candidate.lineKind ?? 0) - (best.row.lineKind ?? 0)
+        || (candidate.lineRecency ?? 0) - (best.row.lineRecency ?? 0)) > 0) {
         best = { row: candidate, line: index };
       }
     }
@@ -989,6 +1027,8 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
     const lineLeads = !!evidence.best && (evidence.best.tier >= 2 || evidence.best.tier > todayTier);
     const fits = lineLeads ? lineFits(evidence, asOf, evidence.tier >= todayTier ? null : today) ?? today : today;
     const checks = line && options.key ? checksFor(options.key, line, supply, buyer) : checksFor(options.key ?? emptyKey(), emptyLine(), supply, buyer);
+    const override = buyBoxOverride(supplies[best.line], buyer, asOf);
+    if (override) { checks.push(overrideCheck(override, supplies[best.line], asOf)); }
     if (evidence.declined) { checks.push(declinedCheck(evidence.declined, asOf)); }
     rows.set(buyer.id, {
       ...best.row,
@@ -1004,11 +1044,11 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
   const ordered = [...rows.values()].toSorted((a, b) =>
     Number(b.userVerdict === "shortlist") - Number(a.userVerdict === "shortlist")
     || b.productTier - a.productTier
-    || (b.lineKind ?? 0) - (a.lineKind ?? 0)
-    || (b.lineRecency ?? 0) - (a.lineRecency ?? 0)
     || b.priceFit - a.priceFit
     || b.priceBasis - a.priceBasis
     || b.priceMargin - a.priceMargin
+    || (b.lineKind ?? 0) - (a.lineKind ?? 0)
+    || (b.lineRecency ?? 0) - (a.lineRecency ?? 0)
     || (STAGE_RANK[b.stage ?? ""] ?? 0) - (STAGE_RANK[a.stage ?? ""] ?? 0)
     || lastTouchKey(a.lastTouch) - lastTouchKey(b.lastTouch)
     || compareText(a.companyId, b.companyId));

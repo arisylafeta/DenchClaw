@@ -19,7 +19,11 @@ type CompanyRow = {
   profile: Record<string, unknown>; dossier: Record<string, unknown> | null; last_touch: string | null;
 };
 
-/** `MATCH_BUYER_LINES=off` restores the ranking exactly as it was before buyer interest lines. On by default. */
+/**
+ * `MATCH_BUYER_LINES=off` restores the ranking exactly as it was before buyer interest lines. On by default.
+ * Production runs self-hosted and reads this once per request from the process environment, so switching it needs a
+ * restart through the deploy tool (scripts/denchclaw-deploy.py); rolling the feature back is a deploy rollback.
+ */
 export const buyerLinesEnabled = () => (process.env.MATCH_BUYER_LINES ?? "on").trim().toLowerCase() !== "off";
 
 type LineRow = {
@@ -30,15 +34,16 @@ type LineRow = {
   decline_reason: string | null;
 };
 
-/** Every current line for these companies, one indexed read (company_id), grouped by company. */
-export async function loadBuyerLines(companyIds: string[], asOf: string): Promise<Map<string, BuyerLine[]>> {
-  const rows = companyIds.length ? await queryPg<LineRow>(
-    `select company_id, kind, product_key, make, model, format, chemistry, kwh_min::float8 as kwh_min,
+/** Every current line for some companies, read by company_id (index `buyer_interest_company_idx`). */
+export const BUYER_LINES_SQL = `select company_id, kind, product_key, make, model, format, chemistry, kwh_min::float8 as kwh_min,
             kwh_max::float8 as kwh_max, first_seen::text, last_seen::text, expires_on::text, quantity::float8 as quantity,
             quantity_unit, price::float8 as price, price_currency, price_unit, decline_reason
      from buyer_interest
-     where company_id = any($1::text[]) and (expires_on is null or expires_on >= $2::date)`,
-    [companyIds, asOf]) : [];
+     where company_id = any($1::text[]) and (expires_on is null or expires_on >= $2::date)`;
+
+/** Every current line for these companies, one indexed read (company_id), grouped by company. */
+export async function loadBuyerLines(companyIds: string[], asOf: string): Promise<Map<string, BuyerLine[]>> {
+  const rows = companyIds.length ? await queryPg<LineRow>(BUYER_LINES_SQL, [companyIds, asOf]) : [];
   const lines = new Map<string, BuyerLine[]>();
   for (const row of rows) {
     const list = lines.get(row.company_id) ?? [];
