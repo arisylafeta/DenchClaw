@@ -127,4 +127,9 @@ describe("section heights", () => {
     const bots = [...document.querySelectorAll("[data-bot]")].map((row) => row.getAttribute("data-bot"));
     expect(bots.at(-1)).toBe("sorcerer");
   });
+  it("hides scrollbars on the sidebar sections", async () => {
+    render(<Harness />);
+    await screen.findByRole("button", { name: "Open sorcerer" });
+    for (const body of document.querySelectorAll("[data-section-body]")) expect(body).toHaveClass("no-scrollbar");
+  });
 });

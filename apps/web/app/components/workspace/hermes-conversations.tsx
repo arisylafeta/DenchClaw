@@ -440,7 +440,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
     {chats.error && <div role="alert" className="mb-2 rounded-md border border-[var(--color-border)] p-2 text-xs"><p>{chats.error}</p><button type="button" className="mt-1 min-h-9 underline focus-visible:outline focus-visible:outline-2" onClick={() => void chats.reload()}>Retry loading chats</button></div>}
     {chats.listing?.warnings.map((warning) => <p key={warning} role="status" className="text-[11px] p-2 text-amber-700">{warning}</p>)}
     {!chats.ready && <div role="status" aria-label="Loading chats" className="space-y-3 p-2 motion-safe:animate-pulse">{[0, 1, 2, 3].map((n) => <div key={n} className="h-9 rounded-md bg-[var(--color-surface-hover)]" />)}</div>}
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className="no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto">
       {blocks.map((block, index) => {
         const open = isOpen(block.key), flex = block.key === flexKey, target = resizeTarget(index);
         return <Fragment key={block.key}>
@@ -450,7 +450,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
               <SourceIcon source={block.key} /><span className="min-w-0 flex-1 truncate text-left">{block.label}</span><span className="tabular-nums">{block.count}</span>
             </button></h3>
             {open && <motion.div layoutScroll ref={(node: HTMLDivElement | null) => { if (node) bodies.current.set(block.key, node); else bodies.current.delete(block.key); }} data-section-body={block.key}
-              className={`min-h-0 overflow-y-auto overflow-x-hidden ${flex ? "flex-1" : ""}`} style={flex ? undefined : { flex: "0 1 auto", maxHeight: heights[block.key] ?? DEFAULT_SECTION_HEIGHT }}>
+              className={`no-scrollbar min-h-0 overflow-y-auto overflow-x-hidden ${flex ? "flex-1" : ""}`} style={flex ? undefined : { flex: "0 1 auto", maxHeight: heights[block.key] ?? DEFAULT_SECTION_HEIGHT }}>
               {block.key === "bots" ? byStatus(bots, (entry) => entry.main ? statusOf(entry.main) : "idle").map(renderBot) : byStatus(block.rows, statusOf).map(renderRow)}
             </motion.div>}
           </section>
