@@ -11,6 +11,7 @@ anyone out.
 
 from __future__ import annotations
 
+import math
 import re
 import unicodedata
 from typing import Any
@@ -389,6 +390,58 @@ def _kwh_values(product: dict[str, Any]) -> list[float]:
     return []
 
 
+def _product_kwh_range(product: dict[str, Any]) -> tuple[float, float] | None:
+    """[min, max] of a product's stated range (kwh_min / kwh_max); None when it states none."""
+    lo, hi = product.get("kwh_min"), product.get("kwh_max")
+    lo = float(lo) if isinstance(lo, (int, float)) and not isinstance(lo, bool) else None
+    hi = float(hi) if isinstance(hi, (int, float)) and not isinstance(hi, bool) else None
+    if lo is None and hi is None:
+        return None
+    return (lo if lo is not None else 0.0, hi if hi is not None else 10000.0)
+
+
+def _gap_between(lo: float, hi: float, target_lo: float, target_hi: float) -> float:
+    if hi < target_lo:
+        return _relative_gap(hi, target_lo)
+    if lo > target_hi:
+        return _relative_gap(lo, target_hi)
+    return 0.0
+
+
+def _kwh_tolerance(buyer: dict[str, Any]) -> float:
+    substitution = (buyer.get("dossier") or {}).get("frontmatter", {}).get("substitution") or {}
+    if isinstance(substitution, dict) and substitution.get("kwh_tolerance") is not None:
+        return float(substitution["kwh_tolerance"])
+    return 0.15
+
+
+_SIZE_STATUSES = {"bought", "asked", "said_interested"}
+
+
+def size_gap(listing: dict[str, Any], buyer: dict[str, Any]) -> float:
+    """Relative gap to the nearest size a dossier buyer bought, asked for or said they wanted; 0 when unknown.
+
+    Ranks only, never excludes. Twin of `sizeFit` in apps/web/lib/match/rules.ts.
+    """
+    fmt = str(listing.get("format") or "").lower()
+    if not buyer.get("dossier") or listing.get("kwh") is None or fmt not in {"packs", "modules"}:
+        return 0.0
+    products = _dossier_products(buyer)
+    if any(listing.get("platform") and p.get("platform") and platform_match(listing.get("platform"), p.get("platform")) for p in products):
+        return 0.0
+    kwh = float(listing["kwh"])
+    best = None
+    for product in products:
+        if product.get("status") not in _SIZE_STATUSES or str(product.get("format") or "").lower() != fmt:
+            continue
+        rng = _product_kwh_range(product)
+        gaps = [_gap_between(kwh, kwh, rng[0], rng[1])] if rng else []
+        gaps += [_gap_between(kwh, kwh, v, v) for v in _kwh_values(product)]
+        for gap in gaps:
+            best = gap if best is None else min(best, gap)
+    return 0.0 if best is None else math.floor(best * 10000 + 0.5) / 10000
+
+
 def _relative_gap(value: float, target: float) -> float:
     return abs(value - target) / target if target else 1.0
 
@@ -498,7 +551,8 @@ def rule_out(listing: dict[str, Any], buyer: dict[str, Any]) -> tuple[str, str] 
     # treated as a substitution candidate, not a conflict.
     if listing.get("kwh") is not None and fmt in {"packs", "modules"}:
         if is_dossier:
-            products = [p for p in _dossier_products(buyer) if str(p.get("format") or "").lower() == fmt and _kwh_values(p)]
+            # Only a stated range (kwh_min / kwh_max) rules a lot out; point sizes only rank (size_gap).
+            products = [p for p in _dossier_products(buyer) if str(p.get("format") or "").lower() == fmt and _product_kwh_range(p)]
             same_platform = any(
                 listing.get("platform") and p.get("platform") and platform_match(listing.get("platform"), p.get("platform"))
                 for p in _dossier_products(buyer)
@@ -508,7 +562,11 @@ def rule_out(listing: dict[str, Any], buyer: dict[str, Any]) -> tuple[str, str] 
                 substitution = (buyer.get("dossier") or {}).get("frontmatter", {}).get("substitution") or {}
                 if isinstance(substitution, dict) and substitution.get("kwh_tolerance") is not None:
                     tolerance = float(substitution["kwh_tolerance"])
-                best = min(_relative_gap(float(listing["kwh"]), v) for p in products for v in _kwh_values(p))
+                kwh = float(listing["kwh"])
+                best = min(
+                    [_gap_between(kwh, kwh, *_product_kwh_range(p)) for p in products]
+                    + [_gap_between(kwh, kwh, v, v) for p in products for v in _kwh_values(p)]
+                )
                 body_bounds = _body_kwh_bounds(str((buyer.get("dossier") or {}).get("body") or ""))
                 body_covers = bool(
                     body_bounds
@@ -602,6 +660,7 @@ def rank_a1(
             "price_fit": price[0],
             "price_basis": price[1],
             "price_margin": price[2],
+            "size_gap": size_gap(listing, buyer),
             "stage": buyer.get("stage"),
             "basis": buyer.get("basis"),
             "last_touch": _last_touch(buyer, as_of),
@@ -612,6 +671,7 @@ def rank_a1(
         -r["price_fit"],
         -r["price_basis"],
         -r["price_margin"],
+        r["size_gap"],
         -STAGE_RANK.get(r["stage"] or "", 0),
         _last_touch_key(r["last_touch"]),
         r["company_id"],

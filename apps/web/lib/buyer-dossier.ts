@@ -719,17 +719,18 @@ function productKwhBounds(product: Json): { lo: number | null; hi: number | null
   };
 }
 
-type KwhBounds = { min: number | null; max: number | null };
+type KwhBounds = { min: number | null; max: number | null; stated: boolean };
 
 function kwhByFormat(products: Json[]): Record<string, KwhBounds> {
-  const acc = new Map<string, { los: number[]; his: number[]; openLo: boolean; openHi: boolean }>();
+  const acc = new Map<string, { los: number[]; his: number[]; openLo: boolean; openHi: boolean; stated: boolean }>();
   for (const product of products) {
     const format = canonical(product.format, FORMATS);
     const { lo, hi, stated } = productKwhBounds(product);
     if (!format || !stated) {continue;}
     const key = format.toLowerCase();
-    const entry = acc.get(key) ?? { los: [], his: [], openLo: false, openHi: false };
+    const entry = acc.get(key) ?? { los: [], his: [], openLo: false, openHi: false, stated: false };
     acc.set(key, entry);
+    if (isNumber(product.kwh_min) || isNumber(product.kwh_max)) {entry.stated = true;}
     if (lo === null) {entry.openLo = true;} else {entry.los.push(lo);}
     if (hi === null) {entry.openHi = true;} else {entry.his.push(hi);}
   }
@@ -738,21 +739,22 @@ function kwhByFormat(products: Json[]): Record<string, KwhBounds> {
     result[key] = {
       min: entry.openLo || !entry.los.length ? null : Math.min(...entry.los),
       max: entry.openHi || !entry.his.length ? null : Math.max(...entry.his),
+      stated: entry.stated,
     };
   }
   return result;
 }
 
-/** [min, max] for the flat readers: packs, else modules, else cells; systems only for a systems-only buyer. */
-function topLevelKwh(byFormat: Record<string, KwhBounds>, products: Json[]): KwhBounds {
+/** [min, max] for the flat readers, from stated ranges only: packs, else modules, else cells; systems only for a systems-only buyer. */
+function topLevelKwh(byFormat: Record<string, KwhBounds>, products: Json[]): { min: number | null; max: number | null } {
   for (const key of KWH_FORMAT_PRIORITY) {
-    if (byFormat[key]) {return byFormat[key];}
+    if (byFormat[key]?.stated) {return { min: byFormat[key].min, max: byFormat[key].max };}
   }
   const systemsOnly = products.every((product) => {
     const format = canonical(product.format, FORMATS);
     return !format || format === "Systems";
   });
-  if (byFormat.systems && systemsOnly) {return byFormat.systems;}
+  if (byFormat.systems?.stated && systemsOnly) {return { min: byFormat.systems.min, max: byFormat.systems.max };}
   return { min: null, max: null };
 }
 

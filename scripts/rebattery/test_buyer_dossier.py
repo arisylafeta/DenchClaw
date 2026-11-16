@@ -270,9 +270,11 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(self.profile["makes"], ["VW Group"])
         self.assertEqual(self.profile["cell_makers"], ["CALB"])
         self.assertEqual(self.profile["part_numbers"], [])
-        # The range is what they ask for (CALB 0.23 kWh), not the 82 kWh pack they once bought.
-        self.assertEqual(self.profile["kwh_min"], 0.23)
-        self.assertEqual(self.profile["kwh_max"], 0.23)
+        # The sizes are what they ask for (CALB 0.23 kWh), not the 82 kWh pack they once bought, and a point
+        # size is not a stated range, so the flat bounds stay empty.
+        self.assertIsNone(self.profile["kwh_min"])
+        self.assertIsNone(self.profile["kwh_max"])
+        self.assertEqual(self.profile["kwh_by_format"]["cells"], {"min": 0.23, "max": 0.23, "stated": False})
 
     def test_no_invented_origins_or_min_soh(self):
         self.assertNotIn("origins", self.profile)
@@ -299,7 +301,9 @@ class MappingTests(unittest.TestCase):
             {"make": "Renault", "format": "packs", "chemistry": "LMO", "kwh": [22], "status": "bought"},
         ])
         profile = bd.to_buyer_profile(frontmatter)
-        self.assertEqual((profile["kwh_min"], profile["kwh_max"]), (30, 30))
+        # Point sizes from asks are not a stated range: the flat bounds stay null, the sizes stay for ranking.
+        self.assertEqual((profile["kwh_min"], profile["kwh_max"]), (None, None))
+        self.assertEqual(profile["kwh_by_format"], {"packs": {"min": 30, "max": 30, "stated": False}})
 
     def test_kwh_range_falls_back_to_bought_when_no_ask_states_a_capacity(self):
         frontmatter = parse_valid(products=[
@@ -307,7 +311,8 @@ class MappingTests(unittest.TestCase):
             {"make": "Renault", "format": "packs", "chemistry": "LMO", "kwh": [22], "status": "bought"},
         ])
         profile = bd.to_buyer_profile(frontmatter)
-        self.assertEqual((profile["kwh_min"], profile["kwh_max"]), (22, 22))
+        self.assertEqual((profile["kwh_min"], profile["kwh_max"]), (None, None))
+        self.assertEqual(profile["kwh_by_format"], {"packs": {"min": 22, "max": 22, "stated": False}})
 
     def test_a_declined_product_never_sets_the_range(self):
         frontmatter = parse_valid(products=[
@@ -315,7 +320,7 @@ class MappingTests(unittest.TestCase):
             {"make": "Renault", "format": "packs", "chemistry": "LMO", "kwh": [22], "status": "bought"},
         ])
         profile = bd.to_buyer_profile(frontmatter)
-        self.assertEqual((profile["kwh_min"], profile["kwh_max"]), (22, 22))
+        self.assertEqual(profile["kwh_by_format"], {"packs": {"min": 22, "max": 22, "stated": False}})
 
     def test_dated_rules_out_entry_still_removes_chemistry(self):
         frontmatter = parse_valid()
@@ -393,7 +398,8 @@ class MappingTests(unittest.TestCase):
             {"make": "Renault", "format": "packs", "kwh": [55, 84], "status": "asked"},
         ])
         profile = bd.to_buyer_profile(frontmatter)
-        self.assertEqual((profile["kwh_min"], profile["kwh_max"]), (55, 84))
+        self.assertEqual((profile["kwh_min"], profile["kwh_max"]), (None, None))
+        self.assertEqual(profile["kwh_by_format"]["packs"], {"min": 55, "max": 84, "stated": False})
 
     def _bounds(self, products):
         profile = bd.to_buyer_profile(parse_valid(products=products))
@@ -406,28 +412,33 @@ class MappingTests(unittest.TestCase):
             {"make": "BYD", "format": "systems", "chemistry": "LFP", "kwh": [1577], "status": "asked"},
         ])
         self.assertEqual((lo, hi), (30, None))
-        self.assertEqual(by_format, {"packs": {"min": 30, "max": None},
-                                     "systems": {"min": 1577, "max": 1577}})
+        self.assertEqual(by_format, {"packs": {"min": 30, "max": None, "stated": True},
+                                     "systems": {"min": 1577, "max": 1577, "stated": False}})
 
     def test_systems_only_buyer_uses_the_systems_bounds_at_top_level(self):
         lo, hi, by_format = self._bounds([
             {"make": "BYD", "format": "systems", "kwh": [1577], "status": "asked"}])
-        self.assertEqual((lo, hi), (1577, 1577))
-        self.assertEqual(by_format, {"systems": {"min": 1577, "max": 1577}})
+        self.assertEqual((lo, hi), (None, None))
+        self.assertEqual(by_format, {"systems": {"min": 1577, "max": 1577, "stated": False}})
+        lo, hi, by_format = self._bounds([
+            {"make": "BYD", "format": "systems", "kwh_min": 1500, "kwh_max": 1600, "status": "asked"}])
+        self.assertEqual((lo, hi), (1500, 1600))
+        self.assertEqual(by_format, {"systems": {"min": 1500, "max": 1600, "stated": True}})
 
     def test_systems_never_set_top_level_when_the_buyer_also_wants_other_formats(self):
         lo, hi, by_format = self._bounds([
             {"format": "modules", "status": "asked"},
             {"format": "systems", "kwh": [500], "status": "asked"}])
         self.assertEqual((lo, hi), (None, None))
-        self.assertEqual(by_format, {"systems": {"min": 500, "max": 500}})
+        self.assertEqual(by_format, {"systems": {"min": 500, "max": 500, "stated": False}})
 
     def test_pack_figures_41_and_52_give_both_bounds(self):
         lo, hi, by_format = self._bounds([
             {"make": "Renault", "model": "ZOE", "format": "packs", "kwh": [41], "status": "asked"},
             {"make": "Renault", "model": "ZOE", "format": "packs", "kwh": [52], "status": "asked"}])
-        self.assertEqual((lo, hi), (41, 52))
-        self.assertEqual(by_format, {"packs": {"min": 41, "max": 52}})
+        # Bought or asked point sizes keep both bounds for ranking but are not stated, so no flat bounds.
+        self.assertEqual((lo, hi), (None, None))
+        self.assertEqual(by_format, {"packs": {"min": 41, "max": 52, "stated": False}})
 
     def test_open_kwh_min_leaves_the_max_null_and_wins_over_a_closed_sibling(self):
         lo, hi, _ = self._bounds([
@@ -438,7 +449,7 @@ class MappingTests(unittest.TestCase):
     def test_open_kwh_max_leaves_the_min_null(self):
         lo, hi, by_format = self._bounds([{"format": "modules", "kwh_max": 5, "status": "asked"}])
         self.assertEqual((lo, hi), (None, 5))
-        self.assertEqual(by_format, {"modules": {"min": None, "max": 5}})
+        self.assertEqual(by_format, {"modules": {"min": None, "max": 5, "stated": True}})
 
     def test_no_capacity_gives_no_by_format_key(self):
         profile = bd.to_buyer_profile(parse_valid(products=[{"format": "packs", "status": "asked"}]))

@@ -43,14 +43,8 @@
         ],
         "cell_makers": [],
         "part_numbers": [],
-        "kwh_min": 24,
-        "kwh_max": 24,
-        "kwh_by_format": {
-          "packs": {
-            "min": 24,
-            "max": 24
-          }
-        },
+        "kwh_min": null,
+        "kwh_max": null,
         "wants": "Renault 24 kWh packs (asked 2026-09-01)",
         "dossier": {
           "company_id": "company-merge-1",
@@ -66,6 +60,13 @@
               "seen": "2026-09-01"
             }
           ]
+        },
+        "kwh_by_format": {
+          "packs": {
+            "min": 24,
+            "max": 24,
+            "stated": false
+          }
         }
       },
       "changed": true
@@ -84,14 +85,8 @@
         ],
         "cell_makers": [],
         "part_numbers": [],
-        "kwh_min": 24,
-        "kwh_max": 24,
-        "kwh_by_format": {
-          "packs": {
-            "min": 24,
-            "max": 24
-          }
-        },
+        "kwh_min": null,
+        "kwh_max": null,
         "wants": "Renault 24 kWh packs (asked 2026-09-01)",
         "dossier": {
           "company_id": "company-merge-2",
@@ -107,6 +102,13 @@
               "seen": "2026-09-01"
             }
           ]
+        },
+        "kwh_by_format": {
+          "packs": {
+            "min": 24,
+            "max": 24,
+            "stated": false
+          }
         }
       },
       "frontmatter": {
@@ -137,14 +139,8 @@
         ],
         "cell_makers": [],
         "part_numbers": [],
-        "kwh_min": 24,
-        "kwh_max": 24,
-        "kwh_by_format": {
-          "packs": {
-            "min": 24,
-            "max": 24
-          }
-        },
+        "kwh_min": null,
+        "kwh_max": null,
         "wants": "Renault 24 kWh packs (asked 2026-09-01)",
         "dossier": {
           "company_id": "company-merge-2",
@@ -160,6 +156,13 @@
               "seen": "2026-09-01"
             }
           ]
+        },
+        "kwh_by_format": {
+          "packs": {
+            "min": 24,
+            "max": 24,
+            "stated": false
+          }
         }
       },
       "changed": false
@@ -269,14 +272,8 @@
         ],
         "cell_makers": [],
         "part_numbers": [],
-        "kwh_min": 30,
-        "kwh_max": 30,
-        "kwh_by_format": {
-          "packs": {
-            "min": 30,
-            "max": 30
-          }
-        },
+        "kwh_min": null,
+        "kwh_max": null,
         "wants": "LFP 30 kWh packs (asked 2026-08-20)\nRenault 22 kWh packs (bought 2026-09-11)",
         "dossier": {
           "company_id": "company-merge-4",
@@ -302,6 +299,13 @@
               "seen": "2026-09-11"
             }
           ]
+        },
+        "kwh_by_format": {
+          "packs": {
+            "min": 30,
+            "max": 30,
+            "stated": false
+          }
         }
       },
       "changed": true
@@ -345,14 +349,8 @@
         ],
         "cell_makers": [],
         "part_numbers": [],
-        "kwh_min": 22,
-        "kwh_max": 22,
-        "kwh_by_format": {
-          "packs": {
-            "min": 22,
-            "max": 22
-          }
-        },
+        "kwh_min": null,
+        "kwh_max": null,
         "wants": "BYD systems (said interested 2026-06-04)\nRenault 22 kWh packs (bought 2026-09-11)",
         "dossier": {
           "company_id": "company-merge-5",
@@ -374,6 +372,13 @@
               "seen": "2026-09-11"
             }
           ]
+        },
+        "kwh_by_format": {
+          "packs": {
+            "min": 22,
+            "max": 22,
+            "stated": false
+          }
         }
       },
       "changed": true
@@ -428,14 +433,8 @@
         ],
         "cell_makers": [],
         "part_numbers": [],
-        "kwh_min": 75,
-        "kwh_max": 75,
-        "kwh_by_format": {
-          "packs": {
-            "min": 75,
-            "max": 75
-          }
-        },
+        "kwh_min": null,
+        "kwh_max": null,
         "wants": "Tesla 75 kWh packs (asked 2026-05-04)",
         "dossier": {
           "company_id": "company-merge-6",
@@ -461,6 +460,13 @@
               "seen": "2026-05-04"
             }
           ]
+        },
+        "kwh_by_format": {
+          "packs": {
+            "min": 75,
+            "max": 75,
+            "stated": false
+          }
         },
         "origins": [
           "Passenger EV",

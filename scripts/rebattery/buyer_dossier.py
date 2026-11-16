@@ -583,14 +583,21 @@ def _product_kwh_bounds(product):
 
 
 def _kwh_by_format(products):
-    """{format: {min, max}} over the given products; an open bound stays None."""
+    """{format: {min, max, stated}} over the given products; an open bound stays None.
+
+    `stated` is true only when a product gave an explicit kwh_min / kwh_max range itself. Capacity
+    from bought or asked point values (`kwh: [75]`) keeps min and max for display and ranking but
+    is not stated, so it never rules a lot out.
+    """
     out = {}
     for product in products:
         fmt = _canonical(product.get("format"), FORMATS)
         lo, hi, stated = _product_kwh_bounds(product)
         if not fmt or not stated:
             continue
-        entry = out.setdefault(fmt.lower(), {"los": [], "his": [], "open_lo": False, "open_hi": False})
+        entry = out.setdefault(fmt.lower(), {"los": [], "his": [], "open_lo": False, "open_hi": False, "stated": False})
+        if _is_number(product.get("kwh_min")) or _is_number(product.get("kwh_max")):
+            entry["stated"] = True
         if lo is None:
             entry["open_lo"] = True
         else:
@@ -603,17 +610,25 @@ def _kwh_by_format(products):
     for fmt, e in out.items():
         lo = None if e["open_lo"] or not e["los"] else min(e["los"])
         hi = None if e["open_hi"] or not e["his"] else max(e["his"])
-        result[fmt] = {"min": None if lo is None else _whole(lo), "max": None if hi is None else _whole(hi)}
+        result[fmt] = {
+            "min": None if lo is None else _whole(lo),
+            "max": None if hi is None else _whole(hi),
+            "stated": e["stated"],
+        }
     return result
 
 
 def _top_level_kwh(by_format, products):
-    """(min, max) for the flat readers: packs, else modules, else cells; systems only for a systems-only buyer."""
+    """(min, max) for the flat readers, from stated ranges only: packs, else modules, else cells.
+
+    Systems count only for a systems-only buyer. A buyer with no stated range gets None, None, so
+    a legacy reader never filters on capacity that came from a purchase.
+    """
     for fmt in KWH_FORMAT_PRIORITY[:3]:
-        if fmt in by_format:
+        if by_format.get(fmt, {}).get("stated"):
             return by_format[fmt]["min"], by_format[fmt]["max"]
     systems_only = all(_canonical(p.get("format"), FORMATS) in (None, "Systems") for p in products)
-    if "systems" in by_format and systems_only:
+    if by_format.get("systems", {}).get("stated") and systems_only:
         return by_format["systems"]["min"], by_format["systems"]["max"]
     return None, None
 
@@ -643,9 +658,11 @@ def to_buyer_profile(frontmatter):
     history and are excluded. `rules_out` removes a chemistry or format; its entries are plain
     values or {value, seen, src} mappings, and only the value matters here.
 
-    The kWh range comes from what they asked for or said they were interested in; only when no such
-    product states a capacity does it fall back to what they bought, so an older, smaller purchase
-    does not lower the minimum they now ask for. `origins` is the battery's application origin, one
+    Capacity per format comes from what they asked for or said they were interested in; only when no
+    such product states a capacity does it fall back to what they bought, so an older, smaller
+    purchase does not lower the minimum they now ask for. Only an explicit kwh_min / kwh_max range
+    is `stated`: it alone fills the flat kwh_min / kwh_max and can rule a lot out. Point sizes keep
+    their min and max in kwh_by_format for ranking and display, with stated false. `origins` is the battery's application origin, one
     of the registry's origin values, and flattens under the same name; `source_countries` is where
     the goods come from and stays in the dossier copy only. `min_soh` also passes through flat.
     Deterministic: same frontmatter, same output.

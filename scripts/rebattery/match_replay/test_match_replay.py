@@ -166,6 +166,33 @@ class RulesTest(unittest.TestCase):
         flat = self.buyer(profile={**profile, "kwh_by_format": {"systems": {"min": 1500, "max": 1600}}})
         self.assertEqual(rules.rule_out(self.listing(kwh=10), flat)[0], "kwh")
 
+    def dossier_buyer(self, buyer_id, products):
+        products = [{"format": "packs", "chemistry": "NMC", **p} for p in products]
+        return self.buyer(id=buyer_id, name=buyer_id, dossier={"frontmatter": {"products": products}, "body": ""})
+
+    def test_only_a_stated_range_rules_out_a_dossier_buyer(self) -> None:
+        modual = self.dossier_buyer("modual", [{"kwh_min": 30, "status": "asked"}])
+        self.assertEqual(rules.rule_out(self.listing(kwh=20), modual)[0], "kwh")
+        self.assertIsNone(rules.rule_out(self.listing(kwh=60), modual))
+        spagnesi = self.dossier_buyer("spagnesi", [{"kwh_min": 60, "kwh_max": 82, "status": "asked"}])
+        self.assertEqual(rules.rule_out(self.listing(kwh=40), spagnesi)[0], "kwh")
+        self.assertEqual(rules.rule_out(self.listing(kwh=100), spagnesi)[0], "kwh")
+        self.assertIsNone(rules.rule_out(self.listing(kwh=75), spagnesi))
+        zibi = self.dossier_buyer("zibi", [{"kwh": [75], "status": "bought"}])
+        self.assertIsNone(rules.rule_out(self.listing(kwh=50), zibi))
+
+    def test_size_closeness_ranks_a_dossier_buyer_and_leaves_legacy_alone(self) -> None:
+        zibi = self.dossier_buyer("zibi", [{"kwh": [75], "status": "bought"}])
+        fifty = self.dossier_buyer("fifty", [{"kwh": [50], "status": "bought"}])
+        lot = self.listing(kwh=50)
+        self.assertEqual(rules.size_gap(lot, fifty), 0.0)
+        self.assertEqual(rules.size_gap(lot, zibi), 0.3333)
+        ranked = rules.rank_a1(lot, [zibi, fifty], "2026-03-01")
+        self.assertEqual([r["company_id"] for r in ranked], ["fifty", "zibi"])
+        legacy = self.buyer(profile={"chemistries": ["NMC"], "formats": ["Packs"], "kwh_min": 60, "kwh_max": 82})
+        self.assertEqual(rules.size_gap(self.listing(kwh=20), legacy), 0.0)
+        self.assertEqual(rules.rule_out(self.listing(kwh=20), legacy)[0], "kwh")
+
     def test_chemistry_conflict_rules_out(self) -> None:
         buyer = self.buyer(profile={"chemistries": ["LFP"], "formats": ["Packs"]})
         self.assertIsNotNone(rules.rule_out(self.listing(), buyer))

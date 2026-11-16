@@ -96,6 +96,8 @@ export type RankedBuyer = {
   priceFit: number;
   priceBasis: number;
   priceMargin: number;
+  /** Relative gap between the lot and the nearest size a dossier buyer bought or asked for; 0 when unknown. Smaller ranks higher, after the price keys. */
+  sizeGap?: number;
   stage: string | null;
   basis: string | null;
   lastTouch: string;
@@ -486,6 +488,51 @@ function withinProfileKwh(supply: SupplyFacts, buyer: BuyerFacts, tolerance: num
   return true;
 }
 
+function kwhTolerance(buyer: BuyerFacts): number {
+  const substitution = frontmatter(buyer).substitution;
+  if (substitution && typeof substitution === "object" && typeof (substitution as Record<string, unknown>).kwh_tolerance === "number") {
+    return (substitution as Record<string, unknown>).kwh_tolerance as number;
+  }
+  return 0.15;
+}
+
+const SIZE_VERB: Record<string, string> = { bought: "they bought", asked: "they asked for", said_interested: "they said they wanted" };
+
+/**
+ * How far a lot's size is from the sizes a dossier buyer bought, asked for or said they wanted (same format).
+ * Never excludes: it ranks (`gap`, 0 when unknown or a same-platform substitution) and, when the lot is beyond the
+ * tolerance of every figure, names the nearest one in `note`. Legacy buyers return null.
+ */
+export function sizeFit(supply: SupplyFacts, buyer: BuyerFacts): { gap: number; note: string | null } | null {
+  if (!hasDossier(buyer)) { return null; }
+  const fmt = String(supply.format ?? "").toLowerCase();
+  const range = supplyRange(supply);
+  if (!range || (fmt !== "packs" && fmt !== "modules")) { return null; }
+  if (dossierProducts(buyer).some((product) => supply.platform && product.platform && platformMatch(supply.platform, product.platform))) {
+    return { gap: 0, note: null };
+  }
+  let best: { gap: number; value: number | null; status: string } | null = null;
+  for (const product of dossierProducts(buyer)) {
+    const status = String(product.status ?? "");
+    if (!(status in SIZE_VERB) || String(product.format ?? "").toLowerCase() !== fmt) { continue; }
+    const productRange = productKwhRange(product);
+    if (productRange) {
+      const gap = gapBetween(range[0], range[1], productRange[0], productRange[1]);
+      if (!best || gap < best.gap) { best = { gap, value: null, status }; }
+    }
+    for (const value of productKwhValues(product)) {
+      const gap = gapBetween(range[0], range[1], value, value);
+      if (!best || gap < best.gap) { best = { gap, value, status }; }
+    }
+  }
+  if (!best) { return { gap: 0, note: null }; }
+  const gap = Math.floor(best.gap * 10_000 + 0.5) / 10_000;
+  const note = best.value != null && best.gap > kwhTolerance(buyer)
+    ? `Size differs: ${SIZE_VERB[best.status]} ${Math.round(best.value * 100) / 100} kWh`
+    : null;
+  return { gap, note };
+}
+
 /** `buyBox` marks the flat legacy buy box lists (chemistries, formats), the only rule-outs a live line can override. */
 export type RuleOut = {
   code: string; detail: string; buyBox?: boolean; stated?: string;
@@ -595,23 +642,20 @@ export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts, ignoreBuyBoxList
   const range = supplyRange(supply);
   if (range && (fmt === "packs" || fmt === "modules")) {
     if (isDossier) {
+      // Only a range the buyer stated (kwh_min / kwh_max) rules a lot out. Sizes from products they bought or
+      // asked about only rank and add a check; see sizeFit.
       const products = dossierProducts(buyer).filter((product) => String(product.format ?? "").toLowerCase() === fmt
-        && (productKwhValues(product).length > 0 || productKwhRange(product)));
+        && productKwhRange(product));
       const samePlatform = dossierProducts(buyer).some((product) => supply.platform && product.platform && platformMatch(supply.platform, product.platform));
       if (products.length && !samePlatform) {
-        let tolerance = 0.15;
-        const substitution = frontmatter(buyer).substitution;
-        if (substitution && typeof substitution === "object" && typeof (substitution as Record<string, unknown>).kwh_tolerance === "number") {
-          tolerance = (substitution as Record<string, unknown>).kwh_tolerance as number;
-        }
+        const tolerance = kwhTolerance(buyer);
         let best = Number.POSITIVE_INFINITY;
         for (const product of products) {
           const productRange = productKwhRange(product);
-          const values = productKwhValues(product);
           if (productRange) {
             best = Math.min(best, gapBetween(range[0], range[1], productRange[0], productRange[1]));
           }
-          for (const value of values) {
+          for (const value of productKwhValues(product)) {
             best = Math.min(best, gapBetween(range[0], range[1], value, value));
           }
         }
@@ -954,7 +998,7 @@ export function rankA1(supply: SupplyFacts, buyers: BuyerFacts[], asOf: string, 
       companyId: buyer.id, name: buyer.name,
       productTier: Math.max(productTier(supply, buyer, asOf, bodyFallback), evidence.tier),
       lineKind: evidence.kindRank, lineRecency: evidence.recency,
-      priceFit: price[0], priceBasis: price[1], priceMargin: price[2],
+      priceFit: price[0], priceBasis: price[1], priceMargin: price[2], sizeGap: sizeFit(supply, buyer)?.gap ?? 0,
       stage: buyer.stage, basis: buyer.basis, lastTouch: lastTouch(buyer, asOf), isLead: isLead(buyer),
     });
   }
@@ -962,6 +1006,7 @@ export function rankA1(supply: SupplyFacts, buyers: BuyerFacts[], asOf: string, 
     || b.priceFit - a.priceFit
     || b.priceBasis - a.priceBasis
     || b.priceMargin - a.priceMargin
+    || (a.sizeGap ?? 0) - (b.sizeGap ?? 0)
     || (b.lineKind ?? 0) - (a.lineKind ?? 0)
     || (b.lineRecency ?? 0) - (a.lineRecency ?? 0)
     || (STAGE_RANK[b.stage ?? ""] ?? 0) - (STAGE_RANK[a.stage ?? ""] ?? 0)
@@ -1112,12 +1157,13 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
         companyId: buyer.id, name: buyer.name,
         productTier: Math.max(productTier(supply, buyer, asOf), evidence.tier),
         lineKind: evidence.kindRank, lineRecency: evidence.recency,
-        priceFit: price[0], priceBasis: price[1], priceMargin: price[2],
+        priceFit: price[0], priceBasis: price[1], priceMargin: price[2], sizeGap: sizeFit(supply, buyer)?.gap ?? 0,
         stage: buyer.stage, basis: buyer.basis, lastTouch: lastTouch(buyer, asOf), isLead: isLead(buyer),
       };
       if (!best || (candidate.productTier - best.row.productTier
         || candidate.priceFit - best.row.priceFit
         || candidate.priceMargin - best.row.priceMargin
+        || (best.row.sizeGap ?? 0) - (candidate.sizeGap ?? 0)
         || (candidate.lineKind ?? 0) - (best.row.lineKind ?? 0)
         || (candidate.lineRecency ?? 0) - (best.row.lineRecency ?? 0)) > 0) {
         best = { row: candidate, line: index };
@@ -1144,6 +1190,8 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
     const lineLeads = !!evidence.best && (evidence.best.tier >= 2 || evidence.best.tier > todayTier);
     const fits = lineLeads ? lineFits(evidence, asOf, evidence.tier >= todayTier ? null : today) ?? today : today;
     const checks = line && options.key ? checksFor(options.key, line, supply, buyer) : checksFor(options.key ?? emptyKey(), emptyLine(), supply, buyer);
+    const sizeNote = sizeFit(supply, buyer)?.note;
+    if (sizeNote) { checks.push(sizeNote); }
     const override = buyBoxOverride(supplies[best.line], buyer, asOf);
     if (override) { checks.push(overrideCheck(override, supplies[best.line], asOf)); }
     if (evidence.declined) { checks.push(declinedCheck(evidence.declined, asOf)); }
@@ -1164,6 +1212,7 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
     || b.priceFit - a.priceFit
     || b.priceBasis - a.priceBasis
     || b.priceMargin - a.priceMargin
+    || (a.sizeGap ?? 0) - (b.sizeGap ?? 0)
     || (b.lineKind ?? 0) - (a.lineKind ?? 0)
     || (b.lineRecency ?? 0) - (a.lineRecency ?? 0)
     || (STAGE_RANK[b.stage ?? ""] ?? 0) - (STAGE_RANK[a.stage ?? ""] ?? 0)

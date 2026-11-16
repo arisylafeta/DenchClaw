@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildProductKey } from "./product-key";
 import {
   filteredPastAsks, isLead, lineEvidence, priceKey, productTier, rankA1, rankBuyers, ruleOut,
-  supplyFactsFromKey, type BuyerFacts, type BuyerLine, type SupplyFacts,
+  sizeFit, supplyFactsFromKey, type BuyerFacts, type BuyerLine, type SupplyFacts,
 } from "./rules";
 
 // The cases below are the ones pinned by scripts/rebattery/match_replay/test_match_replay.py, so the
@@ -141,11 +141,15 @@ describe("rule_out", () => {
     expect(ruleOut(listing({ platform: "MEB", kwh: 82 }), samePlatform)).toBeNull();
   });
 
-  it("rules out a capacity far off a stated product on the same format", () => {
-    const far = buyer({
+  it("rules out a capacity outside a range the buyer stated, not one far from a size they asked about", () => {
+    const range = buyer({
+      dossier: { frontmatter: { products: [{ format: "packs", chemistry: "NMC", kwh_min: 30, kwh_max: 40, status: "asked" }] }, body: "" },
+    });
+    expect(ruleOut(listing({ kwh: 80 }), range)?.code).toBe("kwh");
+    const point = buyer({
       dossier: { frontmatter: { products: [{ format: "packs", chemistry: "NMC", kwh: [30], status: "asked" }] }, body: "" },
     });
-    expect(ruleOut(listing({ kwh: 80 }), far)?.code).toBe("kwh");
+    expect(ruleOut(listing({ kwh: 80 }), point)).toBeNull();
   });
 
   it("accepts a capacity inside an open dossier range", () => {
@@ -182,7 +186,49 @@ describe("rule_out", () => {
       dossier: { frontmatter: { products: [{ format: "packs", chemistry: "NMC", kwh: [40], status: "asked" }] }, body: "" },
     });
     expect(ruleOut(listing({ kwh: null, kwhMin: 35, kwhMax: 84 }), mods)).toBeNull();
-    expect(ruleOut(listing({ kwh: null, kwhMin: 55, kwhMax: 84 }), mods)?.code).toBe("kwh");
+    // A point size never excludes; a stated range does.
+    expect(ruleOut(listing({ kwh: null, kwhMin: 55, kwhMax: 84 }), mods)).toBeNull();
+    const stated = buyer({
+      dossier: { frontmatter: { products: [{ format: "packs", chemistry: "NMC", kwh_min: 30, kwh_max: 40, status: "asked" }] }, body: "" },
+    });
+    expect(ruleOut(listing({ kwh: null, kwhMin: 55, kwhMax: 84 }), stated)?.code).toBe("kwh");
+  });
+});
+
+describe("dossier kWh: only a stated range excludes; bought sizes rank", () => {
+  const withProducts = (id: string, products: Record<string, unknown>[]) => buyer({
+    id, name: id, dossier: { frontmatter: { products: products.map((product) => ({ format: "packs", chemistry: "NMC", ...product })) }, body: "" },
+  });
+
+  it("Modual-like: stated packs of 30+ kWh rule out 20 kWh, keep 60 kWh", () => {
+    const modual = withProducts("modual", [{ kwh_min: 30, status: "asked" }]);
+    expect(ruleOut(listing({ kwh: 20 }), modual)?.code).toBe("kwh");
+    expect(ruleOut(listing({ kwh: 60 }), modual)).toBeNull();
+  });
+
+  it("MS Spagnesi-like: a stated 60-82 range", () => {
+    const spagnesi = withProducts("spagnesi", [{ kwh_min: 60, kwh_max: 82, status: "asked" }]);
+    expect(ruleOut(listing({ kwh: 40 }), spagnesi)?.code).toBe("kwh");
+    expect(ruleOut(listing({ kwh: 100 }), spagnesi)?.code).toBe("kwh");
+    expect(ruleOut(listing({ kwh: 75 }), spagnesi)).toBeNull();
+  });
+
+  it("Zibi-like: a bought 75 kWh pack does not exclude a 50 kWh lot, shows a check and ranks below a 50 kWh buyer", () => {
+    const zibi = withProducts("zibi", [{ kwh: [75], status: "bought" }]);
+    const fifty = withProducts("fifty", [{ kwh: [50], status: "bought" }]);
+    const lot = listing({ kwh: 50 });
+    expect(ruleOut(lot, zibi)).toBeNull();
+    expect(rankA1(lot, [zibi, fifty], AS_OF).map((row) => row.companyId)).toEqual(["fifty", "zibi"]);
+    const rows = rankBuyers([lot], [zibi, fifty], { asOf: AS_OF }).ranked;
+    expect(rows.map((row) => row.companyId)).toEqual(["fifty", "zibi"]);
+    expect(rows[1].checks).toContain("Size differs: they bought 75 kWh");
+    expect(rows[0].checks.some((check) => check.startsWith("Size differs"))).toBe(false);
+  });
+
+  it("leaves a legacy buyer's kWh bounds exactly as before", () => {
+    const legacy = buyer({ profile: { chemistries: ["NMC"], formats: ["Packs"], kwh_min: 60, kwh_max: 82 } });
+    expect(ruleOut(listing({ kwh: 20 }), legacy)?.code).toBe("kwh");
+    expect(sizeFit(listing({ kwh: 20 }), legacy)).toBeNull();
   });
 });
 
