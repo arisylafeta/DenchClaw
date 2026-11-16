@@ -100,6 +100,8 @@
 
 /* Drag handle between sidebar sections: a hairline that strengthens on hover, focus and drag. */
 .sectionSeparator { position: relative; height: 7px; cursor: row-resize; outline: none; }
+/* A 23px pointer target around the 7px visual gap. */
+.sectionSeparator::before { content: ""; position: absolute; left: 0; right: 0; top: -8px; bottom: -8px; z-index: 1; }
 .sectionSeparator::after { content: ""; position: absolute; left: 8px; right: 8px; top: 3px; height: 1px; background: var(--color-border); }
 .sectionSeparator:active::after { background: var(--color-text-muted); }
 @media (hover: hover) and (pointer: fine) {

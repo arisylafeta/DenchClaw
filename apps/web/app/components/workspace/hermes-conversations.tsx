@@ -79,6 +79,7 @@ export function useHermesConversations() {
   const closeDialog = useCallback(() => setDialog(null), []);
   const clear = useCallback(() => setSelected(null), []);
   const [pins, setPins] = useState<string[]>([]);
+  const botOpening = useRef(false);
   const reload = useCallback(async () => {
     const sequence = ++reloadSequence.current;
     try {
@@ -216,13 +217,17 @@ export function useHermesConversations() {
   };
   /** Single bots continue their main session (created on first open, shared with the team when the bot is shared); multi bots start a new chat. */
   const openBot = async (profile: string) => {
+    if (botOpening.current) return;
     const config = botConfig(profile);
     if (config.mode === "single") {
       const main = mainSession(listing?.sessions ?? [], profile, account.current);
       if (main) { select(main); return; }
     }
-    const row = await create([profile]);
-    if (row && config.mode === "single" && config.scope === "shared") await setVisibility(row, "team");
+    botOpening.current = true;
+    try {
+      const row = await create([profile]);
+      if (row && config.mode === "single" && config.scope === "shared") await setVisibility(row, "team");
+    } finally { botOpening.current = false; }
   };
   /** The server withdrew access: forget the row, selection, pin, unread marker and rename, and discard listings already in flight. */
   const revoke = useCallback((key: string) => {
@@ -370,7 +375,8 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
   const blocks = [...result.sections.map((section) => ({ key: section.key, label: section.label ?? "", count: section.rows.length, rows: section.rows }))];
   if (bots.length) blocks.splice(blocks[0]?.key === "pinned" ? 1 : 0, 0, { key: "bots", label: "Bots", count: bots.length, rows: [] });
   const isOpen = (key: string) => !view.collapsed?.includes(key);
-  const flexKey = blocks.some((b) => b.key === "mine" && isOpen("mine")) ? "mine" : [...blocks].reverse().find((b) => isOpen(b.key))?.key;
+  // Only My chats flexes; when it is collapsed every section keeps its own height.
+  const flexKey = blocks.some((b) => b.key === "mine") && isOpen("mine") ? "mine" : undefined;
   const heights = liveHeights ?? view.heights ?? {};
   const commitHeight = (key: string, px: number) => updateView({ ...view, heights: { ...view.heights, [key]: clampHeight(px) } });
   const resizeTarget = (index: number): { key: string; sign: 1 | -1 } | null => {
@@ -380,18 +386,22 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
     if (below.key !== flexKey && isOpen(below.key) && below.count) return { key: below.key, sign: -1 };
     return null;
   };
+  // Pointer capture keeps the drag on the handle until release, even outside the window; capture loss ends it.
   const startDrag = (event: React.PointerEvent<HTMLDivElement>, key: string, sign: 1 | -1) => {
     const body = bodies.current.get(key);
     if (!body || event.button !== 0) return;
-    event.preventDefault();
+    const handle = event.currentTarget, pointerId = event.pointerId;
+    handle.focus();
+    try { handle.setPointerCapture(pointerId); } catch { /* Synthetic events have no active pointer. */ }
     const startY = event.clientY, start = body.offsetHeight;
     let latest = start;
-    const move = (e: PointerEvent) => { latest = clampHeight(start + sign * (e.clientY - startY)); setLiveHeights((current) => ({ ...(current ?? view.heights ?? {}), [key]: latest })); };
-    const up = () => {
-      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up);
-      setLiveHeights(null); commitHeight(key, latest);
+    const move = (e: PointerEvent) => { if (e.pointerId !== pointerId) return; latest = clampHeight(start + sign * (e.clientY - startY)); setLiveHeights((current) => ({ ...(current ?? view.heights ?? {}), [key]: latest })); };
+    const end = () => {
+      for (const [type, listener] of [["pointermove", move], ["pointerup", end], ["pointercancel", end], ["lostpointercapture", end]] as const) { handle.removeEventListener(type, listener as EventListener); window.removeEventListener(type, listener as EventListener); }
+      setLiveHeights(null); if (latest !== start) commitHeight(key, latest);
     };
-    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+    for (const target of [handle, window]) { target.addEventListener("pointermove", move as EventListener); target.addEventListener("pointerup", end); target.addEventListener("pointercancel", end); }
+    handle.addEventListener("lostpointercapture", end);
   };
   const nudge = (event: React.KeyboardEvent<HTMLDivElement>, key: string, sign: 1 | -1) => {
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
@@ -440,7 +450,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
       {blocks.map((block, index) => {
         const open = isOpen(block.key), flex = block.key === flexKey, target = resizeTarget(index);
         return <Fragment key={block.key}>
-          <section aria-label={block.label} data-section={block.key} className="flex min-h-0 flex-col" style={!open ? { flex: "0 0 auto" } : flex ? { flex: "1 1 0px", minHeight: FLEX_MIN } : { flex: "0 1 auto", minHeight: block.count ? SECTION_MIN : undefined }}>
+          <section aria-label={block.label || undefined} data-section={block.key} className="flex min-h-0 flex-col" style={!open ? { flex: "0 0 auto" } : flex ? { flex: "1 1 0px", minHeight: FLEX_MIN } : { flex: "0 1 auto", minHeight: block.count ? SECTION_MIN : undefined }}>
             <h3 className="shrink-0"><button type="button" aria-label={`${block.label} ${block.count}`} aria-expanded={open} onClick={() => toggleSection(block.key)} className="flex min-h-10 w-full items-center gap-2 rounded-md px-2 text-[11px] font-medium text-[var(--color-chat-sidebar-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline focus-visible:outline-2">
               <ChevronRight size={12} aria-hidden="true" className={open ? "rotate-90" : ""} />
               <SourceIcon source={block.key} /><span className="min-w-0 flex-1 truncate text-left">{block.label}</span><span className="tabular-nums">{block.count}</span>
@@ -451,11 +461,12 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
             </motion.div>}
           </section>
           {target && <div role="separator" aria-orientation="horizontal" aria-label={`Resize ${blocks[target.sign === 1 ? index : index + 1].label}`} tabIndex={0}
+            aria-valuemin={ROW} aria-valuemax={2000} aria-valuenow={Math.round(heights[target.key] ?? bodies.current.get(target.key)?.offsetHeight ?? DEFAULT_SECTION_HEIGHT)}
             onPointerDown={(event) => startDrag(event, target.key, target.sign)} onKeyDown={(event) => nudge(event, target.key, target.sign)}
             className={`${styles.sectionSeparator} shrink-0 touch-none`} />}
         </Fragment>;
       })}
-      {chats.ready && !chats.error && !result.shown && <div className="p-3 text-xs text-[var(--color-chat-sidebar-muted)]"><p>{rows.length ? "No conversations match this view." : `No conversations${chats.filter ? ` for ${chats.filter}` : ""} yet.`}</p>{(query || view.hidden.length > 0) && <button type="button" className="mt-1 min-h-9 underline focus-visible:outline focus-visible:outline-2" onClick={() => { setQuery(""); updateView({ ...view, hidden: [] }); }}>Clear search and source filters</button>}</div>}
+      {chats.ready && !chats.error && !result.shown && !bots.length && <div className="p-3 text-xs text-[var(--color-chat-sidebar-muted)]"><p>{rows.length ? "No conversations match this view." : `No conversations${chats.filter ? ` for ${chats.filter}` : ""} yet.`}</p>{(query || view.hidden.length > 0) && <button type="button" className="mt-1 min-h-9 underline focus-visible:outline focus-visible:outline-2" onClick={() => { setQuery(""); updateView({ ...view, hidden: [] }); }}>Clear search and source filters</button>}</div>}
     </div>
   </div>;
 }

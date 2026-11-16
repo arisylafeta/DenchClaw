@@ -111,4 +111,10 @@ describe("section heights", () => {
     fireEvent.pointerUp(window);
     await waitFor(() => expect(bots.style.maxHeight).toBe("160px"));
   });
+  it("lets no other section take My chats' slot when My chats is collapsed", async () => {
+    const user = userEvent.setup(); render(<Harness />);
+    await screen.findByRole("button", { name: "Open sorcerer" });
+    await user.click(screen.getByRole("button", { name: /^My chats \d+$/ }));
+    expect([...document.querySelectorAll<HTMLElement>("[data-section]")].some((node) => node.style.flex === "1 1 0px")).toBe(false);
+  });
 });
