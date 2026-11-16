@@ -1,13 +1,14 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConversationNotifications } from "@/lib/hermes-chat/use-conversation-notifications";
 import { closeHermesEventsClient } from "@/lib/hermes-chat/events-client";
 import { applyChatView, automation, canViewConversation, conversationChannel, DEFAULT_VIEW, filterConversations, messagingConversation, parseChatView, type ChatView, type GroupBy, type HermesConversation } from "@/lib/hermes-conversations";
-import { ChevronRight, MessageCircle, Users, Pin, PinOff, Clock3, Hash, Pencil, Copy, MoreVertical, Share2 } from "lucide-react";
+import { Bot, ChevronRight, MessageCircle, Users, Pin, PinOff, Clock3, Hash, Pencil, Copy, MoreVertical, Share2 } from "lucide-react";
 import { FaDiscord, FaWhatsapp } from "react-icons/fa";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/app/components/ui/dropdown-menu";
 import { motion } from "framer-motion";
 import { ProfileAvatar } from "./profile-avatar";
+import { botEntries, botConfig, mainSession, type BotEntry } from "@/lib/hermes-bots";
 import { useConversationReorderMotion } from "./use-conversation-reorder-motion";
 import styles from "./hermes-conversations.module.css";
 
@@ -18,6 +19,12 @@ const SEEN_KEY = "hermes-chats-seen";
 const VIEW_KEY = "hermes-chats-view";
 const ALIAS_KEY = "hermes-chats-aliases";
 const PROFILE_FILTER_KEY = "hermes-chats-profile-filter";
+const ROW = 44;
+const SECTION_MIN = 40 + ROW;
+const DEFAULT_SECTION_HEIGHT = 4 * ROW;
+// My chats always keeps at least a third of the sidebar on short screens.
+const FLEX_MIN = `max(${SECTION_MIN}px, 35%)`;
+const clampHeight = (px: number) => Math.round(Math.min(2000, Math.max(ROW, px)));
 const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: "source", label: "Source sections" }, { value: "channel", label: "Channel" }, { value: "agent", label: "Agent" },
   { value: "day", label: "Day" }, { value: "job", label: "Scheduled job" },
@@ -146,16 +153,17 @@ export function useHermesConversations() {
       return true;
     } catch { return false; }
   }, []);
-  const create = async (profiles: string[]) => {
-    if (creating) return;
+  const create = async (profiles: string[]): Promise<HermesConversation | null> => {
+    if (creating) return null;
     const token = generation.current;
     setCreating(true); setError(null);
     try {
       const data = await jsonResponse(await fetch("/api/hermes/conversations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profiles }) }));
-      if (token !== generation.current) return;
+      if (token !== generation.current) return null;
       setLastCreatedKey(data.conversation.key);
       select(data.conversation); await reload();
-    } catch (e) { if (token === generation.current) setError(e instanceof Error ? e.message : "Could not create chat"); }
+      return data.conversation as HermesConversation;
+    } catch (e) { if (token === generation.current) setError(e instanceof Error ? e.message : "Could not create chat"); return null; }
     finally { if (token === generation.current) setCreating(false); }
   };
   const rename = async (row: HermesConversation, title: string) => {
@@ -206,6 +214,16 @@ export function useHermesConversations() {
     } catch (e) { if (token === generation.current) setError(e instanceof Error ? e.message : "Could not update sharing"); return false; }
     finally { if (token === generation.current) { sharingPending.current = false; setSharingKey(null); } }
   };
+  /** Single bots continue their main session (created on first open, shared with the team when the bot is shared); multi bots start a new chat. */
+  const openBot = async (profile: string) => {
+    const config = botConfig(profile);
+    if (config.mode === "single") {
+      const main = mainSession(listing?.sessions ?? [], profile, account.current);
+      if (main) { select(main); return; }
+    }
+    const row = await create([profile]);
+    if (row && config.mode === "single" && config.scope === "shared") await setVisibility(row, "team");
+  };
   /** The server withdrew access: forget the row, selection, pin, unread marker and rename, and discard listings already in flight. */
   const revoke = useCallback((key: string) => {
     const owner = account.current;
@@ -232,7 +250,7 @@ export function useHermesConversations() {
   const displaySelected = useMemo(() => selected ? display(selected) : null, [selected, display]);
   return { enabled: listing?.backend === "hermes", ready, listing: displayListing, filter, setFilter: updateFilter, selected: displaySelected,
     forget: (key: string) => { if (selected?.key === key) setSelected(null); void reload(); },
-    sharingKey, setVisibility, seen, pins, setPinned, error, creating, lastCreatedKey, dialog, newChat, closeDialog, clear, select, selectKey, create, rename, reload, revoke, userId: listing?.userId ?? null, accountId };
+    sharingKey, setVisibility, seen, pins, setPinned, error, creating, lastCreatedKey, dialog, newChat, closeDialog, clear, select, selectKey, create, openBot, rename, reload, revoke, userId: listing?.userId ?? null, accountId };
 }
 export type HermesChatsController = ReturnType<typeof useHermesConversations>;
 /** Awaiting human input outranks running; background = only subagents work; done means unseen output. */
@@ -259,7 +277,7 @@ export function ParticipantIcons({ row, working = false }: { row: HermesConversa
   </span>;
 }
 function SourceIcon({ source }: { source: string }) {
-  const Icon = source === "discord" ? FaDiscord : source === "whatsapp" ? FaWhatsapp : source === "group" || source === "shared" ? Users : source === "pinned" ? Pin : source === "automation" ? Clock3 : source === "chats" || source === "mine" ? MessageCircle : Hash;
+  const Icon = source === "discord" ? FaDiscord : source === "whatsapp" ? FaWhatsapp : source === "group" || source === "shared" ? Users : source === "pinned" ? Pin : source === "automation" ? Clock3 : source === "bots" ? Bot : source === "chats" || source === "mine" ? MessageCircle : Hash;
   return <Icon size={12} aria-hidden="true" className="shrink-0" />;
 }
 function RenameInput({ initial, onSubmit, onCancel }: { initial: string; onSubmit: (title: string) => Promise<boolean>; onCancel: () => void }) {
@@ -296,13 +314,92 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
     setView(next);
     try { localStorage.setItem(`${VIEW_KEY}:${chats.listing?.userId}`, JSON.stringify(next)); } catch { /* Keep filtering usable without storage. */ }
   };
-  const result = applyChatView(rows, { ...view, pins: chats.pins ?? [] }, query, new Date(), chats.listing?.userId);
+  const userId = chats.listing?.userId;
+  // A single bot's main session lives on its Bots row, never as a separate chat.
+  const allBots = botEntries(chats.listing?.profiles ?? [], listed, userId);
+  const mainKeys = new Set(allBots.flatMap((entry) => entry.main ? [entry.main.key] : []));
+  const needle = query.trim().toLowerCase();
+  const bots = chats.ready ? allBots.filter((entry) => (!chats.filter || entry.profile === chats.filter) && (!needle || entry.profile.toLowerCase().includes(needle))) : [];
+  const result = applyChatView(rows.filter((row) => !mainKeys.has(row.key)), { ...view, pins: chats.pins ?? [] }, query, new Date(), userId);
+  const [liveHeights, setLiveHeights] = useState<Record<string, number> | null>(null);
+  const bodies = useRef(new Map<string, HTMLDivElement>());
   const reorderMotion = useConversationReorderMotion(result.sections, JSON.stringify([view, chats.pins, query, chats.filter, chats.ready]));
 
   const serverPins = chats.pins ?? [];
   const togglePin = (key: string) => void chats.setPinned(key, !serverPins.includes(key));
   const toggleSection = (key: string) => updateView({ ...view, collapsed: view.collapsed?.includes(key) ? view.collapsed.filter((id) => id !== key) : [...(view.collapsed ?? []), key] });
-  return <motion.div layoutScroll className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden p-2 text-[var(--color-text)]" aria-label="Hermes conversations">
+  const renderRow = (row: HermesConversation) => {
+    const status = chatStatus(row, chats, workingKeys?.has(row.key), awaitingKeys?.has(row.key), backgroundKeys?.has(row.key));
+    const pinned = serverPins.includes(row.key);
+    const PinIcon = pinned ? PinOff : Pin;
+    return <motion.div key={row.key} {...reorderMotion} data-conversation-key={row.key} data-status={status} data-selected={chats.selected?.key === row.key} className={`${styles.conversationRow} relative flex min-w-0 items-center rounded-lg ${status === "running" ? styles.running : ""}`}>
+      <span className={`${styles.rowAvatar} flex h-11 w-11 shrink-0 items-center justify-center`}>{messagingConversation(row) ? <SourceIcon source={row.source!} /> : <ParticipantIcons row={row} working={status === "running"} />}</span>
+      <div className="min-w-0 flex-1">
+        {renaming === row.key ? <RenameInput initial={row.title} onCancel={() => setRenaming(null)} onSubmit={async (title) => { const ok = await chats.rename(row, title); if (ok) setRenaming(null); return ok; }} /> :
+        <button type="button" aria-label={`Open ${row.title}`} title={row.title} onClick={() => { chats.select(row); onOpen?.(); }} onDoubleClick={() => { if (row.access?.canWrite) setRenaming(row.key); }} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="block min-h-11 w-full min-w-0 touch-manipulation rounded-md py-1.5 text-left focus-visible:outline focus-visible:outline-2">
+          <span className="block truncate text-[12px] font-medium">{row.title}</span>
+          <span className="block truncate text-[9px] text-[var(--color-chat-sidebar-muted)]">{[formatChatDate(row.updatedAt), view.sortBy === "project" ? row.project || "No project" : "", row.access?.visibility === "team" ? conversationChannel(row).label : "Private", automation(row) ? "read-only" : ""].filter(Boolean).join(" · ")}</span>
+        </button>}
+      </div>
+      <span className="ml-1 flex w-3 shrink-0 justify-center"><StatusDot status={status} /></span>
+      <button type="button" aria-label={`${pinned ? "Unpin" : "Pin"} ${row.title}`} title={pinned ? "Unpin chat" : "Pin chat"} aria-pressed={pinned} onClick={() => togglePin(row.key)} className={`${styles.rowPin} flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] focus-visible:outline focus-visible:outline-2`}><PinIcon size={15} aria-hidden="true" /></button>
+      {renaming !== row.key && <DropdownMenu>
+        <DropdownMenuTrigger aria-label={`More options for ${row.title}`} title="More options" className={`${styles.rowRename} flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] focus-visible:outline focus-visible:outline-2`}><MoreVertical size={14} aria-hidden="true" /></DropdownMenuTrigger>
+        <DropdownMenuContent align="end" side="bottom" finalFocus={() => { if (!renamingNext.current) return true; renamingNext.current = false; return false; }}>
+          {row.access?.canWrite && <DropdownMenuItem onSelect={() => { renamingNext.current = true; setRenaming(row.key); }}><Pencil size={14} aria-hidden="true" />{messagingConversation(row) ? "Rename in this browser" : "Rename"}</DropdownMenuItem>}
+          {row.access?.canShare && row.access.ownerId === chats.listing?.userId && <DropdownMenuItem disabled={!!chats.sharingKey} onSelect={() => { if (row.access?.visibility === "private" && !window.confirm("Share this chat with the team? This reveals its full history to the team.")) return; void chats.setVisibility(row, row.access?.visibility === "team" ? "private" : "team"); }}><Share2 size={14} aria-hidden="true" />{chats.sharingKey === row.key ? "Updating sharing…" : row.access.visibility === "team" ? "Make private" : "Share"}</DropdownMenuItem>}
+          <DropdownMenuItem onSelect={() => { void navigator.clipboard?.writeText(row.id); }}><Copy size={14} aria-hidden="true" />Copy ID</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>}
+    </motion.div>;
+  };
+  const renderBot = ({ profile, config, main }: BotEntry) => {
+    const status = main ? chatStatus(main, chats, workingKeys?.has(main.key), awaitingKeys?.has(main.key), backgroundKeys?.has(main.key)) : "idle";
+    const selected = !!main && chats.selected?.key === main.key;
+    const single = config.mode === "single";
+    return <div key={profile} data-bot={profile} data-bot-mode={config.mode} data-status={status} data-selected={selected} className={`${styles.conversationRow} relative flex min-w-0 items-center rounded-lg ${status === "running" ? styles.running : ""}`}>
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center"><ProfileAvatar name={profile} className="h-6 w-6" working={status === "running"} /></span>
+      <button type="button" aria-label={single ? `Open ${profile}` : `New chat with ${profile}`} title={single ? profile : `New chat with ${profile}`} disabled={chats.creating} onClick={() => { void chats.openBot(profile); onOpen?.(); }} aria-current={selected ? "true" : undefined} className="block min-h-11 min-w-0 flex-1 touch-manipulation rounded-md py-1.5 text-left focus-visible:outline focus-visible:outline-2">
+        <span className="block truncate text-[12px] font-medium">{profile}</span>
+        {single && main && <span className="block truncate text-[9px] text-[var(--color-chat-sidebar-muted)]">{formatChatDate(main.updatedAt)}</span>}
+      </button>
+      <span className="ml-1 mr-3 flex w-3 shrink-0 justify-center"><StatusDot status={status} /></span>
+    </div>;
+  };
+  // Sections, top to bottom: Pinned, Bots, then the rest. My chats takes the remaining height; the others keep their own.
+  const blocks = [...result.sections.map((section) => ({ key: section.key, label: section.label ?? "", count: section.rows.length, rows: section.rows }))];
+  if (bots.length) blocks.splice(blocks[0]?.key === "pinned" ? 1 : 0, 0, { key: "bots", label: "Bots", count: bots.length, rows: [] });
+  const isOpen = (key: string) => !view.collapsed?.includes(key);
+  const flexKey = blocks.some((b) => b.key === "mine" && isOpen("mine")) ? "mine" : [...blocks].reverse().find((b) => isOpen(b.key))?.key;
+  const heights = liveHeights ?? view.heights ?? {};
+  const commitHeight = (key: string, px: number) => updateView({ ...view, heights: { ...view.heights, [key]: clampHeight(px) } });
+  const resizeTarget = (index: number): { key: string; sign: 1 | -1 } | null => {
+    const above = blocks[index], below = blocks[index + 1];
+    if (!below) return null;
+    if (above.key !== flexKey && isOpen(above.key) && above.count) return { key: above.key, sign: 1 };
+    if (below.key !== flexKey && isOpen(below.key) && below.count) return { key: below.key, sign: -1 };
+    return null;
+  };
+  const startDrag = (event: React.PointerEvent<HTMLDivElement>, key: string, sign: 1 | -1) => {
+    const body = bodies.current.get(key);
+    if (!body || event.button !== 0) return;
+    event.preventDefault();
+    const startY = event.clientY, start = body.offsetHeight;
+    let latest = start;
+    const move = (e: PointerEvent) => { latest = clampHeight(start + sign * (e.clientY - startY)); setLiveHeights((current) => ({ ...(current ?? view.heights ?? {}), [key]: latest })); };
+    const up = () => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up);
+      setLiveHeights(null); commitHeight(key, latest);
+    };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+  };
+  const nudge = (event: React.KeyboardEvent<HTMLDivElement>, key: string, sign: 1 | -1) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    const body = bodies.current.get(key);
+    if (body) commitHeight(key, body.offsetHeight + sign * (event.key === "ArrowDown" ? ROW : -ROW));
+  };
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-2 text-[var(--color-text)]" aria-label="Hermes conversations">
     <div className="flex items-center gap-1 pb-2">
       <input type="search" aria-label="Search chats" placeholder="Search chats" value={query} onChange={(event) => setQuery(event.target.value)} className="h-9 min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1" />
       <DropdownMenu>
@@ -339,39 +436,28 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
     {chats.error && <div role="alert" className="mb-2 rounded-md border border-[var(--color-border)] p-2 text-xs"><p>{chats.error}</p><button type="button" className="mt-1 min-h-9 underline focus-visible:outline focus-visible:outline-2" onClick={() => void chats.reload()}>Retry loading chats</button></div>}
     {chats.listing?.warnings.map((warning) => <p key={warning} role="status" className="text-[11px] p-2 text-amber-700">{warning}</p>)}
     {!chats.ready && <div role="status" aria-label="Loading chats" className="space-y-3 p-2 motion-safe:animate-pulse">{[0, 1, 2, 3].map((n) => <div key={n} className="h-9 rounded-md bg-[var(--color-surface-hover)]" />)}</div>}
-    {result.sections.map((section) => <section key={section.key} aria-label={section.label ?? undefined}>
-      <h3><button type="button" aria-label={`${section.label} ${section.rows.length}`} aria-expanded={!view.collapsed?.includes(section.key)} onClick={() => toggleSection(section.key)} className="flex min-h-10 w-full items-center gap-2 rounded-md px-2 text-[11px] font-medium text-[var(--color-chat-sidebar-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline focus-visible:outline-2">
-        <ChevronRight size={12} aria-hidden="true" className={view.collapsed?.includes(section.key) ? "" : "rotate-90"} />
-        <SourceIcon source={section.key} /><span className="min-w-0 flex-1 truncate text-left">{section.label}</span><span className="tabular-nums">{section.rows.length}</span>
-      </button></h3>
-      {!view.collapsed?.includes(section.key) && section.rows.map((row) => {
-        const status = chatStatus(row, chats, workingKeys?.has(row.key), awaitingKeys?.has(row.key), backgroundKeys?.has(row.key));
-        const pinned = serverPins.includes(row.key);
-        const PinIcon = pinned ? PinOff : Pin;
-        return <motion.div key={row.key} {...reorderMotion} data-conversation-key={row.key} data-status={status} data-selected={chats.selected?.key === row.key} className={`${styles.conversationRow} relative flex min-w-0 items-center rounded-lg ${status === "running" ? styles.running : ""}`}>
-          <span className={`${styles.rowAvatar} flex h-11 w-11 shrink-0 items-center justify-center`}>{messagingConversation(row) ? <SourceIcon source={row.source!} /> : <ParticipantIcons row={row} working={status === "running"} />}</span>
-          <div className="min-w-0 flex-1">
-            {renaming === row.key ? <RenameInput initial={row.title} onCancel={() => setRenaming(null)} onSubmit={async (title) => { const ok = await chats.rename(row, title); if (ok) setRenaming(null); return ok; }} /> :
-            <button type="button" aria-label={`Open ${row.title}`} title={row.title} onClick={() => { chats.select(row); onOpen?.(); }} onDoubleClick={() => { if (row.access?.canWrite) setRenaming(row.key); }} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="block min-h-11 w-full min-w-0 touch-manipulation rounded-md py-1.5 text-left focus-visible:outline focus-visible:outline-2">
-              <span className="block truncate text-[12px] font-medium">{row.title}</span>
-              <span className="block truncate text-[9px] text-[var(--color-chat-sidebar-muted)]">{[formatChatDate(row.updatedAt), view.sortBy === "project" ? row.project || "No project" : "", row.access?.visibility === "team" ? conversationChannel(row).label : "Private", automation(row) ? "read-only" : ""].filter(Boolean).join(" · ")}</span>
-            </button>}
-          </div>
-          <span className="ml-1 flex w-3 shrink-0 justify-center"><StatusDot status={status} /></span>
-          <button type="button" aria-label={`${pinned ? "Unpin" : "Pin"} ${row.title}`} title={pinned ? "Unpin chat" : "Pin chat"} aria-pressed={pinned} onClick={() => togglePin(row.key)} className={`${styles.rowPin} flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] focus-visible:outline focus-visible:outline-2`}><PinIcon size={15} aria-hidden="true" /></button>
-          {renaming !== row.key && <DropdownMenu>
-            <DropdownMenuTrigger aria-label={`More options for ${row.title}`} title="More options" className={`${styles.rowRename} flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] focus-visible:outline focus-visible:outline-2`}><MoreVertical size={14} aria-hidden="true" /></DropdownMenuTrigger>
-            <DropdownMenuContent align="end" side="bottom" finalFocus={() => { if (!renamingNext.current) return true; renamingNext.current = false; return false; }}>
-              {row.access?.canWrite && <DropdownMenuItem onSelect={() => { renamingNext.current = true; setRenaming(row.key); }}><Pencil size={14} aria-hidden="true" />{messagingConversation(row) ? "Rename in this browser" : "Rename"}</DropdownMenuItem>}
-              {row.access?.canShare && row.access.ownerId === chats.listing?.userId && <DropdownMenuItem disabled={!!chats.sharingKey} onSelect={() => { if (row.access?.visibility === "private" && !window.confirm("Share this chat with the team? This reveals its full history to the team.")) return; void chats.setVisibility(row, row.access?.visibility === "team" ? "private" : "team"); }}><Share2 size={14} aria-hidden="true" />{chats.sharingKey === row.key ? "Updating sharing…" : row.access.visibility === "team" ? "Make private" : "Share"}</DropdownMenuItem>}
-              <DropdownMenuItem onSelect={() => { void navigator.clipboard?.writeText(row.id); }}><Copy size={14} aria-hidden="true" />Copy ID</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>}
-        </motion.div>;
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      {blocks.map((block, index) => {
+        const open = isOpen(block.key), flex = block.key === flexKey, target = resizeTarget(index);
+        return <Fragment key={block.key}>
+          <section aria-label={block.label} data-section={block.key} className="flex min-h-0 flex-col" style={!open ? { flex: "0 0 auto" } : flex ? { flex: "1 1 0px", minHeight: FLEX_MIN } : { flex: "0 1 auto", minHeight: block.count ? SECTION_MIN : undefined }}>
+            <h3 className="shrink-0"><button type="button" aria-label={`${block.label} ${block.count}`} aria-expanded={open} onClick={() => toggleSection(block.key)} className="flex min-h-10 w-full items-center gap-2 rounded-md px-2 text-[11px] font-medium text-[var(--color-chat-sidebar-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline focus-visible:outline-2">
+              <ChevronRight size={12} aria-hidden="true" className={open ? "rotate-90" : ""} />
+              <SourceIcon source={block.key} /><span className="min-w-0 flex-1 truncate text-left">{block.label}</span><span className="tabular-nums">{block.count}</span>
+            </button></h3>
+            {open && <motion.div layoutScroll ref={(node: HTMLDivElement | null) => { if (node) bodies.current.set(block.key, node); else bodies.current.delete(block.key); }} data-section-body={block.key}
+              className={`min-h-0 overflow-y-auto overflow-x-hidden ${flex ? "flex-1" : ""}`} style={flex ? undefined : { flex: "0 1 auto", maxHeight: heights[block.key] ?? DEFAULT_SECTION_HEIGHT }}>
+              {block.key === "bots" ? bots.map(renderBot) : block.rows.map(renderRow)}
+            </motion.div>}
+          </section>
+          {target && <div role="separator" aria-orientation="horizontal" aria-label={`Resize ${blocks[target.sign === 1 ? index : index + 1].label}`} tabIndex={0}
+            onPointerDown={(event) => startDrag(event, target.key, target.sign)} onKeyDown={(event) => nudge(event, target.key, target.sign)}
+            className={`${styles.sectionSeparator} shrink-0 touch-none`} />}
+        </Fragment>;
       })}
-    </section>)}
-    {chats.ready && !chats.error && !result.shown && <div className="p-3 text-xs text-[var(--color-chat-sidebar-muted)]"><p>{rows.length ? "No conversations match this view." : `No conversations${chats.filter ? ` for ${chats.filter}` : ""} yet.`}</p>{(query || view.hidden.length > 0) && <button type="button" className="mt-1 min-h-9 underline focus-visible:outline focus-visible:outline-2" onClick={() => { setQuery(""); updateView({ ...view, hidden: [] }); }}>Clear search and source filters</button>}</div>}
-  </motion.div>;
+      {chats.ready && !chats.error && !result.shown && <div className="p-3 text-xs text-[var(--color-chat-sidebar-muted)]"><p>{rows.length ? "No conversations match this view." : `No conversations${chats.filter ? ` for ${chats.filter}` : ""} yet.`}</p>{(query || view.hidden.length > 0) && <button type="button" className="mt-1 min-h-9 underline focus-visible:outline focus-visible:outline-2" onClick={() => { setQuery(""); updateView({ ...view, hidden: [] }); }}>Clear search and source filters</button>}</div>}
+    </div>
+  </div>;
 }
 export function HermesNewChatDialog({ chats }: { chats: HermesChatsController }) {
   const [mode, setMode] = useState<NewChatMode>("solo");
@@ -404,7 +490,7 @@ export function HermesNewChatDialog({ chats }: { chats: HermesChatsController })
       {chats.error && <p role="alert" className="mt-2 text-xs text-red-600">{chats.error}</p>}
       <div className="mt-4 flex justify-end gap-2 text-sm">
         <button type="button" onClick={chats.closeDialog} className="rounded-lg px-3 py-1.5 hover:bg-[var(--color-surface-hover)]">Cancel</button>
-        <button type="button" disabled={chats.creating || !valid} onClick={() => void chats.create(bots)} className="rounded-lg bg-[var(--color-text)] px-3 py-1.5 text-[var(--color-bg)] disabled:opacity-40">{chats.creating ? "Creating…" : "Start chat"}</button>
+        <button type="button" disabled={chats.creating || !valid} onClick={() => void (mode === "solo" ? chats.openBot(bots[0]) : chats.create(bots))} className="rounded-lg bg-[var(--color-text)] px-3 py-1.5 text-[var(--color-bg)] disabled:opacity-40">{chats.creating ? "Creating…" : "Start chat"}</button>
       </div>
     </div>
   </div>;

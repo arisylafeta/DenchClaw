@@ -97,3 +97,12 @@
 @keyframes sidebar-orbit {
   to { --hermes-sidebar-orbit: 360deg; }
 }
+
+/* Drag handle between sidebar sections: a hairline that strengthens on hover, focus and drag. */
+.sectionSeparator { position: relative; height: 7px; cursor: row-resize; outline: none; }
+.sectionSeparator::after { content: ""; position: absolute; left: 8px; right: 8px; top: 3px; height: 1px; background: var(--color-border); }
+.sectionSeparator:active::after { background: var(--color-text-muted); }
+@media (hover: hover) and (pointer: fine) {
+  .sectionSeparator:hover::after { background: var(--color-text-muted); }
+}
+.sectionSeparator:focus-visible::after { height: 2px; top: 2.5px; background: var(--color-text); }

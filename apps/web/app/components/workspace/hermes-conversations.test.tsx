@@ -86,7 +86,7 @@ describe("Hermes unified chat UI", () => {
     await user.click(within(list).getByRole("button", { name: /^Open Shared room/ }));
     await waitFor(() => expect(within(list).getByRole("button", { name: /^Open Shared room/ })).toHaveAttribute("aria-current", "true"));
     await user.click(screen.getByTitle("Switch workspace"));
-    await user.click(screen.getByText("other"));
+    await user.click(screen.getAllByText("other").find((node) => !list.contains(node))!);
     await waitFor(() => expect(within(list).queryByText("Shared room")).not.toBeInTheDocument());
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => url === "/api/workspace/switch")).toBe(false);

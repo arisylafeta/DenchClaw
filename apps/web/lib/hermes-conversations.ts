@@ -65,7 +65,7 @@ function scheduledJob(row: HermesConversation) {
 }
 export type GroupBy = "source" | "none" | "channel" | "agent" | "day" | "job";
 export type SortBy = "recent" | "project";
-export type ChatView = { hidden: string[]; groupBy: GroupBy; sortBy?: SortBy; version?: 2; pins?: string[]; collapsed?: string[] };
+export type ChatView = { hidden: string[]; groupBy: GroupBy; sortBy?: SortBy; version?: 2; pins?: string[]; collapsed?: string[]; heights?: Record<string, number> };
 /** Automation is discoverable, but closed until deliberately opened. */
 export const DEFAULT_VIEW: ChatView = { version: 2, hidden: [], groupBy: "source", sortBy: "recent", pins: [], collapsed: ["automation"] };
 export type ChatSection = { key: string; label: string | null; rows: HermesConversation[] };
@@ -86,7 +86,13 @@ export function parseChatView(value: unknown): ChatView {
   if (!strings(v.hidden) || !["source", "none", "channel", "agent", "day", "job"].includes(String(v.groupBy))) return { ...DEFAULT_VIEW };
   return { version: 2, hidden: [...new Set(v.hidden)], groupBy: v.groupBy === "none" ? "source" : v.groupBy as GroupBy,
     sortBy: v.sortBy === "project" ? "project" : "recent",
-    pins: strings(v.pins) ? [...new Set(v.pins)] : [], collapsed: strings(v.collapsed) ? [...new Set(v.collapsed)] : ["automation"] };
+    pins: strings(v.pins) ? [...new Set(v.pins)] : [], collapsed: strings(v.collapsed) ? [...new Set(v.collapsed)] : ["automation"], ...parseHeights(v.heights) };
+}
+/** Section heights the user dragged, in pixels. Anything malformed is dropped. */
+function parseHeights(value: unknown): { heights?: Record<string, number> } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const heights = Object.fromEntries(Object.entries(value).filter(([key, px]) => key.length <= 200 && typeof px === "number" && Number.isFinite(px) && px >= 0 && px <= 5000).slice(0, 100)) as Record<string, number>;
+  return Object.keys(heights).length ? { heights } : {};
 }
 function dayBucket(ms: number, now: Date) {
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
