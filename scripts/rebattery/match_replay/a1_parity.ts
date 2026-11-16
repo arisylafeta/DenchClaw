@@ -87,6 +87,7 @@ const toSupplyFacts = (listing: Record<string, unknown>): SupplyFacts => {
     kwhMax: pick<number>("kwhMax", "kwh_max"),
     moduleSeries: pick<string>("moduleSeries", "module_series"),
     partNumber: pick<string>("partNumber", "part_number"),
+    voltageV: pick<number>("voltageV", "voltage_v"),
     units: pick<number>("units", "units"),
     sellerPriceEurPerKwh: pick<number>("sellerPriceEurPerKwh", "seller_price_eur_per_kwh"),
     sellerPriceEurPerUnit: pick<number>("sellerPriceEurPerUnit", "seller_price_eur_per_unit"),

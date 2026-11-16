@@ -408,6 +408,16 @@ def _within_profile_kwh(listing: dict[str, Any], buyer: dict[str, Any], toleranc
     return True
 
 
+def _alnum(text: Any) -> str:
+    return re.sub(r"[^A-Z0-9]", "", str(text or "").upper())
+
+
+def _min_pack_voltage(buyer: dict[str, Any]) -> float | None:
+    raw = ((buyer.get("dossier") or {}).get("frontmatter") or {}).get("min_pack_voltage")
+    value = raw.get("value") if isinstance(raw, dict) else raw
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else None
+
+
 def rule_out(listing: dict[str, Any], buyer: dict[str, Any]) -> tuple[str, str] | None:
     """Return (code, detail) when an as-of dossier or stated buy box rules the lot out."""
     is_dossier = bool(buyer.get("dossier"))
@@ -465,6 +475,17 @@ def rule_out(listing: dict[str, Any], buyer: dict[str, Any]) -> tuple[str, str] 
         else:
             if not _within_profile_kwh(listing, buyer, 0.15) and (profile.get("kwh_min") is not None or profile.get("kwh_max") is not None):
                 return ("kwh", f"buy profile kWh bounds exclude {listing['kwh']} kWh")
+
+    if is_dossier:
+        lot = [v for v in (_alnum(listing.get("part_number")), _alnum(listing.get("model"))) if len(v) >= 4]
+        for value in _rule_values(rules.get("part_numbers")):
+            wanted = _alnum(value)
+            if len(wanted) >= 4 and any(have == wanted or wanted in have for have in lot):
+                return ("part", f"rules_out.part_numbers includes {value}")
+        minimum = _min_pack_voltage(buyer)
+        voltage = listing.get("voltage_v")
+        if minimum and fmt in {"packs", "systems"} and voltage is not None and float(voltage) < minimum:
+            return ("voltage", f"Packs below {minimum:g} V")
 
     if is_dossier and listing.get("damaged_mixed") and rules.get("damaged") is True:
         return ("damaged", "buyer will not take damaged stock")

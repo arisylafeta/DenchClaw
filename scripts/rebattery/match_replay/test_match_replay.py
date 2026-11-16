@@ -170,6 +170,16 @@ class RulesTest(unittest.TestCase):
         self.assertIsNotNone(found)
         self.assertEqual(found[0], "chemistry")
 
+    def test_refused_part_number_and_low_voltage_rule_out(self) -> None:
+        buyer = self.buyer(dossier={"frontmatter": {
+            "min_pack_voltage": {"value": 450, "seen": "2026-08-20"},
+            "rules_out": {"part_numbers": [{"value": "NCR2170M", "seen": "2026-10-24"}]},
+        }})
+        self.assertEqual(rules.rule_out(self.listing(format="cells", model="Panasonic NCR-2170M"), buyer)[0], "part")
+        self.assertEqual(rules.rule_out(self.listing(voltage_v=400), buyer)[0], "voltage")
+        self.assertIsNone(rules.rule_out(self.listing(voltage_v=800), buyer))
+        self.assertIsNone(rules.rule_out(self.listing(), buyer))
+
     def test_whole_batch_conflict(self) -> None:
         buyer = self.buyer(dossier={"frontmatter": {"quantity": {"whole_batch_ok": False}}, "body": ""})
         self.assertIsNotNone(rules.rule_out(self.listing(whole_batch=True), buyer))
