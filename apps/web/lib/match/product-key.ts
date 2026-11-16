@@ -64,6 +64,8 @@ export type ProductKey = {
   format: KeyFormat | null;
   chemistry: string | null;
   sellerPrice: SellerPrice | null;
+  /** The pack nominal voltage the listing states (its highest stated figure), in volts. Null when none is stated. */
+  voltageV: number | null;
   /** Why a stated price was not used, in plain words. */
   priceNote: string | null;
   /** Both values of every conflicting field, for display. */
@@ -471,6 +473,19 @@ function priceOf(text: string, status: FieldStatus): { price: SellerPrice | null
  * The product key for one listing: its field rows plus the title/summary text.
  * Nothing here calls a model; the same input always yields the same key.
  */
+/** The nominal pack voltage in volts from the listing's voltage fields ("400 V", "350-400V", "400"); the highest figure stated. */
+export function voltageFrom(fields: Map<string, FieldFact>): number | null {
+  for (const key of ["voltage", "nominal_voltage", "pack_voltage", "voltage_v"]) {
+    const row = fields.get(key);
+    if (!row || !trusted(row.status ?? "missing")) { continue; }
+    const figures = [...asText(row.value).replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*(?:v\b|volts?\b|$|[-–/])/gi)]
+      .map((match) => Number(match[1]))
+      .filter((value) => value > 0 && value < 2000);
+    if (figures.length) { return Math.max(...figures); }
+  }
+  return null;
+}
+
 export function buildProductKey(input: { fields: FieldFact[]; title?: string | null }): ProductKey {
   const fields = new Map(input.fields.map((row) => [row.field_key, row]));
   const title = asText(input.title);
@@ -564,6 +579,7 @@ export function buildProductKey(input: { fields: FieldFact[]; title?: string | n
     format,
     chemistry: chemKnown ? chemistries[0] : null,
     sellerPrice: price.price,
+    voltageV: voltageFrom(fields),
     priceNote: price.note,
     conflicts,
     notes,

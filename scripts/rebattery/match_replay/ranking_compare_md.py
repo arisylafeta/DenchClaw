@@ -7,7 +7,7 @@ from pathlib import Path
 out_dir, report, commit, date = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3], sys.argv[4]
 old, new = json.loads((out_dir / "old.json").read_text()), json.loads((out_dir / "new_on.json").read_text())
 name = lambda row: row["name"]
-cite = lambda row: " ".join(part for part in (row.get("reason") or "", "; ".join(c for c in row.get("checks", []) if c.startswith(("Buy box says", "Declined before")))) if part)
+cite = lambda row: " ".join(part for part in (row.get("reason") or "", "; ".join(c for c in row.get("checks", []) if c.startswith(("Buy box says", "Declined")))) if part)
 lines = [
     "# Step 1c live ranking comparison: old top 10 vs new top 10", "",
     f"Date: {date}. Read-only against production (`default_transaction_read_only=on`). Branch `feat/interest-ranking` at `{commit}`. For each open supply listing "
@@ -19,7 +19,7 @@ for lid, entry in old.items():
     o, n = entry["result"], new[lid]["result"]
     orows, nrows = o["rows"], n["rows"]
     lines += [f"## {entry['title']}", f"`{lid}`. Lot key: {(n.get('lotKey') or {}).get('line')}. Rows: {len(orows)} old, {len(nrows)} new."]
-    cited = sum(1 for row in nrows if any(c.startswith(("Buy box says", "Declined before")) for c in row.get("checks", [])) or " Also: " in (row.get("reason") or "") or (row.get("reason") or "").startswith(("Bought:", "Ask:", "Standing want:", "Saved search:", "Interest:")))
+    cited = sum(1 for row in nrows if any(c.startswith(("Buy box says", "Declined")) for c in row.get("checks", [])) or " Also: " in (row.get("reason") or "") or (row.get("reason") or "").startswith(("Bought:", "Ask:", "Standing want:", "Saved search:", "Interest:")))
     same = [(r["name"], r["reason"], r["checks"]) for r in orows] == [(r["name"], r["reason"], r["checks"]) for r in nrows]
     if same:
         lines += ["No change: same buyers, order, reasons and checks.", ""]

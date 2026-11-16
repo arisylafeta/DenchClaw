@@ -24,6 +24,8 @@ export type SupplyFacts = {
   kwhMax?: number | null;
   moduleSeries?: string | null;
   partNumber?: string | null;
+  /** Pack nominal voltage in volts, when the listing states one. */
+  voltageV?: number | null;
   units?: number | null;
   sellerPriceEurPerKwh?: number | null;
   sellerPriceEurPerUnit?: number | null;
@@ -495,6 +497,38 @@ function ruleEntry(raw: unknown, matches: (value: string) => boolean): { seen?: 
   return {};
 }
 
+const alnum = (text: unknown) => String(text ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/** A lot whose part number or cell model is the one the buyer refuses (`rules_out.part_numbers`). */
+function partRule(supply: SupplyFacts, rules: Record<string, unknown>): RuleOut | null {
+  const lot = [supply.partNumber, supply.model].map(alnum).filter((value) => value.length >= 4);
+  if (!lot.length) { return null; }
+  const items = Array.isArray(rules.part_numbers) ? rules.part_numbers : [];
+  for (const item of items) {
+    const value = ruleEntryValue(item);
+    const wanted = alnum(value);
+    if (value && wanted.length >= 4 && lot.some((have) => have === wanted || have.includes(wanted))) {
+      return { code: "part", detail: `rules_out.part_numbers includes ${value}`, text: `No ${value}`, ...ruleEntry(item, (entry) => entry === value) };
+    }
+  }
+  return null;
+}
+
+/** The buyer's stated minimum pack voltage as `{ value, seen, src }`, or null. */
+function minPackVoltage(buyer: BuyerFacts): { value: number; seen?: string; src?: string } | null {
+  const raw = frontmatter(buyer).min_pack_voltage;
+  const entry = raw && typeof raw === "object" ? raw as Record<string, unknown> : null;
+  const value = entry ? entry.value : raw;
+  if (typeof value !== "number" || !(value > 0)) { return null; }
+  return {
+    value,
+    ...(entry && typeof entry.seen === "string" && entry.seen ? { seen: entry.seen } : {}),
+    ...(entry && typeof entry.src === "string" && entry.src ? { src: entry.src } : {}),
+  };
+}
+
+const voltageApplies = (supply: SupplyFacts) => ["packs", "systems"].includes(String(supply.format ?? "").toLowerCase());
+
 /** Why this buyer is ruled out of this lot, or null. Only a conflict both sides state rules anyone out. */
 export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts, ignoreBuyBoxLists = false): RuleOut | null {
   const isDossier = hasDossier(buyer);
@@ -576,6 +610,16 @@ export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts, ignoreBuyBoxList
     }
   }
 
+  if (isDossier) {
+    const part = partRule(supply, rules);
+    if (part) { return part; }
+    const minV = minPackVoltage(buyer);
+    if (minV && voltageApplies(supply) && supply.voltageV != null && supply.voltageV < minV.value) {
+      const text = `Packs below ${minV.value} V`;
+      const said = minV.seen ? `, said ${shortDate(minV.seen, minV.seen.slice(0, 4))}` : "";
+      return { code: "voltage", detail: `${text}${said}`, text, ...(minV.seen ? { seen: minV.seen } : {}), ...(minV.src ? { src: minV.src } : {}) };
+    }
+  }
   if (isDossier && supply.damagedMixed && rules.damaged === true) {
     return { code: "damaged", detail: "buyer will not take damaged stock" };
   }
@@ -865,8 +909,11 @@ const overrideCheck = (override: BuyBoxOverride, supply: SupplyFacts, asOf: stri
   return `Buy box says ${override.rule.stated} only; they ${BOUGHT_VERB[override.line.kind] ?? override.line.kind} this ${what} on ${shortDate(override.line.lastSeen, asOf)}`;
 };
 
-const declinedCheck = (line: BuyerLine, asOf: string) =>
-  `Declined before: ${line.declineReason?.trim() || "no reason given"}, ${shortDate(line.lastSeen, asOf)}`;
+const declinedCheck = (line: BuyerLine, asOf: string) => {
+  const product = [line.make, line.model].filter(Boolean).join(" ");
+  const reason = line.declineReason?.trim();
+  return `Declined${product ? ` ${product}` : ""} on ${shortDate(line.lastSeen, asOf)}${reason ? `: ${reason}` : ""}`;
+};
 
 const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -919,6 +966,7 @@ export function supplyFactsFromKey(key: ProductKey, listing: { title?: string | 
     kwhMax: line.unknown.kwh ? null : line.kwhMax,
     moduleSeries: line.moduleSeries,
     partNumber: line.partNumber,
+    voltageV: key.voltageV ?? null,
     units: line.units ?? (index === 0 ? key.units : null),
     // A seller price orders the list only when it is one firm amount; the key has already enforced that.
     sellerPriceEurPerKwh: key.sellerPrice?.eurPerKwh ?? null,
@@ -997,6 +1045,10 @@ function checksFor(key: ProductKey, line: ProductLine, supply: SupplyFacts, buye
   }
   if (buyer.dossier && !dossierPrice(buyer)) {
     checks.push("No price on their dossier");
+  }
+  const minV = minPackVoltage(buyer);
+  if (minV && voltageApplies(supply) && supply.voltageV == null) {
+    checks.push(`Voltage not stated; they need at least ${minV.value} V`);
   }
   return checks;
 }
@@ -1105,7 +1157,7 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
 
 const emptyKey = (): ProductKey => ({
   lines: [], mixed: false, units: null, partNumbers: [], chemistries: [], format: null, chemistry: null,
-  sellerPrice: null, priceNote: null, conflicts: [], notes: [],
+  sellerPrice: null, voltageV: null, priceNote: null, conflicts: [], notes: [],
   source: { model: null, capacity: null, chemistry: null, format: null, quantity: null, title: null },
 });
 

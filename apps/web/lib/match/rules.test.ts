@@ -43,6 +43,29 @@ describe("rule_out", () => {
     expect(ruleOut(listing(), dated)?.code).toBe("chemistry");
   });
 
+  it("rules out a pack below the buyer's minimum voltage, and only checks when none is stated", () => {
+    const fm = { min_pack_voltage: { value: 450, seen: "2026-08-20", src: "gmail_msg_test" } };
+    const b = buyer({ dossier: { frontmatter: fm } });
+    const out = ruleOut(listing({ voltageV: 400 }), b);
+    expect(out).toMatchObject({ code: "voltage", detail: "Packs below 450 V, said 20 Aug", seen: "2026-08-20", src: "gmail_msg_test" });
+    expect(ruleOut(listing({ voltageV: 800 }), b)).toBeNull();
+    expect(ruleOut(listing({ voltageV: null }), b)).toBeNull();
+    expect(ruleOut(listing({ voltageV: 400, format: "modules" }), buyer({ profile: {}, dossier: { frontmatter: fm } }))).toBeNull();
+    const key = buildProductKey({ fields: [{ field_key: "model", value: "Test Model", status: "confirmed" }, { field_key: "format", value: "packs", status: "confirmed" }, { field_key: "capacity", value: "50 kWh per pack", status: "confirmed" }] });
+    const supplies = supplyFactsFromKey(key);
+    expect(rankBuyers(supplies, [b], { asOf: "2026-11-01", key }).ranked[0].checks).toContain("Voltage not stated; they need at least 450 V");
+    const stated = buildProductKey({ fields: [{ field_key: "voltage", value: "400 V", status: "confirmed" }, { field_key: "format", value: "packs", status: "confirmed" }, { field_key: "capacity", value: "50 kWh per pack", status: "confirmed" }] });
+    expect(stated.voltageV).toBe(400);
+    expect(rankBuyers(supplyFactsFromKey(stated), [b], { asOf: "2026-11-01", key: stated }).ruledOut[0]).toMatchObject({ code: "voltage" });
+  });
+
+  it("rules out a lot whose part number or cell model the buyer refuses", () => {
+    const b = buyer({ dossier: { frontmatter: { rules_out: { part_numbers: [{ value: "NCR2170M", seen: "2026-10-24", src: "gmail_msg_test" }] } } } });
+    expect(ruleOut(listing({ format: "cells", model: "Panasonic NCR-2170M" }), b)).toMatchObject({ code: "part", seen: "2026-10-24" });
+    expect(ruleOut(listing({ format: "cells", partNumber: "NCR2170M" }), b)?.code).toBe("part");
+    expect(ruleOut(listing({ format: "cells", model: "Samsung 50E" }), b)).toBeNull();
+  });
+
   it("rules out a buyer who will not take a whole batch", () => {
     const whole = buyer({ dossier: { frontmatter: { quantity: { whole_batch_ok: false } }, body: "" } });
     expect(ruleOut(listing({ wholeBatch: true }), whole)?.code).toBe("whole_batch");
@@ -458,7 +481,9 @@ describe("buyer interest lines as evidence", () => {
         line({ kind: "ask", productKey: "part:SU001B5189", lastSeen: "2026-10-01" }),
       ]);
       const row = rankBuyers(supplies, [declined], { asOf: AS_OF_LIVE, key }).ranked[0];
-      expect(row.checks).toContain("Declined before: price too high, 20 Aug");
+      expect(row.checks).toContain("Declined on 20 Aug: price too high");
+      const named = plain("n", [line({ kind: "declined", productKey: "part:SU001B5189", make: "Panasonic", model: "NCR2170M", lastSeen: "2026-10-24", declineReason: "needs wire bonding" })]);
+      expect(rankBuyers(supplies, [named], { asOf: AS_OF_LIVE, key }).ranked[0].checks).toContain("Declined Panasonic NCR2170M on 24 Oct: needs wire bonding");
       // A decline never counts as evidence of interest, and a broad decline adds nothing.
       const onlyDeclined = plain("e", [line({ kind: "declined", productKey: "part:SU001B5189" }), line({ kind: "declined", productKey: "broad:nmc-packs" })]);
       expect(rankBuyers(supplies, [onlyDeclined], { asOf: AS_OF_LIVE, key }).ranked[0].productTier).toBe(1);
