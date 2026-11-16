@@ -52,8 +52,8 @@ describe("bot config and main session", () => {
     expect(mainSession([cron], "sorcerer", "user-a")).toBeNull();
     expect(mainSession([alpha], "alpha", "user-a")).toBeNull();
   });
-  it("lists single bots first", () => {
-    expect(botEntries(["alpha", "sorcerer", "papajules"], [main], "user-a").map((entry) => entry.profile)).toEqual(["papajules", "sorcerer", "alpha"]);
+  it("lists only single bots", () => {
+    expect(botEntries(["alpha", "sorcerer", "papajules"], [main], "user-a").map((entry) => entry.profile)).toEqual(["papajules", "sorcerer"]);
   });
 });
 
@@ -72,14 +72,12 @@ describe("Bots section", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Open sorcerer" })).toHaveAttribute("aria-current", "true"));
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
-  it("creates a single bot's main session on first open, and a multi bot always starts a new chat", async () => {
+  it("creates a single bot's main session on first open and leaves multi bots out of Bots", async () => {
     const user = userEvent.setup(); render(<Harness />);
     await user.click(await screen.findByRole("button", { name: "Open papajules" }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1));
-    created = chat("alpha", "new", 1100);
-    await user.click(screen.getByRole("button", { name: "New chat with alpha" }));
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(2));
-    expect(JSON.parse(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")[1][1].body).profiles).toEqual(["alpha"]);
+    expect(screen.queryByRole("button", { name: "New chat with alpha" })).toBeNull();
+    expect([...document.querySelectorAll("[data-bot]")].map((row) => row.getAttribute("data-bot")).sort()).toEqual(["papajules", "sorcerer"]);
   });
   it("opens the main session when a single bot is picked in the new chat dialog", async () => {
     const user = userEvent.setup(); render(<Harness />);

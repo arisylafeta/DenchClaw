@@ -36,9 +36,10 @@ export function mainSession(rows: HermesConversation[], profile: string, userId:
 
 export type BotEntry = { profile: string; config: BotConfig; main: HermesConversation | null };
 
-/** Every bot the user can talk to: single bots first, then multi, each alphabetical. */
+/** The Bots section: single-session bots only, alphabetical. Multi bots are started from New chat. */
 export function botEntries(profiles: string[], rows: HermesConversation[], userId: string | null | undefined): BotEntry[] {
   return [...new Set(profiles)]
+    .filter((profile) => botConfig(profile).mode === "single")
     .map((profile) => ({ profile, config: botConfig(profile), main: mainSession(rows, profile, userId) }))
-    .sort((a, b) => Number(a.config.mode !== "single") - Number(b.config.mode !== "single") || a.profile.localeCompare(b.profile));
+    .sort((a, b) => a.profile.localeCompare(b.profile));
 }
