@@ -42,11 +42,18 @@ def as_agent(monkeypatch, profile, session='s-' + 'main'):
     monkeypatch.setenv('HERMES_SESSION_ID', session)
 
 
-def inbound(message_id, thread, sender, minutes_ago=10, to=('supply@rebattery.io',), identity='supply'):
+def inbound(message_id, thread, sender, minutes_ago=10, to=('supply@rebattery.io',), identity='supply', labels=(), sent_days_ago=0):
+    created = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
     with psycopg2.connect(DSN) as db, db.cursor() as cur:
-        cur.execute('''insert into mail_message (id, direction, transport, state, thread_id, subject, from_email, to_emails, identity_key, created_at)
-                       values (%s,'inbound','gmail','received',%s,'Re: offer',%s,%s,%s,%s)''',
-                    (message_id, thread, sender, list(to), identity, datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)))
+        cur.execute('''insert into mail_message (id, direction, transport, state, thread_id, subject, from_email, to_emails, identity_key, labels, sent_at, created_at)
+                       values (%s,'inbound','gmail','received',%s,'Re: offer',%s,%s,%s,%s,%s,%s)''',
+                    (message_id, thread, sender, list(to), identity, list(labels), created - timedelta(days=sent_days_ago), created))
+
+
+def run_dispatch(**kw):
+    base = dict(lookback_minutes=60, max_age_hours=24, debounce_seconds=90, max_per_hour=20, log='/dev/null', apply=True)
+    base.update(kw)
+    return owner.dispatch(Namespace(**base))
 
 
 def args(**kw):
@@ -78,8 +85,15 @@ def test_dry_run_writes_nothing_and_reason_is_required(monkeypatch):
     as_agent(monkeypatch, 'papajules')
     owner.change(args(thread='t2', apply=False), 'set')
     assert owner.show(Namespace(thread='t2'))['owner'] is None
-    with pytest.raises(Exception):
+    with pytest.raises(owner.UsageError) as exc:
         owner.change(args(thread='t2', reason='  '), 'set')
+    assert exc.value.rule == 'reason_required'
+    with pytest.raises(owner.UsageError) as exc:
+        owner.change(args(thread='t2', profile='no-such-bot'), 'set')
+    assert exc.value.rule == 'unknown_profile'
+    with psycopg2.connect(DSN) as db, db.cursor() as cur:
+        cur.execute('select count(*) from mail_thread_owner_event')
+        assert cur.fetchone()[0] == 0
 
 
 def test_router_assigns_anyone_and_bots_cannot_edit_rules(monkeypatch):
@@ -107,18 +121,18 @@ def test_routing_order_and_dispatch(monkeypatch):
     inbound('m4', 't3', 'alex@rebattery.io')        # our own mail is skipped
     inbound('m5', None, 'someone@else.co')          # no thread: unassigned
     inbound('m6', 't1', 'seller@pack.co', minutes_ago=0)  # newest on t1: debounces t1
-    result = owner.dispatch(Namespace(lookback_minutes=60, debounce_seconds=90, max_per_hour=20, log='/dev/null', apply=True))
+    result = run_dispatch()
     assert result['skipped'] == 1 and result['unassigned'] == 1
     woken = {c[0]: c for c in calls}
     assert set(woken) == {'sorcerer', 'papajules'} and len(calls) == 2  # t2 -> sorcerer, t3 -> papajules; t1 waits
     assert {'thread_id': 't1', 'reason': 'debounce'} in result['deferred']
     assert owner.show(Namespace(thread='t2'))['owner']['assigned_by'] == 'router'
     # Second run: nothing new to queue, t1 still debounced; each message woke its owner at most once.
-    again = owner.dispatch(Namespace(lookback_minutes=60, debounce_seconds=90, max_per_hour=20, log='/dev/null', apply=True))
+    again = run_dispatch()
     assert again['queued'] == 0 and len(calls) == 2
     with psycopg2.connect(DSN) as db, db.cursor() as cur:
         cur.execute("update mail_message set created_at = now() - interval '5 minutes' where id='m6'")
-    owner.dispatch(Namespace(lookback_minutes=60, debounce_seconds=90, max_per_hour=20, log='/dev/null', apply=True))
+    run_dispatch()
     assert len(calls) == 3 and calls[-1][0] == 'papajules' and '2 new emails' in calls[-1][2]
 
 
@@ -142,10 +156,52 @@ def test_rate_limit_defers(monkeypatch):
         owner.change(args(thread=t), 'set')
     monkeypatch.delenv('HERMES_SESSION_PROFILE')
     inbound('m1', 't1', 'a@b.co'); inbound('m2', 't2', 'c@d.co')
-    result = owner.dispatch(Namespace(lookback_minutes=60, debounce_seconds=90, max_per_hour=1, log='/dev/null', apply=True))
+    result = run_dispatch(max_per_hour=1)
     assert len(calls) == 1 and any(d['reason'] == 'rate_limited' for d in result['deferred'])
 
 
 def test_plus_tags():
     assert owner.plus_tags(['supply+trade-123@rebattery.io', 'x+y@other.com']) == ['trade-123']
-    json.dumps(owner.plus_tags([]))
+
+
+def test_wake_request_carries_key_and_message_off_the_command_line(monkeypatch):
+    monkeypatch.setenv('API_SERVER_KEY', 'test-key-123')
+    config = owner.curl_config('hello "there"')
+    assert 'header = "Authorization: Bearer test-key-123"' in config
+    body = config.split('data-binary = ', 1)[1].strip()
+    assert json.loads(json.loads(body)) == {'message': 'hello "there"'}
+
+
+def test_automated_old_and_owned_by_nobody_never_wake(monkeypatch):
+    calls = []
+    monkeypatch.setattr(owner, 'deliver', lambda *a: calls.append(a))
+    monkeypatch.setattr(owner, 'ensure_session', lambda cur, o, subject, apply: ('s', False))
+    owner.rules(Namespace(action='add', kind='mailbox', value='supply', profile='sorcerer', session=None, priority=100, note=None, apply=True))
+    inbound('m1', 't1', 'no-reply@shop.com')
+    inbound('m2', 't2', 'deals@shop.com', labels=('CATEGORY_PROMOTIONS', 'INBOX'))
+    inbound('m3', 't3', 'buyer@real.co', sent_days_ago=30)
+    result = run_dispatch()
+    assert result['skipped'] == 3 and result['queued'] == 0 and calls == []
+
+
+def test_one_failing_owner_does_not_block_the_queue(monkeypatch):
+    calls = []
+    monkeypatch.setattr(owner, 'deliver', lambda profile, session, text, log: calls.append(profile))
+    def flaky(cur, o, subject, apply):
+        if o['profile'] == 'sorcerer':
+            raise RuntimeError('gateway down')
+        return 's', False
+    monkeypatch.setattr(owner, 'ensure_session', flaky)
+    as_agent(monkeypatch, 'mailvin')
+    owner.change(args(thread='t1', profile='sorcerer'), 'set')
+    owner.change(args(thread='t2', profile='papajules'), 'set')
+    monkeypatch.delenv('HERMES_SESSION_PROFILE')
+    inbound('m1', 't1', 'a@b.co', minutes_ago=20)
+    inbound('m2', 't2', 'c@d.co')
+    result = run_dispatch()
+    assert calls == ['papajules'] and result['failed'][0]['profile'] == 'sorcerer'
+    for _ in range(4):
+        run_dispatch()
+    with psycopg2.connect(DSN) as db, db.cursor() as cur:
+        cur.execute("select state, attempts from mail_agent_event where message_id='m1'")
+        assert cur.fetchone() == ('failed', 5)

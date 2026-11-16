@@ -6,6 +6,9 @@ Agents call these commands; the caller is the Hermes profile and session the com
 Rules for agents: claim an unowned thread for yourself, hand off or clear only threads you own. Router profiles
 (MAIL_OWNER_ROUTERS, default mailvin and default) may assign any thread and manage routing rules. A run without a Hermes
 profile (cron, an operator shell) acts as 'operator' with router rights.
+
+These checks are guardrails for cooperating agents, not a security boundary: the command runs as root with the caller's
+environment, so an agent that edits its environment can act as anyone. Every change is logged with the claimed actor.
 """
 from __future__ import annotations
 
@@ -13,6 +16,7 @@ import json
 import os
 import re
 import subprocess
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -23,6 +27,9 @@ KINDS = ('tag', 'sender', 'person', 'company', 'domain', 'mailbox')
 OWN_DOMAIN = 'rebattery.io'
 API_BASE = os.environ.get('HERMES_API_BASE', 'http://127.0.0.1:8642')
 ENV_FILE = '/root/.hermes/.env'
+PROFILES_DIR = '/root/.hermes/profiles'
+AUTOMATED_SENDER = re.compile(r'(^|[._+-])(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounces?|notifications?|alerts?)([._+-]|@)', re.I)
+BULK_LABELS = {'SPAM', 'TRASH', 'CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'CATEGORY_FORUMS'}
 
 
 def actor():
@@ -42,6 +49,8 @@ def routers():
 def check_profile(profile):
     if not profile or not PROFILE_RE.match(profile):
         raise UsageError('invalid_profile', f'Not a Hermes profile name: {profile!r}')
+    if profile != 'default' and not os.path.isdir(os.path.join(PROFILES_DIR, profile)):
+        raise UsageError('unknown_profile', f'No Hermes profile named {profile!r}')
     return profile
 
 
@@ -61,7 +70,14 @@ def resolve_thread(cur, ref):
     return rows[0]
 
 
+def lock_thread(cur, thread_id):
+    """Serialise ownership changes on one thread, including the first claim (no row to lock yet)."""
+    cur.execute("select pg_advisory_xact_lock(hashtext('mail_thread_owner:' || %s))", (thread_id,))
+
+
 def current_owner(cur, thread_id, lock=False):
+    if lock:
+        lock_thread(cur, thread_id)
     cur.execute('select * from mail_thread_owner where thread_id=%s' + (' for update' if lock else ''), (thread_id,))
     return cur.fetchone()
 
@@ -142,6 +158,8 @@ def list_threads(args):
                    order by t.last_message_at desc limit %s''', (since, args.limit))
         else:
             profile = args.profile or me
+            if profile == 'operator':
+                raise UsageError('profile_required', 'Outside an agent session, pass --profile or --unassigned')
             cur.execute(
                 '''select o.thread_id, o.profile, o.session_id, o.reason, o.updated_at, t.subject, t.last_message_at
                    from mail_thread_owner o join mail_thread t on t.id=o.thread_id
@@ -150,6 +168,15 @@ def list_threads(args):
 
 
 # ---- routing -------------------------------------------------------------------------------------------------
+
+def automated(message):
+    """Mail no agent should be woken for: spam, promotions, social, forums, and machine senders."""
+    if BULK_LABELS & set(message.get('labels') or []):
+        return 'bulk label'
+    if AUTOMATED_SENDER.search((message.get('from_email') or '').split('@')[0] + '@'):
+        return 'automated sender'
+    return None
+
 
 def plus_tags(addresses):
     tags = []
@@ -261,9 +288,19 @@ def wake_text(thread_id, rows):
             f"is not yours to handle, hand it off with a reason.")
 
 
+def session_alive(profile, session_id):
+    try:
+        api('GET', f'/p/{profile}/api/sessions/{session_id}', timeout=15)
+        return True
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return False
+        raise
+
+
 def ensure_session(cur, owner, subject, apply):
-    """The owner's session; a thread owned by a profile without a session gets its own, remembered for follow-ups."""
-    if owner['session_id']:
+    """The owner's live session. A thread with no session, or whose session was deleted, gets its own, remembered."""
+    if owner['session_id'] and (not apply or session_alive(owner['profile'], owner['session_id'])):
         return owner['session_id'], False
     if not apply:
         return None, True
@@ -277,58 +314,71 @@ def ensure_session(cur, owner, subject, apply):
     return session_id, True
 
 
+def curl_config(text):
+    """curl -K config for one wake: auth header and body, so neither appears on the command line."""
+    auth = 'Authorization: ' + 'Bearer ' + api_key()
+    return f'header = "{auth}"\nheader = "Content-Type: application/json"\ndata-binary = {json.dumps(json.dumps({"message": text}))}\n'
+
+
 def deliver(profile, session_id, text, log_path):
-    """Fire the turn and return: a reply can take minutes and the session may be mid-turn (the gateway queues it)."""
-    payload = json.dumps({'message': text})
+    """Start the turn and return. ensure_session already proved the key and the session; a reply can take minutes and
+    the gateway queues it if the session is mid-turn. curl writes the final HTTP status to the log."""
     url = f'{API_BASE}/p/{profile}/api/sessions/{session_id}/chat'
-    # The key goes in through curl's config on stdin, never on the command line.
-    config = f'header = "Authorization: Bearer {api_key()}"\nheader = "Content-Type: application/json"\n'
     with open(log_path, 'a') as log:
         log.write(f'{datetime.now(timezone.utc).isoformat()} wake {profile} {session_id}\n')
         log.flush()
         process = subprocess.Popen(['curl', '-sS', '-o', '/dev/null', '-w', f'{profile} {session_id} http=%{{http_code}}\\n',
-                                    '--max-time', '3600', '-K', '-', '-X', 'POST', '--data-binary', payload, url],
+                                    '--max-time', '3600', '-K', '-', '-X', 'POST', url],
                                    stdin=subprocess.PIPE, stdout=log, stderr=log, start_new_session=True)
-    process.stdin.write(config.encode())  # type: ignore[union-attr]
+    process.stdin.write(curl_config(text).encode())  # type: ignore[union-attr]
     process.stdin.close()  # type: ignore[union-attr]
+
+
+MESSAGE_COLUMNS = ('m.id, m.thread_id, m.subject, m.from_email, m.from_person_id, m.person_id, m.company_id, m.identity_key, '
+                   'm.to_emails, m.cc_emails, m.labels, m.sent_at, m.created_at')
 
 
 def dispatch(args):
     """Queue new inbound mail, route it, and wake each owner once per thread. Safe to run every minute."""
-    own = None
     since = datetime.now(timezone.utc) - timedelta(minutes=args.lookback_minutes)
-    result = {'queued': 0, 'unassigned': 0, 'skipped': 0, 'dispatched': [], 'deferred': [], 'dry_run': not args.apply}
+    fresh = datetime.now(timezone.utc) - timedelta(hours=args.max_age_hours)
+    result = {'queued': 0, 'unassigned': 0, 'skipped': 0, 'dispatched': [], 'deferred': [], 'failed': [], 'dry_run': not args.apply}
     with connection(read_only=not args.apply) as db, dict_cursor(db) as cur:
-        cur.execute("select lower(address) from mail_identity union select lower(gmail_account) from mail_identity where gmail_account is not null")
-        own = {r['lower'] for r in cur.fetchall() if r['lower']}
+        cur.execute("select lower(address) as a from mail_identity union select lower(gmail_account) from mail_identity where gmail_account is not null")
+        own = {r['a'] for r in cur.fetchall() if r['a']}
         cur.execute(
-            '''select m.* from mail_message m left join mail_agent_event e on e.message_id=m.id
-               where m.direction='inbound' and m.created_at >= %s and e.id is null order by m.created_at''', (since,))
+            f"""select {MESSAGE_COLUMNS} from mail_message m left join mail_agent_event e on e.message_id=m.id
+               where m.direction='inbound' and m.created_at >= %s and e.id is null order by m.created_at""", (since,))
         for message in cur.fetchall():
             sender = (message['from_email'] or '').lower()
+            hit, why = None, None
             if sender in own or sender.endswith('@' + OWN_DOMAIN):
-                state, hit = 'skipped', None
+                state, why = 'skipped', 'own mail'
+            elif message['sent_at'] and message['sent_at'] < fresh:
+                state, why = 'skipped', 'old mail (backfill)'
+            elif automated(message):
+                state, why = 'skipped', automated(message)
             else:
                 hit = route(cur, message)
                 state = 'pending' if hit and message['thread_id'] else 'unassigned'
+                why = hit and hit[2]
             result['queued' if state == 'pending' else state] += 1
             if not args.apply:
                 continue
             if hit and state == 'pending':
-                owner = current_owner(cur, message['thread_id'])
+                owner = current_owner(cur, message['thread_id'], lock=True)
                 if not owner:  # routed by a rule or the sender heuristic: the thread now belongs to that agent
                     write_owner(cur, message['thread_id'], hit[0], hit[1], 'router', hit[2], 'route', None, rule_id=hit[3])
-            cur.execute('''insert into mail_agent_event (message_id, thread_id, profile, session_id, state, detail)
-                           values (%s,%s,%s,%s,%s,%s) on conflict (message_id) do nothing''',
+            cur.execute("""insert into mail_agent_event (message_id, thread_id, profile, session_id, state, detail)
+                           values (%s,%s,%s,%s,%s,%s) on conflict (message_id) do nothing""",
                         (message['id'], message['thread_id'], hit and hit[0], hit and hit[1], state,
-                         json.dumps({'why': hit and hit[2], 'from': sender})))
-        if args.apply:
-            db.commit()
+                         json.dumps({'why': why, 'from': sender})))
+            db.commit()  # one message at a time: releases the thread lock and keeps earlier messages queued if a later one fails
         # Wake owners. A thread whose newest message is younger than the debounce window waits for the next run.
         cur.execute(
-            '''select e.thread_id, array_agg(e.id order by e.created_at) as ids, max(m.created_at) as newest
+            """select e.thread_id, array_agg(e.id order by e.created_at) as ids, max(m.created_at) as newest
                from mail_agent_event e join mail_message m on m.id=e.message_id
-               where e.state='pending' group by e.thread_id''')
+               where e.state='pending' group by e.thread_id order by min(e.created_at)""")
         groups = cur.fetchall()
         for group in groups:
             if group['newest'] > datetime.now(timezone.utc) - timedelta(seconds=args.debounce_seconds):
@@ -338,30 +388,38 @@ def dispatch(args):
             if not owner:
                 if args.apply:
                     cur.execute("update mail_agent_event set state='unassigned', updated_at=now() where id=any(%s)", (group['ids'],))
+                    db.commit()
                 continue
-            cur.execute('''select count(*) from mail_agent_event where profile=%s and state='dispatched'
-                           and dispatched_at > now() - interval '1 hour' ''', (owner['profile'],))
-            if cur.fetchone()['count'] >= args.max_per_hour:
+            # The cap counts wake-ups (one per thread per run), not messages.
+            cur.execute("""select count(distinct (thread_id, dispatched_at)) as n from mail_agent_event where profile=%s
+                           and state='dispatched' and dispatched_at > now() - interval '1 hour'""", (owner['profile'],))
+            if cur.fetchone()['n'] >= args.max_per_hour:
                 result['deferred'].append({'thread_id': group['thread_id'], 'reason': 'rate_limited', 'profile': owner['profile']})
+                if args.apply:
+                    db.rollback()
                 continue
-            cur.execute('''select m.subject, m.from_email from mail_agent_event e join mail_message m on m.id=e.message_id
-                           where e.id=any(%s) order by e.created_at''', (group['ids'],))
+            cur.execute("""select m.subject, m.from_email from mail_agent_event e join mail_message m on m.id=e.message_id
+                           where e.id=any(%s) order by e.created_at""", (group['ids'],))
             rows = cur.fetchall()
-            session_id, created = ensure_session(cur, dict(owner), rows[0]['subject'], args.apply)
-            entry = {'thread_id': group['thread_id'], 'profile': owner['profile'], 'session_id': session_id,
-                     'session_created': created, 'messages': len(rows)}
-            if args.apply:
-                try:
+            entry = {'thread_id': group['thread_id'], 'profile': owner['profile'], 'messages': len(rows)}
+            try:
+                session_id, created = ensure_session(cur, dict(owner), rows[0]['subject'], args.apply)
+                entry.update(session_id=session_id, session_created=created)
+                if args.apply:
                     deliver(owner['profile'], session_id, wake_text(group['thread_id'], rows), args.log)
-                    cur.execute('''update mail_agent_event set state='dispatched', profile=%s, session_id=%s, attempts=attempts+1,
-                                   dispatched_at=now(), updated_at=now() where id=any(%s)''', (owner['profile'], session_id, group['ids']))
-                except Exception as exc:  # leave pending; retried next run, failed after 5 attempts
-                    cur.execute('''update mail_agent_event set attempts=attempts+1, updated_at=now(),
-                                   state=case when attempts+1>=5 then 'failed' else state end, detail=detail||%s where id=any(%s)''',
+                    cur.execute("""update mail_agent_event set state='dispatched', profile=%s, session_id=%s, attempts=attempts+1,
+                                   dispatched_at=now(), updated_at=now() where id=any(%s)""", (owner['profile'], session_id, group['ids']))
+                    db.commit()
+                result['dispatched'].append(entry)
+            except Exception as exc:  # stays pending and is retried next run; failed after 5 attempts. Never blocks other threads.
+                if args.apply:
+                    db.rollback()
+                    cur.execute("""update mail_agent_event set attempts=attempts+1, updated_at=now(),
+                                   state=case when attempts+1>=5 then 'failed' else state end, detail=detail||%s where id=any(%s)""",
                                 (json.dumps({'error': str(exc)[:300]}), group['ids']))
-                    entry['error'] = str(exc)[:300]
-                db.commit()
-            result['dispatched'].append(entry)
+                    db.commit()
+                entry['error'] = str(exc)[:300]
+                result['failed'].append(entry)
     return result
 
 
@@ -419,7 +477,8 @@ def register(subparsers):
     p.set_defaults(handler=rules)
 
     p = sub.add_parser('dispatch', help='Cron: queue new inbound mail, route it and wake owners')
-    p.add_argument('--lookback-minutes', type=int, default=180)
+    p.add_argument('--lookback-minutes', type=int, default=1440, help='How far back to look for imported mail not yet queued')
+    p.add_argument('--max-age-hours', type=int, default=24, help='Mail sent longer ago than this (backfills) never wakes anyone')
     p.add_argument('--debounce-seconds', type=int, default=90)
     p.add_argument('--max-per-hour', type=int, default=20)
     p.add_argument('--log', default='/root/.hermes/logs/mail-dispatch.log')
