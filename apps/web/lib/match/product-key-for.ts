@@ -27,6 +27,7 @@ import {
   normalModel,
   partKey,
 } from "@/lib/commercial-stock";
+import { modelSlug } from "./model-aliases";
 import { PACK_FAMILIES, type PackFamily } from "./pack-families";
 
 export type ProductFacts = {
@@ -49,6 +50,11 @@ export type ProductFacts = {
   makes?: (string | null | undefined)[] | null;
   chemistries?: (string | null | undefined)[] | null;
   formats?: (string | null | undefined)[] | null;
+  /**
+   * Products the source states as pairs ("Toyota Proace 50 kWh NMC; Stellantis 52 kWh LFP"). When present they are the
+   * only products: a stated make never pairs with another product's chemistry, capacity or format.
+   */
+  products?: ProductFacts[] | null;
 };
 
 export type ProductKeyLevel = "part" | "pack" | "model" | "cell" | "broad";
@@ -183,8 +189,8 @@ function graphPack(facts: ProductFacts): string | null {
 
 function modelKey(facts: ProductFacts): string | null {
   const make = makeKey(facts.make ?? null);
-  if (isProseModel(facts.model ?? null)) {return null;}
-  const model = fold(normalModel(facts.make ?? null, modelKeyText(facts.model ?? null)) ?? modelKeyText(facts.model ?? null));
+  // The canonical slug from the shared alias list ("Kona Electric" is `kona`); null for a text that lists models.
+  const model = modelSlug(facts.make ?? null, facts.model ?? null);
   const kwh = kwhKeyText(singleKwh(facts));
   return make && model && kwh ? `model:${make}-${model}-${kwh}kwh` : null;
 }
@@ -207,10 +213,8 @@ export function modelWideText(make: string | null | undefined, model: string | n
 function modelWideKey(facts: ProductFacts): string | null {
   if (facts.cellMaker) {return null;}  // a cell is keyed by its maker and model
   const make = makeKey(facts.make ?? null);
-  const text = modelWideText(facts.make, facts.model);
-  if (!make || !text || isProseModel(text)) {return null;}
-  const model = fold(text);
-  return model ? `model:${make}-${model}` : null;
+  const model = modelSlug(facts.make ?? null, facts.model ?? null);
+  return make && model ? `model:${make}-${model}` : null;
 }
 
 function cellKey(facts: ProductFacts): string | null {
@@ -251,34 +255,89 @@ function statedValues(values: (string | null | undefined)[] | null | undefined, 
   return [fallback || null];
 }
 
+/** Vehicle brands: a battery system (BESS container) is not theirs unless the source says so. BYD sells both. */
+const VEHICLE_WORDS = new Set([
+  "volkswagen", "vw", "audi", "mini", "skoda", "cupra", "porsche", "bmw", "mercedes", "benz", "tesla", "stellantis", "nissan", "renault",
+  "dacia", "peugeot", "citroen", "opel", "vauxhall", "fiat", "jeep", "ford", "hyundai", "kia", "genesis", "toyota", "lexus", "honda",
+  "mazda", "mitsubishi", "suzuki", "subaru", "volvo", "polestar", "jaguar", "mg", "saic", "lotus", "lucid", "rivian", "nio", "xpeng",
+  "zeekr", "leapmotor", "maxus", "smart", "seat", "jlr", "gm", "ds", "lynk",
+]);
+
+/** A make that builds vehicles, group names included ("Hyundai or Kia", "VW Group"). */
+export function isVehicleMake(make: string | null | undefined): boolean {
+  const words = unaccentWords(make);
+  return words.some((word) => VEHICLE_WORDS.has(word));
+}
+
+const unaccentWords = (value: string | null | undefined) =>
+  (value ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+/** A model that is itself a stationary product (a Tesla Megapack is a system, a Model 3 is not). */
+const STATIONARY_MODEL = /\b(megapack|powerwall|powerpack|bess|container|cabinet|rack|ess)\b/i;
+
+/** The fact set with an impossible pairing removed: a vehicle make on a battery system stays a system of no stated make. */
+function withoutVehicleSystem(facts: ProductFacts): ProductFacts {
+  if (formatOf(facts) === "system" && isVehicleMake(facts.make) && !STATIONARY_MODEL.test(facts.model ?? "")) {
+    return { ...facts, make: null, makes: [] };
+  }
+  return facts;
+}
+
 /**
- * One fact set per stated make x chemistry x format, capped at `limit`, mirroring buyer_interest_fact_sets()
- * in SQL. `stated` is how many combinations the facts really name, so a caller can record the truncation.
+ * The fact sets a source's own lists state, mirroring buyer_interest_fact_sets() in SQL.
+ *
+ * - `products` are stated pairs: one fact set per product, a dimension the product leaves out inherited only when the
+ *   source states exactly one value for it.
+ * - Lists with at most one dimension that has several values multiply out (single values apply to every line).
+ * - Lists where two or more dimensions have several values ("Tesla, Nissan; NMC, LFP") say nothing about which make goes
+ *   with which chemistry, so no line pairs them: one set per value of each such dimension, carrying only the single-valued
+ *   dimensions. A make never pairs with a chemistry, a format or a capacity the source did not give it.
+ * - A vehicle make is never paired with a battery system from a list.
+ * Capped at `limit`; `stated` is how many sets the source really states, so a caller can record a truncation.
  */
 export function expandProductFacts(facts: ProductFacts, limit = PRODUCT_FACT_COMBINATIONS): { facts: ProductFacts[]; stated: number } {
+  const cap = Math.max(limit, 1);
+  const finish = (sets: ProductFacts[]) => {
+    const seen = new Set<string>();
+    const unique = sets.map((set) => withoutVehicleSystem(set)).filter((set) => {
+      const id = JSON.stringify([set.make ?? null, set.chemistry ?? null, set.format ?? null, set.model ?? null, set.kwh ?? null, set.kwhMin ?? null, set.kwhMax ?? null, set.cellMaker ?? null, set.partNumbers ?? null]);
+      return seen.has(id) ? false : (seen.add(id), true);
+    });
+    return { facts: unique.slice(0, cap), stated: Math.max(unique.length, 0) };
+  };
   const makes = statedValues(splitMakes(statedValues(facts.makes, facts.make ?? null)), null);
   const chemistries = statedValues(facts.chemistries, facts.chemistry ?? null);
   const formats = statedValues(facts.formats, facts.format ?? null);
-  const expanded: ProductFacts[] = [];
-  for (const make of makes) {
-    for (const chemistry of chemistries) {
-      for (const format of formats) {
-        if (expanded.length >= Math.max(limit, 1)) {
-          return { facts: expanded, stated: makes.length * chemistries.length * formats.length };
-        }
-        expanded.push({
-          ...facts,
-          make,
-          chemistry,
-          format,
-          makes: make ? [make] : [],
-          chemistries: chemistry ? [chemistry] : [],
-          formats: format ? [format] : [],
-        });
-      }
-    }
+  const { products, ...shared } = facts;
+  delete (shared as ProductFacts).makes; delete (shared as ProductFacts).chemistries; delete (shared as ProductFacts).formats;
+  const one = <T>(values: (T | null)[]) => (values.length === 1 ? values[0] : null);
+  const carry = (make: string | null, chemistry: string | null, format: string | null): ProductFacts => ({
+    ...shared, make, chemistry, format,
+    makes: make ? [make] : [], chemistries: chemistry ? [chemistry] : [], formats: format ? [format] : [],
+  });
+  if (products?.length) {
+    return finish(products.flatMap((product) => {
+      const stated = statedValues(splitMakes(statedValues(product.makes, product.make ?? null)), null);
+      return stated.map((make) => ({
+        ...shared, ...product, make,
+        chemistry: product.chemistry ?? one(chemistries),
+        format: product.format ?? one(formats),
+        makes: make ? [make] : [], chemistries: [], formats: [],
+      }));
+    }));
   }
-  return { facts: expanded, stated: makes.length * chemistries.length * formats.length };
+  const multi = [makes.length > 1, chemistries.length > 1, formats.length > 1].filter(Boolean).length;
+  if (multi <= 1) {
+    return finish(makes.flatMap((make) => chemistries.flatMap((chemistry) => formats.map((format) => carry(make, chemistry, format)))));
+  }
+  const sets: ProductFacts[] = [];
+  const singleMake = one(makes);
+  const singleChemistry = one(chemistries);
+  const singleFormat = one(formats);
+  if (makes.length > 1) {for (const make of makes) {sets.push(carry(make, singleChemistry, singleFormat));}}
+  if (chemistries.length > 1) {for (const chemistry of chemistries) {sets.push(carry(singleMake, chemistry, singleFormat));}}
+  if (formats.length > 1) {for (const format of formats) {sets.push(carry(singleMake, singleChemistry, format));}}
+  return finish(sets);
 }
 
 /**

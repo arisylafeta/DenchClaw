@@ -1,8 +1,10 @@
+import { MODEL_ALIAS_DATA, modelSlug } from "./model-aliases";
 import { describe, expect, it } from "vitest";
 import {
   broaderKeysFor,
   expandProductFacts,
   isProseModel,
+  isVehicleMake,
   kwhKeyText,
   makeKey,
   packFamilyFor,
@@ -59,10 +61,10 @@ describe("productKeyFor", () => {
     expect(productKeyLevel("model:kia-ev3")).toBe("model");
     // A reviewed pack family matches a model alone, so the parser never takes that key without a stated kWh; the
     // model-level key is still in the chain for it to take.
-    expect(broaderKeysFor({ make: "Vauxhall", model: "Corsa-e", format: "packs" })).toContain("model:vauxhall-corsae");
+    expect(broaderKeysFor({ make: "Vauxhall", model: "Corsa-e", format: "packs" })).toContain("model:vauxhall-corsa");
     // A lot of that model, at any size, counts as the model-level key as well as its own.
     expect(broaderKeysFor({ make: "Kia", model: "Kia EV3 81.4 kWh pack", kwh: 81.4, format: "pack", chemistry: "NMC" }))
-      .toEqual(["model:kia-ev3", "broad:kia-nmc-packs", "broad:nmc-packs"]);
+      .toEqual(["model:kia-ev3-81.4kwh", "model:kia-ev3", "broad:kia-nmc-packs", "broad:nmc-packs"]);
     expect(broaderKeysFor({ make: "Kia", model: "EV3", kwh: 81.4, format: "pack" }))
       .toEqual(["model:kia-ev3-81.4kwh", "model:kia-ev3", "broad:kia-any-packs", "broad:any-packs"]);
     expect(broaderKeysFor({ make: "Kia", model: "EV3 pack" })).toContain("model:kia-ev3");
@@ -91,7 +93,7 @@ describe("productKeyFor", () => {
   it("rolls a specific key up to every broader key it counts as", () => {
     const keys = broaderKeysFor({ make: "Vauxhall", model: "Corsa-e", chemistry: "NMC", format: "packs", kwh: 50 });
     expect(keys).toEqual([
-      "pack:stellantis-ecmp-50kwh", "model:vauxhall-corsae-50kwh", "model:vauxhall-corsae", "broad:vauxhall-nmc-packs", "broad:nmc-packs",
+      "pack:stellantis-ecmp-50kwh", "model:vauxhall-corsa-50kwh", "model:vauxhall-corsa", "broad:vauxhall-nmc-packs", "broad:nmc-packs",
     ]);
     const part = broaderKeysFor({ partNumbers: ["37501-Q4052"], make: "Kia", model: "Niro", kwh: 64.8, chemistry: "NMC", format: "packs" });
     expect(part[0]).toBe("part:37501Q4052");
@@ -137,17 +139,44 @@ describe("productKeyFor", () => {
     expect(two.map(productKeyFor)).toEqual(["pack:stellantis-ecmp-50kwh", "broad:lfp-modules"]);
   });
 
-  it("fans every stated make and chemistry out instead of keeping only the first", () => {
+  it("keeps every stated make and chemistry without pairing a make with a chemistry nobody paired", () => {
+    // Two makes and two chemistries in separate lists: Toyota NMC and Stellantis LFP may be the pairs, so no line pairs them.
     const { facts, stated } = expandProductFacts({
       makes: ["Toyota or Lexus", "Stellantis"], chemistries: ["NMC", "LFP"], formats: ["Packs"], kwhMin: 50, kwhMax: 60,
     });
     expect(stated).toBe(4);
     expect(facts.map(productKeyFor)).toEqual([
-      "broad:stellantis-lfp-packs",
-      "broad:stellantis-nmc-packs",
-      "broad:toyota-or-lexus-lfp-packs",
-      "broad:toyota-or-lexus-nmc-packs",
+      "broad:stellantis-any-packs",
+      "broad:toyota-or-lexus-any-packs",
+      "broad:lfp-packs",
+      "broad:nmc-packs",
     ]);
+    // One list with several values still multiplies out: the single chemistry applies to every make.
+    expect(expandProductFacts({ makes: ["Toyota", "Stellantis"], chemistries: ["NMC"], formats: ["Packs"] }).facts.map(productKeyFor))
+      .toEqual(["broad:stellantis-nmc-packs", "broad:toyota-nmc-packs"]);
+  });
+
+  it("keeps stated products paired: STN's Toyota Proace 50 kWh NMC and Stellantis 52 kWh LFP", () => {
+    const { facts, stated } = expandProductFacts({
+      makes: ["Toyota or Lexus", "Stellantis"], chemistries: ["NMC", "LFP"], formats: ["Packs"], kwhMin: 50, kwhMax: 52,
+      products: [
+        { make: "Toyota or Lexus", model: "Proace", chemistry: "NMC", kwh: 50 },
+        { make: "Stellantis", model: "e-K9", chemistry: "LFP", kwh: 52 },
+      ],
+    });
+    expect(stated).toBe(2);
+    expect(facts.map((fact) => [fact.make, fact.chemistry, fact.kwh, fact.format])).toEqual([
+      ["Toyota or Lexus", "NMC", 50, "Packs"], ["Stellantis", "LFP", 52, "Packs"],
+    ]);
+  });
+
+  it("never pairs a vehicle make with a battery system from a list", () => {
+    const sets = expandProductFacts({ makes: ["Tesla"], formats: ["Packs", "Systems"] }).facts;
+    expect(sets.map(productKeyFor).toSorted()).toEqual(["broad:any-systems", "broad:tesla-any-packs"]);
+    // A stationary make keeps its systems; a stationary model of a vehicle make does too.
+    expect(expandProductFacts({ makes: ["Sungrow"], formats: ["Systems"] }).facts.map(productKeyFor)).toEqual(["broad:sungrow-any-systems"]);
+    expect(isVehicleMake("Hyundai or Kia")).toBe(true);
+    expect(isVehicleMake("Sungrow")).toBe(false);
   });
 
   it("splits a compound make into one want per make, never one slugged phrase", () => {
@@ -183,12 +212,15 @@ describe("productKeyFor", () => {
   });
 
   it("caps the fan-out and reports how many combinations the source stated", () => {
-    const makes = ["Toyota", "Stellantis", "Hyundai", "Kia", "BMW"];
+    const makes = ["Toyota", "Stellantis", "Hyundai", "Kia", "BMW", "Ford", "Audi", "Volvo"];
     const chemistries = ["NMC", "LFP", "NCA"];
     const { facts, stated } = expandProductFacts({ makes, chemistries, formats: ["Packs"] });
-    expect(stated).toBe(15);
-    expect(facts).toHaveLength(12);
-    expect(new Set(facts.map(productKeyFor)).size).toBe(12);
+    expect(stated).toBe(11);
+    expect(facts).toHaveLength(11);
+    const wider = expandProductFacts({ makes, chemistries, formats: ["Packs", "Modules"] });
+    expect(wider.stated).toBe(13);
+    expect(wider.facts).toHaveLength(12);
+    expect(new Set(wider.facts.map(productKeyFor)).size).toBe(12);
   });
 
   it("reports the level of a key from its prefix", () => {
@@ -208,5 +240,34 @@ describe("productKeyFor", () => {
     // The EV9 is a 99.8 kWh pack, not the 77 kWh E-GMP one.
     expect(packFamilyFor({ make: "Kia", model: "EV9", kwh: 99.8 })).toBeNull();
     expect(packFamilyFor({ make: "Kia", model: "EV6", kwh: 77.4 })?.id).toBe("hyundai-kia-egmp-77kwh");
+  });
+});
+
+describe("canonical model slugs", () => {
+  it.each([
+    ["Hyundai", "Kona Electric", "kona"],
+    ["Tesla", "Model 3 Long Range AWD", "model3"],
+    ["Kia", "e-Niro", "niro"],
+    ["VW", "ID.3", "id3"],
+    ["Nissan", "NISSAN LEAF 2011-17", "leaf"],
+    ["Hyundai", "Ioniq 5 Long Range", "ioniq5"],
+    ["Polestar", "2", "2"],
+    ["MG", "MG4", "4"],
+  ])("%s %s is %s on the lot side and the line side", (make, model, slug) => {
+    expect(modelSlug(make, model)).toBe(slug);
+    expect(productKeyFor({ make, model, kwh: 64 })).toBe(`model:${makeKey(make)}-${slug}-64kwh`);
+  });
+
+  it("keeps a list of models out of the key", () => {
+    expect(modelSlug("Volvo", "hybrid 2017-2021 (V60, V90, XC60, XC90)")).toBeNull();
+    expect(modelSlug("Stellantis", "Berlingo / Combo / Partner / Doblo van")).toBeNull();
+  });
+
+  it("every alias in the shared list resolves to its own model", () => {
+    for (const model of MODEL_ALIAS_DATA.models) {
+      for (const alias of model.aliases) {
+        expect(modelSlug(model.make, alias), `${model.make} ${alias}`).toBe(model.slug);
+      }
+    }
   });
 });
