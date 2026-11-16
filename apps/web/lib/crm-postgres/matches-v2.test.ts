@@ -33,7 +33,9 @@ describe.skipIf(!TEST_URL)("matches v2", () => {
         ('p4_co_lfp', 'Synthetic LFP Buyer Ltd', 'Contacted', 'C', 'stated',
          '{"chemistries": ["LFP"], "formats": ["Packs"]}'),
         ('p4_co_other', 'Synthetic Other Buyer Ltd', 'Identified', null, 'researched',
-         '{"chemistries": ["NMC"], "formats": ["Packs"]}');
+         '{"chemistries": ["NMC"], "formats": ["Packs"]}'),
+        ('p4_co_ruled', 'Synthetic Ruled Out Buyer Ltd', 'Qualified', 'B', 'stated',
+         '{"dossier": {"products": [{"format": "packs", "chemistry": "LFP", "status": "asked"}], "rules_out": {"chemistries": [{"value": "NMC", "seen": "2026-09-14", "src": "gmail_msg_x"}]}}}');
 
       insert into crm_bulk_listings (id, kind, party, summary, status, quantity, location, spec) values
         ('p4_sup_1', 'supply', 'Synthetic Dismantler Ltd', '40 Toyota Proace packs', 'open', '40 packs', 'GB',
@@ -53,7 +55,8 @@ describe.skipIf(!TEST_URL)("matches v2", () => {
         ('p4_sup_1', 'seller_price', 'EUR 40 per kWh', 'confirmed', 'teaser');
 
       insert into crm_people (id, company_id, full_name, email) values
-        ('p4_pe_1', 'p4_co_other', 'Synthetic Contact', 'contact@synthetic.test');
+        ('p4_pe_1', 'p4_co_other', 'Synthetic Contact', 'contact@synthetic.test'),
+        ('p4_pe_ruled', 'p4_co_ruled', 'Ruled Contact', 'ruled@synthetic.test');
 
       insert into crm_stock_opportunities (id, person_id, company_id, status, title, quantity, location, details) values
         ('p4_sto_1', 'p4_pe_1', 'p4_co_other', 'opportunity', 'MG ZS EV 44 kWh pack', 6, 'GB',
@@ -124,6 +127,21 @@ describe.skipIf(!TEST_URL)("matches v2", () => {
       expect(part.reason).toMatch(/Same part number/);
       expect(part.price).toMatch(/against their 60\/kWh/);
       expect(make.checks.length).toBeGreaterThan(0);
+    });
+
+    it("keeps a buyer a dossier rule excludes out of the ranking but visible, with the rule, date and source", async () => {
+      const result = await supplyV2.supplyMatchesV2("p4_sup_1");
+      expect(result!.rows.map((row) => row.companyId)).not.toContain("p4_co_ruled");
+      expect(result!.ruledOut).toHaveLength(1);
+      const [ruled] = result!.ruledOut!;
+      expect(ruled).toMatchObject({
+        key: "company:p4_co_ruled", companyId: "p4_co_ruled", personId: "p4_pe_ruled", contact: "ruled@synthetic.test",
+        reason: expect.stringMatching(/^No NMC cells, said 14 Sep/),
+        ruledOut: { text: "No NMC cells", seen: "2026-09-14", source: "gmail_msg_x" },
+        offer: null,
+      });
+      // Our own Not a fit call is not a rule: that buyer stays hidden.
+      expect(result!.ruledOut!.map((row) => row.companyId)).not.toContain("p4_co_lfp");
     });
 
     it("tags a researched-only company as a lead and gives it our contact", async () => {

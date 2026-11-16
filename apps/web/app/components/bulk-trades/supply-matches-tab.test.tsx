@@ -45,6 +45,26 @@ describe("Matches tab", () => {
     expect(screen.getAllByRole("button", { name: "Not a fit" })).toHaveLength(2);
   });
 
+  it("shows ruled-out buyers in a collapsed section with the reason, and Add to offers overrides", async () => {
+    const ruled = row({ key: "company:c9", name: "Cellco", companyId: "c9", personId: null, contact: null, reason: "No loose cells, said 14 Sep", checks: [], price: null, ruledOut: { text: "No loose cells", seen: "2025-09-14", source: "gmail_x" } });
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => (init?.method === "POST"
+      ? json({ offer: { id: "o1", stage: "candidate", updated_at: "2026-11-16T10:00:00Z" } })
+      : json(result([row()], { ruledOut: [ruled] }))));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SupplyMatchesTab listingId="bts_1" active />);
+    const toggle = await screen.findByRole("button", { name: /Ruled out \(1\)/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Cellco")).toBeNull();
+    expect(screen.getByText(/1 match · 34 checked/)).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(screen.getByText("Cellco")).toBeTruthy();
+    expect(screen.getByText("No loose cells, said 14 Sep")).toBeTruthy();
+    fireEvent.click(within(screen.getByText("Cellco").closest("li")!).getByRole("button", { name: "Add to offers" }));
+    await waitFor(() => expect(screen.getByText(/In offers/)).toBeTruthy());
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
+    expect(JSON.parse(String(post[1]!.body)).data.match.ruled_out_override).toBe(true);
+  });
+
   it("expands the full key only when asked, or by itself for a disputed or mixed lot", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json(result([row()]))));
     const { unmount } = render(<SupplyMatchesTab listingId="bts_1" active />);

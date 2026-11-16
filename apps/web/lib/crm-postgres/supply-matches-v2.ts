@@ -5,7 +5,7 @@ import "server-only";
 // Read only, except the Not a fit verdicts the route records.
 import { queryPg } from "../postgres";
 import { buildProductKey, keyLine, type FieldFact, type ProductKey } from "../match/product-key";
-import { rankBuyers, supplyFactsFromKey, type BuyerLine, type RankedBuyerRow } from "../match/rules";
+import { rankBuyers, shortDate, supplyFactsFromKey, type BuyerLine, type RankedBuyerRow, type RuledOutRow } from "../match/rules";
 import { countryFromText, requirementFor, scoreCandidate, vocabulary, type Candidate, type Check } from "../demand-match";
 import { priceLabel } from "../bulk-demand";
 import { matchVerdicts, verdictKey, type FeedRow } from "./demand-match-supply";
@@ -302,7 +302,7 @@ export async function supplyMatchesV2(listingId: string): Promise<MatchesResult 
      order by p.company_id,
        (p.email is not null and not coalesce(p.email_opted_out, false)) desc,
        (p.id = c.buyer_main_contact_id) desc, p.full_name`,
-    [ranked.ranked.map((row) => row.companyId)],
+    [[...ranked.ranked.map((row) => row.companyId), ...ranked.ruledOut.filter((row) => row.kind === "rule").map((row) => row.companyId)]],
   );
   const contactOf = new Map(contacts.map((row) => [row.company_id, row]));
 
@@ -311,12 +311,18 @@ export async function supplyMatchesV2(listingId: string): Promise<MatchesResult 
     rows.push(buyerRow(buyer, contactOf.get(buyer.companyId) ?? null, touch.get(buyer.companyId) ?? null, offers));
   }
   const listed = rows.map((row, index) => ({ ...row, rank: index + 1 }));
+  // A dossier rule excludes a buyer from the ranking, never from sight. "Marked not a fit" stays hidden: that is our own call.
+  const ruledOut = ranked.ruledOut
+    .filter((row) => row.kind === "rule")
+    .toSorted((a, b) => compareName(a.name, b.name))
+    .map((row, index) => ruledOutRow(row, index + 1, asOf, contactOf.get(row.companyId) ?? null, touch.get(row.companyId) ?? null, offers));
 
   return {
     id: listingId,
     kind: "supply",
     lotKey,
     rows: listed,
+    ruledOut,
     considered: demand.length + ranked.evaluated,
     blocked: listed.length ? null : "Nothing fits yet. Add a dossier or a listing field to widen the match.",
     errors: [],
@@ -338,5 +344,31 @@ function buyerRow(buyer: RankedBuyerRow, contact: { person_id: string; email: st
     personId: contact?.person_id ?? null,
     contact: contact?.email ?? null,
     stockId: null,
+  };
+}
+
+const compareName = (a: string, b: string) => a.localeCompare(b, "en");
+
+function ruledOutRow(
+  rule: RuledOutRow, rank: number, asOf: string, contact: { person_id: string; email: string | null } | null,
+  lastTouch: string | null, offers: Awaited<ReturnType<typeof offersForListing>>,
+): MatchRow {
+  const said = rule.seen ? shortDate(rule.seen, asOf) : null;
+  const text = (rule.text ?? rule.detail).replace(/^./, (first) => first.toUpperCase());
+  return {
+    key: verdictKey.company(rule.companyId),
+    rank,
+    name: rule.name,
+    detail: lastTouch ? `Last contact ${day(lastTouch)}` : "No contact yet",
+    tags: [],
+    reason: said ? `${text}, said ${said}` : text,
+    checks: [],
+    price: null,
+    offer: offers.find(rule.companyId, contact?.person_id ?? null, rule.name),
+    companyId: rule.companyId,
+    personId: contact?.person_id ?? null,
+    contact: contact?.email ?? null,
+    stockId: null,
+    ruledOut: { text, seen: rule.seen ?? null, source: rule.src ?? null },
   };
 }

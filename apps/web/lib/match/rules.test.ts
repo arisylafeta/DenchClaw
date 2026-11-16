@@ -343,6 +343,14 @@ describe("buyer interest lines as evidence", () => {
       expect(rank(small).ruledOut[0].code).toBe("kwh");
     });
 
+    it("returns a dossier rule-out with its text, date and source", () => {
+      const dossier = { frontmatter: { rules_out: { chemistries: [{ value: "NMC", seen: "2026-05-01", src: "gmail_msg_test" }] } }, body: "" };
+      const [out] = rank(buyer({ id: "d", name: "Dossier", dossier })).ruledOut;
+      expect(out).toMatchObject({ code: "chemistry", kind: "rule", text: "No NMC cells", seen: "2026-05-01", src: "gmail_msg_test" });
+      const plain = { frontmatter: { rules_out: { chemistries: ["NMC"] } }, body: "" };
+      expect(rank(buyer({ id: "e", name: "Plain", dossier: plain })).ruledOut[0].seen).toBeUndefined();
+    });
+
     it("never beats an explicit dossier rules_out", () => {
       const dossier = { frontmatter: { rules_out: { chemistries: [{ value: "NMC", seen: "2026-05-01", src: "gmail_msg_test" }] } }, body: "" };
       const ranked = rank(buyer({ id: "d", name: "Dossier", dossier, lines: [line({ kind: "bought" })] }));

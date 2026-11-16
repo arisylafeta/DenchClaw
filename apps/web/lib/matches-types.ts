@@ -53,6 +53,8 @@ export type MatchRow = {
    * which stays a plain row. `stockId` is then the cheapest unit, and `group.stockIds` every unit, cheapest first.
    */
   group?: MatchGroupView | null;
+  /** Supply rows the dossier rules out: why, and when and where the buyer said it. Never in `rows`. */
+  ruledOut?: { text: string; seen: string | null; source: string | null };
 };
 
 /** One unit (a pack) or lot (cells, modules) in a grouped row's units table. */
@@ -135,6 +137,8 @@ export type MatchesResult = {
   kind: "supply" | "demand";
   lotKey: MatchKeyView;
   rows: MatchRow[];
+  /** Supply tab: buyers a dossier rule excludes, kept visible with the rule. Adding one to offers is an explicit override. */
+  ruledOut?: MatchRow[];
   /** How many candidates were scored, for the quiet line under the header. */
   considered: number;
   blocked: string | null;

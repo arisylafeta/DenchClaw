@@ -42,6 +42,7 @@ type Props = {
 export function MatchesList({ result, loading, error, onRetry, offersEndpoint, onAdded, onNotAFit, onOpenOffers, onOpenDetails }: Props) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [showRuledOut, setShowRuledOut] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
   const [quick, setQuick] = useState<string | null>(null);
@@ -52,6 +53,7 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
   useEffect(() => {
     setOpen(!!result?.lotKey.open);
     setShowAll(false);
+    setShowRuledOut(false);
   }, [result?.id, result?.lotKey?.open]);
 
   if (loading && !result) {
@@ -78,6 +80,7 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
 
   const rows = showAll ? result.rows : result.rows.slice(0, 10);
   const hidden = result.rows.length - rows.length;
+  const ruledOut = result.ruledOut ?? [];
 
   /**
    * Adds one offer. `batch`: a supplier from Group matches, whose offer records every stock line on the buyer's pack
@@ -96,7 +99,7 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
         // A matched row is a CRM company or person, so the server refuses a name-only add from here.
         source: "match",
         data: {
-          match: { reason: row.reason, rank: row.rank, at: new Date().toISOString() },
+          match: { reason: row.reason, rank: row.rank, at: new Date().toISOString(), ...(row.ruledOut ? { ruled_out_override: true } : {}) },
           // A grouped row is still one offer per supplier: the cheapest unit stays the offer's stock line (No stock marks it),
           // and every unit's stock line is kept for the unit picking that comes next (slice 4).
           ...(row.stockId ? { stock_opportunity_id: row.stockId } : {}),
@@ -305,6 +308,53 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
           Show {Math.min(10, hidden)} more of {hidden}
         </LinkButton>
       )}
+
+      {ruledOut.length > 0 && (
+        <div className="border-t pt-2" style={{ borderColor: "var(--color-border)" }}>
+          <button
+            type="button"
+            aria-expanded={showRuledOut}
+            aria-controls="matches-ruled-out"
+            className={`${rowFocus} flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-[13px] font-medium`}
+            style={{ color: "var(--color-text-secondary)" }}
+            onClick={() => setShowRuledOut(!showRuledOut)}
+          >
+            {showRuledOut ? <ChevronDown size={14} className="shrink-0" aria-hidden /> : <ChevronRight size={14} className="shrink-0" aria-hidden />}
+            Ruled out ({ruledOut.length})
+          </button>
+          {showRuledOut && (
+            <ul id="matches-ruled-out" className="flex flex-col">
+              {ruledOut.map((row) => (
+                <li key={row.key} className="flex flex-wrap items-start gap-x-3 gap-y-2 border-t py-3 first:border-t-0" style={{ borderColor: "var(--color-border)" }}>
+                  <div className="min-w-0 flex-1 pl-5">
+                    <span className="truncate text-[14px] font-semibold">{row.name}</span>
+                    <p className="mt-0.5 text-[13px]">{row.reason}</p>
+                    {row.detail && <p className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>{row.detail}</p>}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2 pl-8 sm:pl-0">
+                    {row.offer ? (
+                      <button
+                        type="button"
+                        className={`${rowFocus} inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[12px] font-medium underline-offset-2 hover:underline`}
+                        style={{ color: "var(--color-accent)" }}
+                        onClick={onOpenOffers}
+                        disabled={!onOpenOffers}
+                      >
+                        <StatusDot tone={row.offer.stage === "declined" || row.offer.stage === "lost" ? "red" : "green"} />
+                        In offers · {STAGE_LABEL[row.offer.stage as OfferStage] ?? row.offer.stage} {offerDate(row.offer.date)}
+                      </button>
+                    ) : (
+                      <Button variant="secondary" size="small" disabled={adding === row.key} onClick={() => void add(row)}>
+                        {adding === row.key ? "Adding…" : "Add to offers"}
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -356,6 +406,7 @@ export function MatchesTab({ kind, id, active, onOpenOffers, onOpenDetails }: { 
       onAdded={(row, offer) => setData((current) => current && {
         ...current,
         rows: current.rows.map((item) => (item.key === row.key ? { ...item, offer } : item)),
+        ruledOut: current.ruledOut?.map((item) => (item.key === row.key ? { ...item, offer } : item)),
         suppliers: current.suppliers?.map((s) => (s.rowKeys.includes(row.key) ? { ...s, offer } : s)) ?? current.suppliers,
       })}
       onNotAFit={async (row, reason) => {

@@ -473,7 +473,27 @@ function withinProfileKwh(supply: SupplyFacts, buyer: BuyerFacts, tolerance: num
 }
 
 /** `buyBox` marks the flat legacy buy box lists (chemistries, formats), the only rule-outs a live line can override. */
-export type RuleOut = { code: string; detail: string; buyBox?: boolean; stated?: string };
+export type RuleOut = {
+  code: string; detail: string; buyBox?: boolean; stated?: string;
+  /** Dossier rules_out entries: the rule in the buyer's words, and the dated entry's `seen` and `src`. */
+  text?: string; seen?: string; src?: string;
+};
+
+/** The dated `rules_out` entry behind a match: its text, and the `seen` / `src` when it carries them. */
+function ruleEntry(raw: unknown, matches: (value: string) => boolean): { seen?: string; src?: string } {
+  const items = Array.isArray(raw) ? raw : [raw];
+  for (const item of items) {
+    const value = ruleEntryValue(item);
+    if (value && matches(value) && item && typeof item === "object") {
+      const entry = item as Record<string, unknown>;
+      return {
+        ...(typeof entry.seen === "string" && entry.seen ? { seen: entry.seen } : {}),
+        ...(typeof entry.src === "string" && entry.src ? { src: entry.src } : {}),
+      };
+    }
+  }
+  return {};
+}
 
 /** Why this buyer is ruled out of this lot, or null. Only a conflict both sides state rules anyone out. */
 export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts, ignoreBuyBoxLists = false): RuleOut | null {
@@ -486,11 +506,11 @@ export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts, ignoreBuyBoxList
   if (isDossier) {
     const ruled = ruleValues(rules.chemistries).map((value) => value.toUpperCase());
     if (chem && ruled.includes(chem)) {
-      return { code: "chemistry", detail: `rules_out.chemistries includes ${chem}` };
+      return { code: "chemistry", detail: `rules_out.chemistries includes ${chem}`, text: `No ${chem} cells`, ...ruleEntry(rules.chemistries, (value) => value.toUpperCase() === chem) };
     }
     const ruledFormats = ruleValues(rules.formats).map((value) => value.toLowerCase());
     if (fmt && ruledFormats.includes(fmt)) {
-      return { code: "format", detail: `rules_out.formats includes ${fmt}` };
+      return { code: "format", detail: `rules_out.formats includes ${fmt}`, text: `No ${fmt}`, ...ruleEntry(rules.formats, (value) => value.toLowerCase() === fmt) };
     }
   } else if (!ignoreBuyBoxLists) {
     const stated = list(profile.chemistries).map((value) => value.toUpperCase());
@@ -509,7 +529,7 @@ export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts, ignoreBuyBoxList
       const text = norm(phrase);
       if (platformMatch(supply.platform, phrase) || ` ${text} `.includes(` ${norm(supply.platform)} `)) {
         if (["will not accept", "not interchangeable", "not acceptable", "refuses"].some((word) => text.includes(word))) {
-          return { code: "platform", detail: `rules_out.other: ${phrase}` };
+          return { code: "platform", detail: `rules_out.other: ${phrase}`, text: ruleValues([phrase])[0], ...ruleEntry(rules.other, (value) => value === ruleValues([phrase])[0]) };
         }
       }
     }
@@ -780,7 +800,7 @@ export function ruleOutWithLines(supply: SupplyFacts, buyer: BuyerFacts, asOf: s
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 /** "16 Jun" in the ranking year, "16 Jun 2025" otherwise. */
-function shortDate(value: string, asOf: string): string {
+export function shortDate(value: string, asOf: string): string {
   const text = day10(value);
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
   if (!match) { return text; }
@@ -924,7 +944,11 @@ export type RankedBuyerRow = RankedBuyer & {
   userVerdict: "shortlist" | "not_a_fit" | null;
 };
 
-export type RuledOutRow = { companyId: string; name: string; code: string; detail: string; kind: "rule" | "verdict" };
+export type RuledOutRow = {
+  companyId: string; name: string; code: string; detail: string; kind: "rule" | "verdict";
+  /** The dossier's own words for the rule, and when and where the buyer said it (dated entries only). */
+  text?: string; seen?: string; src?: string;
+};
 
 export type RankBuyersResult = { ranked: RankedBuyerRow[]; ruledOut: RuledOutRow[]; evaluated: number };
 
@@ -1028,7 +1052,10 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
     if (!best) {
       const rule: RuleOut | null = lastRule;
       if (rule) {
-        ruledOut.push({ companyId: buyer.id, name: buyer.name, code: rule.code, detail: rule.detail, kind: "rule" });
+        ruledOut.push({
+          companyId: buyer.id, name: buyer.name, code: rule.code, detail: rule.detail, kind: "rule",
+          ...(rule.text ? { text: rule.text } : {}), ...(rule.seen ? { seen: rule.seen } : {}), ...(rule.src ? { src: rule.src } : {}),
+        });
       }
       continue;
     }
