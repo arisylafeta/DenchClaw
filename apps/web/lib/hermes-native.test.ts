@@ -343,6 +343,43 @@ describe("native Hermes conversations", () => {
     const detail = await readConversation(conversationKey("solo", "history", "alpha"), undefined, undefined, actor);
     expect(detail.messages).toHaveLength(501); expect(detail.messages.at(-1)?.text).toBe("continued");
   });
+  it("tail reads page back from the newest rows, keep tool groups whole and walk the cursor without gaps", async () => {
+    // user, assistant(call), tool, assistant: 4 raw rows and 3 messages per turn.
+    const store = Array.from({ length: 400 }, (_, turn) => [
+      { id: turn * 4, role: "user", content: `q${turn}` },
+      { id: turn * 4 + 1, role: "assistant", content: "", tool_calls: [{ id: `c${turn}`, function: { name: "t", arguments: "{}" } }] },
+      { id: turn * 4 + 2, role: "tool", tool_call_id: `c${turn}`, content: `r${turn}` },
+      { id: turn * 4 + 3, role: "assistant", content: `a${turn}` },
+    ]).flat();
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (!url.pathname.endsWith("/messages")) {return Response.json({ session: { id: "big", title: "Big" } });}
+      calls++;
+      expect(url.searchParams.get("order")).toBe("latest");
+      const limit = Number(url.searchParams.get("limit")), offset = Number(url.searchParams.get("offset"));
+      return Response.json({ data: store.slice(Math.max(0, store.length - offset - limit), store.length - offset) });
+    }));
+    const key = conversationKey("solo", "big", "alpha");
+    const seen: string[] = [];
+    let skip = 0, pages = 0;
+    for (;;) {
+      calls = 0;
+      const page = await readConversation(key, 0, undefined, actor, { skip, limit: 200 }) as { messages: { id: string; role: string; parts: { type: string; result?: unknown }[] }[]; olderCursor?: string };
+      pages++;
+      if (pages === 1) {
+        expect(calls).toBeLessThanOrEqual(3);
+        const call = page.messages.find((m) => m.parts.some((p) => p.type === "tool-invocation"))!;
+        expect(call.parts.find((p) => p.type === "tool-invocation")?.result).toMatch(/^r\d+$/);
+      }
+      seen.unshift(...page.messages.map((m) => m.id));
+      if (!page.olderCursor) {break;}
+      skip = Number(page.olderCursor);
+      expect(store[store.length - skip - 1].role).not.toBe("tool");
+    }
+    expect(seen).toEqual(store.filter((r) => r.role !== "tool").map((r) => String(r.id)));
+    expect(pages).toBeGreaterThan(2);
+  });
   it("reads a compacted session's summarized turns from the display history", async () => {
     // Hermes in-place compaction: active rows are the model's head+tail copies; the summarized
     // middle stays visible only in the display projection.

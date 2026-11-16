@@ -436,18 +436,20 @@ describe("gateway chat service", () => {
     expect(snapshot.seq).toBe(0);
     expect(manager.eventsSince(retained, snapshot.generation, snapshot.seq).events).toMatchObject([{ type: "message.complete", seq: 42 }]);
   });
-  it("pages large history and uses the same context mapping on older pages", async () => {
-    const messages = Array.from({ length: 450 }, (_, id) => ({ id: String(id), role: "user" as const, text: buildAgentMessage({ userText: `row ${id}`, workspaceContext: { filePath: "doc.md" } }) }));
-    vi.mocked(readConversation).mockResolvedValue({ conversation: { access, key, kind: "solo", id: "one", title: "Chat", updatedAt: 0, participants: [], working: false }, messages });
+  it("reads only the newest window and passes the raw-row cursor to older pages, with the same context mapping", async () => {
+    const rows = (n: number) => Array.from({ length: n }, (_, id) => ({ id: String(id), role: "user" as const, text: buildAgentMessage({ userText: `row ${id}`, workspaceContext: { filePath: "doc.md" } }) }));
+    const conversation = { access, key, kind: "solo", id: "one", title: "Chat", updatedAt: 0, participants: [], working: false };
+    vi.mocked(readConversation).mockResolvedValueOnce({ conversation, messages: rows(200), olderCursor: "250" } as never);
     const snapshot = await service.openForView("ari", "one", undefined, actor);
+    expect(vi.mocked(readConversation).mock.calls.at(-1)?.[4]).toEqual({ skip: 0, limit: 200 });
     expect(snapshot.messages).toHaveLength(200);
-    expect(snapshot.messages[0].text).toBe("row 250");
+    expect(snapshot.messages[0].text).toBe("row 0");
     expect(snapshot.olderCursor).toBe("250");
+    vi.mocked(readConversation).mockResolvedValueOnce({ conversation, messages: rows(50) } as never);
     const older = await service.historyPage(key, snapshot.olderCursor!, undefined, actor);
-    expect(older.messages).toHaveLength(200);
-    expect(older.messages[0].text).toBe("row 50");
-    expect(older.olderCursor).toBe("50");
-    expect((await service.historyPage(key, older.olderCursor!, undefined, actor)).messages).toHaveLength(50);
+    expect(vi.mocked(readConversation).mock.calls.at(-1)?.[4]).toEqual({ skip: 250, limit: 200 });
+    expect(older.messages).toHaveLength(50);
+    expect(older.olderCursor).toBeUndefined();
   });
   it("releases unclaimed media on a confirmed cancellation", async () => {
     socket.deferConsumption = true;

@@ -320,9 +320,11 @@ export async function createConversation(profiles: string[], title?: string, act
   const verified = await groupRpc<RoomState>("groups.state", { room_id: id });
   return Object.assign(roomConversation(verified.room, verified.driver_status?.working ?? null),{access});
 }
-export async function readConversation(key: string, sinceSeq = 0, probeCap?: number, actor?: ConversationActor) {
+/** `tail` reads only the newest rows: `skip` raw rows already shown, then about `limit` user/assistant messages. */
+export interface ConversationTail { skip: number; limit: number }
+export async function readConversation(key: string, sinceSeq = 0, probeCap?: number, actor?: ConversationActor, tail?: ConversationTail) {
   const { access } = await authorizeNativeConversation(actor,key);
-  const result = await readAuthorizedConversation(key,sinceSeq,probeCap,access);
+  const result = await readAuthorizedConversation(key,sinceSeq,probeCap,access,tail);
   // A slow upstream read must not release history after the owner makes it private.
   const current = await authorizeNativeConversation(actor,key);
   Object.assign(result.conversation,{ access: current.access });
@@ -343,7 +345,7 @@ export async function readRoomMemberConversation(parentKey: string, profile: str
   Object.assign(result.conversation,{ access: current.access });
   return result;
 }
-async function readAuthorizedConversation(key: string,sinceSeq: number,probeCap: number | undefined,access: ConversationAccess) {
+async function readAuthorizedConversation(key: string,sinceSeq: number,probeCap: number | undefined,access: ConversationAccess,tail?: ConversationTail) {
   const identity = parseConversationKey(key);
   if (identity.kind === "group") {
     const state = await groupRpc<RoomState>("groups.state", { room_id: identity.id });
@@ -376,8 +378,9 @@ async function readAuthorizedConversation(key: string,sinceSeq: number,probeCap:
   const root = `/api/sessions/${encodeURIComponent(identity.id)}`;
   // Display history, not the model's working set: after Hermes compacts in place, only
   // include_compacted returns the summarized turns (and re-ID'd copies once, in display order).
-  const historyPage = (offset: number) => `${root}/messages?order=${probeCap ? 'latest' : 'oldest'}&limit=${probeCap ? probeCap + 1 : 500}&offset=${offset}&include_compacted=true`;
-  const [sessionResponse, messagesResponse] = await Promise.all([nativeFetch(identity.profile, root), nativeFetch(identity.profile, historyPage(0))]);
+  const historyPage = (offset: number, size = 500) => `${root}/messages?order=${probeCap || tail ? 'latest' : 'oldest'}&limit=${probeCap ? probeCap + 1 : size}&offset=${offset}&include_compacted=true`;
+  const TAIL_CHUNK = 300;
+  const [sessionResponse, messagesResponse] = await Promise.all([nativeFetch(identity.profile, root), nativeFetch(identity.profile, historyPage(tail?.skip ?? 0, tail ? TAIL_CHUNK : 500))]);
   const session = await sessionResponse.json();
   const messages: HermesMessage[] = [];
   const tools = new Map<string, Record<string, unknown>>();
@@ -386,9 +389,33 @@ async function readAuthorizedConversation(key: string,sinceSeq: number,probeCap:
     // Hermes order=latest already returns chronological rows.
     if (page.data.length > probeCap) {throw Error('Trace probe cap exceeded');}
   }
-  let offset = 0;
-  for (;;) {
-    for (const m of page.data) {
+  const rawRows: any[] = [];
+  let olderCursor: string | undefined;
+  if (tail) {
+    // Page back from the newest row, so cost follows the window, not the chat length. Never start the
+    // window on a tool row: its call (and the rest of its group) lives in the older rows.
+    const shows = (m: any) => m.display_kind !== "hidden" && (m.role === "user" || m.role === "assistant");
+    let skip = tail.skip, shown = 0, exhausted = false;
+    for (;;) {
+      rawRows.unshift(...page.data);
+      shown += page.data.filter(shows).length;
+      skip += page.data.length;
+      if (page.data.length < TAIL_CHUNK) { exhausted = true; break; }
+      if (shown >= tail.limit && rawRows[0]?.role !== "tool") {break;}
+      page = await (await nativeFetch(identity.profile, historyPage(skip, TAIL_CHUNK))).json();
+    }
+    if (!exhausted) {olderCursor = String(skip);}
+  } else {
+    let offset = 0;
+    for (;;) {
+      rawRows.push(...page.data);
+      if (page.data.length < 500) {break;}
+      offset += 500;
+      page = await (await nativeFetch(identity.profile, historyPage(offset))).json();
+    }
+  }
+  {
+    for (const m of rawRows) {
       if (m.display_kind === "hidden") {continue;}
       if (m.role === "tool") {
         const tool = tools.get(m.tool_call_id);
@@ -408,9 +435,6 @@ async function readAuthorizedConversation(key: string,sinceSeq: number,probeCap:
       }
       messages.push({ id: String(m.id), role: m.role, timestamp: Number(m.timestamp) > 0 ? Math.round(Number(m.timestamp) * 1000) : undefined, displayKind: typeof m.display_kind === "string" ? m.display_kind : undefined, displayMetadata: m.display_metadata, text, content: text, parts, profile: m.role === "assistant" ? identity.profile : undefined });
     }
-    if (page.data.length < 500) {break;}
-    offset += 500;
-    page = await (await nativeFetch(identity.profile, historyPage(offset))).json();
   }
   const conversation = soloConversation(identity.profile, session.session ?? session);
   const projects = await sessionProjectLabels(identity.profile, [identity.id]);
@@ -419,7 +443,7 @@ async function readAuthorizedConversation(key: string,sinceSeq: number,probeCap:
     const names = await sessionDisplayNames(identity.profile, [identity.id]);
     if (Object.hasOwn(names, identity.id)) {conversation.title = names[identity.id];}
   }
-  return { conversation: Object.assign(conversation,{access}), messages };
+  return { conversation: Object.assign(conversation,{access}), messages, ...(olderCursor ? { olderCursor } : {}) };
 }
 
 const HANDOFF_TURN_CHARS = 600;

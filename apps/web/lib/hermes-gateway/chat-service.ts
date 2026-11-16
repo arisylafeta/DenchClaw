@@ -181,7 +181,7 @@ export class HermesChatService {
     const replay = resume?.replayBoundary ?? (() => { const state = this.manager.eventsSince(retained); return { generation: state.generation, seq: state.latestSeq }; })();
     const history = pending && this.newConversations.has(key)
       ? { conversation: pending, messages: [] }
-      : await readConversation(key,0,undefined,actor);
+      : await readConversation(key,0,undefined,actor,{ skip: pageOptions?.before ?? 0, limit: pageOptions?.limit ?? 200 });
     Object.assign(history.conversation,{ access });
     history.conversation.source = source;
     const agentWorkspace = resolveAgentWorkspacePrefix();
@@ -199,8 +199,11 @@ export class HermesChatService {
     }
     const inflightRow = inflight?.user && [...messages].toReversed().find(row => row.role === "user" && !row.pending && row.text === inflight.user);
     if (inflightRow) {inflightRow.pending = "inflight";}
-    const page = this.pageMessages(messages, pageOptions ? Math.min(pageOptions.before, messages.length) : messages.length, pageOptions?.limit);
-    const inflightBeforeWindow = Boolean(inflightRow && page.messages[0] && messages.indexOf(inflightRow) < messages.indexOf(page.messages[0]));
+    // The history read is already the newest window; `olderCursor` is a raw-row offset from the newest row.
+    const olderCursor = (history as { olderCursor?: string }).olderCursor;
+    const page = { messages, ...(olderCursor ? { olderCursor } : {}) };
+    // A live turn whose prompt is not in the newest window started before it.
+    const inflightBeforeWindow = Boolean(inflight?.user && !pageOptions && olderCursor && !inflightRow);
     // Usage is a read of an existing runtime, never a reason to resume an idle chat.
     // Older gateways may not implement it; history must remain available.
     const usage = gateway === "connected" && this.manager.session(retained)?.runtimeId
@@ -218,10 +221,6 @@ export class HermesChatService {
       running: Boolean(resume?.running), inflight, ...(inflightBeforeWindow ? { inflightBeforeWindow } : {}), queued, subagents: resume?.subagents,
       pendingRequests: gateway === "connected" ? this.manager.pendingRequests(retained) : [], todo_state: resume?.todo_state,
       html };
-  }
-  private pageMessages(messages: GatewayChatSnapshot["messages"], before = messages.length, limit = 200) {
-    const start = Math.max(0, before - limit);
-    return { messages: messages.slice(start, before), ...(start ? { olderCursor: String(start) } : {}) };
   }
   async historyPage(key: string, before: string, limit = 200, actor?: ConversationActor) {
     await this.authorize(actor,key);
