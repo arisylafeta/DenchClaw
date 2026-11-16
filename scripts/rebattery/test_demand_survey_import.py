@@ -109,9 +109,11 @@ class FormbricksMapping(unittest.TestCase):
                                       "Sources from: UK, Europe")
         self.assertEqual(row["wants"], "Cells / Modules, LFP / NMC, for energy storage")
 
-    def test_recycling_answers_are_not_demand(self):
-        self.assertIsNone(survey.map_formbricks({"id": "fb7", "finished": True, "data": {
-            "email": "r@recycler.example", "formats": ["Cells"], "use_case": "Recycling"}}))
+    def test_recycling_answers_are_kept(self):
+        row = survey.map_formbricks({"id": "fb7", "finished": True, "data": {
+            "email": "r@recycler.example", "formats": ["Cells"], "use_case": "Recycling"}})
+        self.assertEqual(row["email"], "r@recycler.example")
+        self.assertIn("recycling", row["wants"].lower())
 
     def test_waits_a_day_before_taking_an_unfinished_response(self):
         import datetime as dt
