@@ -59,10 +59,6 @@ export function conversationChannel(row: HermesConversation): { id: string; labe
 export function automation(row: HermesConversation): boolean {
   return row.kind === "solo" && (row.source === "cron" || row.source === "webhook");
 }
-/** Scheduled runs are titled "<job name> · <time>"; the job name groups repeated runs. */
-function scheduledJob(row: HermesConversation) {
-  return row.source === "cron" ? row.title.split(" · ")[0] : conversationChannel(row).label;
-}
 export type GroupBy = "source" | "none" | "channel" | "agent" | "day" | "job";
 export type SortBy = "recent" | "project";
 export type ChatView = { hidden: string[]; groupBy: GroupBy; sortBy?: SortBy; version?: 2; pins?: string[]; collapsed?: string[]; heights?: Record<string, number> };
@@ -94,37 +90,23 @@ function parseHeights(value: unknown): { heights?: Record<string, number> } {
   const heights = Object.fromEntries(Object.entries(value).filter(([key, px]) => key.length <= 200 && typeof px === "number" && Number.isFinite(px) && px >= 0 && px <= 5000).slice(0, 100)) as Record<string, number>;
   return Object.keys(heights).length ? { heights } : {};
 }
-function dayBucket(ms: number, now: Date) {
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  if (ms >= startOfToday) return "Today";
-  const days = Math.ceil((startOfToday - ms) / 86_400_000);
-  return days === 1 ? "Yesterday" : days <= 7 ? "Last 7 days" : days <= 30 ? "Last 30 days" : "Older";
+/** Ordinary and group chats; scheduled runs, messaging channels and other integrations stay out of the sidebar unless searched for. */
+export function sidebarConversation(row: HermesConversation): boolean {
+  const key = sourceSection(row).key;
+  return key === "chats" || key === "group";
 }
-export function applyChatView(rows: HermesConversation[], view: ChatView, query: string, now = new Date(), userId?: string) {
+/** Two sections, by visibility: My chats (private) and Shared (team), plus Pinned. */
+export function applyChatView(rows: HermesConversation[], view: ChatView, query: string, _now = new Date(), userId?: string) {
   const needle = query.trim().toLowerCase();
   const unique = [...new Map(rows.filter((row) => canViewConversation(row, userId)).map((row) => [row.key, row])).values()];
   const searched = needle ? unique.filter((row) => row.title.toLowerCase().includes(needle) || row.participants.some((p) => p.name.toLowerCase().includes(needle))) : unique;
-  const counts: Record<string, { id: string; label: string; count: number }> = Object.create(null);
-  for (const row of searched) { const c = conversationChannel(row); (counts[c.id] ??= { ...c, count: 0 }).count++; }
-  for (const id of view.hidden) counts[id] ??= { id, label: Object.hasOwn(CHANNEL_LABELS, id) ? CHANNEL_LABELS[id] : id, count: 0 };
-  const shown = searched.filter((row) => !view.hidden.includes(conversationChannel(row).id));
-  const keyOf = (row: HermesConversation) => view.groupBy === "channel" ? conversationChannel(row).label
-    : view.groupBy === "agent" ? (row.kind === "group" ? "Groups" : row.profile ?? "Other")
-    : view.groupBy === "day" ? dayBucket(row.updatedAt, now) : scheduledJob(row);
+  const shown = needle ? searched : searched.filter(sidebarConversation);
   const sections = new Map<string, ChatSection>();
   const pins = new Set(view.pins ?? []);
   const recentFirst = (a: HermesConversation, b: HermesConversation) => b.updatedAt - a.updatedAt || a.key.localeCompare(b.key);
-  // Discover sections in recency order regardless of the row sort preference.
-  const sorted = [...shown].sort(recentFirst);
-  for (const row of sorted) {
-    const scope = row.access?.visibility === "team" ? "shared" : "mine";
-    const detail = automation(row) ? sourceSection(row) : view.groupBy === "source" || view.groupBy === "none"
-      ? sourceSection(row) : { key: `view:${keyOf(row)}`, label: keyOf(row) };
-    const base = scope === "mine" ? "My chats" : "Shared";
+  for (const row of [...shown].sort(recentFirst)) {
     const bucket = pins.has(row.key) ? { key: "pinned", label: "Pinned" }
-      : automation(row) ? { key: "automation", label: `${base} · Automation` }
-      : detail.key === "chats" ? { key: scope, label: base }
-      : { key: `${scope}:${detail.key}`, label: `${base} · ${detail.label}` };
+      : row.access?.visibility === "team" ? { key: "shared", label: "Shared" } : { key: "mine", label: "My chats" };
     const section = sections.get(bucket.key) ?? { ...bucket, rows: [] };
     section.rows.push(row); sections.set(bucket.key, section);
   }
@@ -133,6 +115,5 @@ export function applyChatView(rows: HermesConversation[], view: ChatView, query:
       || (a.project ?? "").localeCompare(b.project ?? "", undefined, { sensitivity: "base" }) || recentFirst(a, b));
   }
   const order = ["pinned", "mine", "shared"];
-  const rank = (key: string) => key === "automation" ? 1000 : order.includes(key) ? order.indexOf(key) : key.startsWith("mine:") ? 1.5 : 3;
-  return { sections: [...sections.values()].sort((a, b) => rank(a.key) - rank(b.key)), channels: Object.values(counts).sort((a, b) => b.count - a.count), shown: shown.length, hiddenCount: searched.length - shown.length };
+  return { sections: [...sections.values()].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key)), shown: shown.length };
 }

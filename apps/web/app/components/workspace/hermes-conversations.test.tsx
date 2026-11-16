@@ -148,14 +148,14 @@ describe("Hermes unified chat UI", () => {
     await user.click(screen.getByRole("button", { name: "new group" })); // dialog opens without hiding the list
     expect(within(list).getByText("Alpha solo")).toBeInTheDocument();
   });
-  it("keeps automation collapsed, discoverable and read-only", async () => {
+  it("keeps scheduled runs out of the sidebar but findable and read-only through search", async () => {
     sessions = [solo, { ...solo, key: "cron", title: "Daily digest", source: "cron" }];
     const user = userEvent.setup(); render(<Harness />);
     await screen.findByText("Alpha solo");
-    expect(screen.getByRole("button", { name: "My chats · Automation 1" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("Daily digest")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "My chats · Automation 1" }));
-    expect(screen.getByRole("button", { name: "Open Daily digest" })).toHaveTextContent("read-only");
+    expect(screen.queryByRole("region", { name: /Automation/ })).not.toBeInTheDocument();
+    await user.type(screen.getByRole("searchbox"), "digest");
+    expect(await screen.findByRole("button", { name: "Open Daily digest" })).toHaveTextContent("read-only");
     await user.click(screen.getByRole("button", { name: "Open Daily digest" }));
     expect(fetchMock.mock.calls.every(([url, init]) => !init?.method || url === "/api/hermes/pins")).toBe(true);
   });
@@ -175,22 +175,21 @@ describe("Hermes unified chat UI", () => {
     expect(screen.queryByRole("region", { name: "Pinned" })).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.every(([url, init]) => !init?.method || url === "/api/hermes/pins")).toBe(true);
   });
-  it("persists project sorting without rerouting and keeps hidden sources in the filter without notice copy", async () => {
-    localStorage.setItem("hermes-chats-view:user-a", JSON.stringify({ ...DEFAULT_VIEW, hidden: ["webhook", "cron"] }));
+  it("persists project sorting without rerouting and offers only sorting in the menu", async () => {
     sessions = [{ ...solo, key: "unknown", title: "Recent chat", updatedAt: 900 }, { ...solo, key: "project", title: "Project chat", project: "Beacon" }];
     const user = userEvent.setup(); const first = render(<Harness />);
     await user.click(await screen.findByRole("button", { name: "Open Recent chat" }));
-    expect(screen.queryByText(/Webhook and Scheduled hidden|Scheduled and Webhook hidden/)).not.toBeInTheDocument();
-    screen.getByRole("button", { name: "Filter and group chats" }).focus(); await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitemcheckbox", { name: "Webhook 0" })).toHaveAttribute("aria-checked", "false");
+    screen.getByRole("button", { name: "Sort chats" }).focus(); await user.keyboard("{ArrowDown}");
+    expect(screen.queryByRole("menuitemcheckbox")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual(["Most recent", "Project"]);
     await user.click(screen.getByRole("menuitemradio", { name: /^Project$/ })); await user.keyboard("{Escape}");
     expect(screen.getAllByRole("button", { name: /^Open / }).map((button) => button.getAttribute("aria-label"))).toEqual(["Open Project chat", "Open Recent chat"]);
     expect(screen.getByRole("button", { name: "Open Recent chat" })).toHaveAttribute("aria-current", "true");
     expect(screen.getByRole("button", { name: "Open Recent chat" })).toHaveTextContent("No project");
-    expect(JSON.parse(localStorage.getItem("hermes-chats-view:user-a")!)).toMatchObject({ sortBy: "project", hidden: ["webhook", "cron"] });
+    expect(JSON.parse(localStorage.getItem("hermes-chats-view:user-a")!)).toMatchObject({ sortBy: "project" });
     first.unmount(); render(<Harness />);
     expect(await screen.findByRole("button", { name: "Open Project chat" })).toHaveTextContent("Beacon");
-    screen.getByRole("button", { name: "Filter and group chats" }).focus(); await user.keyboard("{ArrowDown}");
+    screen.getByRole("button", { name: "Sort chats" }).focus(); await user.keyboard("{ArrowDown}");
     await user.click(screen.getByRole("menuitemradio", { name: "Most recent" })); await user.keyboard("{Escape}");
     expect(screen.getAllByRole("button", { name: /^Open / }).map((button) => button.getAttribute("aria-label"))).toEqual(["Open Recent chat", "Open Project chat"]);
   });
@@ -213,26 +212,6 @@ describe("Hermes unified chat UI", () => {
       expect(!!row.querySelector("[data-testid^=avatar-][data-working]")).toBe(status === "running");
     }
   });
-  it("migrates explicit hidden choices and keeps searched zero-count sources toggleable", async () => {
-    localStorage.setItem("hermes-chats-view:user-a", JSON.stringify({ hidden: ["discord", "cron", "webhook"], groupBy: "none" }));
-    sessions = [solo, { ...group, source: "discord", kind: "solo", title: "Hidden channel" }];
-    const user = userEvent.setup(); render(<Harness />);
-    await screen.findByText("Alpha solo");
-    expect(screen.queryByText("Hidden channel")).not.toBeInTheDocument();
-    await user.type(screen.getByRole("searchbox"), "missing");
-    screen.getByRole("button", { name: "Filter and group chats" }).focus(); await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitemcheckbox", { name: "Discord 0" })).toHaveAttribute("aria-checked", "false");
-    await user.click(screen.getByRole("menuitemcheckbox", { name: "Discord 0" }));
-    expect(JSON.parse(localStorage.getItem("hermes-chats-view:user-a")!)).toMatchObject({ version: 2, hidden: ["cron", "webhook"], groupBy: "source" });
-  });
-  it.each(["Channel", "Agent", "Day", "Scheduled job"])("keeps pins unique in secondary %s view", async (label) => {
-    const user = userEvent.setup(); render(<Harness />);
-    await user.click(await screen.findByRole("button", { name: "Pin Alpha solo" }));
-    screen.getByRole("button", { name: "Filter and group chats" }).focus(); await user.keyboard("{ArrowDown}");
-    await user.click(screen.getByRole("menuitemradio", { name: label })); await user.keyboard("{Escape}");
-    expect(within(screen.getByRole("region", { name: "Pinned" })).getByText("Alpha solo")).toBeInTheDocument();
-    expect(screen.getAllByText("Alpha solo")).toHaveLength(1);
-  });
   it("keeps selected composite identity through profile filters and refresh", async () => {
     const { result } = renderHook(() => useHermesConversations());
     await waitFor(() => expect(result.current.ready).toBe(true));
@@ -245,12 +224,15 @@ describe("Hermes unified chat UI", () => {
   it("uses local messaging aliases consistently in search, selection and reload", async () => {
     sessions = [{ ...solo, source: "whatsapp" }];
     const user = userEvent.setup(); const first = render(<Harness />);
+    await screen.findByLabelText("Hermes conversations");
+    await user.type(screen.getByRole("searchbox"), "alpha");
     await user.click(await screen.findByRole("button", { name: "More options for Alpha solo" })); await user.click(await screen.findByRole("menuitem", { name: /^Rename/ }));
     const titleInput = await screen.findByLabelText("Chat title"); await user.clear(titleInput); await user.type(titleInput, "Harbour contact{Enter}");
+    await user.clear(screen.getByRole("searchbox")); await user.type(screen.getByRole("searchbox"), "harbour");
     await user.click(await screen.findByRole("button", { name: "Open Harbour contact" }));
     expect(screen.getByRole("button", { name: "Open Harbour contact" })).toHaveAttribute("aria-current", "true");
-    await user.type(screen.getByRole("searchbox"), "harbour"); expect(screen.getByText("Harbour contact")).toBeInTheDocument();
-    first.unmount(); render(<Harness />); await screen.findByText("Harbour contact");
+    first.unmount(); render(<Harness />);
+    await user.type(await screen.findByRole("searchbox"), "harbour"); await screen.findByText("Harbour contact");
     expect(fetchMock.mock.calls.every(([url, init]) => !init?.method || url === "/api/hermes/pins")).toBe(true);
   });
   it("recovers from initial loading and failure without showing a false empty state", async () => {
@@ -271,29 +253,18 @@ describe("Hermes unified chat UI", () => {
     try {
       await user.click(screen.getByRole("button", { name: "Pin Alpha solo" }));
       await user.type(screen.getByRole("searchbox"), "missing");
-      expect(screen.getByText("No conversations match this view.")).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "Clear search and source filters" })); expect(screen.getByText("Alpha solo")).toBeInTheDocument();
+      expect(screen.getByText("No conversations match this search.")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Clear search" })); expect(screen.getByText("Alpha solo")).toBeInTheDocument();
     } finally { storage.mockRestore(); }
   });
 });
 describe("chat view edge cases", () => {
-  it("uses local midnight boundaries and preserves source labels and automation semantics", () => {
-    const now = new Date(2026, 9, 16, 0, 0, 1);
-    const midnight = new Date(2026, 9, 16).getTime();
-    const rows = [0, -1, -86_400_000, -7 * 86_400_000, -30 * 86_400_000].map((offset, index) => ({ ...solo, key: `${index}`, updatedAt: midnight + offset }));
-    const result = applyChatView(rows, { hidden: [], groupBy: "day" }, "", now);
-    expect(result.sections.map((section) => [section.label, section.rows.map((row) => row.key)])).toEqual([
-      ["My chats · Today", ["0"]], ["My chats · Yesterday", ["1", "2"]], ["My chats · Last 7 days", ["3"]], ["My chats · Last 30 days", ["4"]],
-    ]);
+  it("preserves source labels and automation semantics", () => {
     expect(conversationChannel({ ...solo, source: "crm" })).toEqual({ id: "crm", label: "CRM" });
     expect(automation({ ...solo, source: "cron" })).toBe(true);
     expect(automation({ ...solo, source: "webhook" })).toBe(true);
     expect(automation({ ...group, source: "cron" })).toBe(false);
-  });
-  it("counts matching hidden channels before hiding and retains absent hidden channels", () => {
-    const result = applyChatView([{ ...solo, source: "cron" }, { ...solo, key: "other", source: "discord", title: "Unmatched", participants: [{ profile: "beta", name: "Beta" }] }], { hidden: ["cron", "webhook"], groupBy: "source" }, " alpha ");
-    expect(result).toMatchObject({ sections: [], shown: 0, hiddenCount: 1 });
-    expect(result.channels).toEqual([{ id: "cron", label: "Scheduled", count: 1 }, { id: "webhook", label: "Webhook", count: 0 }]);
+    expect(applyChatView([{ ...solo, source: "cron" }], DEFAULT_VIEW, " alpha ")).toMatchObject({ shown: 1 });
   });
 });
 
@@ -355,7 +326,7 @@ describe("conversation privacy controls", () => {
     sessions = [solo, group, { ...solo, key: "unknown", title: "Unknown access", access: undefined }, { ...solo, key: "foreign", title: "Foreign private", access: { ...access, ownerId: "other" } }];
     const user = userEvent.setup(); render(<Harness2 />);
     expect(within(await screen.findByRole("region", { name: "My chats" })).getByText(solo.title)).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Shared · Groups" })).getByText(group.title)).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Shared" })).getByText(group.title)).toBeInTheDocument();
     expect(screen.queryByText("Unknown access")).not.toBeInTheDocument();
     expect(screen.queryByText("Foreign private")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "More options for Shared room" }));

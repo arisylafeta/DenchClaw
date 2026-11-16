@@ -2,10 +2,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConversationNotifications } from "@/lib/hermes-chat/use-conversation-notifications";
 import { closeHermesEventsClient } from "@/lib/hermes-chat/events-client";
-import { applyChatView, automation, canViewConversation, conversationChannel, DEFAULT_VIEW, filterConversations, messagingConversation, parseChatView, type ChatView, type GroupBy, type HermesConversation } from "@/lib/hermes-conversations";
-import { Bot, ChevronRight, MessageCircle, Users, Pin, PinOff, Clock3, Hash, Pencil, Copy, MoreVertical, Share2 } from "lucide-react";
+import { applyChatView, automation, canViewConversation, conversationChannel, DEFAULT_VIEW, filterConversations, messagingConversation, parseChatView, type ChatView, type HermesConversation } from "@/lib/hermes-conversations";
+import { ArrowDownUp, ChevronRight, MessageCircle, Users, Pin, PinOff, Clock3, Hash, Pencil, Copy, MoreVertical, Share2 } from "lucide-react";
 import { FaDiscord, FaWhatsapp } from "react-icons/fa";
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/app/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/app/components/ui/dropdown-menu";
 import { motion } from "framer-motion";
 import { ProfileAvatar } from "./profile-avatar";
 import { botEntries, botConfig, mainSession, type BotEntry } from "@/lib/hermes-bots";
@@ -25,10 +25,6 @@ const DEFAULT_SECTION_HEIGHT = 4 * ROW;
 // My chats always keeps at least a third of the sidebar on short screens.
 const FLEX_MIN = `max(${SECTION_MIN}px, 35%)`;
 const clampHeight = (px: number) => Math.round(Math.min(2000, Math.max(ROW, px)));
-const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
-  { value: "source", label: "Source sections" }, { value: "channel", label: "Channel" }, { value: "agent", label: "Agent" },
-  { value: "day", label: "Day" }, { value: "job", label: "Scheduled job" },
-];
 function loadView(userId?: string): ChatView {
   try {
     return parseChatView(JSON.parse(localStorage.getItem(`${VIEW_KEY}:${userId}`) || "null"));
@@ -281,8 +277,16 @@ export function ParticipantIcons({ row, working = false }: { row: HermesConversa
     {row.participants.slice(0, 2).map((p, index) => <span key={p.memberId || p.profile} className="inline-flex" style={{ zIndex: row.participants.length - index }} title={p.name}><ProfileAvatar name={p.profile} className={row.participants.length > 1 ? "h-5 w-5" : "h-6 w-6"} working={working} /></span>)}
   </span>;
 }
+/** The Grok bot mark: a round body with two slanted eyes cut out, drawn in the current text colour. */
+function BotMark() {
+  return <svg width={12} height={12} viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
+    <mask id="bot-mark-eyes"><rect width="24" height="24" fill="#fff" /><rect x="13.2" y="6.2" width="2.2" height="5" rx="1.1" transform="rotate(-28 14.3 8.7)" fill="#000" /><rect x="17" y="5.6" width="1.8" height="4.6" rx="0.9" transform="rotate(-28 17.9 7.9)" fill="#000" /></mask>
+    <circle cx="12" cy="12" r="10" fill="currentColor" mask="url(#bot-mark-eyes)" />
+  </svg>;
+}
 function SourceIcon({ source }: { source: string }) {
-  const Icon = source === "discord" ? FaDiscord : source === "whatsapp" ? FaWhatsapp : source === "group" || source === "shared" ? Users : source === "pinned" ? Pin : source === "automation" ? Clock3 : source === "bots" ? Bot : source === "chats" || source === "mine" ? MessageCircle : Hash;
+  if (source === "bots") return <BotMark />;
+  const Icon = source === "discord" ? FaDiscord : source === "whatsapp" ? FaWhatsapp : source === "group" || source === "shared" ? Users : source === "pinned" ? Pin : source === "automation" ? Clock3 : source === "chats" || source === "mine" ? MessageCircle : Hash;
   return <Icon size={12} aria-hidden="true" className="shrink-0" />;
 }
 function RenameInput({ initial, onSubmit, onCancel }: { initial: string; onSubmit: (title: string) => Promise<boolean>; onCancel: () => void }) {
@@ -413,9 +417,8 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
     <div className="flex items-center gap-1 pb-2">
       <input type="search" aria-label="Search chats" placeholder="Search chats" value={query} onChange={(event) => setQuery(event.target.value)} className="h-9 min-w-0 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1" />
       <DropdownMenu>
-        <DropdownMenuTrigger aria-label="Filter and group chats" title="Filter and group" className="relative flex h-11 w-11 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline focus-visible:outline-2">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3Z" /></svg>
-          {view.hidden.length > 0 && <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--color-text)]" />}
+        <DropdownMenuTrigger aria-label="Sort chats" title="Sort chats" className="relative flex h-11 w-11 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline focus-visible:outline-2">
+          <ArrowDownUp size={13} aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className={styles.filterMenu}>
           <DropdownMenuGroup>
@@ -423,20 +426,6 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
             <DropdownMenuRadioGroup value={view.sortBy ?? "recent"} onValueChange={(value) => updateView({ ...view, sortBy: value === "project" ? "project" : "recent" })}>
               <DropdownMenuRadioItem value="recent">Most recent</DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="project">Project</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-[10px]">Channels</DropdownMenuLabel>
-            {result.channels.map((channel) => <DropdownMenuCheckboxItem key={channel.id} className="text-[11px]" checked={!view.hidden.includes(channel.id)} onCheckedChange={(checked) => updateView({ ...view, hidden: checked ? view.hidden.filter((id) => id !== channel.id) : [...view.hidden, channel.id] })}>
-              {channel.label} {channel.count}
-            </DropdownMenuCheckboxItem>)}
-          </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-[10px]">Group by</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={view.groupBy} onValueChange={(value) => updateView({ ...view, groupBy: value as GroupBy })}>
-              {GROUP_OPTIONS.map((option) => <DropdownMenuRadioItem key={option.value} className="text-[11px]" value={option.value}>{option.label}</DropdownMenuRadioItem>)}
             </DropdownMenuRadioGroup>
           </DropdownMenuGroup>
         </DropdownMenuContent>
@@ -466,7 +455,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
             className={`${styles.sectionSeparator} shrink-0 touch-none`} />}
         </Fragment>;
       })}
-      {chats.ready && !chats.error && !result.shown && !bots.length && <div className="p-3 text-xs text-[var(--color-chat-sidebar-muted)]"><p>{rows.length ? "No conversations match this view." : `No conversations${chats.filter ? ` for ${chats.filter}` : ""} yet.`}</p>{(query || view.hidden.length > 0) && <button type="button" className="mt-1 min-h-9 underline focus-visible:outline focus-visible:outline-2" onClick={() => { setQuery(""); updateView({ ...view, hidden: [] }); }}>Clear search and source filters</button>}</div>}
+      {chats.ready && !chats.error && !result.shown && !bots.length && <div className="p-3 text-xs text-[var(--color-chat-sidebar-muted)]"><p>{query ? "No conversations match this search." : `No conversations${chats.filter ? ` for ${chats.filter}` : ""} yet.`}</p>{query && <button type="button" className="mt-1 min-h-9 underline focus-visible:outline focus-visible:outline-2" onClick={() => setQuery("")}>Clear search</button>}</div>}
     </div>
   </div>;
 }
