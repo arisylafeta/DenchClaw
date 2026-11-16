@@ -19,14 +19,19 @@ DISPOSABLE = {"mailinator.com", "guerrillamail.com", "10minutemail.com", "tempma
 NOT_A_PURCHASE = re.compile(
     r"\b(safety data sheet|data ?sheet|msds|sds\b|un ?38\.?3|test summary|certificate of|user manual|wiring diagram|"
     r"repair (my|of)|fix my|refurbish my)", re.I)
-EMAIL = re.compile(r"^[^@\s]+@([a-z0-9-]+\.)+[a-z]{2,}$", re.I)
+EMAIL = re.compile(r"^[^@\s]+@([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$", re.I)
+NUMBER = r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?)"
 ITEMS = re.compile(r"(\d[\d,]*)\s*(?:x\s*)?(packs?|units?|pcs|pieces|modules?|batteries|battery packs)\b", re.I)
-KWH = re.compile(r"(\d+(?:[.,]\d+)?)\s*(k|m)wh\b", re.I)
+KWH = re.compile(NUMBER + r"\s*(k|m)wh\b", re.I)
 
 
 def _num(value):
+    """A number from text: "1,500" and "1,200,000" are thousands, "1,5" is a decimal comma."""
+    text = str(value).strip() if value is not None else ""
+    if re.fullmatch(r"\d{1,3}(,\d{3})+(\.\d+)?", text):
+        text = text.replace(",", "")
     try:
-        return float(str(value).replace(",", "."))
+        return float(text.replace(",", "."))
     except (TypeError, ValueError):
         return None
 
@@ -57,7 +62,9 @@ def kwh_per_unit(request):
     low, high = _num(filters.get("kwh_min")), _num(filters.get("kwh_max"))
     if low and high:
         return round((low + high) / 2, 1)
-    for text in (request.get("capacity_text"), request.get("wants"), request.get("details"), filters.get("q")):
+    if low or high:
+        return low or high  # a one-sided search: "at least 300 kWh" is 300 each
+    for text in (request.get("wants"), request.get("details"), filters.get("q")):
         match = KWH.search(text or "")
         if match and match.group(2).lower() == "k":
             return _num(match.group(1))
@@ -65,8 +72,12 @@ def kwh_per_unit(request):
 
 
 def stated_total_kwh(request):
-    """A total the buyer wrote in MWh ("2 MWh of LFP"), which is not per item."""
-    for text in (request.get("capacity_text"), request.get("wants"), request.get("details")):
+    """A total the buyer wrote: MWh anywhere ("2 MWh of LFP"), or the capacity field in kWh (it asks for the total)."""
+    match = KWH.search(request.get("capacity_text") or "")
+    if match:
+        value = _num(match.group(1))
+        return (value * 1000 if match.group(2).lower() == "m" else value) if value else None
+    for text in (request.get("wants"), request.get("details")):
         match = KWH.search(text or "")
         if match and match.group(2).lower() == "m":
             value = _num(match.group(1))
@@ -83,9 +94,10 @@ def stated_value_eur(request, count):
     unit = (request.get("price_unit") or "").lower()
     if unit == "kwh":
         return None  # needs the kWh: worked out by size()
-    if unit in ("pack", "cell", "module", "unit") and count:
-        return price * count * rate
-    return price * rate
+    if unit in ("total", "lot", "budget"):
+        return price * rate
+    # A per-item price, or a price with no unit: the form asks for a target price per item.
+    return price * (count or 1) * rate
 
 
 def size(request):
@@ -93,11 +105,12 @@ def size(request):
     count = units(request)
     each = kwh_per_unit(request)
     total = stated_total_kwh(request) or (count * each if count and each else None)
+    exact_total = total
     value, basis = stated_value_eur(request, count), "buyer's budget"
     price, rate = _num(request.get("target_price")), TO_EUR.get(request.get("target_currency"))
     if (request.get("price_unit") or "").lower() == "kwh" and price and rate and total:
         value, basis = price * total * rate, "buyer's price per kWh"
-    return {"units": count, "kwh_each": each, "total_kwh": round(total) if total else None,
+    return {"units": count, "kwh_each": each, "total_kwh": round(total) if total else None, "_exact_kwh": exact_total,
             "value_eur": round(value) if value else None, "value_basis": basis if value else None,
             "est_value_eur": round(total * EUR_PER_KWH_ESTIMATE) if total else None}
 
@@ -115,13 +128,14 @@ def domain_has_mx(domain):
 def check(request, has_mx=domain_has_mx):
     """(passes, reasons, size). Reasons say why it passed or every reason it did not."""
     measured = size(request)
+    exact = measured.pop("_exact_kwh", None)
     text = " ".join(str(request.get(k) or "") for k in ("wants", "details"))
     email = (request.get("email") or "").strip().lower()
     fails, passes = [], []
 
     if measured["total_kwh"] is None and measured["value_eur"] is None:
         fails.append("size unknown: no kWh and no budget")
-    elif (measured["total_kwh"] or 0) >= MIN_KWH:
+    elif (exact or 0) >= MIN_KWH:
         passes.append(f"about {measured['total_kwh']:,} kWh (at least {MIN_KWH})")
     elif (measured["value_eur"] or 0) >= MIN_VALUE_EUR:
         passes.append(f"budget about EUR {measured['value_eur']:,} (at least EUR {MIN_VALUE_EUR:,})")
@@ -139,7 +153,7 @@ def check(request, has_mx=domain_has_mx):
         fails.append("email is not a valid address")
     else:
         domain = email.split("@", 1)[1]
-        if domain in DISPOSABLE:
+        if any(domain == d or domain.endswith("." + d) for d in DISPOSABLE):
             fails.append("disposable email address")
         else:
             mx = has_mx(domain)

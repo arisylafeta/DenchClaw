@@ -258,6 +258,13 @@ export function ReviewBar({ listingId, review, onChanged }: { listingId: string;
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const backRef = useRef<HTMLButtonElement>(null);
+  const opened = useRef(false);
+  useEffect(() => {
+    if (confirming) confirmRef.current?.focus(); else if (opened.current) backRef.current?.focus();
+    opened.current = confirming || opened.current;
+  }, [confirming]);
   const value = review && typeof review === "object" ? (review as Review) : null;
   if (value?.state !== "needs_review") return null;
   async function decide(decision: "approve" | "reject") {
@@ -265,7 +272,7 @@ export function ReviewBar({ listingId, review, onChanged }: { listingId: string;
     try {
       await request(`/api/bulk-listings/${encodeURIComponent(listingId)}/review`, { method: "POST", body: JSON.stringify({ decision }) });
       onChanged?.();
-    } catch (err) { setError(message(err)); setBusy(false); }
+    } catch (err) { setError(message(err)); } finally { setBusy(false); }
   }
   const size = value.size ?? {};
   const facts = [size.total_kwh ? `about ${size.total_kwh.toLocaleString("en-GB")} kWh` : null,
@@ -279,11 +286,11 @@ export function ReviewBar({ listingId, review, onChanged }: { listingId: string;
       </div>
       <div className={css.controlsRow}>
         {confirming ? <>
-          <span className="text-[12px]" style={{ color: "var(--bt-text-2)" }}>Close it as not a fit?</span>
+          <span role="status" className="text-[12px]" style={{ color: "var(--bt-text-2)" }}>Close it as not a fit?</span>
           <button type="button" className={css.ghost} disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
-          <button type="button" className={css.ghost} disabled={busy} onClick={() => void decide("reject")}>{busy ? "Closing…" : "Yes, close"}</button>
+          <button ref={confirmRef} type="button" className={css.ghost} disabled={busy} onClick={() => void decide("reject")}>{busy ? "Closing…" : "Yes, close"}</button>
         </> : <>
-          <button type="button" className={css.ghost} disabled={busy} onClick={() => setConfirming(true)}>Not a bulk deal</button>
+          <button ref={backRef} type="button" className={css.ghost} disabled={busy} onClick={() => setConfirming(true)}>Not a bulk deal</button>
           <button type="button" className={css.primary} disabled={busy} onClick={() => void decide("approve")}>{busy ? "Saving…" : "It's a bulk deal"}</button>
         </>}
       </div>

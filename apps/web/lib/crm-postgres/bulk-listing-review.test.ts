@@ -17,7 +17,9 @@ describe.skipIf(!TEST_URL)("reviewListing", () => {
       insert into crm_bulk_listings (id, kind, party, summary, status, spec, context, next_action, next_due) values
         ('rev_a', 'demand', 'Buyer', 'Packs', 'qualifying', '{"intent": "request"}', '{"review": {"state": "needs_review"}}', 'Review: confirm', '2026-11-17'),
         ('rev_b', 'demand', 'Buyer', 'Packs', 'qualifying', '{"intent": "request"}', '{"review": {"state": "needs_review"}}', 'Review: confirm', '2026-11-17'),
-        ('rev_c', 'demand', 'Buyer', 'Packs', 'qualifying', '{"intent": "request"}', '{}', null, null)`);
+        ('rev_c', 'demand', 'Buyer', 'Packs', 'qualifying', '{"intent": "request"}', '{}', null, null);
+      insert into crm_bulk_listings (id, kind, party, summary, status, closed_reason, spec, context) values
+        ('rev_d', 'demand', 'Buyer', 'Packs', 'closed', 'duplicate', '{"intent": "request"}', '{"review": {"state": "needs_review"}}')`);
   });
   afterAll(async () => {
     await pg.queryPg("delete from crm_bulk_listings where id like 'rev_%'");
@@ -26,7 +28,7 @@ describe.skipIf(!TEST_URL)("reviewListing", () => {
 
   it("approve keeps it open and clears the flag; a second decision is refused", async () => {
     expect(await review.reviewListing("rev_a", "approve", null)).toBe("ok");
-    expect(await read("rev_a")).toEqual({ status: "qualifying", closed_reason: null, state: "approved", next_action: "Review: confirm" });
+    expect(await read("rev_a")).toEqual({ status: "qualifying", closed_reason: null, state: "approved", next_action: null });
     expect(await review.reviewListing("rev_a", "reject", null)).toBe("not_pending");
   });
 
@@ -38,5 +40,7 @@ describe.skipIf(!TEST_URL)("reviewListing", () => {
   it("refuses a listing nobody asked to review, and a missing one", async () => {
     expect(await review.reviewListing("rev_c", "approve", null)).toBe("not_pending");
     expect(await review.reviewListing("rev_missing", "approve", null)).toBe("missing");
+    expect(await review.reviewListing("rev_d", "reject", null)).toBe("not_pending");
+    expect((await read("rev_d")).closed_reason).toBe("duplicate");
   });
 });

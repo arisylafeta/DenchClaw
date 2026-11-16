@@ -36,6 +36,8 @@ def test_a_mwh_total_and_an_explicit_quantity_count():
 
 def test_a_stated_budget_of_20k_passes_without_kwh():
     ok, reasons, size = gate.check(req(wants="BMW i3 modules", quantity_value=100, target_price=250, target_currency="GBP", price_unit="pack"), MX)
+    assert gate.size(req(wants="BMW i3 modules", quantity_value=100, target_price=250, target_currency="GBP"))["value_eur"] == 28750  # no unit: per item
+    assert gate.size(req(wants="x", quantity_value=100, target_price=25000, target_currency="EUR", price_unit="total"))["value_eur"] == 25000
     assert ok and size["value_eur"] == 28750 and "budget" in reasons[0]
     assert gate.owner_for(size) == "Sean"
 
@@ -63,3 +65,23 @@ def test_a_count_in_their_words_beats_the_band():
     assert gate.units(req(details="Need 20 packs for a storage project")) == 20
     assert gate.units(req(quantity="few", wants="2 Renault Zoe 52 kWh battery packs")) == 2
     assert gate.units(req(quantity="one", details="looking for 40 packs")) == 1  # the form says one: keep it
+
+
+def test_thousands_separators_and_capacity_totals():
+    assert gate._num("1,500") == 1500 and gate._num("1,5") == 1.5 and gate._num("1,200,000") == 1200000
+    ok, _, size = gate.check(req(capacity_text="1,500 kWh", quantity="many", wants="LFP modules"), MX)
+    assert ok and size["total_kwh"] == 1500
+
+
+def test_a_one_sided_kwh_range_counts():
+    ok, _, size = gate.check(req(quantity="one", wants="BESS container", filters={"kwh_min": 300}), MX)
+    assert ok and size["kwh_each"] == 300
+
+
+def test_the_threshold_uses_the_unrounded_size():
+    assert not gate.check(req(quantity_value=4, wants="packs 74.9 kWh"), MX)[0]  # 299.6 kWh
+
+
+def test_bad_domains_and_disposable_subdomains():
+    assert "email is not a valid address" in gate.check(req(email="a@-fexample.com", wants="2 MWh"), MX)[1]
+    assert "disposable email address" in gate.check(req(email="a@x.mailinator.com", wants="2 MWh"), MX)[1]

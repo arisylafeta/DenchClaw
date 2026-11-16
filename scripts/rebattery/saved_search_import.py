@@ -422,7 +422,9 @@ def flag_for_review(cur, row, request, reasons, measured, today):
                 (row["source_id"],))
     found = cur.fetchone()
     if not found:
-        return None
+        # The gate let it in but no listing exists: fail the whole run (rolled back, retried next run, cron alerts)
+        # rather than leave an unreviewed import that looks like a qualified deal.
+        raise RuntimeError(f"{row['source_id']} passed the bulk gate but no demand listing was found to flag for review")
     listing_id, party = found["id"], found["party"]
     email = row.get("email")
     cur.execute("""select count(*) as n, max(coalesce(sent_at, created_at))::date as last from mail_message
@@ -498,6 +500,15 @@ def main():
     skipped = len(searches) - len(search_rows)
     skipped_requests = len(requests) - len(request_rows)
 
+    # The gate's mail-domain lookups shell out to dig: do them all before any database lock, once per domain.
+    mx_seen = {}
+
+    def has_mx(domain):
+        if domain not in mx_seen:
+            mx_seen[domain] = gate.domain_has_mx(domain)
+        return mx_seen[domain]
+    checks = {source: gate.check(request, has_mx) for source, request in requests_by_source.items()}
+
     conn = psycopg2.connect(args.dsn)
     added = closed = 0
     gated_out = []
@@ -518,7 +529,7 @@ def main():
             reasons = measured = None
             if request is not None:
                 # Only a genuine bulk purchase becomes a Bulk Trades request; the rest stay as interest on the profile.
-                passes, reasons, measured = gate.check(request)
+                passes, reasons, measured = checks[row["source_id"]]
                 cur.execute("select 1 from crm_bulk_listings where source_id = %s", (row["source_id"],))
                 if not passes and not cur.fetchone():
                     gated_out.append(f"{row['email']} | {row['wants'][:50]} | {'; '.join(reasons)}")

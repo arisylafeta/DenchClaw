@@ -113,6 +113,7 @@ describe("ReviewBar", () => {
     render(<ReviewBar listingId="l1" review={review} />);
     await userEvent.click(screen.getByRole("button", { name: "Not a bulk deal" }));
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Yes, close" })).toHaveFocus();
     await userEvent.click(screen.getByRole("button", { name: "Yes, close" }));
     await waitFor(() => expect(body(fetchMock)).toEqual({ decision: "reject" }));
   });
