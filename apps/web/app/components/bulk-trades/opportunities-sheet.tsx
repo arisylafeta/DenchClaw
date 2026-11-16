@@ -9,6 +9,7 @@ import { iconForLabel } from "./story-entry";
 import { NextActionCell } from "./next-action-cell";
 import { ErrorText } from "./trade-ui";
 import { DriverAvatar, Gap } from "./desk-bits";
+import { ReviewChip } from "./next-action";
 
 const TONE: Record<SheetTone, { dot: string; bg: string }> = {
   new: { dot: "var(--bt-muted)", bg: "var(--bt-segment)" },
@@ -128,7 +129,7 @@ function SheetRowItem({ row, today, onOpen, onNext, loading = false, showSide = 
       <span data-chance className={num} title={row.likelihood != null ? "Chance this deal completes" : "Chance not set"}>
         <Sh on={loading} chars={3}>{row.likelihood != null ? `${row.likelihood}%` : <Gap>Set %</Gap>}</Sh></span>
       <span data-owner className="hidden @2xl:block">{loading ? <ShBlock on size={24}><span /></ShBlock> : <DriverAvatar owner={row.owner} />}</span>
-      <span className="flex min-w-0 flex-col items-start gap-1"><Sh on={loading} chars={11} round><ProgressChip row={row} /></Sh>{!loading && <WaitingBadge row={row} />}</span>
+      <span className="flex min-w-0 flex-col items-start gap-1"><Sh on={loading} chars={11} round><ProgressChip row={row} /></Sh>{!loading && row.review && <ReviewChip />}{!loading && <WaitingBadge row={row} />}</span>
       <span className="min-w-0">
         <NextActionCell loading={loading} value={row.next_action} due={row.next_due} today={today} onSave={(text) => onNext(row, text)} />
       </span>

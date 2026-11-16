@@ -63,6 +63,8 @@ export type SheetRow = {
   waiting_on?: WaitingOn | null;
   waiting_since?: string | null;
   owner: string | null;
+  /** Added by an import (a marketplace request) and not yet reviewed by a person. */
+  review?: boolean;
   /** Date used to order the sheet, newest first. */
   touched: string | null;
 };
@@ -159,6 +161,7 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     latest: input.latest_title ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" } : null,
     next_action: text(input.next_action), likelihood: likelihoodOf((input.context as Record<string, unknown> | null)?.likelihood), next_due: input.next_due, owner: dealOwner((input.context as Record<string, unknown> | null)?.owner),
     waiting_on: input.waiting_on === "us" || input.waiting_on === "them" ? input.waiting_on : null, waiting_since: input.waiting_since ?? null,
+    review: ((input.context as Record<string, unknown> | null)?.review as { state?: unknown } | undefined)?.state === "needs_review",
     touched: input.latest_at ?? input.observed_on ?? input.updated_at,
   };
 }

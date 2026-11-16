@@ -76,9 +76,9 @@ export function boardRows(rows: SheetRow[]): SheetRow[] {
   return rows.filter((row) => isBoardStage(row.progress));
 }
 
-export type TodayGroupKey = "overdue" | "today" | "upcoming" | "undated" | "none";
+export type TodayGroupKey = "review" | "overdue" | "today" | "upcoming" | "undated" | "none";
 export type TodayGroup = { key: TodayGroupKey; label: string; rows: SheetRow[] };
-const GROUP_LABEL: Record<TodayGroupKey, string> = { overdue: "Overdue", today: "Today", upcoming: "Upcoming", undated: "No date", none: "Needs a next action" };
+const GROUP_LABEL: Record<TodayGroupKey, string> = { review: "To review", overdue: "Overdue", today: "Today", upcoming: "Upcoming", undated: "No date", none: "Needs a next action" };
 
 /**
  * Next actions by when they are due: Overdue, Today, Upcoming, No date, then the open listings with no next action.
@@ -87,8 +87,10 @@ const GROUP_LABEL: Record<TodayGroupKey, string> = { overdue: "Overdue", today: 
 export function todayGroups(rows: SheetRow[], today: string): TodayGroup[] {
   const byScore = (a: SheetRow, b: SheetRow) => (b.score ?? -1) - (a.score ?? -1) || a.title.localeCompare(b.title);
   const byDue = (a: SheetRow, b: SheetRow) => (a.next_due ?? "").localeCompare(b.next_due ?? "") || byScore(a, b);
-  const groups: Record<TodayGroupKey, SheetRow[]> = { overdue: [], today: [], upcoming: [], undated: [], none: [] };
+  const groups: Record<TodayGroupKey, SheetRow[]> = { review: [], overdue: [], today: [], upcoming: [], undated: [], none: [] };
   for (const row of rows) {
+    // An imported request waits for a person to say it is a real bulk deal before it joins the day's work.
+    if (row.review) { groups.review.push(row); continue; }
     if (!row.next_action) { if (row.progress !== "Delivered") groups.none.push(row); continue; }
     const due = row.next_due?.slice(0, 10) ?? null;
     groups[!due ? "undated" : due < today ? "overdue" : due === today ? "today" : "upcoming"].push(row);

@@ -65,8 +65,17 @@ describe("Today groups", () => {
     ];
     const groups = todayGroups(rows, today);
     expect(groups.map((g) => [g.label, g.rows.map((r) => r.id)])).toEqual([
-      ["Overdue", ["late1", "late2"]], ["Today", ["now"]], ["Upcoming", ["soon"]],
+      ["To review", []], ["Overdue", ["late1", "late2"]], ["Today", ["now"]], ["Upcoming", ["soon"]],
       ["No date", ["someday-high", "someday-low", "done-but-busy"]], ["Needs a next action", ["idle", "idle-unscored"]],
     ]);
+  });
+});
+
+describe("todayGroups review", () => {
+  it("puts imported requests waiting for review first, whatever their date", () => {
+    const groups = todayGroups([row("imp", { review: true, next_action: "Review: confirm", next_due: "2026-01-01" }), row("late", { next_action: "Chase", next_due: "2026-01-01" })], "2026-11-16");
+    expect(groups[0]).toMatchObject({ key: "review", label: "To review" });
+    expect(groups[0].rows.map((r) => r.id)).toEqual(["imp"]);
+    expect(groups.find((g) => g.key === "overdue")!.rows.map((r) => r.id)).toEqual(["late"]);
   });
 });

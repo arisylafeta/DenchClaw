@@ -67,7 +67,7 @@ export function QuarterTarget({ rows, owner, loading, onOpenBoard }: { rows: She
   );
 }
 
-const GROUP_TONE: Partial<Record<TodayGroupKey, string>> = { overdue: "var(--bt-red)", today: "var(--bt-blue)", none: "var(--bt-amber)" };
+const GROUP_TONE: Partial<Record<TodayGroupKey, string>> = { overdue: "var(--bt-red)", today: "var(--bt-blue)", none: "var(--bt-amber)", review: "var(--bt-amber)" };
 
 /** What the row is: a request, a supply lot, or a deal once it is offered. */
 const kindLabel = (row: SheetRow) => (isBoardStage(row.progress) ? "Deal" : row.kind === "demand" ? "Request" : "Supply");

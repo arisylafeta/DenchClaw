@@ -2,7 +2,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NextActionPanel } from "./next-action";
+import { NextActionPanel, ReviewBar } from "./next-action";
 
 const TODAY = "2026-11-15";
 const ok = () => vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({})));
@@ -90,5 +90,35 @@ describe("NextActionPanel", () => {
     await userEvent.type(screen.getByLabelText("What's next?"), "Send terms{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("Listing not found");
     expect(screen.getByLabelText("What's next?")).toHaveValue("Send terms");
+  });
+});
+
+describe("ReviewBar", () => {
+  const review = { state: "needs_review", added_by: "marketplace import", reasons: ["about 704 kWh (at least 300)", "asks to buy"], size: { total_kwh: 704, est_value_eur: 17600 } };
+
+  it("shows why an import was let in, and approves it", async () => {
+    const fetchMock = ok(); vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn();
+    render(<ReviewBar listingId="l1" review={review} onChanged={onChanged} />);
+    expect(screen.getByText(/To review: added from marketplace import, about 704 kWh/)).toBeInTheDocument();
+    expect(screen.getByText("about 704 kWh (at least 300). asks to buy.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "It's a bulk deal" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/bulk-listings/l1/review");
+    expect(body(fetchMock)).toEqual({ decision: "approve" });
+  });
+
+  it("asks before closing it as not a bulk deal", async () => {
+    const fetchMock = ok(); vi.stubGlobal("fetch", fetchMock);
+    render(<ReviewBar listingId="l1" review={review} />);
+    await userEvent.click(screen.getByRole("button", { name: "Not a bulk deal" }));
+    expect(fetchMock).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Yes, close" }));
+    await waitFor(() => expect(body(fetchMock)).toEqual({ decision: "reject" }));
+  });
+
+  it("shows nothing once reviewed", () => {
+    const { container } = render(<ReviewBar listingId="l1" review={{ ...review, state: "approved" }} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

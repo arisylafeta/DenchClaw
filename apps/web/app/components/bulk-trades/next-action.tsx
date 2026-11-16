@@ -250,3 +250,48 @@ export function TodayTask({ id, value, kind, where, today, onOpen, onUpdate }: {
     </li>
   );
 }
+
+type Review = { state?: string; reasons?: string[]; added_by?: string; size?: { total_kwh?: number | null; value_eur?: number | null; est_value_eur?: number | null } };
+
+/** The review an import asked for: why it was let in, and the two answers. Shown only while it waits for review. */
+export function ReviewBar({ listingId, review, onChanged }: { listingId: string; review: unknown; onChanged?: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const value = review && typeof review === "object" ? (review as Review) : null;
+  if (value?.state !== "needs_review") return null;
+  async function decide(decision: "approve" | "reject") {
+    setBusy(true); setError(null);
+    try {
+      await request(`/api/bulk-listings/${encodeURIComponent(listingId)}/review`, { method: "POST", body: JSON.stringify({ decision }) });
+      onChanged?.();
+    } catch (err) { setError(message(err)); setBusy(false); }
+  }
+  const size = value.size ?? {};
+  const facts = [size.total_kwh ? `about ${size.total_kwh.toLocaleString("en-GB")} kWh` : null,
+    size.value_eur ? `budget about €${size.value_eur.toLocaleString("en-GB")}` : size.est_value_eur ? `≈ €${size.est_value_eur.toLocaleString("en-GB")} at €25/kWh` : null].filter(Boolean);
+  return (
+    <section aria-label="Needs review" className={`${css.root} ${css.review}`} data-review>
+      <div className="min-w-0 flex-1">
+        <p className={css.reviewTitle}><span className={css.dot} />To review: added from {value.added_by ?? "an import"}{facts.length ? `, ${facts.join(", ")}` : ""}</p>
+        {!!value.reasons?.length && <p className={css.reviewWhy}>{value.reasons.join(". ")}.</p>}
+        {error && <p role="alert" className={css.error}>{error}</p>}
+      </div>
+      <div className={css.controlsRow}>
+        {confirming ? <>
+          <span className="text-[12px]" style={{ color: "var(--bt-text-2)" }}>Close it as not a fit?</span>
+          <button type="button" className={css.ghost} disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
+          <button type="button" className={css.ghost} disabled={busy} onClick={() => void decide("reject")}>{busy ? "Closing…" : "Yes, close"}</button>
+        </> : <>
+          <button type="button" className={css.ghost} disabled={busy} onClick={() => setConfirming(true)}>Not a bulk deal</button>
+          <button type="button" className={css.primary} disabled={busy} onClick={() => void decide("approve")}>{busy ? "Saving…" : "It's a bulk deal"}</button>
+        </>}
+      </div>
+    </section>
+  );
+}
+
+/** "To review" on a list row. */
+export function ReviewChip() {
+  return <span className={css.reviewChip} data-review-chip>To review</span>;
+}

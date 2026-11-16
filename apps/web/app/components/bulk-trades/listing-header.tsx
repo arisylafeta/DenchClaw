@@ -12,7 +12,7 @@ import { valueAndFee } from "@/lib/bulk-sheet";
 import { CopyIdButton } from "./copy-id-button";
 import { WaitingBadge } from "./opportunities-sheet";
 import css from "./demand-header.module.css";
-import { NextActionPanel } from "./next-action";
+import { NextActionPanel, ReviewBar } from "./next-action";
 import { dealOwner } from "@/lib/bulk-owner";
 
 export function ListingHeader({ listing, today, onBack, onChanged }: { listing: BulkListingView; today: string; onBack: () => void; onChanged?: () => void }) {
@@ -46,6 +46,7 @@ export function ListingHeader({ listing, today, onBack, onChanged }: { listing: 
         </div>}
       </div>}
     </div>
+    {listing.status !== "closed" && <ReviewBar listingId={listing.id} review={listing.context.review} onChanged={onChanged} />}
     {listing.status !== "closed" && <NextActionPanel listingId={listing.id} today={today} onChanged={onChanged}
       value={{ next_action: listing.next_action, next_due: listing.next_due?.slice(0, 10) ?? null, owner: dealOwner(listing.context.owner) }} />}
     <div className={css.controls} data-deal-controls>{listing.waiting_on && <WaitingBadge row={listing} />}<OwnerPicker key={String(listing.context.owner ?? "")} listingId={listing.id} owner={listing.context.owner} onChanged={onChanged} /><FeeInput listingId={listing.id} fee={listing.context.fee_eur} defaultFee={valueAndFee(listing.kind, listing.spec).fee_eur} onChanged={onChanged} /><LikelihoodPicker listingId={listing.id} likelihood={listing.context.likelihood} onChanged={onChanged} /></div>
