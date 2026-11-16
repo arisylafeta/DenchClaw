@@ -269,6 +269,16 @@ def model_interest_facts(spec, model):
             'kwh_min': spec.get('kwh_min') or spec.get('kwhMin'), 'kwh_max': spec.get('kwh_max') or spec.get('kwhMax')}
 
 
+def sql_fact_sets(cur, spec):
+    """(fact dicts, stated total) from buyer_interest_fact_sets() of migration 115, the one builder the triggers use:
+    products stay paired (R1), no vehicle make on a system (R5), nothing repeated (R4), stated detail kept (R6)."""
+    cur.execute("select fs.facts as fact_sets, fs.stated_total as stated from buyer_interest_fact_sets(%s::jsonb, '{}'::jsonb, '{}'::jsonb, %s) fs",
+                (json.dumps(spec or {}), INTEREST_FACT_COMBINATIONS))
+    row = cur.fetchone()
+    row = row if isinstance(row, dict) else {'fact_sets': row[0], 'stated': row[1]}
+    return list(row['fact_sets'] or []), int(row['stated'] or 0)
+
+
 def interest_fact_total(spec):
     """How many combinations the spec states before the cap, for the truncation note."""
     spec = spec or {}
@@ -305,18 +315,24 @@ def upsert_interest(cur, *, company_id, kind, facts, first_seen, last_seen, pers
     # A line that cannot be written must never abort its importer's transaction.
     cur.execute("savepoint buyer_interest_line")
     try:
-        cur.execute("""with facts as (select buyer_interest_facts(%s::jsonb) as facts),
-                            keyed as (select facts, buyer_interest_product_key(facts) as key from facts)
+        # R5: a vehicle make is never paired with a battery system; R6: what the source states rides on the line.
+        cur.execute("""with raw as (select %s::jsonb as f),
+                            facts as (select buyer_interest_facts(case when buyer_interest_format(f->>'format') = 'system'
+                                and buyer_interest_is_vehicle_make(f->>'make')
+                                and coalesce(f->>'model', '') !~* '\\y(megapack|powerwall|powerpack|bess|container|cabinet|rack|ess)\\y'
+                              then f - 'make' - 'makes' else f end) as facts, f->'stated' as stated from raw),
+                            keyed as (select facts, stated, buyer_interest_product_key(facts) as key from facts)
                        select key, buyer_interest_key_level(key) as level, facts->>'make' as make, facts->>'model' as model,
                          buyer_interest_format(facts->>'format') as format, buyer_interest_chemistry(facts->>'chemistry') as chemistry,
-                         buyer_interest_number(facts->'kwh_min') as kwh_min, buyer_interest_number(facts->'kwh_max') as kwh_max
+                         buyer_interest_number(facts->'kwh_min') as kwh_min, buyer_interest_number(facts->'kwh_max') as kwh_max,
+                         stated
                        from keyed where key <> 'broad:any-batteries'""", (json.dumps(facts or {}),))
         keyed = cur.fetchone()
         if not keyed:
             cur.execute("release savepoint buyer_interest_line")
             return None  # nothing stated that names a product: do not invent a broad bucket
         values = keyed if isinstance(keyed, dict) else dict(zip(
-            ('key', 'level', 'make', 'model', 'format', 'chemistry', 'kwh_min', 'kwh_max'), keyed))
+            ('key', 'level', 'make', 'model', 'format', 'chemistry', 'kwh_min', 'kwh_max', 'stated'), keyed))
         mastered = kind in INTEREST_KINDS
         conflict = ("on conflict (company_id, product_key, kind) where ownership = 'mastered'"
                     if mastered else "on conflict (kind, saved_search_id, product_key) where saved_search_id is not null")
@@ -328,10 +344,11 @@ def upsert_interest(cur, *, company_id, kind, facts, first_seen, last_seen, pers
         cur.execute(f"""insert into buyer_interest (id, company_id, person_id, kind, ownership, product_key, product_key_level,
                          make, model, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit,
                          quantity_basis, price, price_currency, price_unit, price_basis, source_refs, expires_on,
-                         saved_search_id, decline_reason)
+                         saved_search_id, decline_reason, stated)
                        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s::date, %s, %s, %s, %s, %s, %s, %s,
-                         %s::text[], %s::date, %s, %s)
+                         %s::text[], %s::date, %s, %s, %s::jsonb)
                        {conflict} do update set {refresh}
+                         stated = coalesce(excluded.stated, buyer_interest.stated),
                          source_refs = coalesce((select array_agg(distinct ref order by ref)
                            from unnest(buyer_interest.source_refs || excluded.source_refs) ref), '{{}}'),
                          updated_at = now()
@@ -340,7 +357,8 @@ def upsert_interest(cur, *, company_id, kind, facts, first_seen, last_seen, pers
                      values['key'], values['level'], values['make'], values['model'], values['format'], values['chemistry'],
                      values['kwh_min'], values['kwh_max'], first_seen, last_seen, quantity, quantity_unit,
                      quantity_basis or ('not_stated' if quantity is None else 'stated'), price, price_currency, price_unit,
-                     price_basis, list(source_refs or []), expires_on, saved_search_id, decline_reason))
+                     price_basis, list(source_refs or []), expires_on, saved_search_id, decline_reason,
+                     json.dumps(values['stated']) if values['stated'] else None))
         row = cur.fetchone()
         cur.execute("release savepoint buyer_interest_line")
         return row['id'] if isinstance(row, dict) else (row[0] if row else None)
@@ -362,6 +380,7 @@ def upsert_profile_interest(cur, row, basis='stated'):
     spec = row.get('spec') or {}
     quantity = row.get('volume') if row.get('volume') is not None else spec.get('volume')
     price = row.get('max_price') if row.get('max_price') is not None else spec.get('max_price')
+    fact_list, stated_total = sql_fact_sets(cur, spec)
     lines = [upsert_interest(
         cur, company_id=row['company_id'], kind=kind, facts=facts,
         person_id=row.get('person_id'), first_seen=str(observed)[:10], last_seen=str(observed)[:10],
@@ -371,8 +390,8 @@ def upsert_profile_interest(cur, row, basis='stated'):
         price=price, price_currency=(row.get('price_currency') or spec.get('price_currency')) if price is not None else None,
         price_unit=(row.get('price_unit') or spec.get('price_unit')) if price is not None else None,
         price_basis='target' if price is not None else None)
-        for facts in interest_facts(spec)]
-    _record_truncation(cur, row.get('source_id'), interest_fact_total(spec))
+        for facts in fact_list]
+    _record_truncation(cur, row.get('source_id'), stated_total)
     return next((line for line in lines if line), None)
 
 
@@ -386,7 +405,7 @@ def upsert_saved_search_interest(cur, row, unsubscribed=False, today=None):
     spec = row.get('spec') or {}
     named = row.get('interest_model')
     # A search for a known model is that model's line, not every pack of its maker's group.
-    fact_list = [model_interest_facts(spec, named)] if named else interest_facts(spec)
+    fact_list, stated_total = ([model_interest_facts(spec, named)], 0) if named else sql_fact_sets(cur, spec)
     lines = [upsert_interest(cur, company_id=row.get('company_id'), kind='saved_search', facts=facts,
                              person_id=row.get('person_id'), first_seen=confirmed, last_seen=last_seen,
                              expires_on=last_seen if unsubscribed else None, saved_search_id=search_id,
@@ -398,7 +417,7 @@ def upsert_saved_search_interest(cur, row, unsubscribed=False, today=None):
         cur.execute("delete from buyer_interest where kind = 'saved_search' and saved_search_id = %s and company_id = %s "
                     "and id <> all(%s::text[])", (search_id, row['company_id'], written))
     if not named:
-        _record_truncation(cur, row.get('source_id'), interest_fact_total(spec))
+        _record_truncation(cur, row.get('source_id'), stated_total)
     return written[0] if written else None
 
 

@@ -519,6 +519,15 @@ def _fact_sets(cur, facts):
     return list(row["fact_sets"] or []), int(row["stated"] or 0)
 
 
+def _drop_redundant(cur, fact_sets):
+    """The fact sets with every one that a more specific set of the same source already says removed (R4), in SQL."""
+    if len(fact_sets) < 2:
+        return list(fact_sets)
+    cur.execute("select buyer_interest_drop_redundant(array(select jsonb_array_elements(%s::jsonb))) as sets",
+                (json.dumps(fact_sets),))
+    return list(cur.fetchone()["sets"] or [])
+
+
 def _keyed(cur, facts):
     """The product key and its facts, from the same SQL builder the triggers use."""
     payload = json.dumps(facts or {})
@@ -526,7 +535,7 @@ def _keyed(cur, facts):
                         keyed as (select facts, buyer_interest_product_key(facts) as key from facts)
                    select key, buyer_interest_key_level(key) as level, buyer_interest_states_product(facts) as stated,
                           buyer_interest_raw_product(facts) as raw_product,
-                          facts->>'make' as make, facts->>'model' as model,
+                          facts->>'make' as make, facts->>'model' as model, facts->'stated' as stated_facts,
                           buyer_interest_format(facts->>'format') as format,
                           buyer_interest_chemistry(facts->>'chemistry') as chemistry,
                           buyer_interest_number(facts->'kwh_min') as kwh_min,
@@ -550,43 +559,46 @@ def _already_says(cur, company_id, key, kind):
 
 def _write_line(cur, company_id, kind, ownership, keyed, seen, refs, reason=None):
     """One mastered line per product and make; a synced line per purchase or decline, keyed by its source."""
+    stated_json = json.dumps(keyed["stated_facts"]) if keyed.get("stated_facts") else None  # R6
     if ownership == "mastered":
         cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key,
                          product_key_level, make, model, raw_product, format, chemistry, kwh_min, kwh_max,
-                         first_seen, last_seen, quantity_basis, source_refs, expires_on)
+                         first_seen, last_seen, quantity_basis, source_refs, expires_on, stated)
                        values (%s, %s, %s, 'mastered', %s, %s, %s, %s, %s, %s, %s, %s, %s,
                          coalesce(%s::date, current_date), coalesce(%s::date, current_date), 'not_stated',
                          %s::text[], coalesce(%s::date, current_date) + case when %s = 'standing'
-                           then 90 else 180 end)
+                           then 90 else 180 end, %s::jsonb)
                        on conflict (company_id, product_key, kind) where ownership = 'mastered'
                        do update set first_seen = least(buyer_interest.first_seen, excluded.first_seen),
                          last_seen = greatest(buyer_interest.last_seen, excluded.last_seen),
                          expires_on = greatest(buyer_interest.expires_on, excluded.expires_on),
                          model = coalesce(buyer_interest.model, excluded.model),
                          raw_product = coalesce(buyer_interest.raw_product, excluded.raw_product),
+                         stated = coalesce(excluded.stated, buyer_interest.stated),
                          source_refs = (select array_agg(distinct ref order by ref)
                            from unnest(buyer_interest.source_refs || excluded.source_refs) ref),
                          updated_at = now()""",
                     (_dossier_line_id(company_id, kind, keyed["key"]), company_id, kind,
                      keyed["key"], keyed["level"], keyed["make"], keyed["model"], keyed["raw_product"],
                      keyed["format"], keyed["chemistry"], keyed["kwh_min"], keyed["kwh_max"], seen, seen, refs,
-                     seen, kind))
+                     seen, kind, stated_json))
     else:
         cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key,
                          product_key_level, make, model, raw_product, format, chemistry, kwh_min, kwh_max,
-                         first_seen, last_seen, quantity_basis, source_refs, decline_reason)
+                         first_seen, last_seen, quantity_basis, source_refs, decline_reason, stated)
                        values (%s, %s, %s, 'synced', %s, %s, %s, %s, %s, %s, %s, %s, %s,
                          coalesce(%s::date, current_date), coalesce(%s::date, current_date), 'not_stated',
-                         %s::text[], %s)
+                         %s::text[], %s, %s::jsonb)
                        on conflict (id) do update set last_seen = greatest(buyer_interest.last_seen,
                          excluded.last_seen), decline_reason = excluded.decline_reason,
+                         stated = coalesce(excluded.stated, buyer_interest.stated),
                          source_refs = (select array_agg(distinct ref order by ref)
                            from unnest(buyer_interest.source_refs || excluded.source_refs) ref),
                          updated_at = now()""",
                     (_dossier_line_id(company_id, kind, keyed["key"]), company_id, kind,
                      keyed["key"], keyed["level"], keyed["make"], keyed["model"], keyed["raw_product"],
                      keyed["format"], keyed["chemistry"], keyed["kwh_min"], keyed["kwh_max"], seen, seen, refs,
-                     reason))
+                     reason, stated_json))
 
 
 ARCHIVE_TABLE = "buyer_interest_removed_20261115"
@@ -628,16 +640,22 @@ def sync_dossier_rows(cur, companies):
                 _clear_notes(cur, f"{company['id']}:{index}")
                 # One line per stated combination, exactly as a demand row fans out: "BMW, Volvo" is two makes.
                 keyed_lines, stated = [], 0
+                raw_models = {}
+                all_sets = []
                 for variant in product_facts(product):
                     raw_model = variant.pop("raw_model", None)
                     fact_sets, count = _fact_sets(cur, variant)
                     stated += max(count - len(fact_sets), 0)
                     for fact in fact_sets:
-                        keyed = _keyed(cur, fact)
-                        if keyed and keyed["stated"]:
-                            # The original wording stays on the line when cleaning changed the model.
-                            keyed["raw_product"] = raw_model or keyed["raw_product"]
-                            keyed_lines.append(keyed)
+                        raw_models[json.dumps(fact, sort_keys=True)] = raw_model
+                        all_sets.append(fact)
+                # R4: a product's variants never leave a less specific line next to a more specific one.
+                for fact in _drop_redundant(cur, all_sets):
+                    keyed = _keyed(cur, fact)
+                    if keyed and keyed["stated"]:
+                        # The original wording stays on the line when cleaning changed the model.
+                        keyed["raw_product"] = raw_models.get(json.dumps(fact, sort_keys=True)) or keyed["raw_product"]
+                        keyed_lines.append(keyed)
                 keyed_lines = list({keyed["key"]: keyed for keyed in keyed_lines}.values())
                 stated += len(keyed_lines)
                 keyed_lines = keyed_lines[:FAN_OUT_CAP]

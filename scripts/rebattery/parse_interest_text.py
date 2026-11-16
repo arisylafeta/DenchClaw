@@ -933,12 +933,37 @@ def pick_key(keys, fact):
                 keys[-1])
 
 
+STATIONARY_MODEL = re.compile(r"\b(megapack|powerwall|powerpack|bess|container|cabinet|rack|ess)\b", re.I)
+
+
+def drop_system_make(cur, fact):
+    """R5: a vehicle make is never paired with a battery system (unless the model is itself stationary)."""
+    sql = fact["sql"]
+    if sql.get("format") != "system" or not sql.get("make") or STATIONARY_MODEL.search(sql.get("model") or ""):
+        return fact
+    cur.execute("select buyer_interest_is_vehicle_make(%s) as vehicle", (sql["make"],))
+    if not cur.fetchone()["vehicle"]:
+        return fact
+    return {**fact, "sql": {k: v for k, v in sql.items() if k not in ("make", "cell_maker")},
+            "ts": {k: v for k, v in fact["ts"].items() if k not in ("make", "cellMaker")}}
+
+
+def stated_detail(product, sql):
+    """R6: part number, cell maker and cell format the text states, kept on the line whatever level the key falls to."""
+    stated = {"part_numbers": [product["part_number"]] if product["part_number"] else None,
+              "cell_makers": [sql["cell_maker"]] if sql.get("cell_maker") else None,
+              "cell_formats": [product["cell_format"]] if product.get("cell_format") else None}
+    return {k: v for k, v in stated.items() if v} or None
+
+
 def key_lines(cur, product, builder="sql", ts_table=None):
     """The lines one accepted product becomes: [{key, level, make, model, format, chemistry, kwh_min, kwh_max, raw_product}]."""
     lines = []
     sets = fact_sets(product)
     ts_first = [pick_key((ts_table or {})[json.dumps(f["ts"], sort_keys=True)], f) if builder == "ts" else None for f in sets]
     for fact, ts in zip(sets, ts_first):
+        stated = stated_detail(product, fact["sql"])
+        fact = drop_system_make(cur, fact)
         keyed = sql_keyed(cur, fact["sql"])
         if not keyed or not keyed["stated"]:
             continue
@@ -950,8 +975,24 @@ def key_lines(cur, product, builder="sql", ts_table=None):
             continue  # a bare model no maker owns (\"Bolt\"): not a product, and never an any-pack line
         raw = keyed["raw_product"] or (f"platform {fact['platform_unused']}" if fact["platform_unused"] else None)
         lines.append({"key": key, "level": level, "make": keyed["make"], "model": keyed["model"], "format": keyed["format"],
-                      "chemistry": keyed["chemistry"], "kwh_min": keyed["kwh_min"], "kwh_max": keyed["kwh_max"], "raw_product": raw})
+                      "chemistry": keyed["chemistry"], "kwh_min": keyed["kwh_min"], "kwh_max": keyed["kwh_max"], "raw_product": raw,
+                      "stated": stated, "fact": fact["sql"]})
     return lines
+
+
+def one_per_key(cur, pairs):
+    """R4 within one source: one line per key, and none a more specific line of the same source already says.
+    `pairs` is [(product, line)]; the survivors keep their order."""
+    seen, unique = set(), []
+    for product, line in pairs:
+        if line["key"] not in seen:
+            seen.add(line["key"])
+            unique.append((product, line))
+    if len(unique) < 2:
+        return unique
+    from backfill_buyer_interest import _drop_redundant
+    keep = {json.dumps(f, sort_keys=True) for f in _drop_redundant(cur, [line["fact"] for _p, line in unique])}
+    return [(p, line) for p, line in unique if json.dumps(line["fact"], sort_keys=True) in keep]
 
 
 # ---------------------------------------------------------------------------
@@ -998,16 +1039,17 @@ def write_line(cur, source, kind, line, product, run_id):
     if existing is None:
         cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key, product_key_level, make, model,
                          raw_product, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit,
-                         quantity_basis, price, price_currency, price_unit, price_basis, price_max, source_refs, expires_on)
+                         quantity_basis, price, price_currency, price_unit, price_basis, price_max, source_refs, expires_on, stated)
                        values (%s, %s, %s, 'mastered', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s::date, %s, %s, %s,
-                         %s, %s, %s, %s, %s, %s::text[], %s::date + %s)""",
+                         %s, %s, %s, %s, %s, %s::text[], %s::date + %s, %s::jsonb)""",
                     (line_id(source["company_id"], kind, line["key"]), source["company_id"], kind, line["key"], line["level"],
                      line["make"], line["model"], line["raw_product"], line["format"], line["chemistry"], line["kwh_min"],
                      line["kwh_max"], seen, seen, quantity, product["quantity_unit"] if quantity is not None else None,
                      "stated" if quantity is not None else "not_stated", price,
                      product["price_currency"] if price is not None else None,
                      product["price_unit"] if price is not None else None, "target" if price is not None else None,
-                     product["price_max"] if price is not None else None, refs, seen, EXPIRY_DAYS[kind]))
+                     product["price_max"] if price is not None else None, refs, seen, EXPIRY_DAYS[kind],
+                     json.dumps(line["stated"]) if line.get("stated") else None))
         return "added"
     own = any(ref.startswith("parse:") for ref in existing["source_refs"] or [])
     if not own:
@@ -1024,13 +1066,15 @@ def write_line(cur, source, kind, line, product, run_id):
                      price = coalesce(price, %s), price_currency = coalesce(price_currency, %s),
                      price_unit = coalesce(price_unit, %s), price_basis = coalesce(price_basis, %s),
                      price_max = coalesce(price_max, case when %s::numeric > coalesce(price, %s::numeric) then %s::numeric end),
+                     stated = coalesce(stated, %s::jsonb),
                      source_refs = (select array_agg(distinct r order by r) from unnest(source_refs || %s::text[]) r),
                      updated_at = now()
                    where id = %s""",
                 (seen, seen, seen, EXPIRY_DAYS[kind], quantity, product["quantity_unit"] if quantity is not None else None,
                  quantity, price, product["price_currency"] if price is not None else None,
                  product["price_unit"] if price is not None else None, "target" if price is not None else None,
-                 product["price_max"], price, product["price_max"], refs, existing["id"]))
+                 product["price_max"], price, product["price_max"],
+                 json.dumps(line["stated"]) if line.get("stated") else None, refs, existing["id"]))
     return "merged"
 
 
@@ -1065,32 +1109,33 @@ def write_sources(conn, parsed, report, run_id, builder, apply_writes, batch_siz
                 try:
                     source["lines"] = []
                     asked = synced_keys(cur, source)
-                    for product in source["result"]["products"]:
-                        for line in key_lines(cur, product, builder, ts_table):
-                            kind = source["line_kind"]
-                            if not adds_information(line, product):
-                                source["lines"].append({**line, "kind": kind, "outcome": "broad_only", "product": product})
-                                report["lines"]["broad_only_skipped"] = report["lines"].get("broad_only_skipped", 0) + 1
-                                continue
-                            if covered_by_ask(line, asked):
-                                source["lines"].append({**line, "kind": kind, "outcome": "covered_by_ask", "product": product})
-                                bump(report["lines"], "covered_by_ask")
-                                continue
-                            outcome = write_line(cur, source, kind, line, product, run_id)
-                            marker = (source["company_id"], line["key"], kind)
-                            if outcome == "added" and not apply_writes:
-                                if marker in shadow:
-                                    outcome = "merged"
-                                shadow.add(marker)
-                            source["lines"].append({**line, "kind": kind, "outcome": outcome, "product": product})
-                            if outcome == "added":
-                                bump(report["lines"]["added"], f"{kind}:{line['level']}")
-                                report["lines"]["added_total"] += 1
-                                if line["level"] != "broad":
-                                    gaining.setdefault(source["company_id"], 0)
-                                    gaining[source["company_id"]] += 1
-                            else:
-                                report["lines"][outcome] += 1
+                    pairs = [(product, line) for product in source["result"]["products"]
+                             for line in key_lines(cur, product, builder, ts_table)]
+                    for product, line in one_per_key(cur, pairs):
+                        kind = source["line_kind"]
+                        if not adds_information(line, product):
+                            source["lines"].append({**line, "kind": kind, "outcome": "broad_only", "product": product})
+                            report["lines"]["broad_only_skipped"] = report["lines"].get("broad_only_skipped", 0) + 1
+                            continue
+                        if covered_by_ask(line, asked):
+                            source["lines"].append({**line, "kind": kind, "outcome": "covered_by_ask", "product": product})
+                            bump(report["lines"], "covered_by_ask")
+                            continue
+                        outcome = write_line(cur, source, kind, line, product, run_id)
+                        marker = (source["company_id"], line["key"], kind)
+                        if outcome == "added" and not apply_writes:
+                            if marker in shadow:
+                                outcome = "merged"
+                            shadow.add(marker)
+                        source["lines"].append({**line, "kind": kind, "outcome": outcome, "product": product})
+                        if outcome == "added":
+                            bump(report["lines"]["added"], f"{kind}:{line['level']}")
+                            report["lines"]["added_total"] += 1
+                            if line["level"] != "broad":
+                                gaining.setdefault(source["company_id"], 0)
+                                gaining[source["company_id"]] += 1
+                        else:
+                            report["lines"][outcome] += 1
                     cur.execute("release savepoint parse_source")
                 except Exception as exc:  # noqa: BLE001
                     cur.execute("rollback to savepoint parse_source")
