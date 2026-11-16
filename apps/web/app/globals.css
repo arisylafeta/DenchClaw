@@ -2728,3 +2728,9 @@ body:has(.bt-preview) .bulk-trades[class*="sheet"] { border-radius: 8px !importa
 @media (prefers-reduced-motion: reduce) {
   .todo-node-active, .todo-check, .todo-seg-active { animation: none; }
 }
+
+/* Settled chat turns off screen skip layout and paint; `auto` remembers the measured height once seen. */
+[aria-label="Native Hermes transcript"] > article[data-settled="true"] {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { NativeTranscriptProps } from "./types";
@@ -53,7 +53,55 @@ function AnswerText({ text, live, renderMarkdown, onOpenArtifact, onSendPrompt }
     ? <VisualBlock key={`visual-${index}`} code={piece.code} closed={piece.closed} onSendPrompt={onSendPrompt} />
     : <Fragment key={`piece-${index}`}>{withArtifacts(piece.text, `p${index}`)}</Fragment>)}</>;
 }
+/**
+ * One transcript turn. Memoized so a streaming delta re-renders (and re-parses markdown for) only the turn
+ * that changed; the reducer keeps untouched messages by identity. Every prop must be referentially stable
+ * between unrelated updates, which is why NativeTranscript passes ref-backed callbacks and a plain html string.
+ */
+const shallowEqual = (a: object, b: object) => { const ak = Object.keys(a), bk = Object.keys(b); return ak.length === bk.length && ak.every(key => Object.is((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key])); };
+/** displayTurns rebuilds merged and re-timed turns every render, so compare message content, not identity. */
+const sameTurn = (a: NativeTranscriptProps["state"]["messages"][number], b: NativeTranscriptProps["state"]["messages"][number]) => {
+  if (a === b) return true;
+  const { segments: as, ...ar } = a, { segments: bs, ...br } = b;
+  return shallowEqual(ar, br) && as.length === bs.length && as.every((segment, index) => segment === bs[index] || shallowEqual(segment, bs[index]));
+};
+const TurnArticle = memo(function TurnArticle({ message, live, userHtml, renderMarkdown, onOpenArtifact, onSendPrompt, onRetry }: {
+  message: NativeTranscriptProps["state"]["messages"][number]; live: boolean; userHtml?: string; renderMarkdown?: (text: string) => ReactNode;
+  onOpenArtifact?: NativeTranscriptProps["onOpenArtifact"]; onSendPrompt?: NativeTranscriptProps["onSendPrompt"]; onRetry?: () => void;
+}) {
+  return <article aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id} data-settled={!message.pending}>
+      {message.role === "user" ? (() => {
+        const { attachments, message: body } = parseUserAttachments(message.segments.filter(segment => segment.type !== "tool").map(segment => segment.text).join(""));
+        return <div className="flex flex-col items-end gap-1.5 py-2">
+          <AttachmentChips attachments={attachments} />
+          {(body || !attachments.length) && <div className="max-w-[80%] min-w-0 rounded-2xl rounded-br-sm px-3 py-2 text-sm leading-6 overflow-hidden break-words chat-message-font" style={{ background: "var(--color-user-bubble)", color: "var(--color-user-bubble-text)" }}>
+            <UserContent html={attachments.length ? undefined : userHtml} text={body} />
+          </div>}
+        </div>;
+      })() : (() => {
+        const blocks = transcriptBlocks(message.segments);
+        return <Fragment key={message.id}>
+          {blocks.map((block, index) => {
+            const next = blocks[index + 1];
+            return block.type === "work"
+              ? <WorkBlock key={block.id} work={block.segments} live={live && message.pending && !message.steerBoundary && (index === blocks.length - 1 || block.segments.some(segment => segment.type === "tool" && segment.status === "running"))} answerStartedAt={next?.type === "answer" ? next.segment.startedAt : undefined} />
+              : <div key={block.id} data-segment={block.segment.type} className="chat-prose chat-message-font text-sm break-words"><AnswerText text={block.segment.text} live={live && message.pending} renderMarkdown={renderMarkdown} onOpenArtifact={onOpenArtifact} onSendPrompt={onSendPrompt} /></div>;
+          })}
+        </Fragment>;
+      })()}
+      {(message.error_surface || message.error) && <ErrorCard error={message.error_surface} message={message.error} partial={message.partial} onRetry={onRetry} />}
+    </article>;
+}, (prev, next) => sameTurn(prev.message, next.message) && shallowEqual({ ...prev, message: 0 }, { ...next, message: 0 }));
 export function NativeTranscript({ state, callbacks, renderMarkdown, userHtml, queuedMessageIds = [], onOpenArtifact, onSendPrompt }: NativeTranscriptProps) {
+  // Inline callbacks from the parent change identity every render; route them through a ref so memoized turns stay put.
+  const latest = useRef({ renderMarkdown, onOpenArtifact, onSendPrompt, onRetry: callbacks.onRetry });
+  latest.current = { renderMarkdown, onOpenArtifact, onSendPrompt, onRetry: callbacks.onRetry };
+  const stableMarkdown = useCallback((text: string) => latest.current.renderMarkdown!(text), []);
+  const stableArtifact = useCallback<NonNullable<NativeTranscriptProps["onOpenArtifact"]>>((...args) => latest.current.onOpenArtifact!(...args), []);
+  const stablePrompt = useCallback<NonNullable<NativeTranscriptProps["onSendPrompt"]>>((...args) => latest.current.onSendPrompt!(...args), []);
+  const stableRetry = useCallback(() => latest.current.onRetry?.(), []);
+  const stable = { renderMarkdown: renderMarkdown ? stableMarkdown : undefined, onOpenArtifact: onOpenArtifact ? stableArtifact : undefined,
+    onSendPrompt: onSendPrompt ? stablePrompt : undefined, onRetry: callbacks.onRetry ? stableRetry : undefined };
   // Waiting messages show in the dock above the composer until Hermes reads them or starts their turn.
   const visible = displayTurns(state.messages.filter(message => !queuedMessageIds.includes(message.id)));
   // The judge's "continue" verdict and the continuation prompt it caused are one step: show one line and
@@ -70,28 +118,7 @@ export function NativeTranscript({ state, callbacks, renderMarkdown, userHtml, q
   }
   // Retry re-runs the latest turn, so only the latest failure offers it.
   return <div className="space-y-2 text-sm text-[var(--color-text-primary)]" aria-label="Native Hermes transcript">
-    {turns.map((message, index) => message.notice ? <NoticeLine key={message.id} notice={message.notice} onCancel={message.notice.pending ? callbacks.onCancelNotice : undefined} /> : <article key={message.id} aria-label={`${message.role} message`} className={message.role === "user" ? "" : "space-y-2 py-3"} data-message-id={message.id}>
-      {message.role === "user" ? (() => {
-        const { attachments, message: body } = parseUserAttachments(message.segments.filter(segment => segment.type !== "tool").map(segment => segment.text).join(""));
-        return <div className="flex flex-col items-end gap-1.5 py-2">
-          <AttachmentChips attachments={attachments} />
-          {(body || !attachments.length) && <div className="max-w-[80%] min-w-0 rounded-2xl rounded-br-sm px-3 py-2 text-sm leading-6 overflow-hidden break-words chat-message-font" style={{ background: "var(--color-user-bubble)", color: "var(--color-user-bubble-text)" }}>
-            <UserContent html={attachments.length ? undefined : userHtml?.(message.id)} text={body} />
-          </div>}
-        </div>;
-      })() : (() => {
-        const blocks = transcriptBlocks(message.segments);
-        return <Fragment key={message.id}>
-          {blocks.map((block, index) => {
-            const next = blocks[index + 1];
-            return block.type === "work"
-              ? <WorkBlock key={block.id} work={block.segments} live={state.live && message.pending && !message.steerBoundary && (index === blocks.length - 1 || block.segments.some(segment => segment.type === "tool" && segment.status === "running"))} answerStartedAt={next?.type === "answer" ? next.segment.startedAt : undefined} />
-              : <div key={block.id} data-segment={block.segment.type} className="chat-prose chat-message-font text-sm break-words"><AnswerText text={block.segment.text} live={state.live && message.pending} renderMarkdown={renderMarkdown} onOpenArtifact={onOpenArtifact} onSendPrompt={onSendPrompt} /></div>;
-          })}
-        </Fragment>;
-      })()}
-      {(message.error_surface || message.error) && <ErrorCard error={message.error_surface} message={message.error} partial={message.partial} onRetry={index === turns.length - 1 || turns.slice(index + 1).every(item => item.notice) ? callbacks.onRetry : undefined} />}
-    </article>)}
+    {turns.map((message, index) => message.notice ? <NoticeLine key={message.id} notice={message.notice} onCancel={message.notice.pending ? callbacks.onCancelNotice : undefined} /> : <TurnArticle key={message.id} message={message} live={state.live} userHtml={userHtml?.(message.id)} renderMarkdown={stable.renderMarkdown} onOpenArtifact={stable.onOpenArtifact} onSendPrompt={stable.onSendPrompt} onRetry={index === turns.length - 1 || turns.slice(index + 1).every(item => item.notice) ? stable.onRetry : undefined} />)}
     <p role="status">{state.pendingRequests.some(request => request.kind === "approval") ? "Waiting for approval" : state.pendingRequests.some(request => request.kind === "clarify") ? "Waiting for your answer" : state.interrupted ? "Interrupted" : ""}</p>
   </div>;
 }
