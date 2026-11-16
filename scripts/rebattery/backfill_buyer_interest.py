@@ -566,7 +566,7 @@ def _write_line(cur, company_id, kind, ownership, keyed, seen, refs, reason=None
 
 def sync_dossier_rows(cur, companies):
     """One mastered line per dossier product and per make it states; the frontmatter itself is left as it is."""
-    written, skipped, from_source, no_facts, truncated, errors = 0, 0, 0, 0, 0, 0
+    written, skipped, from_source, no_facts, truncated, errors, superseded = 0, 0, 0, 0, 0, 0, 0
     for company in companies:
         frontmatter, _body = buyer_dossier.parse(company.get("buyer_dossier") or "")
         products = frontmatter.get("products") or []
@@ -625,7 +625,16 @@ def sync_dossier_rows(cur, companies):
                 cur.execute("rollback to savepoint bi_row")
                 _record_error(cur, "crm_companies", company["id"], "dossier", exc)
                 errors += 1
-    return {"companies": len(companies), "written": written, "skipped": skipped,
+        # Newer evidence wins: a want the dossier later declined on the same key is history, not a live want
+        # (ELG asked for NCR2170M on 16 Oct and declined it on 24 Oct).
+        cur.execute("""delete from buyer_interest w
+                        where w.company_id = %s and w.id like 'bi_dossier_%%' and w.kind <> 'declined'
+                          and exists (select 1 from buyer_interest d
+                                       where d.company_id = w.company_id and d.id like 'bi_dossier_%%'
+                                         and d.kind = 'declined' and d.product_key = w.product_key
+                                         and d.last_seen >= w.last_seen)""", (company["id"],))
+        superseded += cur.rowcount
+    return {"companies": len(companies), "written": written, "skipped": skipped, "superseded_by_decline": superseded,
             "already_from_source": from_source, "no_facts": no_facts, "truncated": truncated, "errors": errors}
 
 

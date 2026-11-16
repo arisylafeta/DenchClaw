@@ -650,6 +650,32 @@ The story, unchanged by this step.
         [line] = lines.values()
         self.assertEqual(line["decline_reason"], "needs wire bonding")
 
+    def test_a_want_the_dossier_later_declined_on_the_same_key_is_history(self):
+        lines = self.dossier_products('''  - make: Panasonic
+    model: NCR2170M
+    format: cells
+    status: asked
+    seen: "2026-10-16"
+  - make: Panasonic
+    model: NCR2170M
+    format: cells
+    status: declined
+    reason: "needs wire bonding"
+    seen: "2026-10-24"
+  - make: Samsung
+    model: INR21700-50E
+    format: cells
+    status: declined
+    seen: "2026-10-01"
+  - make: Samsung
+    model: INR21700-50E
+    format: cells
+    status: asked
+    seen: "2026-10-20"''')
+        self.assertEqual({key: line["kind"] for key, line in lines.items()},
+                         {"model:panasonic-ncr2170m": "declined", "model:samsung-inr2170050e": "standing"})
+        self.assertEqual(lines["model:panasonic-ncr2170m"]["decline_reason"], "needs wire bonding")
+
     def test_a_product_name_in_part_number_is_not_a_part_key(self):
         self.write_dossier(markdown="""---
 company_id: "{company}"
