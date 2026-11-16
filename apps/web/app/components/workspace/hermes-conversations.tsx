@@ -253,9 +253,9 @@ export function StatusDot({ status }: { status: ChatStatus }) {
   if (status === "idle") return null;
   return <span role="img" aria-label={DOT[status].label} title={DOT[status].label} className={`h-2 w-2 shrink-0 rounded-full ${DOT[status].className}`} />;
 }
-export function ParticipantIcons({ row }: { row: HermesConversation }) {
-  return <span className="inline-flex shrink-0 -space-x-2" aria-label={`Participants: ${row.participants.map((p) => p.name).join(", ")}`}>
-    {row.participants.slice(0, 2).map((p, index) => <span key={p.memberId || p.profile} className="rounded-full ring-2 ring-[var(--color-bg)]" style={{ zIndex: row.participants.length - index }} title={p.name}><ProfileAvatar name={p.profile} className={row.participants.length > 1 ? "h-5 w-5" : "h-6 w-6"} /></span>)}
+export function ParticipantIcons({ row, working = false }: { row: HermesConversation; working?: boolean }) {
+  return <span className="inline-flex shrink-0 -space-x-1.5" aria-label={`Participants: ${row.participants.map((p) => p.name).join(", ")}`}>
+    {row.participants.slice(0, 2).map((p, index) => <span key={p.memberId || p.profile} className="inline-flex" style={{ zIndex: row.participants.length - index }} title={p.name}><ProfileAvatar name={p.profile} className={row.participants.length > 1 ? "h-5 w-5" : "h-6 w-6"} working={working} /></span>)}
   </span>;
 }
 function SourceIcon({ source }: { source: string }) {
@@ -349,7 +349,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
         const pinned = serverPins.includes(row.key);
         const PinIcon = pinned ? PinOff : Pin;
         return <motion.div key={row.key} {...reorderMotion} data-conversation-key={row.key} data-status={status} data-selected={chats.selected?.key === row.key} className={`${styles.conversationRow} relative flex min-w-0 items-center rounded-lg ${status === "running" ? styles.running : ""}`}>
-          <span className={`${styles.rowAvatar} flex h-11 w-11 shrink-0 items-center justify-center`}>{messagingConversation(row) ? <SourceIcon source={row.source!} /> : <ParticipantIcons row={row} />}</span>
+          <span className={`${styles.rowAvatar} flex h-11 w-11 shrink-0 items-center justify-center`}>{messagingConversation(row) ? <SourceIcon source={row.source!} /> : <ParticipantIcons row={row} working={status === "running"} />}</span>
           <div className="min-w-0 flex-1">
             {renaming === row.key ? <RenameInput initial={row.title} onCancel={() => setRenaming(null)} onSubmit={async (title) => { const ok = await chats.rename(row, title); if (ok) setRenaming(null); return ok; }} /> :
             <button type="button" aria-label={`Open ${row.title}`} title={row.title} onClick={() => { chats.select(row); onOpen?.(); }} onDoubleClick={() => { if (row.access?.canWrite) setRenaming(row.key); }} aria-current={chats.selected?.key === row.key ? "true" : undefined} className="block min-h-11 w-full min-w-0 touch-manipulation rounded-md py-1.5 text-left focus-visible:outline focus-visible:outline-2">

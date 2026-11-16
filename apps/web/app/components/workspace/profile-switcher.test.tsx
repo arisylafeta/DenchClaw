@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import React from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProfileSwitcher } from "./profile-switcher";
-import { bundledProfileAvatar } from "@/lib/profile-avatars";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -18,7 +17,7 @@ describe("ProfileSwitcher workspace delete action", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows names and avatars without paths, falls back to initials, and switches profiles", async () => {
+  it("shows names and avatars without paths, and switches profiles", async () => {
     const user = userEvent.setup();
     const onWorkspaceSwitch = vi.fn();
     global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
@@ -33,12 +32,7 @@ describe("ProfileSwitcher workspace delete action", () => {
     expect(menu.textContent).not.toContain("/profiles/");
     expect(screen.getAllByText("default").find((node) => menu.contains(node))?.closest(".group")).toHaveTextContent("Active");
     expect(screen.getByText("the-enricher").closest(".group")).not.toHaveTextContent("Active");
-    const avatar = menu.querySelector(`img[src="${bundledProfileAvatar("the-enricher")}"]`)!;
-    expect(avatar).toBeTruthy();
-    const fallback = avatar.parentElement!;
-    fireEvent.error(avatar);
-    expect(fallback.querySelector("img")).toBeNull();
-    expect(fallback.textContent).toBe("TE");
+    expect(menu.querySelector('[data-profile-avatar="the-enricher"] svg')).toBeTruthy();
     await user.click(screen.getByText("the-enricher"));
     await waitFor(() => expect(onWorkspaceSwitch).toHaveBeenCalledOnce());
     expect(global.fetch).toHaveBeenCalledWith("/api/workspace/switch", expect.objectContaining({

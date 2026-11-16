@@ -26,6 +26,8 @@ describe("subagent profile avatar", () => {
     expect(container.querySelector(".chat-pixel-cell")).toBeNull();
     expect(container.querySelector('[data-group-avatar="devon"]')).not.toBeNull();
     expect(container.querySelector('[data-subagent-avatar="devon"]')).not.toBeNull();
+    expect(container.querySelector('[data-subagent-avatar="devon"] [data-working]')).not.toBeNull();
+    expect(container.querySelector('[data-group-avatar="devon"] [data-working]')).not.toBeNull();
   });
   it("falls back to a flat dot, not the grid, when no profile is known", () => {
     const state = started();

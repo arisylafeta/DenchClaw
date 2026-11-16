@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { applyChatView as applyView, automation, conversationChannel, DEFAULT_VIEW, conversationKey, type HermesConversation } from "@/lib/hermes-conversations";
 import { chatStatus, HermesConversationList, HermesNewChatDialog, useHermesConversations } from "./hermes-conversations";
 import { ProfileSwitcher } from "./profile-switcher";
-vi.mock("./profile-avatar", () => ({ ProfileAvatar: ({ name }: { name: string }) => <span data-testid={`avatar-${name}`} /> }));
+vi.mock("./profile-avatar", () => ({ ProfileAvatar: ({ name, working }: { name: string; working?: boolean }) => <span data-testid={`avatar-${name}`} data-working={working || undefined} /> }));
 const applyChatView = (...args: Parameters<typeof applyView>) => applyView(args[0], args[1], args[2], args[3], "user-a");
 const access = { visibility: "private" as const, ownerId: "user-a", canShare: true, canDelete: true, canWrite: true, canApprove: true };
 const solo: HermesConversation = { access, key: conversationKey("solo", "same-id", "alpha"), id: "same-id", kind: "solo", profile: "alpha", title: "Alpha solo", participants: [{ profile: "alpha", name: "Alpha" }], updatedAt: 100, working: null };
@@ -210,6 +210,7 @@ describe("Hermes unified chat UI", () => {
       const row = screen.getByRole("button", { name: `Open ${name} chat` }).closest("[data-conversation-key]")!;
       expect(row).toHaveAttribute("data-status", status);
       expect(row.className.includes("running")).toBe(status === "running");
+      expect(!!row.querySelector("[data-testid^=avatar-][data-working]")).toBe(status === "running");
     }
   });
   it("migrates explicit hidden choices and keeps searched zero-count sources toggleable", async () => {

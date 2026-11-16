@@ -189,6 +189,9 @@ importers:
       async-mutex:
         specifier: ^0.5.0
         version: 0.5.0
+      bloub-react:
+        specifier: 1.0.0
+        version: 1.0.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       chokidar:
         specifier: ^5.0.0
         version: 5.0.0
@@ -5051,6 +5054,13 @@ packages:
 
   birpc@4.0.0:
     resolution: {integrity: sha512-LShSxJP0KTmd101b6DRyGBj57LZxSDYWKitQNW/mi8GRMvZb078Uf9+pveax1DrVL89vm7mWe+TovdI/UDOuPw==}
+
+  bloub-react@1.0.0:
+    resolution: {integrity: sha512-/mTGNnUw7l4kUVkqH5rVQKxIdLZvn2CE7zw+bnO8wpHzX61DimZ3i2nZbECypsrqEO1q463hOUu92Dw3QjkcYQ==}
+    engines: {node: '>=20.0.0'}
+    peerDependencies:
+      react: ^19.0.0
+      react-dom: ^19.0.0
 
   bluebird@3.4.7:
     resolution: {integrity: sha512-iD3898SR7sWVRHbiQv+sHUtHnMvC1o3nW5rAcqnq3uOn07DSAppZYUkIGslDz6gXC7HfunPe7YVBgoEJASPcHA==}
@@ -14058,6 +14068,11 @@ snapshots:
   bignumber.js@9.3.1: {}
 
   birpc@4.0.0: {}
+
+  bloub-react@1.0.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
+    dependencies:
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
 
   bluebird@3.4.7: {}
 

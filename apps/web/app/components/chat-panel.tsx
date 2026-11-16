@@ -3124,7 +3124,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 					<div className="min-w-0 flex-1">
 						{currentSessionId ? (
 							<div className="flex min-w-0 items-center gap-2">
-								{agentProfile && <ProfileAvatar name={agentProfile} className="h-5 w-5" />}
+								{agentProfile && <ProfileAvatar name={agentProfile} className="h-5 w-5" working={isStreaming} />}
 								<h2
 									className="text-sm font-semibold truncate"
 									style={{

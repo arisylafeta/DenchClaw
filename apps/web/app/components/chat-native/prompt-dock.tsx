@@ -88,7 +88,7 @@ function SubagentGroup({ roots, callbacks, tails, profile, canWrite }: { roots: 
     <summary className="flex min-h-7 cursor-pointer list-none items-center gap-2 text-[12px] [&::-webkit-details-marker]:hidden">
       <ChevronRight aria-hidden="true" className="size-3 shrink-0 text-[var(--color-text-muted)] transition-transform motion-reduce:transition-none group-open/agents:rotate-90" />
       <span data-group-avatars className="flex shrink-0 -space-x-1.5">
-        {profiles.length ? profiles.map(name => <span key={name} data-group-avatar={name} className={running ? "todo-node-active" : "opacity-60"}><ProfileAvatar name={name} className="size-4 ring-2 ring-[var(--color-surface)]" /></span>)
+        {profiles.length ? profiles.map(name => <span key={name} data-group-avatar={name} className={running ? undefined : "opacity-60"}><ProfileAvatar name={name} className="size-4" working={running > 0} /></span>)
           : <span aria-hidden="true" className={`size-2 rounded-full bg-[var(--color-accent)] ${running ? "todo-node-active" : "opacity-40"}`} />}
       </span>
       <span role={running ? "status" : undefined} className={`font-medium ${running ? "text-[var(--color-text)]" : "text-[var(--color-text-muted)]"}`}>{label}</span>
