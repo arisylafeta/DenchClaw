@@ -120,7 +120,8 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     const other = id("d4");
     await listing(other, "demand", id("buyer2"), { intent: "request", formats: ["Packs"], chemistries: ["NMC"] });
     await pg.queryPg(`update crm_bulk_listings set status = 'closed', closed_reason = 'bought_elsewhere' where id = $1`, [other]);
-    expect(await lines("demand_id = $1", [other])).toMatchObject([{ kind: "declined", decline_reason: "bought_elsewhere" }]);
+    // R2: a closed request is a purchase or nothing. It never becomes a declined line.
+    expect(await lines("demand_id = $1", [other])).toEqual([]);
 
     // Reopening replaces the outcome with the ask again.
     await pg.queryPg(`update crm_bulk_listings set status = 'open', closed_reason = null where id = $1`, [other]);
@@ -216,7 +217,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     }, user.id);
     expect(await lines("demand_id = $1", [ask.id])).toMatchObject([{ kind: "ask", product_key: "broad:lfp-packs", quantity: 3 }]);
     await demand.closeDemand(ask.id, "bought_elsewhere");
-    expect(await lines("demand_id = $1", [ask.id])).toMatchObject([{ kind: "declined", decline_reason: "bought_elsewhere" }]);
+    expect(await lines("demand_id = $1", [ask.id])).toEqual([]);
   });
 
   it("records a buyer offer's paid and declined stages, replacing the earlier outcome", async () => {
@@ -277,11 +278,10 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       intent: "request", makes: ["Toyota or Lexus", "Stellantis"], chemistries: ["NMC", "LFP"], formats: ["Packs"],
     });
     const rows = await lines("demand_id = $1", [id("d12")]);
+    // R1: two makes and two chemistries say nothing about which pairs with which, so each value is its own line.
     expect(rows.map((row) => row.product_key)).toEqual([
-      "broad:stellantis-lfp-packs", "broad:stellantis-nmc-packs",
-      "broad:toyota-or-lexus-lfp-packs", "broad:toyota-or-lexus-nmc-packs",
+      "broad:lfp-packs", "broad:nmc-packs", "broad:stellantis-any-packs", "broad:toyota-or-lexus-any-packs",
     ]);
-    expect(rows.map((row) => row.chemistry)).toEqual(["LFP", "NMC", "LFP", "NMC"]);
 
     // Dropping a make drops its lines, keeping the other make's.
     await pg.queryPg(`update crm_bulk_listings set spec = jsonb_set(spec, '{makes}', '["Stellantis"]'::jsonb) where id = $1`,
@@ -292,14 +292,65 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
 
   it("caps a very broad ask at 12 lines and records the truncation", async () => {
     await listing(id("d13"), "demand", id("buyer4"), {
-      intent: "request", makes: ["Toyota", "Stellantis", "Hyundai", "Kia"],
-      chemistries: ["NMC", "LFP", "NCA", "LTO"], formats: ["Packs"],
+      intent: "request", chemistries: ["NMC"], formats: ["Packs"],
+      makes: ["Audi", "BMW", "Citroen", "Dacia", "Fiat", "Ford", "Honda", "Hyundai", "Kia", "Mazda", "Opel", "Seat", "Skoda", "Volvo"],
     });
     expect(await lines("demand_id = $1", [id("d13")])).toHaveLength(12);
     const [error] = await pg.queryPg<{ operation: string; message: string }>(
       `select operation, message from buyer_interest_sync_errors where source_id = $1 and operation = 'truncated'`,
       [id("d13")]);
-    expect(error.message).toContain("12 of 16");
+    expect(error.message).toContain("12 of 14");
+  });
+
+  describe("wants conformance (R1-R6)", () => {
+    const keysOf = async (where: string, params: unknown[]) => (await lines(where, params)).map((row) => row.product_key).toSorted();
+
+    it("R1 keeps stated products paired: Toyota Proace 50 kWh NMC and Stellantis 52 kWh LFP are exactly two lines", async () => {
+      const both = { intent: "request", makes: ["Toyota", "Stellantis"], chemistries: ["NMC", "LFP"], formats: ["Packs"] };
+      await listing(id("c1"), "demand", id("buyer1"), { ...both, products: [
+        { make: "Toyota", model: "Proace", kwh: 50, chemistry: "NMC" }, { make: "Stellantis", kwh: 52, chemistry: "LFP" }] });
+      expect(await keysOf("demand_id = $1", [id("c1")])).toEqual(["broad:stellantis-lfp-packs", "model:toyota-proace-50kwh"]);
+      const rows = await lines("demand_id = $1", [id("c1")]);
+      expect(rows.find((row) => row.make === "Stellantis")).toMatchObject({ chemistry: "LFP", format: "pack" });
+      expect(rows.find((row) => row.make === "Toyota")).toMatchObject({ chemistry: "NMC" });
+
+      // The same pairing read from the request's own wording, with no products array.
+      await listing(id("c2"), "demand", id("buyer1"), both);
+      await pg.queryPg(`update crm_bulk_listings set summary = $2 where id = $1`,
+        [id("c2"), "Toyota Proace 50 kWh NMC + Stellantis 52 kWh LFP"]);
+      expect(await keysOf("demand_id = $1", [id("c2")])).toEqual(["broad:stellantis-lfp-packs", "model:toyota-proace-50kwh"]);
+    });
+
+    it("R3 writes the canonical model slug", async () => {
+      await listing(id("c3"), "demand", id("buyer1"), { intent: "request", makes: ["Hyundai"], model: "Kona Electric", kwh: 64 });
+      await listing(id("c4"), "demand", id("buyer1"), { intent: "request", makes: ["Tesla"], model: "Model 3 Long Range AWD" });
+      await listing(id("c5"), "demand", id("buyer1"), { intent: "request", makes: ["Peugeot"], model: "2008", kwh: 50 });
+      expect(await keysOf("demand_id = $1", [id("c3")])).toEqual(["model:hyundai-kona-64kwh"]);
+      expect(await keysOf("demand_id = $1", [id("c4")])).toEqual(["model:tesla-model3"]);
+      expect(await keysOf("demand_id = $1", [id("c5")])).toEqual(["model:peugeot-2008-50kwh"]);
+    });
+
+    it("R4 drops the less specific line a more specific one of the same source already says", async () => {
+      await listing(id("c6"), "demand", id("buyer1"), { intent: "request", products: [
+        { make: "Nissan", model: "Leaf" }, { make: "Nissan", model: "Leaf", kwh: 40 }, { make: "Nissan" }] });
+      expect(await keysOf("demand_id = $1", [id("c6")])).toEqual(["model:nissan-leaf-40kwh"]);
+    });
+
+    it("R5 never pairs a vehicle make with a battery system from a format list", async () => {
+      await listing(id("c7"), "demand", id("buyer1"), { intent: "request", makes: ["Nissan"], formats: ["Systems", "Packs"] });
+      expect(await keysOf("demand_id = $1", [id("c7")])).toEqual(["broad:any-systems", "broad:nissan-any-packs"]);
+    });
+
+    it("R6 keeps cell makers, cell formats, every part number and the voltage on the line", async () => {
+      await listing(id("c8"), "demand", id("buyer1"), { intent: "request", makes: ["Kia"], model: "Niro", kwh: 64,
+        cell_makers: ["LG Energy Solution"], cell_formats: ["Pouch"], part_numbers: ["37501AO050", "37501AO051"], min_pack_voltage: 355 });
+      const [row] = await pg.queryPg<{ product_key: string; kwh_min: string; stated: Record<string, unknown> }>(
+        `select product_key, kwh_min, stated from buyer_interest where demand_id = $1`, [id("c8")]);
+      expect(row.product_key).toBe("part:37501A0050");
+      expect(Number(row.kwh_min)).toBe(64);
+      expect(row.stated).toEqual({ cell_makers: ["LG Energy Solution"], cell_formats: ["Pouch"],
+        part_numbers: ["37501AO050", "37501AO051"], min_pack_voltage: 355 });
+    });
   });
 
   it("moves a synced line to the company the source now names", async () => {

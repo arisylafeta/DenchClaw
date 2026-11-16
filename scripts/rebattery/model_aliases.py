@@ -142,8 +142,8 @@ begin
     txt := regexp_replace(txt, '\\y(battery|batteries|packs?|modules?|hv|high voltage)\\y', ' ', 'g');
     txt := btrim(regexp_replace(regexp_replace(txt, '[^a-z0-9]+', ' ', 'g'), '\\s+', ' ', 'g'));
     for brand in
-      select distinct b from unnest(array[btrim(regexp_replace(buyer_interest_unaccent(p_make), '[^a-z0-9]+', ' ', 'g')),
-        {", ".join("'" + re.sub(r"[^a-z0-9]+", " ", b) + "'" for b in BRAND_WORDS)}]) b where b <> '' order by length(b) desc
+      select b from (select distinct b from unnest(array[btrim(regexp_replace(buyer_interest_unaccent(p_make), '[^a-z0-9]+', ' ', 'g')),
+        {", ".join("'" + re.sub(r"[^a-z0-9]+", " ", b) + "'" for b in BRAND_WORDS)}]) b where b <> '') u order by length(b) desc
     loop
       if txt like brand || ' %' then txt := substr(txt, length(brand) + 2); exit; end if;
     end loop;
