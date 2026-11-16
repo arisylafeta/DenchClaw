@@ -412,6 +412,42 @@ def _alnum(text: Any) -> str:
     return re.sub(r"[^A-Z0-9]", "", str(text or "").upper())
 
 
+def is_part_code(value: Any) -> bool:
+    code = _alnum(value)
+    return len(code) >= 6 and bool(re.search(r"[A-Z]", code)) and bool(re.search(r"\d", code))
+
+
+MIN_PACK_VOLTS = 60
+
+
+def voltage_from_text(text: Any, pack: bool = False) -> float | None:
+    """Mirror of voltageFromText in apps/web/lib/match/product-key.ts: a figure followed by V, or a field that is only
+    a number; below 60 V is a module or cell figure for a pack lot; more than one distinct voltage is unknown."""
+    clean = str(text or "").replace(",", "").strip()
+    if not clean:
+        return None
+    if re.fullmatch(r"\d+(?:\.\d+)?", clean):
+        found = {float(clean)}
+    else:
+        found = set()
+        for m in re.finditer(r"(\d+(?:\.\d+)?)(?:\s*(?:v|volts?)\b|\s*[-\u2013]\s*(\d+(?:\.\d+)?)\s*(?:v|volts?)\b)", clean, re.IGNORECASE):
+            found.add(float(m.group(2) or m.group(1)))
+    figures = {v for v in found if 0 < v < 2000 and not (pack and v < MIN_PACK_VOLTS)}
+    return next(iter(figures)) if len(figures) == 1 and len(found) == 1 else None
+
+
+def lot_voltage_v(listing: dict[str, Any]) -> float | None:
+    """The lot's voltage, read from its voltage text the way the platform does."""
+    pack = str(listing.get("format") or "").lower() in {"packs", "systems"}
+    return voltage_from_text(listing.get("voltage"), pack)
+
+
+def lot_part_codes(listing: dict[str, Any]) -> list[str]:
+    """The lot's part number and, for cells, the cell model code. The vehicle model is never a code."""
+    cell_model = listing.get("cell_model") or (listing.get("model") if str(listing.get("format") or "").lower() == "cells" else None)
+    return [v for v in (_alnum(listing.get("part_number")), _alnum(cell_model)) if v]
+
+
 def _min_pack_voltage(buyer: dict[str, Any]) -> float | None:
     raw = ((buyer.get("dossier") or {}).get("frontmatter") or {}).get("min_pack_voltage")
     value = raw.get("value") if isinstance(raw, dict) else raw
@@ -477,13 +513,12 @@ def rule_out(listing: dict[str, Any], buyer: dict[str, Any]) -> tuple[str, str] 
                 return ("kwh", f"buy profile kWh bounds exclude {listing['kwh']} kWh")
 
     if is_dossier:
-        lot = [v for v in (_alnum(listing.get("part_number")), _alnum(listing.get("model"))) if len(v) >= 4]
+        lot = lot_part_codes(listing)
         for value in _rule_values(rules.get("part_numbers")):
-            wanted = _alnum(value)
-            if len(wanted) >= 4 and any(have == wanted or wanted in have for have in lot):
+            if is_part_code(value) and _alnum(value) in lot:
                 return ("part", f"rules_out.part_numbers includes {value}")
         minimum = _min_pack_voltage(buyer)
-        voltage = listing.get("voltage_v")
+        voltage = lot_voltage_v(listing)
         if minimum and fmt in {"packs", "systems"} and voltage is not None and float(voltage) < minimum:
             return ("voltage", f"Packs below {minimum:g} V")
 

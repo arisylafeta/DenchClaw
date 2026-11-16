@@ -59,10 +59,27 @@ describe("Matches tab", () => {
     fireEvent.click(toggle);
     expect(screen.getByText("Cellco")).toBeTruthy();
     expect(screen.getByText("No loose cells, said 14 Sep")).toBeTruthy();
-    fireEvent.click(within(screen.getByText("Cellco").closest("li")!).getByRole("button", { name: "Add to offers" }));
+    const item = () => within(screen.getByText("Cellco").closest("li")!);
+    // One click only asks; nothing is saved until the buyer is confirmed, and Cancel saves nothing.
+    fireEvent.click(item().getByRole("button", { name: "Add to offers" }));
+    expect(screen.getByText("Add despite: No loose cells?")).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    fireEvent.click(item().getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Add despite: No loose cells?")).toBeNull();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    fireEvent.click(item().getByRole("button", { name: "Add to offers" }));
+    fireEvent.click(item().getByRole("button", { name: "Add anyway" }));
     await waitFor(() => expect(screen.getByText(/In offers/)).toBeTruthy());
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST")!;
-    expect(JSON.parse(String(post[1]!.body)).data.match.ruled_out_override).toBe(true);
+    expect(JSON.parse(String(post[1]!.body)).data.match).toMatchObject({ reason: "Added despite: No loose cells", rank: null, ruled_out_override: true });
+  });
+
+  it("counts every dossier no-go but lists the first rows the server sent", async () => {
+    const ruled = row({ key: "company:c9", name: "Cellco", companyId: "c9", reason: "No loose cells", checks: [], price: null, ruledOut: { text: "No loose cells", seen: null, source: null } });
+    vi.stubGlobal("fetch", vi.fn(async () => json(result([row()], { ruledOut: [ruled], ruledOutTotal: 31 }))));
+    render(<SupplyMatchesTab listingId="bts_1" active />);
+    fireEvent.click(await screen.findByRole("button", { name: /Ruled out \(31\)/ }));
+    expect(screen.getByText("Showing 1 of 31.")).toBeTruthy();
   });
 
   it("expands the full key only when asked, or by itself for a disputed or mixed lot", async () => {

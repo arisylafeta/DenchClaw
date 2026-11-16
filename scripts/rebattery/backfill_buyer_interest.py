@@ -400,10 +400,29 @@ def clean_model(model):
     return text, kwh, False
 
 
+def _known_model_piece(part, own):
+    """A piece of a slash list stands for a model: a brand with something left, or a name of two or more characters.
+    "Model S/X" is one model, not "Model S" and a bare "X"."""
+    part = " ".join(part.split())
+    for name in sorted((make for make in own if make), key=len, reverse=True):
+        if re.match(rf"{re.escape(name)}\b", part, re.IGNORECASE):
+            part = part[len(name):].strip()
+            break
+    else:
+        brand = _BRAND_START.match(part)
+        if brand:
+            part = part[brand.end():].strip()
+    return len(re.sub(r"[^0-9A-Za-z]", "", _FORMAT_WORD.sub(" ", part))) >= 2
+
+
 def _model_pieces(model, makes):
-    """A list of models split into (make, format, model_text) pieces; a single model is one piece."""
+    """A list of models split into (make, format, model_text) pieces; a single model is one piece.
+
+    A "/" splits only when every piece is a model of its own ("ID.3/ID.4"); otherwise it belongs to the model."""
     text = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", model or "")
     parts = [part for part in re.split(r"\s*(?:,|;|/|\band\b)\s*", text, flags=re.IGNORECASE) if part and part.strip()]
+    if "/" in text and not all(_known_model_piece(part, makes) for part in parts):
+        parts = [part for part in re.split(r"\s*(?:,|;|\band\b)\s*", text, flags=re.IGNORECASE) if part and part.strip()]
     if len(parts) < 2:
         return None
     own = sorted((make for make in makes if make), key=len, reverse=True)
@@ -480,9 +499,15 @@ def product_facts(product):
             fact["kwh"] = found
         if cleaned and not _is_prose(cleaned):
             fact["model"] = cleaned
+        # A piece with no usable model and nothing of its own (no format) adds only a make-only line; when the
+        # product already states a make, that line is the product's own and the piece must not widen it.
+        if "model" not in fact and not fmt and base.get("make"):
+            continue
         fact["raw_model"] = model
         if fact not in variants:
             variants.append(fact)
+    if not variants:
+        return [{key: value for key, value in base.items() if key != "model"}]
     return variants
 
 
@@ -564,15 +589,31 @@ def _write_line(cur, company_id, kind, ownership, keyed, seen, refs, reason=None
                      reason))
 
 
+ARCHIVE_TABLE = "buyer_interest_removed_20261115"
+
+
+def _remove_dossier_lines(cur, company_id):
+    """Drop this company's earlier dossier lines before they are rewritten, so a key the dossier no longer produces
+    (an old raw-model key, a product since removed) never lingers beside the new ones. Archived first when the
+    archive table exists; otherwise skipped."""
+    cur.execute("select to_regclass(%s) as name", (f"public.{ARCHIVE_TABLE}",))
+    if (cur.fetchone() or {}).get("name"):
+        cur.execute(f"insert into {ARCHIVE_TABLE} select * from buyer_interest where company_id = %s and id like 'bi_dossier_%%'",
+                    (company_id,))
+    cur.execute("delete from buyer_interest where company_id = %s and id like 'bi_dossier_%%'", (company_id,))
+    return cur.rowcount
+
+
 def sync_dossier_rows(cur, companies):
     """One mastered line per dossier product and per make it states; the frontmatter itself is left as it is."""
-    written, skipped, from_source, no_facts, truncated, errors, superseded = 0, 0, 0, 0, 0, 0, 0
+    written, skipped, from_source, no_facts, truncated, errors, superseded, removed = 0, 0, 0, 0, 0, 0, 0, 0
     for company in companies:
         frontmatter, _body = buyer_dossier.parse(company.get("buyer_dossier") or "")
         products = frontmatter.get("products") or []
         if isinstance(products, dict):  # a mapping instead of a list: one product
             products = [products]
         last_verified = frontmatter.get("last_verified")
+        removed += _remove_dossier_lines(cur, company["id"])
         for index, product in enumerate(products):
             if not isinstance(product, dict):
                 skipped += 1
@@ -634,7 +675,7 @@ def sync_dossier_rows(cur, companies):
                                          and d.kind = 'declined' and d.product_key = w.product_key
                                          and d.last_seen >= w.last_seen)""", (company["id"],))
         superseded += cur.rowcount
-    return {"companies": len(companies), "written": written, "skipped": skipped, "superseded_by_decline": superseded,
+    return {"companies": len(companies), "written": written, "skipped": skipped, "superseded_by_decline": superseded, "removed_before_rewrite": removed,
             "already_from_source": from_source, "no_facts": no_facts, "truncated": truncated, "errors": errors}
 
 

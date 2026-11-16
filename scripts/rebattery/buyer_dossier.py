@@ -193,6 +193,13 @@ def entry_value(item):
     return item if isinstance(item, str) else None
 
 
+def is_part_code(value):
+    """A refused part or cell model code: 6+ characters once spaces and dashes go, with a letter and a digit.
+    Mirrored by isPartCode in apps/web/lib/buyer-dossier.ts."""
+    code = re.sub(r"[^A-Z0-9]", "", str(value).upper())
+    return len(code) >= 6 and bool(re.search(r"[A-Z]", code)) and bool(re.search(r"\d", code))
+
+
 def _check_entry_list(errors, where, value, allowed=None, label="value"):
     """A list whose items are plain values, or {value, seen, src} mappings that date the evidence.
 
@@ -337,6 +344,11 @@ def validate(frontmatter):
                 errors.append(f"rules_out.{key}: must be true, false or null, got {value!r}")
         _check_entry_list(errors, "rules_out.other", rules_out.get("other"))
         _check_entry_list(errors, "rules_out.part_numbers", rules_out.get("part_numbers"))
+        if isinstance(rules_out.get("part_numbers"), list):
+            for i, item in enumerate(rules_out["part_numbers"]):
+                value = item.get("value") if isinstance(item, dict) else item
+                if isinstance(value, str) and value.strip() and not is_part_code(value):
+                    errors.append(f"rules_out.part_numbers[{i}]: {value!r} is not a part code (6 or more letters and digits, with at least one of each)")
 
     products = frontmatter.get("products") or []
     if not isinstance(products, list):

@@ -23,6 +23,7 @@ import {
   type SupplyFacts,
 } from "../../../apps/web/lib/match/rules.ts";
 import { productKeyFor } from "../../../apps/web/lib/match/product-key-for.ts";
+import { voltageFromText } from "../../../apps/web/lib/match/product-key.ts";
 
 type RawBuyer = {
   id: string;
@@ -87,7 +88,9 @@ const toSupplyFacts = (listing: Record<string, unknown>): SupplyFacts => {
     kwhMax: pick<number>("kwhMax", "kwh_max"),
     moduleSeries: pick<string>("moduleSeries", "module_series"),
     partNumber: pick<string>("partNumber", "part_number"),
-    voltageV: pick<number>("voltageV", "voltage_v"),
+    cellModel: pick<string>("cellModel", "cell_model") ?? (String(listing.format ?? "").toLowerCase() === "cells" ? pick<string>("model", "model") : null),
+    // The lot's voltage text is read the way the platform reads a listing's voltage field.
+    voltageV: voltageFromText(String(listing.voltage ?? ""), ["packs", "systems"].includes(String(listing.format ?? "").toLowerCase())),
     units: pick<number>("units", "units"),
     sellerPriceEurPerKwh: pick<number>("sellerPriceEurPerKwh", "seller_price_eur_per_kwh"),
     sellerPriceEurPerUnit: pick<number>("sellerPriceEurPerUnit", "seller_price_eur_per_unit"),

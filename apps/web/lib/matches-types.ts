@@ -139,6 +139,8 @@ export type MatchesResult = {
   rows: MatchRow[];
   /** Supply tab: buyers a dossier rule excludes, kept visible with the rule. Adding one to offers is an explicit override. */
   ruledOut?: MatchRow[];
+  /** How many dossier no-gos there are; the list shows the first 25. */
+  ruledOutTotal?: number;
   /** How many candidates were scored, for the quiet line under the header. */
   considered: number;
   blocked: string | null;

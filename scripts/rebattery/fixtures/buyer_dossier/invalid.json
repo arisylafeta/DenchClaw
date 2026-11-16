@@ -31,7 +31,11 @@
         "LTO",
         "Lead acid"
       ],
-      "damaged": "no"
+      "damaged": "no",
+      "part_numbers": [
+        "2170",
+        "NCR2170M"
+      ]
     },
     "alerts": [
       {
@@ -57,6 +61,7 @@
     "min_soh: 120 is outside 0-100",
     "rules_out.chemistries[1]: 'Lead acid' is not a valid chemistry (LFP, NMC, NCA, LMO, LMFP, LTO, Sodium-ion, Lead-acid, Mixed)",
     "rules_out.damaged: must be true, false or null, got 'no'",
+    "rules_out.part_numbers[0]: '2170' is not a part code (6 or more letters and digits, with at least one of each)",
     "products[0].status: 'maybe' is not a valid status (bought, asked, said_interested, declined)",
     "products[0].format: 'crates' is not a valid format (Cells, Modules, Packs, Systems)",
     "products[0].chemistry: 'LCO' is not a valid chemistry (LFP, NMC, NCA, LMO, LMFP, LTO, Sodium-ion, Lead-acid, Mixed)",

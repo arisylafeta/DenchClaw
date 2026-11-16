@@ -124,6 +124,20 @@ class CleanModel(unittest.TestCase):
         self.assertEqual([(f["make"], f.get("format"), f.get("model")) for f in facts],
                          [("CALB", "cells", None), ("EVE", "modules", None)])
 
+    def test_a_slash_splits_only_when_every_piece_is_a_model(self):
+        facts = self.backfill.product_facts({"make": "Volkswagen", "model": "ID.3/ID.4"})
+        self.assertEqual([f.get("model") for f in facts], ["ID.3", "ID.4"])
+        [fact] = self.backfill.product_facts({"make": "Tesla", "model": "Model S/X"})
+        self.assertEqual(fact["model"], "Model S/X")
+        self.assertNotIn("X", [f.get("model") for f in self.backfill.product_facts({"make": "Tesla", "model": "Model S/X"})])
+
+    def test_a_piece_with_no_model_adds_no_make_only_line_when_the_product_states_a_make(self):
+        facts = self.backfill.product_facts({"make": "Volkswagen", "model": "ID.3, Cupra"})
+        self.assertEqual([(f["make"], f.get("model")) for f in facts], [("Volkswagen", "ID.3")])
+        # Nothing but model-less pieces: the product's own make-level fact is what stays.
+        facts = self.backfill.product_facts({"make": "Volkswagen", "model": "Cupra, Audi"})
+        self.assertEqual([(f["make"], f.get("model")) for f in facts], [("Volkswagen", None)])
+
 
 class Backfill(unittest.TestCase):
     @classmethod
@@ -639,6 +653,61 @@ The story, unchanged by this step.
         self.assertTrue({"model:volkswagen-id3", "model:cupra-born", "model:skoda-enyaq", "model:volkswagen-elroq",
                          "model:audi-q4etron"} <= set(lines), sorted(lines))
         self.assertFalse([key for key in lines if "cellsand" in key or "modules" in key.split(":", 1)[1].replace("any-modules", "")])
+
+    def test_a_slash_model_never_writes_a_bare_one_letter_model(self):
+        lines = self.dossier_products('''  - make: Tesla
+    model: "Model S/X"
+    format: packs
+    status: "asked"
+    seen: "2026-10-07"''')
+        self.assertFalse([key for key in lines if key.endswith("-x") or key.endswith(":x")], sorted(lines))
+
+    def test_stale_dossier_lines_are_removed_and_archived_before_the_rewrite(self):
+        with self.cursor() as cur:
+            cur.execute("create table if not exists buyer_interest_removed_20261115 (like buyer_interest)")
+        self.conn.commit()
+        try:
+            self.dossier_products('''  - make: Panasonic
+    model: NCR2170M
+    format: cells
+    status: asked
+    seen: "2026-10-16"''')
+            with self.cursor() as cur:
+                cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key, product_key_level,
+                                 make, raw_product, first_seen, last_seen, quantity_basis, source_refs, expires_on)
+                               select 'bi_dossier_stale_key', company_id, kind, 'mastered', 'model:old-raw-model-key', product_key_level,
+                                 make, raw_product, first_seen, last_seen, quantity_basis, source_refs, expires_on
+                                 from buyer_interest where company_id = %s limit 1""", (self.dossier_company,))
+            self.conn.commit()
+            self.assertIn("model:old-raw-model-key", {line["product_key"] for line in self.lines(self.dossier_company)})
+            result = self.convert()
+            keys = {line["product_key"] for line in self.lines(self.dossier_company)}
+            self.assertEqual(keys, {"model:panasonic-ncr2170m"})
+            self.assertGreaterEqual(result["removed_before_rewrite"], 2)
+            with self.cursor() as cur:
+                cur.execute("select product_key from buyer_interest_removed_20261115 where company_id = %s", (self.dossier_company,))
+                archived = {row["product_key"] for row in cur.fetchall()}
+            self.assertIn("model:old-raw-model-key", archived)
+        finally:
+            with self.cursor() as cur:
+                cur.execute("drop table if exists buyer_interest_removed_20261115")
+            self.conn.commit()
+
+    def test_a_sync_without_the_archive_table_still_clears_stale_lines(self):
+        self.dossier_products('''  - make: Panasonic
+    model: NCR2170M
+    format: cells
+    status: asked
+    seen: "2026-10-16"''')
+        with self.cursor() as cur:
+            cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key, product_key_level,
+                             make, raw_product, first_seen, last_seen, quantity_basis, source_refs, expires_on)
+                           select 'bi_dossier_stale_key2', company_id, kind, 'mastered', 'model:old-raw-model-key', product_key_level,
+                             make, raw_product, first_seen, last_seen, quantity_basis, source_refs, expires_on
+                             from buyer_interest where company_id = %s limit 1""", (self.dossier_company,))
+        self.conn.commit()
+        self.convert()
+        self.assertEqual({line["product_key"] for line in self.lines(self.dossier_company)}, {"model:panasonic-ncr2170m"})
 
     def test_a_declined_product_keeps_its_reason(self):
         lines = self.dossier_products('''  - make: Panasonic

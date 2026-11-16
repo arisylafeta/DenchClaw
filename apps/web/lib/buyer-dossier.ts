@@ -294,6 +294,12 @@ function entryValue(item: unknown): string | null {
  * A list whose items are plain values, or {value, seen, src} mappings that date the evidence.
  * The plain form stays valid, so existing dossiers need no edit.
  */
+/** A refused part or cell model code: 6+ characters once spaces and dashes go, with a letter and a digit. Mirrored in buyer_dossier.py. */
+const isPartCode = (value: string) => {
+  const code = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return code.length >= 6 && /[A-Z]/.test(code) && /\d/.test(code);
+};
+
 function checkEntryList(errors: string[], where: string, value: unknown, allowed: string[] | null, label = "value"): void {
   if (value === null || value === undefined) {
     return;
@@ -470,6 +476,14 @@ export function validateDossier(frontmatter: unknown): string[] {
     }
     checkEntryList(errors, "rules_out.other", rulesOut.other, null);
     checkEntryList(errors, "rules_out.part_numbers", rulesOut.part_numbers, null);
+    if (Array.isArray(rulesOut.part_numbers)) {
+      rulesOut.part_numbers.forEach((item, index) => {
+        const value = isRecord(item) ? item.value : item;
+        if (typeof value === "string" && value.trim() && !isPartCode(value)) {
+          errors.push(`rules_out.part_numbers[${index}]: ${pyRepr(value)} is not a part code (6 or more letters and digits, with at least one of each)`);
+        }
+      });
+    }
   }
 
   const products = fm.products || [];

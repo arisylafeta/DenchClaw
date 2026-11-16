@@ -294,6 +294,8 @@ export async function supplyMatchesV2(listingId: string): Promise<MatchesResult 
     asOf, top: 30, verdicts: companyVerdicts, key,
   });
 
+  const noGos = ranked.ruledOut.filter(isDossierNoGo).toSorted((a, b) => compareName(a.name, b.name));
+  const shownNoGos = noGos.slice(0, RULED_OUT_CAP);
   // The main contact we can actually write to, so the offer carries a real address.
   const contacts = await queryPg<{ company_id: string; person_id: string; email: string | null }>(
     `select distinct on (p.company_id) p.company_id, p.id as person_id, p.email
@@ -302,7 +304,7 @@ export async function supplyMatchesV2(listingId: string): Promise<MatchesResult 
      order by p.company_id,
        (p.email is not null and not coalesce(p.email_opted_out, false)) desc,
        (p.id = c.buyer_main_contact_id) desc, p.full_name`,
-    [[...ranked.ranked.map((row) => row.companyId), ...ranked.ruledOut.filter((row) => row.kind === "rule").map((row) => row.companyId)]],
+    [[...ranked.ranked.map((row) => row.companyId), ...shownNoGos.map((row) => row.companyId)]],
   );
   const contactOf = new Map(contacts.map((row) => [row.company_id, row]));
 
@@ -312,9 +314,7 @@ export async function supplyMatchesV2(listingId: string): Promise<MatchesResult 
   }
   const listed = rows.map((row, index) => ({ ...row, rank: index + 1 }));
   // A dossier rule excludes a buyer from the ranking, never from sight. "Marked not a fit" stays hidden: that is our own call.
-  const ruledOut = ranked.ruledOut
-    .filter((row) => row.kind === "rule")
-    .toSorted((a, b) => compareName(a.name, b.name))
+  const ruledOut = shownNoGos
     .map((row, index) => ruledOutRow(row, index + 1, asOf, contactOf.get(row.companyId) ?? null, touch.get(row.companyId) ?? null, offers));
 
   return {
@@ -323,6 +323,7 @@ export async function supplyMatchesV2(listingId: string): Promise<MatchesResult 
     lotKey,
     rows: listed,
     ruledOut,
+    ruledOutTotal: noGos.length,
     considered: demand.length + ranked.evaluated,
     blocked: listed.length ? null : "Nothing fits yet. Add a dossier or a listing field to widen the match.",
     errors: [],
@@ -346,6 +347,10 @@ function buyerRow(buyer: RankedBuyerRow, contact: { person_id: string; email: st
     stockId: null,
   };
 }
+
+/** Only a dossier no-go reaches the list, each with its own text. A buy box mismatch or a kWh gap is not a refusal. */
+export const RULED_OUT_CAP = 25;
+export const isDossierNoGo = (row: RuledOutRow) => row.kind === "rule" && !!row.text;
 
 const compareName = (a: string, b: string) => a.localeCompare(b, "en");
 

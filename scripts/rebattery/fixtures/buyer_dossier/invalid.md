@@ -18,6 +18,7 @@ products:
 rules_out:
   chemistries: [LTO, "Lead acid"]
   damaged: "no"
+  part_numbers: ["2170", NCR2170M]
 alerts:
   - filters:
       format: [pack]

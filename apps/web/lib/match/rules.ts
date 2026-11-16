@@ -24,6 +24,8 @@ export type SupplyFacts = {
   kwhMax?: number | null;
   moduleSeries?: string | null;
   partNumber?: string | null;
+  /** The cell model code of a cell lot (NCR2170M), never a vehicle model. */
+  cellModel?: string | null;
   /** Pack nominal voltage in volts, when the listing states one. */
   voltageV?: number | null;
   units?: number | null;
@@ -499,15 +501,24 @@ function ruleEntry(raw: unknown, matches: (value: string) => boolean): { seen?: 
 
 const alnum = (text: unknown) => String(text ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-/** A lot whose part number or cell model is the one the buyer refuses (`rules_out.part_numbers`). */
+/** A part or cell model code is at least 6 characters with a letter and a digit once upper-cased and stripped to A-Z, 0-9. */
+export const isPartCode = (value: unknown) => {
+  const code = alnum(value);
+  return code.length >= 6 && /[A-Z]/.test(code) && /\d/.test(code);
+};
+
+/**
+ * A lot whose part number or cell model code is exactly one the buyer refuses (`rules_out.part_numbers`).
+ * Exact after upper-casing and stripping spaces and dashes: NCR2170M does not rule out NCR2170M-4, and the
+ * vehicle model never counts.
+ */
 function partRule(supply: SupplyFacts, rules: Record<string, unknown>): RuleOut | null {
-  const lot = [supply.partNumber, supply.model].map(alnum).filter((value) => value.length >= 4);
+  const lot = [supply.partNumber, supply.cellModel].map(alnum).filter((value) => value.length > 0);
   if (!lot.length) { return null; }
   const items = Array.isArray(rules.part_numbers) ? rules.part_numbers : [];
   for (const item of items) {
     const value = ruleEntryValue(item);
-    const wanted = alnum(value);
-    if (value && wanted.length >= 4 && lot.some((have) => have === wanted || have.includes(wanted))) {
+    if (value && isPartCode(value) && lot.includes(alnum(value))) {
       return { code: "part", detail: `rules_out.part_numbers includes ${value}`, text: `No ${value}`, ...ruleEntry(item, (entry) => entry === value) };
     }
   }
@@ -530,7 +541,7 @@ function minPackVoltage(buyer: BuyerFacts): { value: number; seen?: string; src?
 const voltageApplies = (supply: SupplyFacts) => ["packs", "systems"].includes(String(supply.format ?? "").toLowerCase());
 
 /** Why this buyer is ruled out of this lot, or null. Only a conflict both sides state rules anyone out. */
-export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts, ignoreBuyBoxLists = false): RuleOut | null {
+export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts, ignoreBuyBoxLists = false, asOf: string = new Date().toISOString().slice(0, 10)): RuleOut | null {
   const isDossier = hasDossier(buyer);
   const rules = isDossier ? dossierRules(buyer) : {};
   const profile = buyer.profile;
@@ -616,16 +627,16 @@ export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts, ignoreBuyBoxList
     const minV = minPackVoltage(buyer);
     if (minV && voltageApplies(supply) && supply.voltageV != null && supply.voltageV < minV.value) {
       const text = `Packs below ${minV.value} V`;
-      const said = minV.seen ? `, said ${shortDate(minV.seen, minV.seen.slice(0, 4))}` : "";
+      const said = minV.seen ? `, said ${shortDate(minV.seen, asOf)}` : "";
       return { code: "voltage", detail: `${text}${said}`, text, ...(minV.seen ? { seen: minV.seen } : {}), ...(minV.src ? { src: minV.src } : {}) };
     }
   }
   if (isDossier && supply.damagedMixed && rules.damaged === true) {
-    return { code: "damaged", detail: "buyer will not take damaged stock" };
+    return { code: "damaged", detail: "buyer will not take damaged stock", text: "No damaged stock" };
   }
   if (fmt === "systems") {
     if (isDossier && rules.bess_systems === true) {
-      return { code: "bess", detail: "buyer will not take containerised/stationary systems" };
+      return { code: "bess", detail: "buyer will not take containerised/stationary systems", text: "No containerised or stationary systems" };
     }
     const statedFormats = list(profile.formats).map((value) => value.toLowerCase());
     if (statedFormats.length === 1 && statedFormats[0] === "packs") {
@@ -839,7 +850,7 @@ export function buyBoxOverride(supply: SupplyFacts, buyer: BuyerFacts, asOf: str
 
 /** Rule-out with line overrides applied: the buy box lists are skipped when a line overrides them. */
 export function ruleOutWithLines(supply: SupplyFacts, buyer: BuyerFacts, asOf: string): RuleOut | null {
-  return buyBoxOverride(supply, buyer, asOf) ? ruleOut(supply, buyer, true) : ruleOut(supply, buyer);
+  return buyBoxOverride(supply, buyer, asOf) ? ruleOut(supply, buyer, true, asOf) : ruleOut(supply, buyer, false, asOf);
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -966,6 +977,7 @@ export function supplyFactsFromKey(key: ProductKey, listing: { title?: string | 
     kwhMax: line.unknown.kwh ? null : line.kwhMax,
     moduleSeries: line.moduleSeries,
     partNumber: line.partNumber,
+    cellModel: line.format === "Cells" ? line.model : null,
     voltageV: key.voltageV ?? null,
     units: line.units ?? (index === 0 ? key.units : null),
     // A seller price orders the list only when it is one firm amount; the key has already enforced that.

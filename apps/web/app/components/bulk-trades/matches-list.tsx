@@ -44,6 +44,7 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
   const [showAll, setShowAll] = useState(false);
   const [showRuledOut, setShowRuledOut] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
   const [quick, setQuick] = useState<string | null>(null);
   const [note, setNote] = useState("");
@@ -81,6 +82,7 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
   const rows = showAll ? result.rows : result.rows.slice(0, 10);
   const hidden = result.rows.length - rows.length;
   const ruledOut = result.ruledOut ?? [];
+  const ruledOutTotal = Math.max(result.ruledOutTotal ?? 0, ruledOut.length);
 
   /**
    * Adds one offer. `batch`: a supplier from Group matches, whose offer records every stock line on the buyer's pack
@@ -99,7 +101,10 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
         // A matched row is a CRM company or person, so the server refuses a name-only add from here.
         source: "match",
         data: {
-          match: { reason: row.reason, rank: row.rank, at: new Date().toISOString(), ...(row.ruledOut ? { ruled_out_override: true } : {}) },
+          // A ruled-out row has no place in the ranking, so it carries no rank and says why it was added.
+          match: row.ruledOut
+            ? { reason: `Added despite: ${row.ruledOut.text}`, rank: null, at: new Date().toISOString(), ruled_out_override: true }
+            : { reason: row.reason, rank: row.rank, at: new Date().toISOString() },
           // A grouped row is still one offer per supplier: the cheapest unit stays the offer's stock line (No stock marks it),
           // and every unit's stock line is kept for the unit picking that comes next (slice 4).
           ...(row.stockId ? { stock_opportunity_id: row.stockId } : {}),
@@ -320,7 +325,7 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
             onClick={() => setShowRuledOut(!showRuledOut)}
           >
             {showRuledOut ? <ChevronDown size={14} className="shrink-0" aria-hidden /> : <ChevronRight size={14} className="shrink-0" aria-hidden />}
-            Ruled out ({ruledOut.length})
+            Ruled out ({ruledOutTotal})
           </button>
           {showRuledOut && (
             <ul id="matches-ruled-out" className="flex flex-col">
@@ -343,15 +348,28 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
                         <StatusDot tone={row.offer.stage === "declined" || row.offer.stage === "lost" ? "red" : "green"} />
                         In offers · {STAGE_LABEL[row.offer.stage as OfferStage] ?? row.offer.stage} {offerDate(row.offer.date)}
                       </button>
+                    ) : confirming === row.key ? (
+                      <>
+                        <span className="text-[12px]" role="alert">Add despite: {row.ruledOut?.text}?</span>
+                        <Button variant="secondary" size="small" disabled={adding === row.key} onClick={() => { setConfirming(null); void add(row); }}>
+                          {adding === row.key ? "Adding…" : "Add anyway"}
+                        </Button>
+                        <LinkButton variant="secondary" size="small" onClick={() => setConfirming(null)}>Cancel</LinkButton>
+                      </>
                     ) : (
-                      <Button variant="secondary" size="small" disabled={adding === row.key} onClick={() => void add(row)}>
-                        {adding === row.key ? "Adding…" : "Add to offers"}
+                      <Button variant="secondary" size="small" disabled={adding === row.key} onClick={() => setConfirming(row.key)}>
+                        Add to offers
                       </Button>
                     )}
                   </div>
                 </li>
               ))}
             </ul>
+          )}
+          {showRuledOut && ruledOutTotal > ruledOut.length && (
+            <p className="px-1 pt-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+              Showing {ruledOut.length} of {ruledOutTotal}.
+            </p>
           )}
         </div>
       )}

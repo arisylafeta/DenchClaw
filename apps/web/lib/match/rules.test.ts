@@ -46,7 +46,7 @@ describe("rule_out", () => {
   it("rules out a pack below the buyer's minimum voltage, and only checks when none is stated", () => {
     const fm = { min_pack_voltage: { value: 450, seen: "2026-08-20", src: "gmail_msg_test" } };
     const b = buyer({ dossier: { frontmatter: fm } });
-    const out = ruleOut(listing({ voltageV: 400 }), b);
+    const out = ruleOut(listing({ voltageV: 400 }), b, false, "2026-11-01");
     expect(out).toMatchObject({ code: "voltage", detail: "Packs below 450 V, said 20 Aug", seen: "2026-08-20", src: "gmail_msg_test" });
     expect(ruleOut(listing({ voltageV: 800 }), b)).toBeNull();
     expect(ruleOut(listing({ voltageV: null }), b)).toBeNull();
@@ -59,11 +59,59 @@ describe("rule_out", () => {
     expect(rankBuyers(supplyFactsFromKey(stated), [b], { asOf: "2026-11-01", key: stated }).ruledOut[0]).toMatchObject({ code: "voltage" });
   });
 
+  it("shows the year in the voltage said date when it is not the ranking year", () => {
+    const b = buyer({ dossier: { frontmatter: { min_pack_voltage: { value: 450, seen: "2026-08-20" } } } });
+    expect(ruleOut(listing({ voltageV: 400 }), b, false, "2027-01-10")?.detail).toBe("Packs below 450 V, said 20 Aug 2026");
+  });
+
+  it("reads a listing voltage only from a figure with V, and treats a module or cell figure as unknown", () => {
+    const key = (voltage: string, format = "Packs") => buildProductKey({ fields: [
+      { field_key: "voltage", value: voltage, status: "confirmed" }, { field_key: "format", value: format, status: "confirmed" },
+      { field_key: "capacity", value: "50 kWh per pack", status: "confirmed" }] });
+    expect(key("400 V").voltageV).toBe(400);
+    expect(key("400").voltageV).toBe(400);
+    expect(key("350-400V").voltageV).toBe(400);
+    expect(key("100 / 48 V", "Modules").voltageV).toBe(48);
+    expect(key("100 / 48").voltageV).toBeNull();
+    expect(key("14.4 V").voltageV).toBeNull();
+    expect(key("14.4 V", "Modules").voltageV).toBe(14.4);
+    expect(key("400 V and 800 V").voltageV).toBeNull();
+    // A module figure on a pack lot is unknown: a check, never an exclusion.
+    const b = buyer({ dossier: { frontmatter: { min_pack_voltage: { value: 450 } } } });
+    const supplies = supplyFactsFromKey(key("14.4 V"));
+    expect(ruleOut(supplies[0], b)).toBeNull();
+    expect(rankBuyers(supplies, [b], { asOf: "2026-11-01", key: key("14.4 V") }).ranked[0].checks).toContain("Voltage not stated; they need at least 450 V");
+  });
+
+  it("matches a refused part number exactly, after upper-casing and dropping spaces and dashes, never a vehicle model", () => {
+    const b = buyer({ dossier: { frontmatter: { rules_out: { part_numbers: ["NCR2170M", "2170", "Model S"] } } } });
+    expect(ruleOut(listing({ format: "cells", cellModel: "ncr-2170 m" }), b)?.code).toBe("part");
+    expect(ruleOut(listing({ format: "cells", cellModel: "NCR2170M-4" }), b)).toBeNull();
+    expect(ruleOut(listing({ format: "cells", cellModel: "Panasonic NCR2170M" }), b)).toBeNull();
+    expect(ruleOut(listing({ format: "cells", cellModel: "Samsung 2170" }), b)).toBeNull();
+    expect(ruleOut(listing({ format: "cells", cellModel: "21700" }), b)).toBeNull();
+    // A vehicle model is not a cell code, even when it spells the refused code.
+    expect(ruleOut(listing({ format: "packs", model: "NCR2170M" }), b)).toBeNull();
+    expect(ruleOut(listing({ model: "Model S", cellModel: null }), b)).toBeNull();
+    const key = buildProductKey({ fields: [{ field_key: "model", value: "NCR2170M", status: "confirmed" }, { field_key: "format", value: "cells", status: "confirmed" }] });
+    expect(ruleOut(supplyFactsFromKey(key)[0], b)?.code).toBe("part");
+  });
+
+  it("gives only a dossier no-go a text; a buy box mismatch has none", () => {
+    const legacy = rankBuyers([listing()], [buyer({ profile: { chemistries: ["LFP"], formats: ["Packs"] } })], { asOf: "2026-11-01" }).ruledOut[0];
+    expect(legacy).toMatchObject({ code: "chemistry", kind: "rule" });
+    expect(legacy.text).toBeUndefined();
+    const dossier = buyer({ dossier: { frontmatter: { rules_out: { damaged: true, bess_systems: true } } } });
+    expect(ruleOut(listing({ damagedMixed: true }), dossier)?.text).toBe("No damaged stock");
+    expect(ruleOut(listing({ format: "systems" }), dossier)?.text).toBe("No containerised or stationary systems");
+    expect(ruleOut(listing({ wholeBatch: true }), buyer({ dossier: { frontmatter: { quantity: { whole_batch_ok: false } } } }))?.text).toBeUndefined();
+  });
+
   it("rules out a lot whose part number or cell model the buyer refuses", () => {
     const b = buyer({ dossier: { frontmatter: { rules_out: { part_numbers: [{ value: "NCR2170M", seen: "2026-10-24", src: "gmail_msg_test" }] } } } });
-    expect(ruleOut(listing({ format: "cells", model: "Panasonic NCR-2170M" }), b)).toMatchObject({ code: "part", seen: "2026-10-24" });
+    expect(ruleOut(listing({ format: "cells", cellModel: "NCR-2170M" }), b)).toMatchObject({ code: "part", seen: "2026-10-24" });
     expect(ruleOut(listing({ format: "cells", partNumber: "NCR2170M" }), b)?.code).toBe("part");
-    expect(ruleOut(listing({ format: "cells", model: "Samsung 50E" }), b)).toBeNull();
+    expect(ruleOut(listing({ format: "cells", cellModel: "Samsung 50E" }), b)).toBeNull();
   });
 
   it("rules out a buyer who will not take a whole batch", () => {

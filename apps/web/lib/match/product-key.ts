@@ -64,7 +64,7 @@ export type ProductKey = {
   format: KeyFormat | null;
   chemistry: string | null;
   sellerPrice: SellerPrice | null;
-  /** The pack nominal voltage the listing states (its highest stated figure), in volts. Null when none is stated. */
+  /** The pack nominal voltage the listing states, in volts. Null when none is stated. */
   voltageV: number | null;
   /** Why a stated price was not used, in plain words. */
   priceNote: string | null;
@@ -473,15 +473,36 @@ function priceOf(text: string, status: FieldStatus): { price: SellerPrice | null
  * The product key for one listing: its field rows plus the title/summary text.
  * Nothing here calls a model; the same input always yields the same key.
  */
-/** The nominal pack voltage in volts from the listing's voltage fields ("400 V", "350-400V", "400"); the highest figure stated. */
-export function voltageFrom(fields: Map<string, FieldFact>): number | null {
+/** A pack lot's nominal voltage is never below this; a smaller figure is a module or cell figure. */
+export const MIN_PACK_VOLTS = 60;
+
+/**
+ * The nominal voltage a voltage field states: a figure followed by V ("400 V", "350-400V"), or a field that is
+ * only a number ("400"). Bare numbers inside mixed text are ignored ("100 / 48 V" reads 48, never 100).
+ * `pack`: figures below 60 V are a module or cell figure, so the voltage stays unknown. When the text states more
+ * than one distinct voltage there is no single pack voltage to apply, so it stays unknown too.
+ */
+export function voltageFromText(text: string, pack = false): number | null {
+  const clean = text.replace(/,/g, "").trim();
+  if (!clean) { return null; }
+  const found = new Set<number>();
+  if (/^\d+(?:\.\d+)?$/.test(clean)) {
+    found.add(Number(clean));
+  } else {
+    for (const match of clean.matchAll(/(\d+(?:\.\d+)?)(?:\s*(?:v|volts?)\b|\s*[-–]\s*(\d+(?:\.\d+)?)\s*(?:v|volts?)\b)/gi)) {
+      found.add(Number(match[2] ?? match[1]));
+    }
+  }
+  const figures = [...found].filter((value) => value > 0 && value < 2000 && !(pack && value < MIN_PACK_VOLTS));
+  return figures.length === 1 && found.size === figures.length ? figures[0] : null;
+}
+
+/** The nominal pack voltage in volts from the listing's voltage fields; null when none, or more than one, is stated. */
+export function voltageFrom(fields: Map<string, FieldFact>, pack = false): number | null {
   for (const key of ["voltage", "nominal_voltage", "pack_voltage", "voltage_v"]) {
     const row = fields.get(key);
     if (!row || !trusted(row.status ?? "missing")) { continue; }
-    const figures = [...asText(row.value).replace(/,/g, "").matchAll(/(\d+(?:\.\d+)?)\s*(?:v\b|volts?\b|$|[-–/])/gi)]
-      .map((match) => Number(match[1]))
-      .filter((value) => value > 0 && value < 2000);
-    if (figures.length) { return Math.max(...figures); }
+    return voltageFromText(asText(row.value), pack);
   }
   return null;
 }
@@ -579,7 +600,7 @@ export function buildProductKey(input: { fields: FieldFact[]; title?: string | n
     format,
     chemistry: chemKnown ? chemistries[0] : null,
     sellerPrice: price.price,
-    voltageV: voltageFrom(fields),
+    voltageV: voltageFrom(fields, format === "Packs" || format === "Systems"),
     priceNote: price.note,
     conflicts,
     notes,

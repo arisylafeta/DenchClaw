@@ -175,10 +175,29 @@ class RulesTest(unittest.TestCase):
             "min_pack_voltage": {"value": 450, "seen": "2026-08-20"},
             "rules_out": {"part_numbers": [{"value": "NCR2170M", "seen": "2026-10-24"}]},
         }})
-        self.assertEqual(rules.rule_out(self.listing(format="cells", model="Panasonic NCR-2170M"), buyer)[0], "part")
-        self.assertEqual(rules.rule_out(self.listing(voltage_v=400), buyer)[0], "voltage")
-        self.assertIsNone(rules.rule_out(self.listing(voltage_v=800), buyer))
+        self.assertEqual(rules.rule_out(self.listing(format="cells", model="NCR-2170M"), buyer)[0], "part")
+        self.assertEqual(rules.rule_out(self.listing(voltage="400 V"), buyer)[0], "voltage")
+        self.assertIsNone(rules.rule_out(self.listing(voltage="800 V"), buyer))
         self.assertIsNone(rules.rule_out(self.listing(), buyer))
+
+    def test_part_number_is_exact_and_never_a_vehicle_model(self) -> None:
+        buyer = self.buyer(dossier={"frontmatter": {"rules_out": {"part_numbers": ["NCR2170M", "2170"]}}})
+        self.assertIsNone(rules.rule_out(self.listing(format="cells", model="NCR2170M-4"), buyer))
+        self.assertIsNone(rules.rule_out(self.listing(format="cells", model="Samsung 2170"), buyer))
+        self.assertIsNone(rules.rule_out(self.listing(format="packs", model="NCR2170M"), buyer))
+        self.assertEqual(rules.rule_out(self.listing(format="cells", part_number="ncr 2170-m"), buyer)[0], "part")
+
+    def test_voltage_is_only_read_from_a_figure_with_v(self) -> None:
+        self.assertEqual(rules.voltage_from_text("400 V", True), 400)
+        self.assertEqual(rules.voltage_from_text("400", True), 400)
+        self.assertEqual(rules.voltage_from_text("350-400V", True), 400)
+        self.assertEqual(rules.voltage_from_text("100 / 48 V", False), 48)
+        self.assertIsNone(rules.voltage_from_text("100 / 48", True))
+        self.assertIsNone(rules.voltage_from_text("14.4 V", True))
+        self.assertEqual(rules.voltage_from_text("14.4 V", False), 14.4)
+        self.assertIsNone(rules.voltage_from_text("400 V and 800 V", True))
+        buyer = self.buyer(dossier={"frontmatter": {"min_pack_voltage": {"value": 450}}})
+        self.assertIsNone(rules.rule_out(self.listing(voltage="14.4 V"), buyer))
 
     def test_whole_batch_conflict(self) -> None:
         buyer = self.buyer(dossier={"frontmatter": {"quantity": {"whole_batch_ok": False}}, "body": ""})

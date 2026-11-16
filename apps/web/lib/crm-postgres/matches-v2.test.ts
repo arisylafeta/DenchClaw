@@ -35,7 +35,13 @@ describe.skipIf(!TEST_URL)("matches v2", () => {
         ('p4_co_other', 'Synthetic Other Buyer Ltd', 'Identified', null, 'researched',
          '{"chemistries": ["NMC"], "formats": ["Packs"]}'),
         ('p4_co_ruled', 'Synthetic Ruled Out Buyer Ltd', 'Qualified', 'B', 'stated',
-         '{"dossier": {"products": [{"format": "packs", "chemistry": "LFP", "status": "asked"}], "rules_out": {"chemistries": [{"value": "NMC", "seen": "2026-09-14", "src": "gmail_msg_x"}]}}}');
+         '{"dossier": {"products": [{"format": "packs", "chemistry": "LFP", "status": "asked"}], "rules_out": {"chemistries": [{"value": "NMC", "seen": "2026-09-14", "src": "gmail_msg_x"}]}}}'),
+        ('p4_co_legacy', 'Synthetic Legacy Box Buyer Ltd', 'Qualified', 'B', 'stated',
+         '{"chemistries": ["LFP"], "formats": ["Packs"]}'),
+        ('p4_co_partno', 'Synthetic Part Refuser Ltd', 'Qualified', 'B', 'stated',
+         '{"dossier": {"products": [{"format": "packs", "chemistry": "NMC", "status": "asked"}], "rules_out": {"part_numbers": [{"value": "SU001B5189", "seen": "2025-10-24"}]}}}'),
+        ('p4_co_partnear', 'Synthetic Part Near Miss Ltd', 'Qualified', 'B', 'stated',
+         '{"dossier": {"products": [{"format": "packs", "chemistry": "NMC", "status": "asked"}], "rules_out": {"part_numbers": [{"value": "SU001B518"}]}}}');
 
       insert into crm_bulk_listings (id, kind, party, summary, status, quantity, location, spec) values
         ('p4_sup_1', 'supply', 'Synthetic Dismantler Ltd', '40 Toyota Proace packs', 'open', '40 packs', 'GB',
@@ -132,8 +138,7 @@ describe.skipIf(!TEST_URL)("matches v2", () => {
     it("keeps a buyer a dossier rule excludes out of the ranking but visible, with the rule, date and source", async () => {
       const result = await supplyV2.supplyMatchesV2("p4_sup_1");
       expect(result!.rows.map((row) => row.companyId)).not.toContain("p4_co_ruled");
-      expect(result!.ruledOut).toHaveLength(1);
-      const [ruled] = result!.ruledOut!;
+      const ruled = result!.ruledOut!.find((row) => row.companyId === "p4_co_ruled")!;
       expect(ruled).toMatchObject({
         key: "company:p4_co_ruled", companyId: "p4_co_ruled", personId: "p4_pe_ruled", contact: "ruled@synthetic.test",
         reason: expect.stringMatching(/^No NMC cells, said 14 Sep/),
@@ -142,6 +147,16 @@ describe.skipIf(!TEST_URL)("matches v2", () => {
       });
       // Our own Not a fit call is not a rule: that buyer stays hidden.
       expect(result!.ruledOut!.map((row) => row.companyId)).not.toContain("p4_co_lfp");
+    });
+
+    it("lists only dossier no-gos: a legacy buy box mismatch and a near-miss part number stay out", async () => {
+      const result = await supplyV2.supplyMatchesV2("p4_sup_1");
+      const ids = result!.ruledOut!.map((row) => row.companyId).toSorted();
+      expect(ids).toEqual(["p4_co_partno", "p4_co_ruled"]);
+      expect(result!.ruledOutTotal).toBe(2);
+      const part = result!.ruledOut!.find((row) => row.companyId === "p4_co_partno")!;
+      expect(part.reason).toBe("No SU001B5189, said 24 Oct 2025");
+      expect(result!.rows.map((row) => row.companyId)).not.toContain("p4_co_legacy");
     });
 
     it("tags a researched-only company as a lead and gives it our contact", async () => {
