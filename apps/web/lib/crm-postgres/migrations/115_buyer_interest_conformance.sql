@@ -426,6 +426,7 @@ begin
     ('porsche', 'taycan', 'taycan', true),
     ('porsche', 'taycan 4s', 'taycan', true),
     ('porsche', 'taycan turbo', 'taycan', true),
+    ('proterra', 'onyx strata h4 15', 'onyxstratah415', true),
     ('renault', 'arkana', 'arkana', true),
     ('renault', 'austral', 'austral', true),
     ('renault', 'captur', 'captur', true),

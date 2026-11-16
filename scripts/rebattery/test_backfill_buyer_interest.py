@@ -550,9 +550,9 @@ The story, unchanged by this step.
             "broad:mg-lfp-packs", "broad:stellantis-lfp-packs", "broad:tesla-lfp-packs"])
 
     def test_a_row_that_states_no_product_gets_a_note_instead_of_a_line(self):
-        # A quantity and nothing else: the row names no product, so it is history without a want.
-        row_id = self.demand_row(status="closed", closed_reason="bought_elsewhere",
-                                 spec={"volume": 2, "volume_unit": "packs"})
+        # A quantity and nothing else: the row names no product, so it is noted, not written. (R2: a closed
+        # bought_elsewhere row writes nothing and never reaches the note, so the fixture is an open request.)
+        row_id = self.demand_row(spec={"volume": 2, "volume_unit": "packs"})
         self.sync([row_id])
         self.assertEqual(self.lines(), [])
         with self.cursor() as cur:

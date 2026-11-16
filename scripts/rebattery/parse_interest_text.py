@@ -983,11 +983,17 @@ def key_lines(cur, product, builder="sql", ts_table=None):
 def one_per_key(cur, pairs):
     """R4 within one source: one line per key, and none a more specific line of the same source already says.
     `pairs` is [(product, line)]; the survivors keep their order."""
-    seen, unique = set(), []
+    index, unique = {}, []
     for product, line in pairs:
-        if line["key"] not in seen:
-            seen.add(line["key"])
+        if line["key"] not in index:
+            index[line["key"]] = len(unique)
             unique.append((product, line))
+            continue
+        # A model-level key covers every format: two formats of one model are one line with the format left open.
+        first_product, first = unique[index[line["key"]]]
+        if first.get("format") != line.get("format"):
+            fact = {k: v for k, v in (first.get("fact") or {}).items() if k != "format"}
+            unique[index[line["key"]]] = (first_product, {**first, "format": None, "fact": fact})
     if len(unique) < 2:
         return unique
     from backfill_buyer_interest import _drop_redundant
