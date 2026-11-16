@@ -2,6 +2,10 @@
 """Imports saved searches into stated company profiles and sourcing requests as qualifying demand.
 
 Run without --apply to preview in a rolled-back transaction. --announce reports new requests only.
+A sourcing request becomes a Bulk Trades request only when bulk_request_gate passes it (at least 300 kWh or a EUR 20k
+budget, a purchase, a real buyer); every other request stays on the buyer's profile as interest. A request that gets
+in is flagged for review (context.review), with its size, the reasons and the buyer's mail history in a Story row,
+a driver and a first next action.
 Unsubscribing from alerts is not evidence that a buyer stopped buying; unsubscribed searches are skipped.
 For a company that has a buyer dossier the saved search is also recorded as a dated saved_search context note
 (the Buyer tab lists it as an alert) and the dossier is flagged stale, never rewritten. A sourcing request
@@ -21,6 +25,9 @@ HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location("demand_survey_import", HERE / "demand_survey_import.py")
 survey = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(survey)
+_gate_spec = importlib.util.spec_from_file_location("bulk_request_gate", HERE / "bulk_request_gate.py")
+gate = importlib.util.module_from_spec(_gate_spec)
+_gate_spec.loader.exec_module(gate)
 
 PLATFORM_ENV = Path("/root/.hermes/workspace/secrets/dench-platform-admin.env")
 SITE = "https://www.rebattery.io"
@@ -401,6 +408,62 @@ def fetch_sourcing_requests(env_path=PLATFORM_ENV):
 
 
 
+def next_working_day(today):
+    day = today + dt.timedelta(days=1)
+    while day.weekday() >= 5:
+        day += dt.timedelta(days=1)
+    return day
+
+
+def flag_for_review(cur, row, request, reasons, measured, today):
+    """A request the gate let in: mark it for review, give it a driver and a first action, and write what we know.
+    Returns the listing id, or None when the row went to the profile instead (no quantity or date)."""
+    cur.execute("select id, party from crm_bulk_listings where source_id = %s and kind = 'demand' order by created_at desc limit 1",
+                (row["source_id"],))
+    found = cur.fetchone()
+    if not found:
+        return None
+    listing_id, party = found["id"], found["party"]
+    email = row.get("email")
+    cur.execute("""select count(*) as n, max(coalesce(sent_at, created_at))::date as last from mail_message
+                   where lower(from_email) = %s or %s = any(to_emails)""", (email, email))
+    mail = cur.fetchone()
+    cur.execute("""select count(*) as n from crm_bulk_listings where id <> %s and status <> 'closed'
+                   and ((company_id is not null and company_id = %s) or (person_id is not null and person_id = %s))""",
+                (listing_id, row.get("company_id"), row.get("person_id")))
+    others = cur.fetchone()["n"]
+    owner = gate.owner_for(measured)
+    size_line = ", ".join(x for x in (
+        f"{measured['units']:g} items" if measured.get("units") else None,
+        f"{measured['kwh_each']:g} kWh each" if measured.get("kwh_each") else None,
+        f"about {measured['total_kwh']:,} kWh" if measured.get("total_kwh") else None,
+        f"budget about EUR {measured['value_eur']:,}" if measured.get("value_eur") else None,
+        f"about EUR {measured['est_value_eur']:,} at EUR {gate.EUR_PER_KWH_ESTIMATE}/kWh" if measured.get("est_value_eur") else None) if x)
+    history = (f"{mail['n']} emails with us, last {mail['last']}" if mail["n"] else "no emails with us yet")
+    review = {"state": "needs_review", "added_by": "marketplace import", "added_on": today.isoformat(),
+              "reasons": reasons, "size": measured}
+    cur.execute(
+        """update crm_bulk_listings
+              set context = context || jsonb_build_object('review', %s::jsonb, 'owner', %s),
+                  next_action = %s, next_due = %s, waiting_on = 'us', waiting_since = %s, updated_at = now()
+            where id = %s""",
+        (json.dumps(review), owner,
+         f"Review: confirm {party} is a genuine bulk buyer and the size"
+         + (f" (about {measured['total_kwh']:,} kWh)" if measured.get("total_kwh") else "") + ", then qualify or close",
+         next_working_day(today), today, listing_id))
+    cur.execute(
+        """insert into crm_bulk_listing_activity (bulk_listing_id, kind, title, body, data)
+           values (%s, 'research', %s, %s, %s::jsonb)""",
+        (listing_id, "Added from a marketplace request: needs review",
+         "\n".join([f"Size: {size_line}.", f"Why it was added: {'; '.join(reasons)}.", f"Buyer: {email}, {history}"
+                    + (f", {others} other open Bulk Trades listings." if others else "."),
+                    f"Their words: {(request.get('details') or request.get('wants') or '').strip()[:600]}",
+                    f"Request: {row.get('source_url')}"]),
+         json.dumps({"review": review, "mail_count": mail["n"], "mail_last": str(mail["last"]) if mail["last"] else None,
+                     "other_open_listings": others, "source_url": row.get("source_url")})))
+    return listing_id
+
+
 def main():
     import psycopg2
     import psycopg2.extras
@@ -437,6 +500,7 @@ def main():
 
     conn = psycopg2.connect(args.dsn)
     added = closed = 0
+    gated_out = []
     today = dt.date.today()
     with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         for row in rows:
@@ -450,9 +514,19 @@ def main():
                 continue
             survey.link(cur, row)
             survey.upsert_saved_search_interest(cur, row, today=today)
+            request = requests_by_source.get(row["source_id"])
+            reasons = measured = None
+            if request is not None:
+                # Only a genuine bulk purchase becomes a Bulk Trades request; the rest stay as interest on the profile.
+                passes, reasons, measured = gate.check(request)
+                cur.execute("select 1 from crm_bulk_listings where source_id = %s", (row["source_id"],))
+                if not passes and not cur.fetchone():
+                    gated_out.append(f"{row['email']} | {row['wants'][:50]} | {'; '.join(reasons)}")
+                    continue
             new = survey.insert(cur, row)
             added += new
-            request = requests_by_source.get(row["source_id"])
+            if new and request is not None:
+                flag_for_review(cur, row, request, reasons, measured, today)
             if new and request and is_recent(request):
                 notes.append(announcement(request, row))
             gone = False
@@ -464,11 +538,15 @@ def main():
                     print(f"    spec {json.dumps(row['spec'], ensure_ascii=False)}")
         if not args.apply:
             conn.rollback()
+    if gated_out and not args.quiet and not args.announce:
+        print(f"kept off Bulk Trades (profile interest only): {len(gated_out)}")
+        for line in gated_out:
+            print(f"    {line}")
     conn.close()
     verb = "added" if args.apply else "would add"
     summary = (f"{verb} {added} and {'closed' if args.apply else 'would close'} {closed} of {len(search_rows)} saved"
                f" searches and {len(request_rows)} sourcing requests ({skipped} searches and {skipped_requests}"
-               f" requests skipped: unconfirmed, internal or test)")
+               f" requests skipped: unconfirmed, internal or test; {len(gated_out)} requests kept off Bulk Trades by the bulk gate)")
     if args.announce:
         # stdout is the Discord message: only new requests, and nothing at all on a quiet run.
         print(summary, file=sys.stderr)
