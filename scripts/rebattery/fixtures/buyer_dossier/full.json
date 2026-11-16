@@ -22,6 +22,11 @@
       "cz"
     ],
     "min_soh": 60,
+    "min_pack_voltage": {
+      "value": 450,
+      "seen": "2026-08-20",
+      "src": "gmail_msg_fixture7"
+    },
     "products": [
       {
         "platform": "MEB",
@@ -67,6 +72,7 @@
           75
         ],
         "status": "declined",
+        "reason": "needs wire bonding",
         "seen": "2026-01-10",
         "src": "gmail_msg_fixture3"
       },
@@ -95,6 +101,13 @@
       ],
       "damaged": true,
       "bess_systems": true,
+      "part_numbers": [
+        {
+          "value": "NCR2170M",
+          "seen": "2026-10-24",
+          "src": "gmail_msg_fixture8"
+        }
+      ],
       "other": [
         "no unknown provenance",
         {
@@ -220,6 +233,11 @@
         "cz"
       ],
       "min_soh": 60,
+      "min_pack_voltage": {
+        "value": 450,
+        "seen": "2026-08-20",
+        "src": "gmail_msg_fixture7"
+      },
       "products": [
         {
           "platform": "MEB",
@@ -265,6 +283,7 @@
             75
           ],
           "status": "declined",
+          "reason": "needs wire bonding",
           "seen": "2026-01-10",
           "src": "gmail_msg_fixture3"
         },
@@ -293,6 +312,13 @@
         ],
         "damaged": true,
         "bess_systems": true,
+        "part_numbers": [
+          {
+            "value": "NCR2170M",
+            "seen": "2026-10-24",
+            "src": "gmail_msg_fixture8"
+          }
+        ],
         "other": [
           "no unknown provenance",
           {
@@ -373,6 +399,7 @@
       "Passenger EV",
       "Bus or truck"
     ],
-    "min_soh": 60
+    "min_soh": 60,
+    "min_pack_voltage": 450
   }
 }

@@ -54,14 +54,14 @@ export const TOP_LEVEL_KEYS = [
   "company_id", "company", "buyer_type", "intent", "countries", "products", "rules_out",
   "substitution", "price", "evidence_required", "quantity", "logistics", "capability",
   "decision_speed", "last_verified", "conflicts", "alerts",
-  "needs_continuity", "timing", "origins", "source_countries", "min_soh",
+  "needs_continuity", "timing", "origins", "source_countries", "min_soh", "min_pack_voltage",
 ];
 const PRODUCT_KEYS = [
   "part_number", "platform", "make", "model", "format", "chemistry", "kwh", "kwh_min", "kwh_max",
-  "module_series", "cell_format", "status", "seen", "src",
+  "module_series", "cell_format", "status", "reason", "seen", "src",
 ];
 const PRICE_KEYS = ["eur_per_kwh", "eur_per_unit", "currency_original", "basis", "incoterm", "seen", "src"];
-const RULES_OUT_KEYS = ["chemistries", "formats", "damaged", "bess_systems", "other"];
+const RULES_OUT_KEYS = ["chemistries", "formats", "damaged", "bess_systems", "other", "part_numbers"];
 const ALERT_KEYS = ["label", "filters", "status", "seen", "src"];
 const TIMING_KEYS = ["max_lead_days", "notes"];
 // A list entry is a plain value, or a mapping that dates the evidence for it.
@@ -70,7 +70,7 @@ const ENTRY_KEYS = ["value", "seen", "src"];
 /** The flat keys derived from the dossier. Existing copies of these are replaced, never merged. */
 export const DERIVED_KEYS = [
   "chemistries", "formats", "makes", "cell_makers", "part_numbers", "kwh_min", "kwh_max", "wants", "dossier",
-  "origins", "min_soh",
+  "origins", "min_soh", "min_pack_voltage",
 ] as const;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -398,6 +398,27 @@ export function validateDossier(frontmatter: unknown): string[] {
     }
   }
 
+  const minV = fm.min_pack_voltage;
+  if (minV !== null && minV !== undefined) {
+    if (!isRecord(minV)) {
+      errors.push("min_pack_voltage: must be a mapping {value, seen, src}");
+    } else {
+      for (const key of Object.keys(minV).filter((key) => !ENTRY_KEYS.includes(key)).toSorted()) {
+        errors.push(`min_pack_voltage.${key}: unknown key (allowed: ${ENTRY_KEYS.join(", ")})`);
+      }
+      if (!isNumber(minV.value) || !(minV.value > 0)) {
+        errors.push(`min_pack_voltage.value: must be a number of volts above 0, got ${pyRepr(minV.value)}`);
+      }
+      if ("seen" in minV) {
+        const reason = dateError(minV.seen);
+        if (reason) {errors.push(`min_pack_voltage.seen: ${reason}`);}
+      }
+      if ("src" in minV && typeof minV.src !== "string") {
+        errors.push("min_pack_voltage.src: must be text");
+      }
+    }
+  }
+
   const quantity = fm.quantity || {};
   if (!isRecord(quantity)) {
     errors.push("quantity: must be a mapping");
@@ -448,6 +469,7 @@ export function validateDossier(frontmatter: unknown): string[] {
       }
     }
     checkEntryList(errors, "rules_out.other", rulesOut.other, null);
+    checkEntryList(errors, "rules_out.part_numbers", rulesOut.part_numbers, null);
   }
 
   const products = fm.products || [];
@@ -462,6 +484,9 @@ export function validateDossier(frontmatter: unknown): string[] {
       }
       for (const key of Object.keys(product).filter((key) => !PRODUCT_KEYS.includes(key)).toSorted()) {
         errors.push(`${where}.${key}: unknown key (allowed: ${PRODUCT_KEYS.join(", ")})`);
+      }
+      if ("reason" in product && typeof product.reason !== "string") {
+        errors.push(`${where}.reason: must be text`);
       }
       if (!product.status) {
         errors.push(`${where}.status: required (one of ${PRODUCT_STATUSES.join(", ")})`);
@@ -806,6 +831,8 @@ export function deriveProfile(frontmatter: unknown): Json {
   }
   const minSoh = fm.min_soh;
   if (isNumber(minSoh)) {profile.min_soh = Number.isInteger(minSoh) ? minSoh : minSoh;}
+  const minV = isRecord(fm.min_pack_voltage) ? fm.min_pack_voltage.value : null;
+  if (isNumber(minV)) {profile.min_pack_voltage = minV;}
   return profile;
 }
 

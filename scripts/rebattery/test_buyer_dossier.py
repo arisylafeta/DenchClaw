@@ -188,6 +188,32 @@ class ValidateTests(unittest.TestCase):
                                   timing={"max_lead_days": 30, "notes": "wants stock within a month"})
         self.assertEqual(bd.validate(frontmatter), [])
 
+    def test_min_pack_voltage_part_numbers_and_reason(self):
+        fm = parse_valid(min_pack_voltage={"value": 450, "seen": "2026-08-20", "src": "x"})
+        fm["rules_out"] = {"part_numbers": [{"value": "NCR2170M", "seen": "2026-10-24"}]}
+        fm["products"][0]["reason"] = "needs wire bonding"
+        self.assertEqual(bd.validate(fm), [])
+        self.assertEqual(bd.to_buyer_profile(fm)["min_pack_voltage"], 450)
+        bad = parse_valid(min_pack_voltage={"value": "high", "colour": 1})
+        bad["products"][0]["reason"] = 3
+        errors = bd.validate(bad)
+        self.assertTrue(any(e.startswith("min_pack_voltage.value") for e in errors), errors)
+        self.assertTrue(any(e.startswith("min_pack_voltage.colour") for e in errors), errors)
+        self.assertTrue(any(e.startswith("products[0].reason") for e in errors), errors)
+        self.assertNotIn("min_pack_voltage", bd.to_buyer_profile(parse_valid()))
+
+    def test_model_with_kwh_brackets_or_list_warns_but_validates(self):
+        fm = parse_valid()
+        fm["products"][0]["model"] = "Zoe 52 kWh (ZE50)"
+        fm["products"].append({"model": "ID.3, ID.4", "format": "Packs", "status": "asked"})
+        self.assertEqual(bd.validate(fm), [])
+        found = bd.warnings(fm)
+        self.assertEqual(len(found), 2, found)
+        self.assertIn("kWh figure", found[0])
+        self.assertIn("brackets", found[0])
+        self.assertIn("list", found[1])
+        self.assertEqual(bd.warnings(parse_valid()), [])
+
     def test_new_keys_reject_wrong_values(self):
         errors = bd.validate(parse_valid(needs_continuity="yes", origins=["Germany"], min_soh=120))
         self.assertTrue(any(e.startswith("needs_continuity:") for e in errors), errors)

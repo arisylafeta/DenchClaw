@@ -66,14 +66,14 @@ TOP_LEVEL_KEYS = [
     "company_id", "company", "buyer_type", "intent", "countries", "products", "rules_out",
     "substitution", "price", "evidence_required", "quantity", "logistics", "capability",
     "decision_speed", "last_verified", "conflicts", "alerts",
-    "needs_continuity", "timing", "origins", "source_countries", "min_soh",
+    "needs_continuity", "timing", "origins", "source_countries", "min_soh", "min_pack_voltage",
 ]
 PRODUCT_KEYS = [
     "part_number", "platform", "make", "model", "format", "chemistry", "kwh", "kwh_min", "kwh_max",
-    "module_series", "cell_format", "status", "seen", "src",
+    "module_series", "cell_format", "status", "reason", "seen", "src",
 ]
 PRICE_KEYS = ["eur_per_kwh", "eur_per_unit", "currency_original", "basis", "incoterm", "seen", "src"]
-RULES_OUT_KEYS = ["chemistries", "formats", "damaged", "bess_systems", "other"]
+RULES_OUT_KEYS = ["chemistries", "formats", "damaged", "bess_systems", "other", "part_numbers"]
 ALERT_KEYS = ["label", "filters", "status", "seen", "src"]
 TIMING_KEYS = ["max_lead_days", "notes"]
 # A list entry is a plain value, or a mapping that dates the evidence for it.
@@ -82,7 +82,7 @@ ENTRY_KEYS = ["value", "seen", "src"]
 # Mirrored by DERIVED_KEYS in apps/web/lib/buyer-dossier.ts.
 DERIVED_KEYS = [
     "chemistries", "formats", "makes", "cell_makers", "part_numbers", "kwh_min", "kwh_max", "wants", "dossier",
-    "origins", "min_soh",
+    "origins", "min_soh", "min_pack_voltage",
 ]
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -279,6 +279,22 @@ def validate(frontmatter):
         elif not 0 <= float(min_soh) <= 100:
             errors.append(f"min_soh: {min_soh!r} is outside 0-100")
 
+    min_v = frontmatter.get("min_pack_voltage")
+    if min_v is not None:
+        if not isinstance(min_v, dict):
+            errors.append("min_pack_voltage: must be a mapping {value, seen, src}")
+        else:
+            for key in sorted(set(min_v) - set(ENTRY_KEYS)):
+                errors.append(f"min_pack_voltage.{key}: unknown key (allowed: {', '.join(ENTRY_KEYS)})")
+            if not _is_number(min_v.get("value")) or not min_v["value"] > 0:
+                errors.append(f"min_pack_voltage.value: must be a number of volts above 0, got {min_v.get('value')!r}")
+            if "seen" in min_v:
+                reason = _date_error(min_v["seen"])
+                if reason:
+                    errors.append(f"min_pack_voltage.seen: {reason}")
+            if "src" in min_v and not isinstance(min_v["src"], str):
+                errors.append("min_pack_voltage.src: must be text")
+
     quantity = frontmatter.get("quantity") or {}
     if not isinstance(quantity, dict):
         errors.append("quantity: must be a mapping")
@@ -320,6 +336,7 @@ def validate(frontmatter):
             if value is not None and not isinstance(value, bool):
                 errors.append(f"rules_out.{key}: must be true, false or null, got {value!r}")
         _check_entry_list(errors, "rules_out.other", rules_out.get("other"))
+        _check_entry_list(errors, "rules_out.part_numbers", rules_out.get("part_numbers"))
 
     products = frontmatter.get("products") or []
     if not isinstance(products, list):
@@ -332,6 +349,8 @@ def validate(frontmatter):
             continue
         for key in sorted(set(product) - set(PRODUCT_KEYS)):
             errors.append(f"{where}.{key}: unknown key (allowed: {', '.join(PRODUCT_KEYS)})")
+        if "reason" in product and not isinstance(product["reason"], str):
+            errors.append(f"{where}.reason: must be text")
         if not product.get("status"):
             errors.append(f"{where}.status: required (one of {', '.join(PRODUCT_STATUSES)})")
         _check_enum(errors, f"{where}.status", product.get("status"), PRODUCT_STATUSES, "status")
@@ -402,6 +421,30 @@ def validate(frontmatter):
                     if reason:
                         errors.append(f"{where}.seen: {reason}")
     return errors
+
+
+_KWH_IN_MODEL = re.compile(r"\d+(?:[.,]\d+)?\s*kwh", re.IGNORECASE)
+
+
+def warnings(frontmatter):
+    """Advice that does not block a save: a product `model` that carries a capacity, a bracketed aside or
+    a list of models keys badly. Put the capacity in `kwh` and write one product per model."""
+    found = []
+    products = frontmatter.get("products") if isinstance(frontmatter, dict) else None
+    for i, product in enumerate(products if isinstance(products, list) else []):
+        model = product.get("model") if isinstance(product, dict) else None
+        if not isinstance(model, str):
+            continue
+        what = []
+        if _KWH_IN_MODEL.search(model):
+            what.append("a kWh figure (use kwh)")
+        if re.search(r"[()\[\]]", model):
+            what.append("brackets")
+        if re.search(r"[,;/]", model):
+            what.append("a list (one product per model)")
+        if what:
+            found.append(f"products[{i}].model: {model!r} has {', '.join(what)}")
+    return found
 
 
 # --- mapping to buyer_profile ------------------------------------------------------------------
@@ -611,6 +654,10 @@ def to_buyer_profile(frontmatter):
     min_soh = frontmatter.get("min_soh")
     if isinstance(min_soh, (int, float)) and not isinstance(min_soh, bool):
         profile["min_soh"] = int(min_soh) if float(min_soh).is_integer() else float(min_soh)
+    min_v = frontmatter.get("min_pack_voltage")
+    min_v = min_v.get("value") if isinstance(min_v, dict) else None
+    if _is_number(min_v):
+        profile["min_pack_voltage"] = int(min_v) if float(min_v).is_integer() else float(min_v)
     return profile
 
 
@@ -725,6 +772,8 @@ def main(argv=None):
                     print(f"  {error}")
             else:
                 print(f"{path}: ok")
+            for warning in warnings(frontmatter):
+                print(f"  warning: {warning}")
         return 1 if failed else 0
 
     if args.command == "map":

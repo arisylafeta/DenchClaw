@@ -8,6 +8,10 @@ needs_continuity: true
 origins: ["Passenger EV", "bus or truck"]
 source_countries: [DE, PL, "cz"]
 min_soh: 60
+min_pack_voltage:
+  value: 450
+  seen: "2026-08-20"
+  src: "gmail_msg_fixture7"
 products:
   - platform: MEB
     make: Volkswagen
@@ -37,6 +41,7 @@ products:
     chemistry: NMC
     kwh: [75]
     status: declined
+    reason: "needs wire bonding"
     seen: "2026-01-10"
     src: "gmail_msg_fixture3"
   - make: Stellantis
@@ -57,6 +62,10 @@ rules_out:
     - Systems
   damaged: true
   bess_systems: true
+  part_numbers:
+    - value: "NCR2170M"
+      seen: "2026-10-24"
+      src: "gmail_msg_fixture8"
   other:
     - "no unknown provenance"
     - value: "no cells below 50% SoH"
