@@ -127,7 +127,7 @@ def main(argv=None):
                 for error in errors:
                     print(f"  {error}")
                 continue
-            if current["buyer_dossier"] == text:
+            if current["buyer_dossier"] == text and _sorted(current["buyer_profile"]) == _sorted(profile):
                 print(f"{path.name}: {company_id} · already loaded (same text), skipped")
                 continue
             diff = bd.diff_profiles(current["buyer_profile"] or {}, profile)  # type: ignore[index]
