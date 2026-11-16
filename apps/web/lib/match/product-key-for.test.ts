@@ -252,7 +252,7 @@ describe("canonical model slugs", () => {
     ["Nissan", "NISSAN LEAF 2011-17", "leaf"],
     ["Hyundai", "Ioniq 5 Long Range", "ioniq5"],
     ["Polestar", "2", "2"],
-    ["MG", "MG4", "4"],
+    ["MG", "MG4", "mg4"],
   ])("%s %s is %s on the lot side and the line side", (make, model, slug) => {
     expect(modelSlug(make, model)).toBe(slug);
     // A reviewed pack family (Kia Niro 64 kWh) keys as pack:, every other model as model:.

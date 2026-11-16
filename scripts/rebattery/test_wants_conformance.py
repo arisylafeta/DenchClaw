@@ -44,10 +44,9 @@ class R1(unittest.TestCase):
                   "spec": {"makes": ["Tesla", "BYD"], "chemistries": ["LFP", "NMC"]}}
         self.assertEqual(wc.r1(ctx([line("a", demand_id="d1", make="BYD", chemistry="NMC")], [demand])), [])
 
-    def test_profile_cross_product(self):
+    def test_buy_box_cross_product_is_independent_criteria(self):
         profile = {"makes": ["Tesla", "Nissan"], "formats": ["Modules", "Packs"], "wants": "Donor modules for service."}
-        out = wc.r1(ctx([line("p", kind="inferred", make="Tesla", format="pack")], profile=profile))
-        self.assertEqual([v["line_id"] for v in out], ["p"])
+        self.assertEqual(wc.r1(ctx([line("p", kind="inferred", make="Tesla", format="pack")], profile=profile)), [])
 
     def test_dossier_line_needs_a_product_stating_the_pairing(self):
         products = [{"make": "CALB", "chemistry": "LFP", "format": "cells"}, {"make": "Tesla", "chemistry": "NMC", "format": "packs"}]

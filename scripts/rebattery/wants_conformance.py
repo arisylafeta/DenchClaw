@@ -3,7 +3,8 @@
 
 Reports every violation of six rules, from the lines against the sources that produced them:
 
-  R1  invented combination: a make/chemistry/format pairing the source does not state together.
+  R1  invented combination: a make/chemistry/format pairing the source does not state together (demand rows, offers,
+      dossier products, parsed text; not buy-box lists, whose cross product is independent criteria).
   R2  declined line whose only source is a closed request (no declined offer, no dossier declined product).
   R3  model key slug that is not the canonical slug of model_aliases.model_slug().
   R4  duplicate lines (company + kind + product_key) and a less specific line next to a more specific one
@@ -170,11 +171,7 @@ def r1(ctx):
             segs = segments(demand.get("summary"), spec.get("product_family"), demand.get("note"), demand.get("source_quote"))
             source = f"demand {demand['id']}"
         elif _is_profile_line(line):
-            profile = (ctx["companies"].get(line.get("company_id")) or {}).get("buyer_profile") or {}
-            lists = {"make": as_list(profile.get("makes")), "chemistry": as_list(profile.get("chemistries")),
-                     "format": as_list(profile.get("formats"))}
-            segs = segments(profile.get("wants"))
-            source = f"buyer_profile of {line.get('company_id')}"
+            continue  # buy-box lists are independent criteria: their cross product is not an invented combination
         elif _is_dossier_line(line):
             problem = _dossier_mismatch(line, (ctx["companies"].get(line.get("company_id")) or {}).get("dossier_products"))
             if problem:
