@@ -30,7 +30,7 @@ export function useConversationNotifications(rows: HermesConversation[] | undefi
         kind: kind === 'subagents' ? 'done' : kind,
         title: row.title || profile || 'ReBattery CRM',
         body: kind === 'input' ? 'Waiting for your input' : kind === 'subagents' ? 'Subagents finished' : 'Finished',
-        icon: (profile && bundledProfileAvatar(profile)) || (profile ? `/api/workspace/avatar?name=${encodeURIComponent(profile)}` : undefined),
+        icon: (profile && bundledProfileAvatar(profile)) || bundledProfileAvatar('default'),
         tag: `agent-${row.key}`,
         url: '/',
       })

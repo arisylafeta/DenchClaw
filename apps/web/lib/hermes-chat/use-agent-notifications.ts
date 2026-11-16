@@ -39,7 +39,7 @@ export function useAgentNotifications({ active, messages, conversationKey, title
   }
   const notify = (kind: 'start' | 'done', body: string) => {
     const { conversationKey: key, title: t, profile: p } = latest.current
-    const icon = (p && bundledProfileAvatar(p)) || (p ? `/api/workspace/avatar?name=${encodeURIComponent(p)}` : undefined)
+    const icon = (p && bundledProfileAvatar(p)) || bundledProfileAvatar('default')
     void showAgentNotification({
       kind,
       title: t || (p ? p : 'ReBattery CRM'),

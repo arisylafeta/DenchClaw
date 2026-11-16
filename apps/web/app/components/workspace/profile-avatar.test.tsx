@@ -43,6 +43,13 @@ describe("blob profile avatars", () => {
     expect(container.querySelector("[data-profile-avatar=\"devon\"] svg")).toBeTruthy();
   });
 
+  it("runs no animation loop while idle", () => {
+    const raf = vi.spyOn(window, "requestAnimationFrame");
+    render(<ProfileAvatar name="devon" />);
+    expect(raf).not.toHaveBeenCalled();
+    raf.mockRestore();
+  });
+
   it("stays still when the user prefers reduced motion", () => {
     const matchMedia = window.matchMedia;
     window.matchMedia = ((query: string) => ({ matches: query.includes("reduce"), addEventListener() {}, removeEventListener() {} })) as never;
