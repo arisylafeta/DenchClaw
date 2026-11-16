@@ -41,6 +41,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -365,29 +366,124 @@ def dossier_rows(cur):
     return cur.fetchall()
 
 
+_KWH_FIGURE = re.compile(r"(\d+(?:[.,]\d+)?)\s*kwh\b", re.IGNORECASE)
+_TRIM_WORDS = re.compile(r"\b(?:long\s+range|standard\s+range|dual\s+motor|awd|rwd|fwd|van|truck)\b", re.IGNORECASE)
+_FORMAT_WORD = re.compile(r"\b(cells?|modules?|packs?)\b", re.IGNORECASE)
+_BRANDS = ("volkswagen|vw|audi|mini|skoda|cupra|porsche|bmw|mercedes-benz|mercedes|tesla|stellantis|nissan|renault|dacia|"
+           "peugeot|citroen|opel|vauxhall|fiat|jeep|ford|hyundai|kia|genesis|toyota|lexus|honda|mazda|mitsubishi|suzuki|"
+           "subaru|volvo|polestar|jaguar|land rover|mg|byd|lotus|lucid|rivian|nio|xpeng|zeekr|leapmotor|maxus")
+_BRAND_START = re.compile(rf"^(?:{_BRANDS})\b", re.IGNORECASE)
+# One dossier product fans out to at most this many lines, as a demand row's fact sets are capped.
+FAN_OUT_CAP = 12
+
+
+def _is_prose(model):
+    """Mirrors buyer_interest_prose_model(): a model that lists vehicles or years rather than naming one."""
+    text = (model or "").strip()
+    return bool(text) and bool(re.search(r"[(),;/:]", text) or len(text.split()) >= 4
+                               or re.search(r"\b(19|20)[0-9]{2}\b", text))
+
+
+def clean_model(model):
+    """(model, kwh, changed): the model without a capacity, an aside or a trim word, when what remains is a
+    model the key builder accepts. The kWh figure is returned for the caller to use only when kwh is missing."""
+    text = " ".join((model or "").split())
+    figure = _KWH_FIGURE.search(text)
+    kwh = float(figure.group(1).replace(",", ".")) if figure else None
+    cleaned = _KWH_FIGURE.sub(" ", text)
+    cleaned = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", cleaned)
+    cleaned = " ".join(cleaned.split()).strip(" :-,;/")
+    trimmed = " ".join(_TRIM_WORDS.sub(" ", cleaned).split()).strip(" :-,;/")
+    for candidate in (trimmed, cleaned):
+        if candidate and not _is_prose(candidate):
+            return candidate, kwh, candidate != text
+    return text, kwh, False
+
+
+def _model_pieces(model, makes):
+    """A list of models split into (make, format, model_text) pieces; a single model is one piece."""
+    text = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", model or "")
+    parts = [part for part in re.split(r"\s*(?:,|;|/|\band\b)\s*", text, flags=re.IGNORECASE) if part and part.strip()]
+    if len(parts) < 2:
+        return None
+    own = sorted((make for make in makes if make), key=len, reverse=True)
+    pieces = []
+    for part in parts:
+        part = " ".join(part.split())
+        make = None
+        for name in own:
+            if re.match(rf"{re.escape(name)}\b", part, re.IGNORECASE):
+                make, part = name, part[len(name):].strip()
+                break
+        else:
+            brand = _BRAND_START.match(part)
+            if brand:
+                make, part = brand.group(0), part[brand.end():].strip()
+        fmt = _FORMAT_WORD.search(part)
+        if fmt:
+            part = " ".join(_FORMAT_WORD.sub(" ", part).split())
+        pieces.append((make, fmt.group(1).lower().rstrip("s") + "s" if fmt else None, part))
+    return pieces
+
+
 def product_facts(product):
-    """One dossier product in the facts shape the key builder reads. Missing stays missing."""
-    facts = {}
+    """One dossier product as a list of fact dicts in the shape the key builder reads. Missing stays missing.
+
+    The model is cleaned first: a capacity in it moves to kwh when kwh is missing (never invented), an aside
+    in brackets and words like Long Range or AWD go when a known model remains, and a list of models
+    ("ID.3, ID.4, Cupra Born") becomes one fact dict per model. The original text goes to `raw_model`.
+    """
+    base = {}
     if isinstance(product.get("part_number"), str) and product["part_number"].strip():
-        facts["part_numbers"] = [product["part_number"].strip()]
+        base["part_numbers"] = [product["part_number"].strip()]
     for key in ("make", "model", "chemistry"):
         if isinstance(product.get(key), str) and product[key].strip():
-            facts[key] = product[key].strip()
+            base[key] = product[key].strip()
     if isinstance(product.get("format"), str) and product["format"].strip():
-        facts["format"] = product["format"].strip()
+        base["format"] = product["format"].strip()
     kwh = product.get("kwh")
     if isinstance(kwh, list) and kwh:
         values = [value for value in kwh if isinstance(value, (int, float))]
         if len(values) == 1:
-            facts["kwh"] = values[0]
+            base["kwh"] = values[0]
         elif len(values) >= 2:
-            facts["kwh_min"], facts["kwh_max"] = min(values), max(values)
+            base["kwh_min"], base["kwh_max"] = min(values), max(values)
     elif isinstance(kwh, (int, float)):
-        facts["kwh"] = kwh
+        base["kwh"] = kwh
     elif product.get("kwh_min") is not None or product.get("kwh_max") is not None:
-        facts["kwh_min"] = product.get("kwh_min")
-        facts["kwh_max"] = product.get("kwh_max")
-    return facts
+        base["kwh_min"] = product.get("kwh_min")
+        base["kwh_max"] = product.get("kwh_max")
+    model = base.get("model")
+    if not model:
+        return [base]
+    states_kwh = any(base.get(key) is not None for key in ("kwh", "kwh_min", "kwh_max"))
+    makes = [make.strip() for make in re.split(r"\s*(?:,|/|&|\band\b)\s*", base.get("make", ""), flags=re.IGNORECASE)]
+
+    pieces = _model_pieces(model, makes)
+    if pieces is None:
+        cleaned, found, changed = clean_model(model)
+        if found is not None and not states_kwh:
+            base["kwh"] = found
+        if changed:
+            base["model"], base["raw_model"] = cleaned, model
+        return [base]
+
+    variants = []
+    for make, fmt, part in pieces:
+        fact = {key: value for key, value in base.items() if key != "model"}
+        cleaned, found, _changed = clean_model(part) if part else (None, None, False)
+        if make:
+            fact["make"] = make
+        if fmt and not fact.get("format"):
+            fact["format"] = fmt
+        if found is not None and not states_kwh:
+            fact["kwh"] = found
+        if cleaned and not _is_prose(cleaned):
+            fact["model"] = cleaned
+        fact["raw_model"] = model
+        if fact not in variants:
+            variants.append(fact)
+    return variants
 
 
 def _fact_sets(cur, facts):
@@ -427,7 +523,7 @@ def _already_says(cur, company_id, key, kind):
     return cur.fetchone() is not None
 
 
-def _write_line(cur, company_id, kind, ownership, keyed, seen, refs):
+def _write_line(cur, company_id, kind, ownership, keyed, seen, refs, reason=None):
     """One mastered line per product and make; a synced line per purchase or decline, keyed by its source."""
     if ownership == "mastered":
         cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key,
@@ -458,14 +554,14 @@ def _write_line(cur, company_id, kind, ownership, keyed, seen, refs):
                          coalesce(%s::date, current_date), coalesce(%s::date, current_date), 'not_stated',
                          %s::text[], %s)
                        on conflict (id) do update set last_seen = greatest(buyer_interest.last_seen,
-                         excluded.last_seen),
+                         excluded.last_seen), decline_reason = excluded.decline_reason,
                          source_refs = (select array_agg(distinct ref order by ref)
                            from unnest(buyer_interest.source_refs || excluded.source_refs) ref),
                          updated_at = now()""",
                     (_dossier_line_id(company_id, kind, keyed["key"]), company_id, kind,
                      keyed["key"], keyed["level"], keyed["make"], keyed["model"], keyed["raw_product"],
                      keyed["format"], keyed["chemistry"], keyed["kwh_min"], keyed["kwh_max"], seen, seen, refs,
-                     "dossier product marked " + kind))
+                     reason))
 
 
 def sync_dossier_rows(cur, companies):
@@ -490,8 +586,20 @@ def sync_dossier_rows(cur, companies):
             try:
                 _clear_notes(cur, f"{company['id']}:{index}")
                 # One line per stated combination, exactly as a demand row fans out: "BMW, Volvo" is two makes.
-                fact_sets, stated = _fact_sets(cur, product_facts(product))
-                keyed_lines = [keyed for keyed in (_keyed(cur, fact) for fact in fact_sets) if keyed and keyed["stated"]]
+                keyed_lines, stated = [], 0
+                for variant in product_facts(product):
+                    raw_model = variant.pop("raw_model", None)
+                    fact_sets, count = _fact_sets(cur, variant)
+                    stated += max(count - len(fact_sets), 0)
+                    for fact in fact_sets:
+                        keyed = _keyed(cur, fact)
+                        if keyed and keyed["stated"]:
+                            # The original wording stays on the line when cleaning changed the model.
+                            keyed["raw_product"] = raw_model or keyed["raw_product"]
+                            keyed_lines.append(keyed)
+                keyed_lines = list({keyed["key"]: keyed for keyed in keyed_lines}.values())
+                stated += len(keyed_lines)
+                keyed_lines = keyed_lines[:FAN_OUT_CAP]
                 if not keyed_lines:
                     cur.execute("release savepoint bi_row")
                     no_facts += 1
@@ -505,11 +613,12 @@ def sync_dossier_rows(cur, companies):
                                   f"kept {len(keyed_lines)} of {stated} stated combinations")
                 seen = str(product.get("seen") or last_verified or "")[:10] or None
                 refs = [str(product["src"])] if product.get("src") else [f"crm:dossier:{company['id']}"]
+                reason = str(product["reason"]).strip() or None if isinstance(product.get("reason"), str) else None
                 for keyed in keyed_lines:
                     if kind in ("bought", "declined") and _already_says(cur, company["id"], keyed["key"], kind):
                         from_source += 1
                         continue
-                    _write_line(cur, company["id"], kind, ownership, keyed, seen, refs)
+                    _write_line(cur, company["id"], kind, ownership, keyed, seen, refs, reason)
                     written += 1
                 cur.execute("release savepoint bi_row")
             except Exception as exc:  # noqa: BLE001

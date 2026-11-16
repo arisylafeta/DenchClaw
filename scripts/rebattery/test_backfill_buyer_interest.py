@@ -95,6 +95,36 @@ class ConnectionGuard(unittest.TestCase):
         self.assertIn("dry run", out.getvalue())
 
 
+class CleanModel(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.backfill = load("backfill_buyer_interest")
+
+    def test_cleaning_moves_kwh_only_when_missing_and_never_invents(self):
+        [fact] = self.backfill.product_facts({"make": "Renault", "model": "Zoe 52 kWh (ZE50)", "format": "packs"})
+        self.assertEqual((fact["model"], fact["kwh"], fact["raw_model"]), ("Zoe", 52.0, "Zoe 52 kWh (ZE50)"))
+        [fact] = self.backfill.product_facts({"make": "Renault", "model": "Zoe 52 kWh", "kwh": [41]})
+        self.assertEqual((fact["model"], fact["kwh"]), ("Zoe", 41))
+        [fact] = self.backfill.product_facts({"make": "Tesla", "model": "Model 3"})
+        self.assertNotIn("kwh", fact)
+        [fact] = self.backfill.product_facts({"make": "Tesla", "model": "Model 3 Long Range AWD 75 kWh"})
+        self.assertEqual((fact["model"], fact["kwh"]), ("Model 3", 75.0))
+
+    def test_a_sentence_that_is_not_a_model_is_left_alone(self):
+        [fact] = self.backfill.product_facts({"make": "X", "model": "hybrid 2015-2022 packs we have seen"})
+        self.assertEqual(fact["model"], "hybrid 2015-2022 packs we have seen")
+        self.assertNotIn("raw_model", fact)
+
+    def test_a_list_gives_one_fact_per_model_with_its_own_brand(self):
+        facts = self.backfill.product_facts({"make": "Volkswagen", "format": "packs",
+                                             "model": "ID.3, ID.4, Cupra Born, Audi Q4 e-tron"})
+        self.assertEqual([(f["make"], f["model"]) for f in facts], [
+            ("Volkswagen", "ID.3"), ("Volkswagen", "ID.4"), ("Cupra", "Born"), ("Audi", "Q4 e-tron")])
+        facts = self.backfill.product_facts({"make": "CALB, EVE", "model": "CALB cells and EVE modules"})
+        self.assertEqual([(f["make"], f.get("format"), f.get("model")) for f in facts],
+                         [("CALB", "cells", None), ("EVE", "modules", None)])
+
+
 class Backfill(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -554,27 +584,71 @@ The story, unchanged by this step.
         self.assertEqual(note["source_table"], "crm_bulk_offers")
         self.assertIn(listing_id, note["message"])
 
-    def test_a_dossier_prose_model_keeps_its_wording_out_of_the_key(self):
-        self.write_dossier(markdown="""---
-company_id: "{company}"
-company: "Dossier Test Buyer"
-last_verified: "2026-11-04"
-products:
-  - make: "VW Group"
+    def dossier_products(self, products):
+        self.write_dossier(markdown='---\ncompany_id: "%s"\ncompany: "Dossier Test Buyer"\nlast_verified: "2026-11-04"\nproducts:\n%s\n---\nThe story.\n'
+                           % (self.dossier_company, products))
+        self.convert()
+        return {line["product_key"]: line for line in self.lines(self.dossier_company)}
+
+    def test_a_model_list_splits_into_one_line_per_model_and_keeps_the_wording(self):
+        lines = self.dossier_products('''  - make: "VW Group"
     model: "82 kWh: ID.4, Q4 e-tron, Enyaq, ID.7, Elroq"
     format: packs
     chemistry: NMC
     kwh: [82]
     status: "asked"
+    seen: "2026-10-07"''')
+        self.assertEqual(sorted(lines), [
+            "model:vw-group-elroq-82kwh", "model:vw-group-enyaq-82kwh", "model:vw-group-id4-82kwh",
+            "model:vw-group-id7-82kwh", "model:vw-group-q4etron-82kwh"])
+        self.assertEqual(lines["model:vw-group-enyaq-82kwh"]["raw_product"], "82 kWh: ID.4, Q4 e-tron, Enyaq, ID.7, Elroq")
+
+    def test_a_model_with_a_capacity_aside_or_trim_words_is_keyed_as_the_model(self):
+        lines = self.dossier_products('''  - make: Renault
+    model: "Zoe 52 kWh (ZE50)"
+    format: packs
+    status: "asked"
     seen: "2026-10-07"
----
-The story.
-""".format(company=self.dossier_company))
-        self.convert()
-        [line] = self.lines(self.dossier_company)
-        self.assertEqual(line["product_key"], "broad:vw-group-nmc-packs")
-        self.assertEqual(line["raw_product"], "82 kWh: ID.4, Q4 e-tron, Enyaq, ID.7, Elroq")
-        self.assertEqual(line["model"], "82 kWh: ID.4, Q4 e-tron, Enyaq, ID.7, Elroq")
+  - make: Tesla
+    model: "Model 3 Long Range AWD 75 kWh"
+    format: packs
+    status: "asked"
+    seen: "2026-10-07"
+  - make: "Iveco FPT"
+    model: "eBS69 (van/truck)"
+    format: packs
+    kwh: [69.3]
+    status: "asked"
+    seen: "2026-10-07"''')
+        self.assertEqual(sorted(lines), ["model:iveco-fpt-ebs69-69.3kwh", "model:renault-zoe-52kwh", "model:tesla-model3-75kwh"])
+        self.assertEqual(lines["model:renault-zoe-52kwh"]["raw_product"], "Zoe 52 kWh (ZE50)")
+        self.assertEqual(float(lines["model:renault-zoe-52kwh"]["kwh_min"]), 52)
+
+    def test_a_mixed_make_and_model_list_never_gets_a_garbled_key(self):
+        lines = self.dossier_products('''  - make: "CALB, EVE"
+    model: "CALB cells and EVE modules"
+    status: "asked"
+    seen: "2026-10-07"
+  - make: Volkswagen
+    model: "ID.3, ID.4, Cupra Born, Skoda Enyaq, Elroq, Audi Q4 e-tron"
+    format: packs
+    status: "asked"
+    seen: "2026-10-07"''')
+        self.assertIn("broad:calb-any-cells", lines)
+        self.assertIn("broad:eve-any-modules", lines)
+        self.assertTrue({"model:volkswagen-id3", "model:cupra-born", "model:skoda-enyaq", "model:volkswagen-elroq",
+                         "model:audi-q4etron"} <= set(lines), sorted(lines))
+        self.assertFalse([key for key in lines if "cellsand" in key or "modules" in key.split(":", 1)[1].replace("any-modules", "")])
+
+    def test_a_declined_product_keeps_its_reason(self):
+        lines = self.dossier_products('''  - make: Panasonic
+    model: NCR2170M
+    format: cells
+    status: declined
+    reason: "needs wire bonding"
+    seen: "2026-10-24"''')
+        [line] = lines.values()
+        self.assertEqual(line["decline_reason"], "needs wire bonding")
 
     def test_a_product_name_in_part_number_is_not_a_part_key(self):
         self.write_dossier(markdown="""---
