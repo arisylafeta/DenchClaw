@@ -262,6 +262,7 @@ export function chatStatus(row: HermesConversation, chats: Pick<HermesChatsContr
   if (chats.selected?.key !== row.key && row.updatedAt > (chats.seen[row.key] ?? row.updatedAt)) return "done";
   return "idle";
 }
+const STATUS_RANK: Record<ChatStatus, number> = { awaiting: 0, done: 1, idle: 2, background: 3, running: 4 };
 const DOT: Record<Exclude<ChatStatus, "idle">, { className: string; label: string }> = {
   running: { className: "bg-green-500 motion-safe:animate-pulse", label: "Running" },
   awaiting: { className: "bg-amber-500", label: "Needs your attention" },
@@ -337,8 +338,12 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
   const serverPins = chats.pins ?? [];
   const togglePin = (key: string) => void chats.setPinned(key, !serverPins.includes(key));
   const toggleSection = (key: string) => updateView({ ...view, collapsed: view.collapsed?.includes(key) ? view.collapsed.filter((id) => id !== key) : [...(view.collapsed ?? []), key] });
+  const statusOf = (row: HermesConversation) => chatStatus(row, chats, workingKeys?.has(row.key), awaitingKeys?.has(row.key), backgroundKeys?.has(row.key));
+  // Finished and waiting-on-you chats rise to the top; chats still working sink to the bottom. Ties keep the section order.
+  const byStatus = <T,>(items: T[], status: (item: T) => ChatStatus) => items.map((item, index) => ({ item, index, rank: STATUS_RANK[status(item)] }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index).map(({ item }) => item);
   const renderRow = (row: HermesConversation) => {
-    const status = chatStatus(row, chats, workingKeys?.has(row.key), awaitingKeys?.has(row.key), backgroundKeys?.has(row.key));
+    const status = statusOf(row);
     const pinned = serverPins.includes(row.key);
     const PinIcon = pinned ? PinOff : Pin;
     return <motion.div key={row.key} {...reorderMotion} data-conversation-key={row.key} data-status={status} data-selected={chats.selected?.key === row.key} className={`${styles.conversationRow} relative flex min-w-0 items-center rounded-lg ${status === "running" ? styles.running : ""}`}>
@@ -363,7 +368,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
     </motion.div>;
   };
   const renderBot = ({ profile, config, main }: BotEntry) => {
-    const status = main ? chatStatus(main, chats, workingKeys?.has(main.key), awaitingKeys?.has(main.key), backgroundKeys?.has(main.key)) : "idle";
+    const status = main ? statusOf(main) : "idle";
     const selected = !!main && chats.selected?.key === main.key;
     const single = config.mode === "single";
     return <div key={profile} data-bot={profile} data-bot-mode={config.mode} data-status={status} data-selected={selected} className={`${styles.conversationRow} relative flex min-w-0 items-center rounded-lg ${status === "running" ? styles.running : ""}`}>
@@ -446,7 +451,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
             </button></h3>
             {open && <motion.div layoutScroll ref={(node: HTMLDivElement | null) => { if (node) bodies.current.set(block.key, node); else bodies.current.delete(block.key); }} data-section-body={block.key}
               className={`min-h-0 overflow-y-auto overflow-x-hidden ${flex ? "flex-1" : ""}`} style={flex ? undefined : { flex: "0 1 auto", maxHeight: heights[block.key] ?? DEFAULT_SECTION_HEIGHT }}>
-              {block.key === "bots" ? bots.map(renderBot) : block.rows.map(renderRow)}
+              {block.key === "bots" ? byStatus(bots, (entry) => entry.main ? statusOf(entry.main) : "idle").map(renderBot) : byStatus(block.rows, statusOf).map(renderRow)}
             </motion.div>}
           </section>
           {target && <div role="separator" aria-orientation="horizontal" aria-label={`Resize ${blocks[target.sign === 1 ? index : index + 1].label}`} tabIndex={0}

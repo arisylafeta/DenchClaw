@@ -117,4 +117,14 @@ describe("section heights", () => {
     await user.click(screen.getByRole("button", { name: /^My chats \d+$/ }));
     expect([...document.querySelectorAll<HTMLElement>("[data-section]")].some((node) => node.style.flex === "1 1 0px")).toBe(false);
   });
+  it("puts finished chats and bots on top and working ones at the bottom", async () => {
+    sessions = [chat("alpha", "busy", 900, { working: true }), chat("alpha", "quiet", 500), chat("alpha", "finished", 400), { ...main, working: true }];
+    localStorage.setItem("hermes-chats-seen:user-a", JSON.stringify({ [chat("alpha", "finished", 0).key]: 100 }));
+    render(<Harness />);
+    await screen.findByRole("button", { name: "Open alpha busy" });
+    const mine = document.querySelector('[data-section-body="mine"]')!;
+    expect([...mine.querySelectorAll("[data-conversation-key]")].map((row) => row.getAttribute("data-status"))).toEqual(["done", "idle", "running"]);
+    const bots = [...document.querySelectorAll("[data-bot]")].map((row) => row.getAttribute("data-bot"));
+    expect(bots.at(-1)).toBe("sorcerer");
+  });
 });

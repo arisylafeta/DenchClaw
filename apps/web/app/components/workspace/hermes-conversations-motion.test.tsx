@@ -13,7 +13,7 @@ vi.mock("./profile-avatar", () => ({ ProfileAvatar: () => <span /> }));
 const access = { visibility: "team" as const, ownerId: null, canShare: false, canDelete: false, canWrite: true, canApprove: true };
 const rows: HermesConversation[] = [
   { access, key: "new", id: "new", kind: "solo", title: "Newer chat", updatedAt: 200, working: false, project: "Beacon", participants: [] },
-  { access, key: "old", id: "old", kind: "solo", title: "Older chat", updatedAt: 100, working: true, project: "Beacon", participants: [] },
+  { access, key: "old", id: "old", kind: "solo", title: "Older chat", updatedAt: 100, working: false, project: "Beacon", participants: [] },
 ];
 const sections = (sessions = rows) => applyChatView(sessions, DEFAULT_VIEW, "").sections;
 function controller(sessions = rows) {
