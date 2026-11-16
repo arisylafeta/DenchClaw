@@ -62,10 +62,16 @@ def lists_models(raw):
 
 
 def normal_tokens(raw, make=None):
+    # Years are dropped unless the model is itself year-like (Peugeot 2008): then nothing else would be left.
+    return _normal_pass(raw, make, True) or _normal_pass(raw, make, False)
+
+
+def _normal_pass(raw, make, drop_years):
     text = unaccent(raw)
     text = re.sub(r"\b\d+(?:\.\d+)?\s*(?:kwh|kw|ps|hp|bhp|ah)\b", " ", text)
     text = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", text)
-    text = re.sub(r"\b(?:19|20)\d{2}\b", " ", text)
+    if drop_years:
+        text = re.sub(r"\b(?:19|20)\d{2}\b", " ", text)
     text = re.sub(r"\b(?:battery|batteries|packs?|modules?|hv|high voltage)\b", " ", text)
     text = " ".join(re.sub(r"[^a-z0-9]+", " ", text).split())
     tokens = text.split()
@@ -124,26 +130,30 @@ declare
   mk text := nullif(buyer_interest_fold(p_make), '');
   best text;
   exact_only boolean := position('/' in coalesce(p_model, '')) > 0;
+  pass int;
   variants text[] := array['long', 'range', 'standard', 'awd', 'rwd', 'fwd', '4wd', '2wd', 'lr', 'sr', 'dual', 'motor', 'performance', 'premium', 'se'];
 begin
   if btrim(raw) = '' or raw ~ '[,;:]' then return null; end if;
-  txt := buyer_interest_unaccent(raw);
-  txt := regexp_replace(txt, '\\y[0-9]+(\\.[0-9]+)?\\s*(kwh|kw|ps|hp|bhp|ah)\\y', ' ', 'g');
-  txt := regexp_replace(txt, '\\([^)]*\\)|\\[[^\\]]*\\]', ' ', 'g');
-  txt := regexp_replace(txt, '\\y(19|20)[0-9]{{2}}\\y', ' ', 'g');
-  txt := regexp_replace(txt, '\\y(battery|batteries|packs?|modules?|hv|high voltage)\\y', ' ', 'g');
-  txt := btrim(regexp_replace(regexp_replace(txt, '[^a-z0-9]+', ' ', 'g'), '\\s+', ' ', 'g'));
-  for brand in
-    select distinct b from unnest(array[btrim(regexp_replace(buyer_interest_unaccent(p_make), '[^a-z0-9]+', ' ', 'g')),
-      {", ".join("'" + re.sub(r"[^a-z0-9]+", " ", b) + "'" for b in BRAND_WORDS)}]) b where b <> '' order by length(b) desc
-  loop
-    if txt like brand || ' %' then txt := substr(txt, length(brand) + 2); exit; end if;
+  for pass in 1..2 loop
+    txt := buyer_interest_unaccent(raw);
+    txt := regexp_replace(txt, '\\y[0-9]+(\\.[0-9]+)?\\s*(kwh|kw|ps|hp|bhp|ah)\\y', ' ', 'g');
+    txt := regexp_replace(txt, '\\([^)]*\\)|\\[[^\\]]*\\]', ' ', 'g');
+    if pass = 1 then txt := regexp_replace(txt, '\\y(19|20)[0-9]{{2}}\\y', ' ', 'g'); end if;
+    txt := regexp_replace(txt, '\\y(battery|batteries|packs?|modules?|hv|high voltage)\\y', ' ', 'g');
+    txt := btrim(regexp_replace(regexp_replace(txt, '[^a-z0-9]+', ' ', 'g'), '\\s+', ' ', 'g'));
+    for brand in
+      select distinct b from unnest(array[btrim(regexp_replace(buyer_interest_unaccent(p_make), '[^a-z0-9]+', ' ', 'g')),
+        {", ".join("'" + re.sub(r"[^a-z0-9]+", " ", b) + "'" for b in BRAND_WORDS)}]) b where b <> '' order by length(b) desc
+    loop
+      if txt like brand || ' %' then txt := substr(txt, length(brand) + 2); exit; end if;
+    end loop;
+    tokens := string_to_array(txt, ' ');
+    while coalesce(array_length(tokens, 1), 0) > 1 and tokens[array_length(tokens, 1)] = any(variants) loop
+      tokens := tokens[1:array_length(tokens, 1) - 1];
+    end loop;
+    norm := array_to_string(tokens, ' ');
+    exit when norm <> '';
   end loop;
-  tokens := string_to_array(txt, ' ');
-  while coalesce(array_length(tokens, 1), 0) > 1 and tokens[array_length(tokens, 1)] = any(variants) loop
-    tokens := tokens[1:array_length(tokens, 1) - 1];
-  end loop;
-  norm := array_to_string(tokens, ' ');
   if norm = '' then return null; end if;
   select slug into best from (values
     {values}

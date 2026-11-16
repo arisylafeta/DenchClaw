@@ -56,10 +56,15 @@ export function listsModels(raw: string | null | undefined): boolean {
 
 /** The model text as the alias list reads it. */
 export function normalModelTokens(raw: string | null | undefined, make?: string | null): string {
+  // Years are dropped unless the model is itself a year-like name (Peugeot 2008): then nothing else would be left.
+  return normalModelPass(raw, make, true) || normalModelPass(raw, make, false);
+}
+
+function normalModelPass(raw: string | null | undefined, make: string | null | undefined, dropYears: boolean): string {
   let text = unaccent(raw)
     .replace(/\b\d+(?:\.\d+)?\s*(?:kwh|kw|ps|hp|bhp|ah)\b/g, " ")
     .replace(/\([^)]*\)|\[[^\]]*\]/g, " ")
-    .replace(/\b(?:19|20)\d{2}\b/g, " ")
+    .replace(dropYears ? /\b(?:19|20)\d{2}\b/g : /$^/g, " ")
     .replace(/\b(?:battery|batteries|packs?|modules?|hv|high voltage)\b/g, " ");
   text = spaced(text);
   const own = make ? spaced(unaccent(make)) : "";

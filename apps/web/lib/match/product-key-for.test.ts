@@ -255,7 +255,9 @@ describe("canonical model slugs", () => {
     ["MG", "MG4", "4"],
   ])("%s %s is %s on the lot side and the line side", (make, model, slug) => {
     expect(modelSlug(make, model)).toBe(slug);
-    expect(productKeyFor({ make, model, kwh: 64 })).toBe(`model:${makeKey(make)}-${slug}-64kwh`);
+    // A reviewed pack family (Kia Niro 64 kWh) keys as pack:, every other model as model:.
+    const level = make === "Kia" && slug === "niro" ? "pack" : "model";
+    expect(productKeyFor({ make, model, kwh: 64 })).toBe(`${level}:${makeKey(make)}-${slug}-64kwh`);
   });
 
   it("keeps a list of models out of the key", () => {
