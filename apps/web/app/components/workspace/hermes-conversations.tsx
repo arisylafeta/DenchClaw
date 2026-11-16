@@ -8,7 +8,7 @@ import { FaDiscord, FaWhatsapp } from "react-icons/fa";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@/app/components/ui/dropdown-menu";
 import { motion } from "framer-motion";
 import { ProfileAvatar } from "./profile-avatar";
-import { botEntries, botConfig, mainSession, type BotEntry } from "@/lib/hermes-bots";
+import { botEntries, botConfig, botName, mainSession, type BotEntry } from "@/lib/hermes-bots";
 import { useConversationReorderMotion } from "./use-conversation-reorder-motion";
 import styles from "./hermes-conversations.module.css";
 
@@ -330,7 +330,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
   const allBots = botEntries(chats.listing?.profiles ?? [], listed, userId);
   const mainKeys = new Set(allBots.flatMap((entry) => entry.main ? [entry.main.key] : []));
   const needle = query.trim().toLowerCase();
-  const bots = chats.ready ? allBots.filter((entry) => (!chats.filter || entry.profile === chats.filter) && (!needle || entry.profile.toLowerCase().includes(needle))) : [];
+  const bots = chats.ready ? allBots.filter((entry) => (!chats.filter || entry.profile === chats.filter) && (!needle || entry.profile.toLowerCase().includes(needle) || botName(entry.profile).toLowerCase().includes(needle))) : [];
   const result = applyChatView(rows.filter((row) => !mainKeys.has(row.key)), { ...view, pins: chats.pins ?? [] }, query, new Date(), userId);
   const [liveHeights, setLiveHeights] = useState<Record<string, number> | null>(null);
   const bodies = useRef(new Map<string, HTMLDivElement>());
@@ -382,8 +382,8 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
     const single = config.mode === "single";
     return <div key={profile} data-bot={profile} data-bot-mode={config.mode} data-status={status} data-selected={selected} className={`${styles.conversationRow} relative flex min-w-0 items-center rounded-lg ${status === "running" ? styles.running : ""}`}>
       <span className="flex h-11 w-11 shrink-0 items-center justify-center"><ProfileAvatar name={profile} className="h-6 w-6" working={status === "running"} /></span>
-      <button type="button" aria-label={single ? `Open ${profile}` : `New chat with ${profile}`} title={single ? profile : `New chat with ${profile}`} disabled={chats.creating} onClick={() => { void chats.openBot(profile); onOpen?.(); }} aria-current={selected ? "true" : undefined} className="block min-h-11 min-w-0 flex-1 touch-manipulation rounded-md py-1.5 text-left focus-visible:outline focus-visible:outline-2">
-        <span className="block truncate text-[12px] font-medium">{profile}</span>
+      <button type="button" aria-label={single ? `Open ${botName(profile)}` : `New chat with ${botName(profile)}`} title={single ? botName(profile) : `New chat with ${botName(profile)}`} disabled={chats.creating} onClick={() => { void chats.openBot(profile); onOpen?.(); }} aria-current={selected ? "true" : undefined} className="block min-h-11 min-w-0 flex-1 touch-manipulation rounded-md py-1.5 text-left focus-visible:outline focus-visible:outline-2">
+        <span className="block truncate text-[12px] font-medium">{botName(profile)}</span>
         {single && main && <span className="block truncate text-[9px] text-[var(--color-chat-sidebar-muted)]">{formatChatDate(main.updatedAt)}</span>}
       </button>
       <span className="ml-1 mr-3 flex w-3 shrink-0 justify-center"><StatusDot status={status} /></span>
@@ -497,7 +497,7 @@ export function HermesNewChatDialog({ chats }: { chats: HermesChatsController })
       <div role="group" aria-label="Agents">
         {chats.listing?.profiles.map((profile) => <label key={profile} className="flex cursor-pointer items-center gap-3 rounded-lg p-2 hover:bg-[var(--color-surface-hover)]">
           <input type={mode === "solo" ? "radio" : "checkbox"} name="hermes-agent" checked={bots.includes(profile)} disabled={chats.creating} onChange={() => toggle(profile)} />
-          <ProfileAvatar name={profile} className="h-7 w-7" /><span className="text-sm">{profile}</span>
+          <ProfileAvatar name={profile} className="h-7 w-7" /><span className="text-sm">{botName(profile)}</span>
         </label>)}
       </div>
       {mode === "group" && groupsOff && <p className="mt-2 text-xs text-amber-700">Group chats are not connected on this server.</p>}

@@ -6,13 +6,18 @@ import { canViewConversation, sourceSection, type HermesConversation } from "./h
  */
 export type BotMode = "single" | "multi";
 export type BotScope = "personal" | "shared";
-export type BotConfig = { mode: BotMode; scope: BotScope };
+export type BotConfig = { mode: BotMode; scope: BotScope; name?: string };
 
 const BOTS: Record<string, BotConfig> = {
-  sorcerer: { mode: "single", scope: "personal" },
-  papajules: { mode: "single", scope: "personal" },
+  sorcerer: { mode: "single", scope: "personal", name: "Sourcing Requests" },
+  papajules: { mode: "single", scope: "personal", name: "Jules Watcher" },
 };
 const MULTI: BotConfig = { mode: "multi", scope: "personal" };
+
+/** Display name for a bot; the Hermes profile id (and its sessions) stays the same. */
+export function botName(profile: string): string {
+  return botConfig(profile).name ?? profile;
+}
 
 export function botConfig(profile: string): BotConfig {
   return Object.hasOwn(BOTS, profile) ? BOTS[profile] : MULTI;
@@ -41,5 +46,5 @@ export function botEntries(profiles: string[], rows: HermesConversation[], userI
   return [...new Set(profiles)]
     .filter((profile) => botConfig(profile).mode === "single")
     .map((profile) => ({ profile, config: botConfig(profile), main: mainSession(rows, profile, userId) }))
-    .sort((a, b) => a.profile.localeCompare(b.profile));
+    .sort((a, b) => botName(a.profile).localeCompare(botName(b.profile)));
 }
