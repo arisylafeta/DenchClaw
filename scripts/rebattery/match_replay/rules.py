@@ -393,10 +393,18 @@ def _relative_gap(value: float, target: float) -> float:
     return abs(value - target) / target if target else 1.0
 
 
+def _profile_kwh_bounds(listing: dict[str, Any], profile: dict[str, Any]) -> tuple[Any, Any]:
+    """The lot's own format bounds when the buy box has them, else the flat kwh_min / kwh_max."""
+    by_format = profile.get("kwh_by_format")
+    entry = by_format.get(str(listing.get("format") or "").lower()) if isinstance(by_format, dict) else None
+    if isinstance(entry, dict):
+        return entry.get("min"), entry.get("max")
+    return profile.get("kwh_min"), profile.get("kwh_max")
+
+
 def _within_profile_kwh(listing: dict[str, Any], buyer: dict[str, Any], tolerance: float) -> bool:
     profile = buyer.get("profile") or {}
-    lo = profile.get("kwh_min")
-    hi = profile.get("kwh_max")
+    lo, hi = _profile_kwh_bounds(listing, profile)
     kwh = listing.get("kwh")
     if kwh is None or (lo is None and hi is None):
         return False
@@ -509,7 +517,7 @@ def rule_out(listing: dict[str, Any], buyer: dict[str, Any]) -> tuple[str, str] 
                 if best > tolerance and not body_covers and not _within_profile_kwh(listing, buyer, tolerance):
                     return ("kwh", f"stated {fmt} capacity is {best:.0%} away from {listing['kwh']} kWh")
         else:
-            if not _within_profile_kwh(listing, buyer, 0.15) and (profile.get("kwh_min") is not None or profile.get("kwh_max") is not None):
+            if not _within_profile_kwh(listing, buyer, 0.15) and any(b is not None for b in _profile_kwh_bounds(listing, profile)):
                 return ("kwh", f"buy profile kWh bounds exclude {listing['kwh']} kWh")
 
     if is_dossier:

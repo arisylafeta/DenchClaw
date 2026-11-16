@@ -32,6 +32,12 @@
     "part_numbers": [],
     "kwh_min": 24,
     "kwh_max": 24,
+    "kwh_by_format": {
+      "packs": {
+        "min": 24,
+        "max": 24
+      }
+    },
     "wants": "Nissan 24 kWh packs (asked 2026-09-01)",
     "dossier": {
       "company_id": "company-synthetic-2",

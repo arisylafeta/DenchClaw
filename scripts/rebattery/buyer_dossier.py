@@ -81,8 +81,8 @@ ENTRY_KEYS = ["value", "seen", "src"]
 # The flat keys derived from the dossier. A dossier save replaces these and passes every other key through.
 # Mirrored by DERIVED_KEYS in apps/web/lib/buyer-dossier.ts.
 DERIVED_KEYS = [
-    "chemistries", "formats", "makes", "cell_makers", "part_numbers", "kwh_min", "kwh_max", "wants", "dossier",
-    "origins", "min_soh", "min_pack_voltage",
+    "chemistries", "formats", "makes", "cell_makers", "part_numbers", "kwh_min", "kwh_max", "kwh_by_format",
+    "wants", "dossier", "origins", "min_soh", "min_pack_voltage",
 ]
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -558,6 +558,66 @@ def _product_label(product):
     return _canonical(product.get("chemistry"), CHEMISTRIES) or ""
 
 
+KWH_FORMAT_PRIORITY = ["packs", "modules", "cells", "systems"]
+
+
+def _whole(value):
+    return int(value) if float(value).is_integer() else float(value)
+
+
+def _product_kwh_bounds(product):
+    """(lo, hi, stated): a product's own capacity bounds; None is an open side.
+
+    The `kwh` figures and the optional kwh_min / kwh_max all count. A product with only kwh_min is
+    open above; one with only kwh_max is open below; one with figures is closed on the side no bound
+    opens. A product with no capacity at all states nothing.
+    """
+    values = _kwh_values(product)
+    lo_b = product.get("kwh_min") if _is_number(product.get("kwh_min")) else None
+    hi_b = product.get("kwh_max") if _is_number(product.get("kwh_max")) else None
+    if not values and lo_b is None and hi_b is None:
+        return None, None, False
+    lows = values + ([float(lo_b)] if lo_b is not None else [])
+    highs = values + ([float(hi_b)] if hi_b is not None else [])
+    return (min(lows) if lows else None), (max(highs) if highs else None), True
+
+
+def _kwh_by_format(products):
+    """{format: {min, max}} over the given products; an open bound stays None."""
+    out = {}
+    for product in products:
+        fmt = _canonical(product.get("format"), FORMATS)
+        lo, hi, stated = _product_kwh_bounds(product)
+        if not fmt or not stated:
+            continue
+        entry = out.setdefault(fmt.lower(), {"los": [], "his": [], "open_lo": False, "open_hi": False})
+        if lo is None:
+            entry["open_lo"] = True
+        else:
+            entry["los"].append(lo)
+        if hi is None:
+            entry["open_hi"] = True
+        else:
+            entry["his"].append(hi)
+    result = {}
+    for fmt, e in out.items():
+        lo = None if e["open_lo"] or not e["los"] else min(e["los"])
+        hi = None if e["open_hi"] or not e["his"] else max(e["his"])
+        result[fmt] = {"min": None if lo is None else _whole(lo), "max": None if hi is None else _whole(hi)}
+    return result
+
+
+def _top_level_kwh(by_format, products):
+    """(min, max) for the flat readers: packs, else modules, else cells; systems only for a systems-only buyer."""
+    for fmt in KWH_FORMAT_PRIORITY[:3]:
+        if fmt in by_format:
+            return by_format[fmt]["min"], by_format[fmt]["max"]
+    systems_only = all(_canonical(p.get("format"), FORMATS) in (None, "Systems") for p in products)
+    if "systems" in by_format and systems_only:
+        return by_format["systems"]["min"], by_format["systems"]["max"]
+    return None, None
+
+
 def _wants_line(product):
     kwh = _kwh_values(product)
     if len(kwh) == 1:
@@ -623,10 +683,10 @@ def to_buyer_profile(frontmatter):
             wants.append(line)
 
     asked = [p for p in products if p.get("status") in ASK_STATUSES]
-    kwh = [value for product in asked for value in _kwh_values(product)]
-    if not kwh:
-        kwh = [value for product in products if product.get("status") == "bought"
-               for value in _kwh_values(product)]
+    kwh_products = asked if any(_product_kwh_bounds(p)[2] for p in asked) else [
+        p for p in products if p.get("status") == "bought"]
+    by_format = _kwh_by_format(kwh_products)
+    kwh_min, kwh_max = _top_level_kwh(by_format, kwh_products)
 
     order = {value: i for i, value in enumerate(MAKES)}
     makes.sort(key=lambda m: order.get(m, len(order)))
@@ -643,15 +703,17 @@ def to_buyer_profile(frontmatter):
         "makes": makes,
         "cell_makers": cell_makers,
         "part_numbers": part_numbers,
-        "kwh_min": min(kwh) if kwh else None,
-        "kwh_max": max(kwh) if kwh else None,
+        "kwh_min": kwh_min,
+        "kwh_max": kwh_max,
         "wants": "\n".join(wants),
         "dossier": frontmatter,
     }
     # Whole numbers read better in JSON and in the old columns.
     for key in ("kwh_min", "kwh_max"):
-        if profile[key] is not None and float(profile[key]).is_integer():
-            profile[key] = int(profile[key])
+        if profile[key] is not None:
+            profile[key] = _whole(profile[key])
+    if by_format:
+        profile["kwh_by_format"] = by_format
 
     # Application origin and a minimum SoH have flat names the readers already look for.
     # Only registry values survive; anything else is a validation error before a save.

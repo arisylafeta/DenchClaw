@@ -141,6 +141,49 @@ describe("merge parity with scripts/rebattery/buyer_dossier.py", () => {
   }
 });
 
+describe("derive kWh per format", () => {
+  const derive = (products: string) => deriveProfile(parseDossier(`---\ncompany_id: x\nproducts:\n${products}---\n`).frontmatter);
+
+  it("keeps packs and systems apart (Modual-like)", () => {
+    const profile = derive(`  - format: packs
+    chemistry: LFP
+    kwh_min: 30
+    status: asked
+  - make: BYD
+    format: systems
+    chemistry: LFP
+    kwh: [1577]
+    status: asked
+`);
+    expect([profile.kwh_min, profile.kwh_max]).toEqual([30, null]);
+    expect(profile.kwh_by_format).toEqual({ packs: { min: 30, max: null }, systems: { min: 1577, max: 1577 } });
+  });
+
+  it("uses the systems bounds at top level only for a systems-only buyer", () => {
+    const only = derive("  - make: BYD\n    format: systems\n    kwh: [1577]\n    status: asked\n");
+    expect([only.kwh_min, only.kwh_max]).toEqual([1577, 1577]);
+    const mixed = derive("  - format: modules\n    status: asked\n  - format: systems\n    kwh: [500]\n    status: asked\n");
+    expect([mixed.kwh_min, mixed.kwh_max]).toEqual([null, null]);
+  });
+
+  it("gives both bounds for packs of 41 and 52 kWh", () => {
+    const profile = derive("  - model: ZOE\n    format: packs\n    kwh: [41]\n    status: asked\n  - model: ZOE\n    format: packs\n    kwh: [52]\n    status: asked\n");
+    expect([profile.kwh_min, profile.kwh_max]).toEqual([41, 52]);
+    expect(profile.kwh_by_format).toEqual({ packs: { min: 41, max: 52 } });
+  });
+
+  it("keeps an open kwh_min open above and an open kwh_max open below", () => {
+    const open = derive("  - format: packs\n    kwh_min: 30\n    status: asked\n  - format: packs\n    kwh: [60]\n    status: asked\n");
+    expect([open.kwh_min, open.kwh_max]).toEqual([30, null]);
+    const below = derive("  - format: modules\n    kwh_max: 5\n    status: asked\n");
+    expect(below.kwh_by_format).toEqual({ modules: { min: null, max: 5 } });
+  });
+
+  it("omits kwh_by_format when no product states a capacity", () => {
+    expect(derive("  - format: packs\n    status: asked\n")).not.toHaveProperty("kwh_by_format");
+  });
+});
+
 describe("derive", () => {
   it("derives the range from the asks even when an older purchase is smaller", () => {
     const frontmatter = parseDossier(`---

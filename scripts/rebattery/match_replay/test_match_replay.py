@@ -152,6 +152,20 @@ class RulesTest(unittest.TestCase):
         base.update(overrides)
         return base
 
+    def test_kwh_bounds_follow_the_lots_format(self) -> None:
+        profile = {"chemistries": ["NMC"], "formats": ["Packs", "Systems"], "kwh_min": 30, "kwh_max": None,
+                   "kwh_by_format": {"packs": {"min": 30, "max": None}, "systems": {"min": 1500, "max": 1600}}}
+        buyer = self.buyer(profile=profile)
+        self.assertIsNone(rules.rule_out(self.listing(kwh=80), buyer))
+        self.assertEqual(rules.rule_out(self.listing(kwh=10), buyer)[0], "kwh")
+        # A 1577 kWh system is judged on the systems bounds, a 2000 kWh one is outside them.
+        self.assertIsNone(rules.rule_out(self.listing(format="systems", kwh=1577), buyer))
+        self.assertTrue(rules._within_profile_kwh(self.listing(format="systems", kwh=1577), buyer, 0.15))
+        self.assertFalse(rules._within_profile_kwh(self.listing(format="systems", kwh=2000), buyer, 0.15))
+        # No entry for the lot's format: the flat bounds apply.
+        flat = self.buyer(profile={**profile, "kwh_by_format": {"systems": {"min": 1500, "max": 1600}}})
+        self.assertEqual(rules.rule_out(self.listing(kwh=10), flat)[0], "kwh")
+
     def test_chemistry_conflict_rules_out(self) -> None:
         buyer = self.buyer(profile={"chemistries": ["LFP"], "formats": ["Packs"]})
         self.assertIsNotNone(rules.rule_out(self.listing(), buyer))

@@ -395,6 +395,55 @@ class MappingTests(unittest.TestCase):
         profile = bd.to_buyer_profile(frontmatter)
         self.assertEqual((profile["kwh_min"], profile["kwh_max"]), (55, 84))
 
+    def _bounds(self, products):
+        profile = bd.to_buyer_profile(parse_valid(products=products))
+        return profile["kwh_min"], profile["kwh_max"], profile.get("kwh_by_format")
+
+    def test_kwh_bounds_keep_packs_and_systems_apart(self):
+        # Modual-like: open-ended LFP packs from 30 kWh next to a 1,577 kWh containerised system.
+        lo, hi, by_format = self._bounds([
+            {"format": "packs", "chemistry": "LFP", "kwh_min": 30, "status": "asked"},
+            {"make": "BYD", "format": "systems", "chemistry": "LFP", "kwh": [1577], "status": "asked"},
+        ])
+        self.assertEqual((lo, hi), (30, None))
+        self.assertEqual(by_format, {"packs": {"min": 30, "max": None},
+                                     "systems": {"min": 1577, "max": 1577}})
+
+    def test_systems_only_buyer_uses_the_systems_bounds_at_top_level(self):
+        lo, hi, by_format = self._bounds([
+            {"make": "BYD", "format": "systems", "kwh": [1577], "status": "asked"}])
+        self.assertEqual((lo, hi), (1577, 1577))
+        self.assertEqual(by_format, {"systems": {"min": 1577, "max": 1577}})
+
+    def test_systems_never_set_top_level_when_the_buyer_also_wants_other_formats(self):
+        lo, hi, by_format = self._bounds([
+            {"format": "modules", "status": "asked"},
+            {"format": "systems", "kwh": [500], "status": "asked"}])
+        self.assertEqual((lo, hi), (None, None))
+        self.assertEqual(by_format, {"systems": {"min": 500, "max": 500}})
+
+    def test_pack_figures_41_and_52_give_both_bounds(self):
+        lo, hi, by_format = self._bounds([
+            {"make": "Renault", "model": "ZOE", "format": "packs", "kwh": [41], "status": "asked"},
+            {"make": "Renault", "model": "ZOE", "format": "packs", "kwh": [52], "status": "asked"}])
+        self.assertEqual((lo, hi), (41, 52))
+        self.assertEqual(by_format, {"packs": {"min": 41, "max": 52}})
+
+    def test_open_kwh_min_leaves_the_max_null_and_wins_over_a_closed_sibling(self):
+        lo, hi, _ = self._bounds([
+            {"format": "packs", "kwh_min": 30, "status": "asked"},
+            {"format": "packs", "kwh": [60], "status": "asked"}])
+        self.assertEqual((lo, hi), (30, None))
+
+    def test_open_kwh_max_leaves_the_min_null(self):
+        lo, hi, by_format = self._bounds([{"format": "modules", "kwh_max": 5, "status": "asked"}])
+        self.assertEqual((lo, hi), (None, 5))
+        self.assertEqual(by_format, {"modules": {"min": None, "max": 5}})
+
+    def test_no_capacity_gives_no_by_format_key(self):
+        profile = bd.to_buyer_profile(parse_valid(products=[{"format": "packs", "status": "asked"}]))
+        self.assertNotIn("kwh_by_format", profile)
+
     def test_missing_frontmatter_maps_to_empty_profile(self):
         profile = bd.to_buyer_profile({})
         self.assertEqual(profile["chemistries"], [])

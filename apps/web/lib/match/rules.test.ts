@@ -155,6 +155,20 @@ describe("rule_out", () => {
     expect(ruleOut(listing({ kwh: 80 }), open)).toBeNull();
   });
 
+  it("judges a lot against the bounds of its own format", () => {
+    const profile = {
+      chemistries: ["NMC"], formats: ["Packs", "Systems"], kwh_min: 30, kwh_max: null,
+      kwh_by_format: { packs: { min: 30, max: null }, systems: { min: 1500, max: 1600 } },
+    };
+    const box = buyer({ profile });
+    expect(ruleOut(listing({ kwh: 80 }), box)).toBeNull();
+    expect(ruleOut(listing({ kwh: 10 }), box)?.code).toBe("kwh");
+    expect(ruleOut(listing({ format: "systems", kwh: 1577 }), box)).toBeNull();
+    // Without an entry for the lot's format the flat bounds apply.
+    const flat = buyer({ profile: { ...profile, kwh_by_format: { systems: { min: 1500, max: 1600 } } } });
+    expect(ruleOut(listing({ kwh: 10 }), flat)?.code).toBe("kwh");
+  });
+
   it("compares capacity per format, not across formats", () => {
     // Their packs are 30 kWh; this lot is modules, so the pack figure is not a conflict.
     const modules = buyer({

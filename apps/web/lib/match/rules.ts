@@ -459,10 +459,20 @@ const supplyRange = (supply: SupplyFacts): [number, number] | null => {
   return null;
 };
 
+/** The buy box's kWh bounds for this lot: its own format's bounds when the profile has them, else the flat ones. */
+function profileKwhBounds(supply: SupplyFacts, profile: Record<string, unknown>): [number | null, number | null] {
+  const byFormat = profile.kwh_by_format;
+  const entry = byFormat && typeof byFormat === "object" && !Array.isArray(byFormat)
+    ? (byFormat as Record<string, unknown>)[String(supply.format ?? "").toLowerCase()]
+    : null;
+  const source = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null;
+  const lo = source ? source.min : profile.kwh_min;
+  const hi = source ? source.max : profile.kwh_max;
+  return [typeof lo === "number" ? lo : null, typeof hi === "number" ? hi : null];
+}
+
 function withinProfileKwh(supply: SupplyFacts, buyer: BuyerFacts, tolerance: number): boolean {
-  const profile = buyer.profile;
-  const lo = typeof profile.kwh_min === "number" ? profile.kwh_min : null;
-  const hi = typeof profile.kwh_max === "number" ? profile.kwh_max : null;
+  const [lo, hi] = profileKwhBounds(supply, buyer.profile);
   const range = supplyRange(supply);
   if (!range || (lo == null && hi == null)) {
     return false;
@@ -613,7 +623,7 @@ export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts, ignoreBuyBoxList
         }
       }
     } else {
-      const stated = typeof profile.kwh_min === "number" || typeof profile.kwh_max === "number";
+      const stated = profileKwhBounds(supply, profile).some((bound) => bound != null);
       if (stated && !withinProfileKwh(supply, buyer, 0.15)) {
         const shown = supply.kwhMin != null && supply.kwhMax != null ? `${supply.kwhMin}-${supply.kwhMax}` : `${range[0]}`;
         return { code: "kwh", detail: `buy profile kWh bounds exclude ${shown} kWh` };

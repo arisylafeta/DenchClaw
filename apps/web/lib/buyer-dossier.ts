@@ -69,8 +69,8 @@ const ENTRY_KEYS = ["value", "seen", "src"];
 
 /** The flat keys derived from the dossier. Existing copies of these are replaced, never merged. */
 export const DERIVED_KEYS = [
-  "chemistries", "formats", "makes", "cell_makers", "part_numbers", "kwh_min", "kwh_max", "wants", "dossier",
-  "origins", "min_soh", "min_pack_voltage",
+  "chemistries", "formats", "makes", "cell_makers", "part_numbers", "kwh_min", "kwh_max", "kwh_by_format",
+  "wants", "dossier", "origins", "min_soh", "min_pack_voltage",
 ] as const;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -700,6 +700,62 @@ function kwhValues(product: Json): number[] {
   return values.filter(isNumber);
 }
 
+const KWH_FORMAT_PRIORITY = ["packs", "modules", "cells"];
+
+/** A product's own capacity bounds; null is an open side. `stated` is false when it states no capacity. */
+function productKwhBounds(product: Json): { lo: number | null; hi: number | null; stated: boolean } {
+  const values = kwhValues(product);
+  const loBound = isNumber(product.kwh_min) ? product.kwh_min : null;
+  const hiBound = isNumber(product.kwh_max) ? product.kwh_max : null;
+  if (!values.length && loBound === null && hiBound === null) {
+    return { lo: null, hi: null, stated: false };
+  }
+  const lows = loBound === null ? values : [...values, loBound];
+  const highs = hiBound === null ? values : [...values, hiBound];
+  return {
+    lo: lows.length ? Math.min(...lows) : null,
+    hi: highs.length ? Math.max(...highs) : null,
+    stated: true,
+  };
+}
+
+type KwhBounds = { min: number | null; max: number | null };
+
+function kwhByFormat(products: Json[]): Record<string, KwhBounds> {
+  const acc = new Map<string, { los: number[]; his: number[]; openLo: boolean; openHi: boolean }>();
+  for (const product of products) {
+    const format = canonical(product.format, FORMATS);
+    const { lo, hi, stated } = productKwhBounds(product);
+    if (!format || !stated) {continue;}
+    const key = format.toLowerCase();
+    const entry = acc.get(key) ?? { los: [], his: [], openLo: false, openHi: false };
+    acc.set(key, entry);
+    if (lo === null) {entry.openLo = true;} else {entry.los.push(lo);}
+    if (hi === null) {entry.openHi = true;} else {entry.his.push(hi);}
+  }
+  const result: Record<string, KwhBounds> = {};
+  for (const [key, entry] of acc) {
+    result[key] = {
+      min: entry.openLo || !entry.los.length ? null : Math.min(...entry.los),
+      max: entry.openHi || !entry.his.length ? null : Math.max(...entry.his),
+    };
+  }
+  return result;
+}
+
+/** [min, max] for the flat readers: packs, else modules, else cells; systems only for a systems-only buyer. */
+function topLevelKwh(byFormat: Record<string, KwhBounds>, products: Json[]): KwhBounds {
+  for (const key of KWH_FORMAT_PRIORITY) {
+    if (byFormat[key]) {return byFormat[key];}
+  }
+  const systemsOnly = products.every((product) => {
+    const format = canonical(product.format, FORMATS);
+    return !format || format === "Systems";
+  });
+  if (byFormat.systems && systemsOnly) {return byFormat.systems;}
+  return { min: null, max: null };
+}
+
 function productLabel(product: Json): string {
   for (const key of ["platform", "make", "model"]) {
     const value = product[key];
@@ -799,12 +855,12 @@ export function deriveProfile(frontmatter: unknown): Json {
     if (!wants.includes(line)) {wants.push(line);}
   }
 
-  const askedKwh = products
-    .filter((product) => ASK_STATUSES.has(String(product.status)))
-    .flatMap(kwhValues);
-  const kwh = askedKwh.length
-    ? askedKwh
-    : products.filter((product) => String(product.status) === "bought").flatMap(kwhValues);
+  const asked = products.filter((product) => ASK_STATUSES.has(String(product.status)));
+  const kwhProducts = asked.some((product) => productKwhBounds(product).stated)
+    ? asked
+    : products.filter((product) => String(product.status) === "bought");
+  const byFormat = kwhByFormat(kwhProducts);
+  const topKwh = topLevelKwh(byFormat, kwhProducts);
 
   const makeOrder = new Map(MAKES.map((value, index) => [value, index]));
   makes.sort((a, b) => (makeOrder.get(a) ?? MAKES.length) - (makeOrder.get(b) ?? MAKES.length));
@@ -816,19 +872,18 @@ export function deriveProfile(frontmatter: unknown): Json {
   const formatOrder = new Map(FORMATS.map((value, index) => [value, index]));
   formats.sort((a, b) => (formatOrder.get(a) ?? FORMATS.length) - (formatOrder.get(b) ?? FORMATS.length));
 
-  // Whole numbers read better in JSON and in the old columns.
-  const whole = (value: number) => (Number.isInteger(value) ? value : value);
   const profile: Json = {
     chemistries,
     formats,
     makes,
     cell_makers: cellMakers,
     part_numbers: partNumbers,
-    kwh_min: kwh.length ? whole(Math.min(...kwh)) : null,
-    kwh_max: kwh.length ? whole(Math.max(...kwh)) : null,
+    kwh_min: topKwh.min,
+    kwh_max: topKwh.max,
     wants: wants.join("\n"),
     dossier: fm,
   };
+  if (Object.keys(byFormat).length) {profile.kwh_by_format = byFormat;}
 
   // Application origin and a minimum SoH have flat names the readers already look for.
   // Only registry values survive; anything else is a validation error before a save.
