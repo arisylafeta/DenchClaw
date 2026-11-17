@@ -88,7 +88,10 @@ def kwh_numbers(line):
 
 
 def line_blob(line):
-    return fold(" ".join(str(line.get(k) or "") for k in ("product_key", "raw_product", "make", "model")))
+    stated = line.get("stated")
+    if isinstance(stated, (dict, list)):
+        stated = json.dumps(stated, ensure_ascii=False)  # R6: detail kept in buyer_interest.stated counts as carried
+    return fold(" ".join(str(line.get(k) or "") for k in ("product_key", "raw_product", "make", "model")) + " " + str(stated or ""))
 
 
 def _words(text):
@@ -295,6 +298,10 @@ def _less_specific(a, b):
         return False
     if a.get("format") and norm_format(a["format"]) != norm_format(b.get("format")):
         return False
+    # b must also say the capacity a states: a kWh floor or range is detail a line without it does not carry.
+    for field in ("kwh_min", "kwh_max"):
+        if num(a.get(field)) is not None and num(a.get(field)) != num(b.get(field)):
+            return False
     return True
 
 
@@ -302,12 +309,12 @@ def r4(ctx):
     found = []
     groups = collections.defaultdict(list)
     for line in ctx["lines"]:
-        groups[(line.get("company_id"), line.get("kind"), line.get("product_key"))].append(line)
-    for (_, kind, key), items in groups.items():
+        groups[(_source_key(line), line.get("kind"), line.get("product_key"))].append(line)
+    for (_source, kind, key), items in groups.items():
         if len(items) > 1:
             ids = ", ".join(i["id"] for i in items)
             for item in items[1:]:
-                found.append(_violation(ctx, "R4", item, f"duplicate of {items[0]['id']} (same company, kind {kind}, key {key}); lines: {ids}"))
+                found.append(_violation(ctx, "R4", item, f"duplicate of {items[0]['id']} (same source, kind {kind}, key {key}); lines: {ids}"))
     by_source = collections.defaultdict(list)
     for line in ctx["lines"]:
         by_source[(_source_key(line), line.get("kind"))].append(line)
@@ -363,7 +370,9 @@ def r6(ctx):
     found = []
     by_demand = collections.defaultdict(list)
     by_company_dossier = collections.defaultdict(list)
+    by_company = collections.defaultdict(list)
     for line in ctx["lines"]:
+        by_company[line["company_id"]].append(line)
         if line.get("demand_id"):
             by_demand[line["demand_id"]].append(line)
         if _is_dossier_line(line):
@@ -385,8 +394,10 @@ def r6(ctx):
             found.append(_violation(ctx, "R6", lines[0], f"source states {'; '.join(lost)} but none of its {len(lines)} line(s) carries it", f"demand {demand_id}", key=f"{len(lines)} line(s): {lines[0]['product_key']}"))
     for company_id, lines in by_company_dossier.items():
         company = ctx["companies"].get(company_id) or {}
-        blob = "".join(line_blob(line) for line in lines)
-        numbers = set().union(*(kwh_numbers(line) for line in lines))
+        # A product the dossier shares with a demand row or offer is written once, by that source: any line of the company carries it.
+        everything = by_company[company_id]
+        blob = "".join(line_blob(line) for line in everything)
+        numbers = set().union(*(kwh_numbers(line) for line in everything))
         for product in company.get("dossier_products") or []:
             items = [("part number", "text", v) for v in as_list(product.get("part_number"))]
             items += [("cell format", "text", v) for v in as_list(product.get("cell_format"))]

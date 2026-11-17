@@ -1201,6 +1201,11 @@ def run(conn, runner, run_id=None, apply_writes=False, builder="sql", limit=None
         if result["products"]:
             parsed.append(source)
     write_sources(conn, parsed, report, run_id, builder, apply_writes, batch_size, tsx)
+    if apply_writes:
+        from backfill_buyer_interest import drop_covered_lines  # R4: a broad line a parsed specific one now covers
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            report["covered_removed"] = drop_covered_lines(cur)
+        conn.commit()
     report["status"]["parsed_sources"] = len(parsed)
     report["before"] = {company: before.get(company, []) for company in report["companies_gaining"]}
     return report, sources

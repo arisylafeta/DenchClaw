@@ -460,6 +460,12 @@ def product_facts(product):
             base[key] = product[key].strip()
     if isinstance(product.get("format"), str) and product["format"].strip():
         base["format"] = product["format"].strip()
+    # R6: the cell format a dossier product states stays on its line (buyer_interest.stated), as a demand row's does.
+    cell_formats = product.get("cell_format")
+    cell_formats = cell_formats if isinstance(cell_formats, list) else [cell_formats]
+    cell_formats = [f.strip() for f in cell_formats if isinstance(f, str) and f.strip()]
+    if cell_formats:
+        base["cell_formats"] = cell_formats
     kwh = product.get("kwh")
     if isinstance(kwh, list) and kwh:
         values = [value for value in kwh if isinstance(value, (int, float))]
@@ -602,6 +608,29 @@ def _write_line(cur, company_id, kind, ownership, keyed, seen, refs, reason=None
 
 
 ARCHIVE_TABLE = "buyer_interest_removed_20261115"
+
+
+def drop_covered_lines(cur):
+    """R4 across writers: a line is removed when another line of the same company, kind and source says more (the
+    same test wants_conformance applies). Archived like a removed dossier line. Idempotent."""
+    import wants_conformance as wc
+    cur.execute("select * from buyer_interest order by company_id, id")
+    lines = [dict(r) for r in cur.fetchall()]
+    groups = {}
+    for line in lines:
+        groups.setdefault((wc._source_key(line), line.get("kind")), []).append(line)
+    doomed = sorted({a["id"] for items in groups.values() for a in items
+                     if any(a is not b and wc._less_specific(a, b) for b in items)})
+    if doomed:
+        cur.execute("select to_regclass(%s) as name", (f"public.{ARCHIVE_TABLE}",))
+        if (cur.fetchone() or {}).get("name"):
+            cur.execute("select column_name from information_schema.columns where table_schema = 'public' "
+                        "and table_name = %s intersect select column_name from information_schema.columns "
+                        "where table_schema = 'public' and table_name = 'buyer_interest'", (ARCHIVE_TABLE,))
+            cols = ", ".join(f'"{r["column_name"]}"' for r in cur.fetchall())
+            cur.execute(f"insert into {ARCHIVE_TABLE} ({cols}) select {cols} from buyer_interest where id = any(%s)", (doomed,))
+        cur.execute("delete from buyer_interest where id = any(%s)", (doomed,))
+    return len(doomed)
 
 
 def _remove_dossier_lines(cur, company_id):
@@ -830,6 +859,9 @@ def run(conn, apply_writes=False, batch_size=BATCH):
 
         # Last, so the buy boxes that other batches just covered are already excluded.
         batch("buy-box-1", lambda c: sync_buy_box_rows(c, buy_box_rows(c)))
+
+        # R4 across writers, last: a line a more specific line of the same source already says goes.
+        summary["covered_removed"] = drop_covered_lines(cur)
 
         start_total = sum(summary["lines_at_start"].values())
         if dry_run:
