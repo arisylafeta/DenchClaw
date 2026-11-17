@@ -50,7 +50,7 @@ const ROWS: SheetRow[] = [
   row({}),
   row({ key: "supply:s1", kind: "supply", id: "s1", side: "seller", title: "3 hybrid packs", company: "Seller Ltd", category: "packs", progress: "Offered",
     latest: { label: "Offer by email", at: "2026-10-07" } }),
-  row({ key: "bt_1", kind: "supply", id: "bt_1", side: "seller", title: "Synthetic eBS37", company: "Seller Ltd", category: "packs", progress: "Available",
+  row({ key: "bt_1", kind: "supply", id: "bt_1", side: "seller", title: "Synthetic eBS37", company: "Lot Seller", category: "packs", progress: "Available",
     tone: "active", next_action: "Call the buyer", owner: "Alex", next_due: today }),
 ];
 
@@ -81,6 +81,10 @@ describe("Trades Preview sheet", () => {
   const go = (search: string) => nativeReplace(NEXT_STATE, "", `/?path=%7Etrades-preview${search}`);
   const params = () => new URLSearchParams(window.location.search);
   const rowOf = (name: RegExp) => screen.getByRole("button", { name }).closest("li")!;
+  /** The strip's "all" count: every row the list holds after search and filters. */
+  const allCount = () => document.querySelector("[data-strip=all] b")?.textContent;
+  const listRow = (company: string) => screen.getByRole("button", { name: `Open ${company}` }).closest("li")!;
+  const openFilters = () => userEvent.click(screen.getByRole("button", { name: /^Filters/ }));
 
   it("opens on Today: four tabs, the driver filter, the quarter target and next actions by due date", async () => {
     vi.stubGlobal("fetch", mockApi());
@@ -90,7 +94,12 @@ describe("Trades Preview sheet", () => {
     // Each list tab shows how many it holds for the chosen driver; Today has no count.
     expect(screen.getAllByRole("tab").map((tab) => tab.querySelector("[data-tab-count]")?.textContent ?? null)).toEqual([null, "1", "2", "1"]);
     expect(screen.getByRole("tab", { name: "Today" })).toHaveAttribute("aria-selected", "true");
-    expect(within(screen.getByRole("group", { name: "Driver" })).getAllByRole("button").map((b) => b.textContent)).toEqual(["All", "Alex", "Sean", "Ari"]);
+    const ownerPicker = screen.getByLabelText("Owner") as HTMLSelectElement;
+    expect(Array.from(ownerPicker.options).map((o) => o.textContent)).toEqual(["All owners", "Alex", "Sean", "Ari"]);
+    // Today keeps its own page: no search or Filters there, and no grey segmented toggles anywhere.
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Filters/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Driver" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Pipeline against quarter target" })).toHaveTextContent("£54k (≈ €62k)");
     expect(within(today).getByRole("button", { name: "Call the buyer" })).toBeInTheDocument();
     expect(within(today).getAllByRole("button", { name: "Mark done" })).toHaveLength(1);
@@ -101,13 +110,31 @@ describe("Trades Preview sheet", () => {
     expect(window.location.search).toBe("?path=%7Etrades-preview");
   });
 
+  it("keeps Today at the far left with its To review group, and the To review chip on the Requests row", async () => {
+    vi.stubGlobal("fetch", mockApi({ sheet: [row({ review: true, next_action: "Check the import", next_due: today }), ...ROWS.slice(1)] }));
+    const first = render(<TradesPreviewView />);
+    const review = await screen.findByRole("region", { name: "To review" });
+    expect(screen.getAllByRole("tab")[0]).toHaveTextContent("Today");
+    expect(within(review).getByRole("button", { name: "Check the import" })).toBeInTheDocument();
+    first.unmount();
+    go("&tab=demand");
+    render(<TradesPreviewView />);
+    expect(within(await screen.findByRole("button", { name: "Open H. Nolden" }).then((b) => b.closest("li")!)).getByText("To review")).toBeInTheDocument();
+  });
+
   it("Requests lists demand only, without the side toggle, and offers only demand stages", async () => {
     go("&tab=demand");
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
-    expect(await screen.findByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /3 hybrid packs/ })).not.toBeInTheDocument();
-    expect(screen.getByText("1 of 1 live")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Open H. Nolden" })).toBeInTheDocument();
+    expect(screen.getByText("12 Ioniq packs")).toBeInTheDocument();
+    expect(screen.queryByText("3 hybrid packs")).not.toBeInTheDocument();
+    expect(allCount()).toBe("1");
+    // The stage chips, Company, Category, Waiting on and Sort live in the Filters popover.
+    expect(screen.queryByRole("group", { name: "Stage" })).not.toBeInTheDocument();
+    await openFilters();
+    const filters = screen.getByRole("dialog", { name: "Filters" });
+    for (const label of ["Company", "Category", "Waiting on", "Sort by"]) expect(within(filters).getByLabelText(label)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Buying" })).not.toBeInTheDocument();
     const stages = () => within(screen.getByRole("group", { name: "Stage" })).getAllByRole("button");
     const progress = stages().map((b) => b.firstChild?.textContent);
@@ -121,12 +148,15 @@ describe("Trades Preview sheet", () => {
     go("&tab=supply");
     vi.stubGlobal("fetch", mockApi({ sheet: [...ROWS.slice(0, 2), { ...ROWS[2], likelihood: 60 }] }));
     render(<TradesPreviewView />);
-    const trade = (await screen.findByRole("button", { name: /Synthetic eBS37/ })).closest("li")!;
-    expect(screen.getByText("2 of 2 live")).toBeInTheDocument();
-    expect(within(trade).getByText("Available")).toBeInTheDocument();
-    expect(within(trade).getByRole("button", { name: /Edit next action: Call the buyer/ })).toBeInTheDocument();
-    expect(within(trade.querySelector("[data-owner]") as HTMLElement).getByRole("img", { name: "Driver Alex" })).toBeInTheDocument();
-    expect(trade.querySelector("[data-chance]")).toHaveTextContent("60%");
+    const trade = (await screen.findByRole("button", { name: "Open Lot Seller" })).closest("li")!;
+    expect(allCount()).toBe("2");
+    expect(within(trade).getByRole("img", { name: "Stage: Available, step 3 of 6" })).toBeInTheDocument();
+    expect(within(trade).getByText("Call the buyer")).toBeInTheDocument();
+    expect(trade.querySelector("[data-due]")).toHaveTextContent("Due today");
+    // All owners: the driver shows as a small initial in the row.
+    expect(within(trade).getByRole("img", { name: "Driver Alex" })).toBeInTheDocument();
+    expect(trade.querySelector("[data-chance]")).toHaveTextContent("60% chance");
+    await openFilters();
     const stages = () => within(screen.getByRole("group", { name: "Stage" })).getAllByRole("button");
     const progress = stages().map((b) => b.firstChild?.textContent);
     expect(progress).toEqual(["All", "New", "Available", "Offered"]);
@@ -137,13 +167,13 @@ describe("Trades Preview sheet", () => {
     go("&tab=demand");
     vi.stubGlobal("fetch", mockApi({ sheet: [row({ company: null })] }));
     render(<TradesPreviewView />);
-    const demand = (await screen.findByRole("button", { name: /12 Ioniq packs/ })).closest("li")!;
-    // Ticket, fee and chance are prompts to fill in, never guessed; company and driver say they are missing.
-    expect(demand.querySelector("[data-ticket]")).toHaveTextContent("Add size");
-    expect(demand.querySelector("[data-fee]")).toHaveTextContent("Set fee");
-    expect(demand.querySelector("[data-chance]")).toHaveTextContent("Set %");
-    expect(within(demand).getAllByRole("img", { name: "No driver" }).length).toBeGreaterThan(0);
-    expect(within(demand).getByRole("button", { name: "Add next action" })).toBeInTheDocument();
+    const demand = (await screen.findByRole("button", { name: "Open 12 Ioniq packs" })).closest("li")!;
+    // Fee, ticket and chance are never guessed; the chance is a quiet prompt, and the driver says it is missing.
+    expect(demand.querySelector("[data-money]")).toHaveTextContent("—no fee yetSet chance");
+    expect(within(demand).getByRole("button", { name: "Set chance" })).toBeInTheDocument();
+    expect(within(demand).getByRole("img", { name: "No driver" })).toBeInTheDocument();
+    expect(within(demand).getByText("No next action yet.")).toBeInTheDocument();
+    expect(demand.querySelector("[data-move-label]")).toHaveTextContent("Your move");
   });
 
   it("adds a next action and ticks one done on Today without opening the row", async () => {
@@ -184,12 +214,12 @@ describe("Trades Preview sheet", () => {
     go("&tab=supply");
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
-    await screen.findByRole("button", { name: /3 hybrid packs/ });
+    await screen.findByRole("button", { name: "Open Seller Ltd" });
     await userEvent.type(screen.getByRole("searchbox"), "hybrid");
-    expect(screen.getByText("1 of 2 live")).toBeInTheDocument();
+    expect(allCount()).toBe("1");
     expect(params().get("q")).toBe("hybrid");
-    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(screen.getByText("2 of 2 live")).toBeInTheDocument();
+    await userEvent.clear(screen.getByRole("searchbox"));
+    expect(allCount()).toBe("2");
     expect(window.location.search).toBe("?path=%7Etrades-preview&tab=supply");
   });
 
@@ -197,21 +227,23 @@ describe("Trades Preview sheet", () => {
     go("&tab=supply");
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
-    await screen.findByRole("button", { name: /3 hybrid packs/ });
+    await screen.findByRole("button", { name: "Open Seller Ltd" });
     await userEvent.type(screen.getByRole("searchbox"), "Seller Ltd");
     expect(screen.getByRole("searchbox")).toHaveValue("Seller Ltd");
-    expect(screen.getByText("2 of 2 live")).toBeInTheDocument();
+    expect(allCount()).toBe("1");
   });
 
   it("filters every tab by driver, keeps it in the URL and across tabs, and resets the other filters on a tab change", async () => {
     go("&tab=supply&q=packs");
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
-    await screen.findByRole("button", { name: /3 hybrid packs/ });
-    await userEvent.click(screen.getByRole("button", { name: "Alex" }));
+    await screen.findByRole("button", { name: "Open Seller Ltd" });
+    await userEvent.selectOptions(screen.getByLabelText("Owner"), "Alex");
     expect(params().get("owner")).toBe("Alex");
-    expect(screen.getByText("1 of 2 live")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /3 hybrid packs/ })).not.toBeInTheDocument();
+    expect(allCount()).toBe("1");
+    expect(screen.queryByRole("button", { name: "Open Seller Ltd" })).not.toBeInTheDocument();
+    // One owner: no driver initials in the rows.
+    expect(within(listRow("Lot Seller")).queryByRole("img", { name: /Driver/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: "Today" }));
     expect(window.location.search).toBe("?path=%7Etrades-preview&owner=Alex");
     const target = screen.getByRole("region", { name: "Pipeline against quarter target" });
@@ -220,10 +252,10 @@ describe("Trades Preview sheet", () => {
     expect(target).not.toHaveTextContent("Includes deals with no owner");
     expect(screen.getByRole("button", { name: /Synthetic eBS37/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /12 Ioniq packs/ })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Ari" }));
+    await userEvent.selectOptions(screen.getByLabelText("Owner"), "Ari");
     expect(screen.queryByRole("region", { name: "Pipeline against quarter target" })).not.toBeInTheDocument();
     expect(screen.getByText("Targets are set for Alex and Sean.")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "All" }));
+    await userEvent.selectOptions(screen.getByLabelText("Owner"), "All owners");
     expect(params().has("owner")).toBe(false);
     expect(screen.getByRole("region", { name: "Pipeline against quarter target" })).toHaveTextContent("Includes deals with no owner.");
     expect(screen.getByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
@@ -233,7 +265,10 @@ describe("Trades Preview sheet", () => {
     go("&tab=supply&progress=Offered");
     vi.stubGlobal("fetch", mockApi());
     const first = render(<TradesPreviewView />);
-    expect(await screen.findByText("1 of 2 live")).toBeInTheDocument();
+    await screen.findByRole("button", { name: "Open Seller Ltd" });
+    expect(allCount()).toBe("1");
+    expect(screen.getByRole("button", { name: "Filters, 1 on" })).toHaveTextContent("Filters1");
+    await openFilters();
     expect(within(screen.getByRole("group", { name: "Stage" })).getByRole("button", { name: /^Offered/ })).toHaveAttribute("aria-pressed", "true");
     first.unmount();
 
@@ -249,13 +284,18 @@ describe("Trades Preview sheet", () => {
     go("&tab=supply&progress=Matched");
     vi.stubGlobal("fetch", mockApi());
     const first = render(<TradesPreviewView />);
-    expect(await screen.findByText("1 of 2 live")).toBeInTheDocument();
+    await screen.findByRole("button", { name: "Open Lot Seller" });
+    expect(allCount()).toBe("1");
+    await openFilters();
     expect(within(screen.getByRole("group", { name: "Stage" })).getByRole("button", { name: /^Available/ })).toHaveAttribute("aria-pressed", "true");
     first.unmount();
 
     go("&tab=supply&progress=Sourcing");
     render(<TradesPreviewView />);
-    expect(await screen.findByText("2 of 2 live")).toBeInTheDocument();
+    await screen.findByRole("button", { name: "Open Lot Seller" });
+    expect(allCount()).toBe("2");
+    expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
+    await openFilters();
     expect(within(screen.getByRole("group", { name: "Stage" })).getByRole("button", { name: /^All/ })).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -264,7 +304,7 @@ describe("Trades Preview sheet", () => {
     const fetchMock = mockApi();
     vi.stubGlobal("fetch", fetchMock);
     render(<TradesPreviewView />);
-    await userEvent.click(await screen.findByRole("button", { name: /12 Ioniq packs/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Open H. Nolden" }));
     expect(params().get("listing")).toBe("d1");
     expect(params().get("tab")).toBe("demand");
     const loads = () => fetchMock.mock.calls.filter(([url]) => url === "/api/bulk-trades/sheet").length;
@@ -280,12 +320,13 @@ describe("Trades Preview sheet", () => {
     go("&tab=supply&owner=Alex");
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
-    await userEvent.click(await screen.findByRole("button", { name: /Synthetic eBS37/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Lot Seller" }));
     expect(await screen.findByRole("heading", { level: 1, name: "Listing bt_1" })).toBeInTheDocument();
     expect(params().get("listing")).toBe("bt_1");
 
     await userEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(await screen.findByText("1 of 2 live")).toBeInTheDocument();
+    await screen.findByRole("button", { name: "Open Lot Seller" });
+    expect(allCount()).toBe("1");
     expect(window.location.search).toBe("?path=%7Etrades-preview&tab=supply&owner=Alex");
   });
 
@@ -313,10 +354,10 @@ describe("Trades Preview sheet", () => {
     go("&tab=demand");
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView onOpenListing={onOpenListing} />);
-    await userEvent.click(await screen.findByRole("button", { name: /12 Ioniq packs/ }));
+    await userEvent.click(await screen.findByRole("button", { name: "Open H. Nolden" }));
     expect(onOpenListing).toHaveBeenCalledWith("d1", expect.stringContaining("Ioniq"));
     expect(params().get("listing")).toBeNull();
-    expect(screen.getByText(/\d of \d live/)).toBeInTheDocument();
+    expect(allCount()).toBe("1");
   });
 
   it("in the workspace, brings the tab and filters back when the sheet tab is shown again", async () => {
@@ -324,11 +365,13 @@ describe("Trades Preview sheet", () => {
     go("&tab=supply&owner=Alex");
     vi.stubGlobal("fetch", mockApi());
     const first = render(<TradesPreviewView onOpenListing={vi.fn()} />);
-    expect(await screen.findByText("1 of 2 live")).toBeInTheDocument();
+    await screen.findByRole("button", { name: "Open Lot Seller" });
+    expect(allCount()).toBe("1");
     first.unmount();
     go("");
     render(<TradesPreviewView onOpenListing={vi.fn()} />);
-    expect(await screen.findByText("1 of 2 live")).toBeInTheDocument();
+    await screen.findByRole("button", { name: "Open Lot Seller" });
+    expect(allCount()).toBe("1");
     expect(params().get("tab")).toBe("supply");
     expect(params().get("owner")).toBe("Alex");
     window.sessionStorage.clear();
@@ -338,7 +381,7 @@ describe("Trades Preview sheet", () => {
     vi.stubGlobal("fetch", mockApi({ hangInbox: true }));
     render(<TradesPreviewView />);
     expect(await screen.findByRole("button", { name: /12 Ioniq packs/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Inbox ·/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Inbox" })).toBeInTheDocument();
   });
 
   it("distinguishes loading and an empty sheet on Today and on a list", async () => {

@@ -2,18 +2,21 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BusyRegion, Sh, ShBlock } from "./bt-shimmer";
-import { Plus } from "lucide-react";
+import { Users } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "../ui/dialog";
 import { nextCheckTime, ukTime, type CheckStatus, type Proposal } from "@/lib/bulk-trade-details";
 import { todayInLondon, type TradeOwner } from "@/lib/bulk-trades";
 import { filterSheet, filtersFromRoute, NO_FILTERS, routeFromFilters, sortRows, type SheetFilters, type SheetRow, type SheetSort } from "@/lib/bulk-sheet";
 import { DEMAND_MAIN_STAGES, DEMAND_STAGES, SUPPLY_MAIN_STAGES, SUPPLY_STAGES, progressFor } from "@/lib/bulk-listing";
 import { boardRows, deskCounts } from "@/lib/bulk-desk";
-import type { DealOwner } from "@/lib/bulk-owner";
+import { activeFilterCount } from "@/lib/bulk-overview";
+import { dealOwner, type DealOwner } from "@/lib/bulk-owner";
 import type { Demand } from "@/lib/bulk-demand";
 import { ListingDetail } from "./listing-detail";
 import { DemandDialog } from "./demand-editor";
-import { OpportunitiesSheet, SheetFilterBar } from "./opportunities-sheet";
+import { SheetFilterBar } from "./opportunities-sheet";
+import { OverviewList, usePopover } from "./overview-list";
+import css from "./bulk-overview.module.css";
 import { BulkBoard } from "./bulk-board";
 import { TodayView } from "./today-view";
 import type { NextFields } from "./next-action";
@@ -25,9 +28,18 @@ const SHEET_STATE_KEY = "bt-preview-sheet-state";
 const TABS: [PreviewTab, string][] = [["today", "Today"], ["demand", "Requests"], ["supply", "Supply"], ["board", "Deals"]];
 /** The drivers, in the order the header shows them. */
 const DRIVERS: (DealOwner | "all")[] = ["all", "Alex", "Sean", "Ari"];
-const segmentOn = { background: "var(--bt-surface)", color: "var(--bt-text)", fontWeight: 600, boxShadow: "0 1px 2px rgba(0,0,0,0.08)" } as const;
-const segmentOff = { color: "var(--bt-text-2)" } as const;
-const segmentButton = "h-8 shrink-0 rounded-md px-3 text-[13px] whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]";
+/** The owner picker's initial, in the mock's colours; All owners shows a group icon. */
+const OWNER_LOOK: Record<DealOwner, { text: string; bg: string; fg: string }> = {
+  Sean: { text: "S", bg: "var(--ov-av-bg)", fg: "var(--ov-blue)" },
+  Alex: { text: "A", bg: "var(--ov-text)", fg: "var(--ov-card)" },
+  Ari: { text: "Ar", bg: "var(--bt-purple-bg)", fg: "var(--bt-purple)" },
+};
+function OwnerInitial({ owner }: { owner: DealOwner | "all" }) {
+  const look = owner === "all" ? null : OWNER_LOOK[owner];
+  return <span className={css.av} aria-hidden="true" style={look ? { background: look.bg, color: look.fg, fontSize: look.text.length > 1 ? 10 : undefined } : undefined}>
+    {look ? look.text : <Users size={13} strokeWidth={2.25} />}
+  </span>;
+}
 import { useBulkTradesRoute } from "./use-bulk-trades-route";
 
 type Props = {
@@ -48,8 +60,9 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
   const [showPossible, setShowPossible] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [creating, setCreating] = useState<"demand" | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [sort, setSort] = useState<SheetSort>("newest");
+  const add = usePopover();
+  const filterPop = usePopover();
+  const [sort, setSort] = useState<SheetSort>("urgent");
   const today = todayInLondon();
 
   // The sheet and the inbox load side by side: the rows never wait on the inbox, nor the inbox on the rows.
@@ -101,7 +114,8 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
   }, [route, tab]);
   const tabRows = useMemo(() => tab === "demand" ? rows.filter((row) => row.kind === "demand")
     : tab === "supply" ? rows.filter((row) => row.kind === "supply") : tab === "board" ? boardRows(rows) : rows, [rows, tab]);
-  const shown = useMemo(() => tab === "today" ? filterSheet(rows, { ...NO_FILTERS, owner: filters.owner }) : sortRows(filterSheet(tabRows, filters), sort), [rows, tabRows, filters, sort, tab]);
+  // The list tabs group and order their own rows (OverviewList); the Board keeps the chosen order.
+  const shown = useMemo(() => tab === "today" ? filterSheet(rows, { ...NO_FILTERS, owner: filters.owner }) : tab === "board" ? sortRows(filterSheet(tabRows, filters), sort) : filterSheet(tabRows, filters), [rows, tabRows, filters, sort, tab]);
   /** What each tab holds for the chosen driver, shown beside its name. */
   const tabCounts = useMemo(() => {
     const counts = deskCounts(filterSheet(rows, { ...NO_FILTERS, owner: filters.owner }));
@@ -139,10 +153,9 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
     try { window.sessionStorage.setItem(SHEET_STATE_KEY, filterKey); } catch { /* storage unavailable */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey, onOpenListing, route.listing]);
-  /** Saves a listing’s next action in place. */
-  async function saveNext(row: SheetRow, text: string | null) {
-    await request(`/api/bulk-listings/${row.id}/next`, { method: "PUT", body: JSON.stringify({ next_action: text, next_due: text ? row.next_due : null }) });
-    setRows((current) => current.map((item) => (item.key === row.key ? { ...item, next_action: text, next_due: text ? item.next_due : null } : item)));
+  /** A list row saved a change (next action, date, driver or chance): update it in place. */
+  function updateRow(row: SheetRow, patch: Partial<SheetRow>) {
+    setRows((current) => current.map((item) => (item.key === row.key ? { ...item, ...patch } : item)));
   }
 
   /** A Today row changed its action, date or driver: update it in place. */
@@ -159,59 +172,87 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
     );
   }
 
+  const sideLocked = tab !== "board";
+  const filterCount = activeFilterCount(filters, sideLocked);
+  const searching = filters.query.trim() !== "";
   return (
-    <div className="bulk-trades bt-preview flex h-full flex-col">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-2 pb-2 pt-3 sm:px-3">
-        <h1 className="text-[18px] font-semibold tracking-[-0.01em]">Bulk Trades</h1>
-        <div role="tablist" aria-label="View" className="flex max-w-full overflow-x-auto rounded-lg p-0.5" style={{ background: "var(--bt-segment)" }}>
-          {TABS.map(([value, label]) => (
-            <button key={value} type="button" role="tab" aria-selected={tab === value} onClick={() => setTab(value)}
-              className={segmentButton} style={tab === value ? segmentOn : segmentOff}>
-              {label}{tabCounts[value] != null && sheetLoaded && <><span className="sr-only">, </span><span data-tab-count className="ml-1.5 font-normal tabular-nums" style={{ color: "var(--bt-muted)" }}>{tabCounts[value]}</span></>}
+    <div className={`bulk-trades bt-preview h-full overflow-auto ${css.page}`}>
+      <div className={css.inner}>
+      <header className={css.header}>
+        <div className={css.titleRow}>
+          <h1 className={css.title}>Bulk Trades</h1>
+          <div className={css.headActions}>
+            <button type="button" onClick={() => setShowPossible(true)} className={`${css.btn} ${css.btnGhost}`} aria-label={inboxLoaded ? `Inbox · ${possible.length}` : "Inbox"}>
+              <ShBlock on={!inboxLoaded} size={8}>{check && <CheckLine check={check} />}</ShBlock>Inbox<span className={css.muted} style={{ fontWeight: 500 }}><Sh on={!inboxLoaded} chars={2}>{possible.length}</Sh></span>
             </button>
-          ))}
+            <span className={css.popWrap} ref={add.wrap}>
+              <button ref={add.trigger} type="button" aria-haspopup="menu" aria-expanded={add.open} onClick={() => add.setOpen(!add.open)} className={`${css.btn} ${css.btnPri}`}>
+                <span aria-hidden="true">+</span> Add
+              </button>
+              {add.open && (
+                <div role="menu" className={`${css.popover} ${css.menu}`}>
+                  <button type="button" role="menuitem" className={css.menuItem} onClick={() => { add.setOpen(false); setCreating("demand"); }}>Add demand</button>
+                </div>
+              )}
+            </span>
+          </div>
         </div>
-        <div role="group" aria-label="Driver" className="flex max-w-full overflow-x-auto rounded-lg p-0.5" style={{ background: "var(--bt-segment)" }}>
-          {DRIVERS.map((value) => (
-            <button key={value} type="button" aria-pressed={filters.owner === value} onClick={() => setOwner(value)}
-              className={segmentButton} style={filters.owner === value ? segmentOn : segmentOff}>{value === "all" ? "All" : value}</button>
-          ))}
-        </div>
-        <div className="flex-1" />
-        <button type="button" onClick={() => setShowPossible(true)} className={`${buttonClass} h-9 rounded-lg`} style={buttonStyle}>
-          <ShBlock on={!inboxLoaded} size={8}>{check && <CheckLine check={check} />}</ShBlock>Inbox · <Sh on={!inboxLoaded} chars={2}>{possible.length}</Sh>
-        </button>
-        <div className="relative">
-          <button type="button" aria-haspopup="menu" aria-expanded={adding} onClick={() => setAdding((value) => !value)}
-            className="flex h-9 items-center gap-1.5 rounded-lg bg-[var(--bt-accent)] px-3.5 text-sm font-semibold hover:bg-[var(--bt-accent-hover)]"
-            style={{ color: "var(--bt-on-accent)" }}>
-            <Plus size={16} aria-hidden="true" />Add
-          </button>
-          {adding && (
-            <div role="menu" className="absolute right-0 z-20 mt-1 w-44 rounded-lg border p-1 shadow-md" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-              <button type="button" role="menuitem" className="block w-full rounded-md px-3 py-2 text-left text-[13px] hover:bg-[var(--bt-row-hover)]" onClick={() => { setAdding(false); setCreating("demand"); }}>Add demand</button>
-            </div>
-          )}
+        <div className={css.bar}>
+          <nav role="tablist" aria-label="View" className={css.tabs}>
+            {TABS.map(([value, label]) => (
+              <button key={value} type="button" role="tab" aria-selected={tab === value} onClick={() => setTab(value)}>
+                {label}{tabCounts[value] != null && sheetLoaded && <><span className="sr-only">, </span><span data-tab-count className={css.n}>{tabCounts[value]}</span></>}
+              </button>
+            ))}
+          </nav>
+          <div className={css.tools}>
+            <label className={css.owner}>
+              <OwnerInitial owner={filters.owner} />
+              <select aria-label="Owner" value={filters.owner} onChange={(event) => setOwner((dealOwner(event.target.value) ?? "all"))}>
+                {DRIVERS.map((value) => <option key={value} value={value}>{value === "all" ? "All owners" : value}</option>)}
+              </select>
+              <svg className={css.chev} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true" style={{ color: "var(--ov-sub)" }}><path d="M6 9l6 6 6-6" /></svg>
+            </label>
+            {tab !== "today" && <>
+              <label className={css.search}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ color: "var(--ov-muted)", flex: "none" }}><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+                <input type="search" aria-label="Search buyers, offers and trades" placeholder="Search" value={filters.query} onChange={(event) => setFilters({ ...filters, query: event.target.value })} />
+              </label>
+              <span className={css.popWrap} ref={filterPop.wrap} style={{ position: "static" }}>
+                <button ref={filterPop.trigger} type="button" className={css.btn} aria-haspopup="dialog" aria-expanded={filterPop.open}
+                  aria-label={filterCount ? `Filters, ${filterCount} on` : "Filters"} onClick={() => filterPop.setOpen(!filterPop.open)}>
+                  Filters{filterCount > 0 && <span className={css.badge} data-filter-count>{filterCount}</span>}
+                </button>
+                {filterPop.open && (
+                  <div role="dialog" aria-label="Filters" className={`${css.popover} ${css.filters}`}>
+                    <div className={css.filtersHead}><span>Filters</span>
+                      <button type="button" className={`${css.btn} ${css.btnGhost}`} onClick={() => filterPop.setOpen(false)}>Done</button></div>
+                    <SheetFilterBar rows={tabRows} filters={filters} onFilters={setFilters} hideSearch hideSide={sideLocked} hideProgress={tab === "board"}
+                      sort={tab === "board" ? undefined : sort} onSort={tab === "board" ? undefined : setSort}
+                      stages={tab === "demand" ? DEMAND_STAGES : tab === "supply" ? SUPPLY_STAGES : undefined}
+                      mainStages={tab === "demand" ? DEMAND_MAIN_STAGES : tab === "supply" ? SUPPLY_MAIN_STAGES : undefined} />
+                  </div>
+                )}
+              </span>
+            </>}
+          </div>
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto px-2 pb-8 pt-1 sm:px-3">
+      <main className="min-w-0">
         <ErrorText error={actionError} />
         {tab === "today" ? (
           <TodayView rows={shown} owner={filters.owner} loading={!sheetLoaded && !sheetError} error={sheetError} today={today}
             onOpen={open} onUpdate={updateNext} onOpenBoard={() => setTab("board")}
             onOpenCompany={onOpenEntry ? (id) => onOpenEntry("company", id) : undefined} />
         ) : tab === "board" ? (
-          <div className="flex flex-col gap-4">
-            <SheetFilterBar rows={tabRows} filters={filters} onFilters={setFilters} hideProgress />
-            <BulkBoard shown={shown} loading={!sheetLoaded && !sheetError} error={sheetError} today={today} onOpen={open} />
-          </div>
+          <BulkBoard shown={shown} loading={!sheetLoaded && !sheetError} error={sheetError} today={today} onOpen={open} />
         ) : (
-          <OpportunitiesSheet key={tab} rows={tabRows} shown={shown} filters={filters} loading={!sheetLoaded && !sheetError} error={sheetError} today={today}
-            sort={sort} onSort={setSort} onFilters={setFilters} onOpen={open} onNext={saveNext} hideSide stages={tab === "demand" ? DEMAND_STAGES : SUPPLY_STAGES} mainStages={tab === "demand" ? DEMAND_MAIN_STAGES : SUPPLY_MAIN_STAGES} />
+          <OverviewList key={tab} rows={shown} loading={!sheetLoaded && !sheetError} error={sheetError} today={today} owner={filters.owner} sort={sort}
+            filtered={searching || filterCount > 0} onOpen={open} onUpdate={updateRow} />
         )}
       </main>
-
+      </div>
 
       <Dialog open={showPossible} onOpenChange={setShowPossible}>
         <DialogContent aria-describedby={undefined} showCloseButton={false} className="bulk-trades bt-preview top-0 left-auto right-0 h-full max-w-2xl translate-x-0 translate-y-0 overflow-auto rounded-lg sm:max-w-2xl block" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>

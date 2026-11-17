@@ -1,15 +1,8 @@
 "use client";
 
-import { CopyIdButton } from "./copy-id-button";
-import { BusyRegion, Sh, ShBlock } from "./bt-shimmer";
-import { Search, Flag } from "lucide-react";
-import { filterSheet, NO_FILTERS, FEE_RATE, formatEurCompact, SHEET_SORTS, SIDE_LABEL, SORT_LABEL, WAITING_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetSort, type SheetTone } from "@/lib/bulk-sheet";
+import { Search } from "lucide-react";
+import { filterSheet, NO_FILTERS, SHEET_SORTS, SIDE_LABEL, SORT_LABEL, WAITING_LABEL, sheetOptions, type SheetFilters, type SheetRow, type SheetSort, type SheetTone } from "@/lib/bulk-sheet";
 import { shortDate } from "@/lib/bulk-trade-details";
-import { iconForLabel } from "./story-entry";
-import { NextActionCell } from "./next-action-cell";
-import { ErrorText } from "./trade-ui";
-import { DriverAvatar, Gap } from "./desk-bits";
-import { ReviewChip } from "./next-action";
 
 const TONE: Record<SheetTone, { dot: string; bg: string }> = {
   new: { dot: "var(--bt-muted)", bg: "var(--bt-segment)" },
@@ -20,9 +13,6 @@ const TONE: Record<SheetTone, { dot: string; bg: string }> = {
   warning: { dot: "var(--bt-red)", bg: "var(--bt-red-bg)" },
 };
 
-// Score | Opportunity | Ticket | Fee | Chance | Driver | Stage | Next action. Ticket, fee and chance join at lg.
-// Sized by the sheet's own width (container queries), not the window: in a narrow workspace pane it drops columns instead of scrolling.
-const GRID = "@2xl:grid-cols-[2.25rem_minmax(0,1.7fr)_2.75rem_8.5rem_minmax(11rem,1.4fr)] @4xl:grid-cols-[2.25rem_minmax(0,1.7fr)_4.5rem_4.5rem_3.5rem_2.75rem_8.5rem_minmax(12rem,1.5fr)]";
 const field = "h-9 rounded-lg border bg-[var(--bt-surface)] px-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]";
 const fieldStyle = { borderColor: "var(--bt-border)", color: "var(--bt-text)" };
 
@@ -90,67 +80,16 @@ export function SideChip({ side }: { side: "buyer" | "seller" }) {
   );
 }
 
-/** Compact: just the icon for what happened and the date, full text on hover. */
-function IconDate({ icon: Icon, date, title, tone }: { icon: typeof Flag; date: string | null; title: string; tone?: string }) {
-  if (!date) return <span title="Nothing recorded" style={{ color: "var(--bt-muted)" }}>—</span>;
-  return (
-    <span className="inline-flex items-center gap-1.5" title={title}>
-      <Icon size={13} aria-hidden style={{ color: tone ?? "var(--bt-muted)" }} />
-      <span className="text-[12px] whitespace-nowrap" style={{ color: "var(--bt-muted)" }}>{shortDate(date.slice(0, 10))}</span>
-    </span>
-  );
-}
-
-function SheetRowItem({ row, today, onOpen, onNext, loading = false, showSide = true }: { loading?: boolean; showSide?: boolean; row: SheetRow; today: string; onOpen: (row: SheetRow) => void; onNext: (row: SheetRow, text: string | null) => Promise<void> }) {
-  const latestIcon = row.latest?.kind ? iconForLabel(row.latest.kind) : Flag;
-  const num = "hidden min-w-0 text-[13px] tabular-nums @4xl:block";
-  return (
-    <li aria-hidden={loading || undefined} onClick={() => { if (!loading) onOpen(row); }}
-      className={`grid w-full cursor-pointer grid-cols-1 items-start gap-x-3 gap-y-2 px-2 py-2.5 text-left transition-colors hover:bg-[var(--bt-row-hover)] focus-within:bg-[var(--bt-row-hover)] ${GRID}`}>
-      <span className="hidden @2xl:block"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
-      <span className="min-w-0">
-        <span className="flex items-start gap-1">
-          <button type="button" disabled={loading} title={row.company ? `${row.company}: ${row.title}` : row.title}
-            className="line-clamp-2 min-w-0 flex-1 text-left text-[13px] font-semibold leading-snug focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"><Sh on={loading} chars={25}>{row.company ? `${row.company}: ${row.title}` : row.title}</Sh></button>
-          {!loading && showSide && <SideChip side={row.side} />}
-          {!loading && row.is_trade && <span className="text-[11px]" style={{ color: "var(--bt-green)" }}>Trade</span>}
-          {!loading && <CopyIdButton id={row.id} />}
-        </span>
-        <span className="mt-0.5 flex min-w-0 items-center gap-2 text-[12px]" style={{ color: "var(--bt-muted)" }}>
-          {!loading && row.latest && <span className="hidden shrink-0 @2xl:inline-flex"><IconDate icon={latestIcon} date={row.latest.at} title={[row.latest.kind, row.latest.label, row.latest.at ? shortDate(row.latest.at.slice(0, 10)) : null].filter(Boolean).join(" · ")} /></span>}
-          {!loading && <span className="@2xl:hidden"><DriverAvatar owner={row.owner} size={18} /></span>}
-        </span>
-        <span className="mt-1 inline-flex @2xl:hidden"><ShBlock on={loading} size={28}><ScoreCircle score={row.score} /></ShBlock></span>
-      </span>
-      <span data-ticket className={num} title={row.value_eur != null ? `Approximate ${row.side === "buyer" ? "deal" : "stock"} value, EUR ${row.value_eur.toLocaleString("en-GB")}` : "No size recorded: open it to add quantity and price"}>
-        <Sh on={loading} chars={5}>{row.value_eur != null ? formatEurCompact(row.value_eur) : <Gap>Add size</Gap>}</Sh></span>
-      <span data-fee className={num} title={row.fee_eur != null ? `${row.fee_is_override ? "Fee set by hand" : `Our fee at ${FEE_RATE * 100}% of value`}, EUR ${row.fee_eur.toLocaleString("en-GB")}` : "No fee: set one, or add a size"}>
-        <Sh on={loading} chars={5}>{row.fee_eur != null ? formatEurCompact(row.fee_eur) : <Gap>Set fee</Gap>}</Sh></span>
-      <span data-chance className={num} title={row.likelihood != null ? "Chance this deal completes" : "Chance not set"}>
-        <Sh on={loading} chars={3}>{row.likelihood != null ? `${row.likelihood}%` : <Gap>Set %</Gap>}</Sh></span>
-      <span data-owner className="hidden @2xl:block">{loading ? <ShBlock on size={24}><span /></ShBlock> : <DriverAvatar owner={row.owner} />}</span>
-      <span className="flex min-w-0 flex-col items-start gap-1"><Sh on={loading} chars={11} round><ProgressChip row={row} /></Sh>{!loading && row.review && <ReviewChip />}{!loading && <WaitingBadge row={row} />}</span>
-      <span className="min-w-0">
-        <NextActionCell loading={loading} value={row.next_action} due={row.next_due} today={today} onSave={(text) => onNext(row, text)} />
-      </span>
-    </li>
-  );
-}
-
 /** True when the filter bar narrows the rows. The driver is a page choice, and a locked side is the tab itself. */
-function isFiltered(filters: SheetFilters, sideLocked: boolean): boolean {
+export function isFiltered(filters: SheetFilters, sideLocked: boolean): boolean {
   return filters.query.trim() !== "" || (!sideLocked && filters.side !== "all") || filters.progress !== "all" || filters.company !== "all" || filters.category !== "all" || filters.waiting !== "all";
 }
 
-const PLACEHOLDER_ROWS: SheetRow[] = Array.from({ length: 8 }, (_, index) => ({
-  key: `loading:${index}`, id: "", kind: "demand", side: "buyer", title: "", company: null,
-  company_id: null, category: null, progress: "New", tone: "new", score: null,
-  latest: null, next_action: null, next_due: null, waiting_on: null, waiting_since: null, owner: null, touched: null,
-}));
-
-/** Search, starting point and menus; shared by the list and the board. */
-export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false, hideSide = false, stages, mainStages, sort, onSort }: {
+/** Stage chips, starting point and menus (and search, unless the page has its own); the Filters popover on every list tab. */
+export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false, hideSide = false, hideSearch = false, stages, mainStages, sort, onSort }: {
   rows: SheetRow[]; filters: SheetFilters; onFilters: (next: SheetFilters) => void; hideProgress?: boolean;
+  /** Search lives elsewhere (the page header): leave it out here. */
+  hideSearch?: boolean;
   /** The sheet is locked to one kind (Requests or Supply): no Buying/Selling toggle. */
   hideSide?: boolean;
   /** The Progress choices; defaults to the stages present in the rows. */
@@ -196,12 +135,12 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <label className="relative min-w-0 flex-1 basis-full sm:basis-64">
+        {!hideSearch && <label className="relative min-w-0 flex-1 basis-full sm:basis-64">
           <span className="sr-only">Search opportunities</span>
           <Search size={15} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--bt-muted)" }} />
           <input type="search" value={filters.query} onChange={(event) => set({ query: event.target.value })}
             placeholder="Search buyers, offers, trades" className={`${field} w-full pl-9`} style={fieldStyle} />
-        </label>
+        </label>}
         {/* Starting point. Neither selected shows everything; pressing the selected one again clears it. */}
         {!hideSide && <div role="group" aria-label="Starting point" className="flex rounded-lg p-0.5" style={{ background: "var(--bt-segment)" }}>
           {sides.map((value) => (
@@ -224,7 +163,7 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
           <option value="them">Waiting on: them</option>
         </select>
         {onSort && (
-          <select aria-label="Sort by" value={sort ?? "newest"} onChange={(event) => onSort(event.target.value as SheetSort)}
+          <select aria-label="Sort by" value={sort ?? "urgent"} onChange={(event) => onSort(event.target.value as SheetSort)}
             className={`${field} max-w-[13rem] min-w-0 flex-1 sm:flex-none`} style={fieldStyle}>
             {SHEET_SORTS.map((value) => <option key={value} value={value}>{`Sort: ${SORT_LABEL[value]}`}</option>)}
           </select>
@@ -237,53 +176,5 @@ export function SheetFilterBar({ rows, filters, onFilters, hideProgress = false,
         )}
       </div>
     </div>
-  );
-}
-
-export function OpportunitiesSheet({ rows, filters, shown, loading, error, today, sort, onSort, onFilters, onOpen, onNext, hideSide = false, stages, mainStages }: {
-  hideSide?: boolean;
-  stages?: readonly string[];
-  mainStages?: readonly string[];
-  sort?: SheetSort;
-  onSort?: (next: SheetSort) => void;
-  rows: SheetRow[];
-  shown: SheetRow[];
-  filters: SheetFilters;
-  loading: boolean;
-  error: string | null;
-  today: string;
-  onFilters: (next: SheetFilters) => void;
-  onOpen: (row: SheetRow) => void;
-  onNext: (row: SheetRow, text: string | null) => Promise<void>;
-}) {
-  const busy = loading && !rows.length;
-  const displayRows = busy ? PLACEHOLDER_ROWS : shown;
-  const filtered = isFiltered(filters, hideSide);
-  return (
-    <BusyRegion busy={busy} label="Loading…" className="flex flex-col gap-4">
-      <SheetFilterBar rows={rows} filters={filters} onFilters={onFilters} sort={sort} onSort={onSort} hideSide={hideSide} stages={stages} mainStages={mainStages} />
-
-      <ErrorText error={error} />
-      <p className="text-[12px]" style={{ color: "var(--bt-muted)" }} aria-live="polite">
-        <Sh on={busy} chars={14}>{`${shown.length} of ${rows.length} live`}</Sh>
-      </p>
-
-      <div className="@container overflow-x-auto rounded-xl border" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
-        <div className="@2xl:min-w-[40rem] @4xl:min-w-[54rem]">
-        <div aria-hidden="true" className={`hidden gap-x-3 border-b px-2 py-2 text-[12px] @2xl:grid ${GRID}`} style={{ borderColor: "var(--bt-divider)", color: "var(--bt-muted)" }}>
-          <span>Score</span><span>Opportunity</span><span className="hidden @4xl:block" title="Approximate value of the deal or the stock">Ticket</span><span className="hidden @4xl:block" title={`${FEE_RATE * 100}% of the ticket unless set`}>Fee</span><span className="hidden @4xl:block" title="Chance the deal completes">Chance</span><span>Driver</span><span>Stage</span><span>Next action</span>
-        </div>
-        {displayRows.length > 0 ? (
-          <ul className="divide-y divide-[var(--bt-divider)]">
-            {displayRows.map((row) => <SheetRowItem key={row.key} row={row} loading={busy} today={today} onOpen={onOpen} onNext={onNext} showSide={!hideSide} />)}
-          </ul>
-        ) : (
-          <p className="px-2 py-10 text-center text-[13px]" style={{ color: "var(--bt-muted)" }}>
-            {error ? "The sheet could not load." : filtered ? "No opportunities match these filters." : "Nothing live right now."}
-          </p>
-        )}
-        </div>
-      </div>
-    </BusyRegion>
   );
 }
