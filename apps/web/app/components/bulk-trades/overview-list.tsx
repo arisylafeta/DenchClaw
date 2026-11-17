@@ -222,7 +222,7 @@ export function OverviewList({ rows, loading, error, today, owner, sort = "urgen
   const shown = applyStrip(groups, strip, today);
   const busy = loading && !rows.length;
   const showDriver = owner === "all";
-  const allLabel = `all${owner === "all" ? "" : ` of ${owner}’s`}${counts.active ? ` · ${formatEurCompact(counts.fees_eur)} fees in these ${counts.active}` : ""}`;
+  const allLabel = `all${owner === "all" ? "" : ` of ${owner}’s`}${counts.active ? ` · ${formatEurCompact(counts.fees_eur)} in fees` : ""}`;
   const stats: { key: StripFilter; n: number; label: string; cls: string }[] = [
     { key: "you", n: counts.you, label: "your move", cls: css.statYou },
     { key: "over", n: counts.over, label: "of them overdue", cls: css.statRed },

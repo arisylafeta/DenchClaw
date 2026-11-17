@@ -50,7 +50,7 @@ describe("OverviewList", () => {
     expect(stat("you")).toHaveTextContent("3your move");
     expect(stat("over")).toHaveTextContent("2of them overdue");
     expect(stat("them")).toHaveTextContent("1their move");
-    expect(stat("all")).toHaveTextContent("5all of Sean’s · €30.4k fees in these 4");
+    expect(stat("all")).toHaveTextContent("5all of Sean’s · €30.4k in fees");
     expect(stat("all")).toHaveAttribute("aria-pressed", "true");
 
     await userEvent.click(stat("them"));
