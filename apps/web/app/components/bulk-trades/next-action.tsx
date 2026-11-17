@@ -9,14 +9,14 @@ import { request } from "./trade-ui";
 import css from "./next-action.module.css";
 
 export type NextFields = { next_action: string | null; next_due: string | null; owner: DealOwner | null };
-type Draft = { text: string; due: string | null; owner: DealOwner | null };
+export type Draft = { text: string; due: string | null; owner: DealOwner | null };
 
 const nextUrl = (id: string) => `/api/bulk-listings/${encodeURIComponent(id)}/next`;
 
-async function putNext(id: string, text: string | null, due: string | null, owner?: DealOwner | null) {
+export async function putNext(id: string, text: string | null, due: string | null, owner?: DealOwner | null) {
   await request(nextUrl(id), { method: "PUT", body: JSON.stringify({ next_action: text, next_due: text ? due : null, ...(owner ? { owner } : {}) }) });
 }
-async function postDone(id: string, done: string, draft: Draft | null, ownerChanged: boolean) {
+export async function postDone(id: string, done: string, draft: Draft | null, ownerChanged: boolean) {
   await request(nextUrl(id), { method: "POST", body: JSON.stringify({
     done, next_action: draft?.text ?? null, next_due: draft?.due ?? null, ...(ownerChanged && draft?.owner ? { owner: draft.owner } : {}),
   }) });

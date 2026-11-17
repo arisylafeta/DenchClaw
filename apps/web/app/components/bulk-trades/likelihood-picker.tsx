@@ -5,7 +5,7 @@ import { LIKELIHOOD_OPTIONS, likelihoodOf } from "@/lib/bulk-likelihood";
 import { request } from "./trade-ui";
 
 /** Likelihood of completion (%) for a listing. It scales the deal's score. Saves on change. */
-export function LikelihoodPicker({ listingId, likelihood, onChanged }: { listingId: string; likelihood: unknown; onChanged?: () => void }) {
+export function LikelihoodPicker({ listingId, likelihood, onChanged, autoFocus = false }: { listingId: string; likelihood: unknown; onChanged?: (value: number | null) => void; autoFocus?: boolean }) {
   const [value, setValue] = useState<number | null>(likelihoodOf(likelihood));
   const [error, setError] = useState(false);
   async function change(next: string) {
@@ -14,13 +14,13 @@ export function LikelihoodPicker({ listingId, likelihood, onChanged }: { listing
     setValue(parsed); setError(false);
     try {
       await request(`/api/bulk-listings/${encodeURIComponent(listingId)}/likelihood`, { method: "PUT", body: JSON.stringify({ likelihood: parsed }) });
-      onChanged?.();
+      onChanged?.(parsed);
     } catch { setValue(previous); setError(true); }
   }
   const options = value != null && !(LIKELIHOOD_OPTIONS as readonly number[]).includes(value) ? [...LIKELIHOOD_OPTIONS, value].sort((a, b) => a - b) : LIKELIHOOD_OPTIONS;
   return <label className="inline-flex items-center gap-1.5 text-[12px]" style={{ color: "var(--bt-muted)" }} title="Chance this deal completes. Fee × chance is the weighted fee.">
     Chance
-    <select aria-label="Likelihood of completion" value={value ?? ""} onChange={(event) => void change(event.target.value)}
+    <select aria-label="Likelihood of completion" autoFocus={autoFocus} value={value ?? ""} onChange={(event) => void change(event.target.value)}
       className="h-7 rounded-md border bg-transparent px-1.5 text-[12px]" style={{ borderColor: error ? "var(--bt-red)" : "var(--bt-border)", color: "var(--bt-text)" }}>
       <option value="">Set %</option>
       {options.map((pct) => <option key={pct} value={pct}>{pct}%</option>)}
