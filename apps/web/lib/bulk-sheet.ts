@@ -63,6 +63,8 @@ export type SheetRow = {
   waiting_on?: WaitingOn | null;
   waiting_since?: string | null;
   owner: string | null;
+  /** The listing's contact person, as recorded (e.g. "Markus Nolden"). */
+  contact?: string | null;
   /** Added by an import (a marketplace request) and not yet reviewed by a person. */
   review?: boolean;
   /** Date used to order the sheet, newest first. */
@@ -99,6 +101,7 @@ export type ListingSheetInput = {
   latest_kind: string | null; latest_title: string | null; latest_at: string | null;
   observed_on: string | null; updated_at: string; next_action: string | null; next_due: string | null;
   waiting_on?: string | null; waiting_since?: string | null;
+  contact?: string | null;
   furthest_stage: string | null;
   paired_listing_id?: string | null;
   /** From bulk_listing_stage(): one of LISTING_STAGES. */
@@ -161,6 +164,7 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     latest: input.latest_title ? { label: input.latest_title, at: input.latest_at, kind: ACTIVITY_LABEL[input.latest_kind ?? ""] ?? "Activity" } : null,
     next_action: text(input.next_action), likelihood: likelihoodOf((input.context as Record<string, unknown> | null)?.likelihood), next_due: input.next_due, owner: dealOwner((input.context as Record<string, unknown> | null)?.owner),
     waiting_on: input.waiting_on === "us" || input.waiting_on === "them" ? input.waiting_on : null, waiting_since: input.waiting_since ?? null,
+    contact: text(input.contact),
     review: ((input.context as Record<string, unknown> | null)?.review as { state?: unknown } | undefined)?.state === "needs_review",
     touched: input.latest_at ?? input.observed_on ?? input.updated_at,
   };
@@ -178,16 +182,16 @@ function rankSide(rows: SheetRow[], side: SheetFilters["side"]): SheetRow[] {
   return [...rows].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
 }
 
-/** How the list is ordered. `newest` keeps the default order from filterSheet. */
-export const SHEET_SORTS = ["newest", "score_desc", "score_asc", "due", "stage", "fee_desc"] as const;
+/** How the list is ordered. `urgent` keeps the overview's order (whose move, then due date); `newest` keeps the default order from filterSheet. */
+export const SHEET_SORTS = ["urgent", "newest", "score_desc", "score_asc", "due", "stage", "fee_desc"] as const;
 export type SheetSort = (typeof SHEET_SORTS)[number];
 export const SORT_LABEL: Record<SheetSort, string> = {
-  newest: "Newest first", score_desc: "Score: high to low", score_asc: "Score: low to high", due: "Next due: soonest", stage: "Stage: furthest first", fee_desc: "Fee: high to low",
+  urgent: "Most urgent first", newest: "Newest first", score_desc: "Score: high to low", score_asc: "Score: low to high", due: "Next due: soonest", stage: "Stage: furthest first", fee_desc: "Fee: high to low",
 };
 
 /** Orders already-filtered rows. Unscored rows and rows with no due date sort last in every score or date order, so they never crowd the top. */
 export function sortRows(rows: SheetRow[], sort: SheetSort): SheetRow[] {
-  if (sort === "newest") return rows;
+  if (sort === "newest" || sort === "urgent") return rows;
   const byTitle = (a: SheetRow, b: SheetRow) => a.title.localeCompare(b.title);
   const scoreDesc = (a: SheetRow, b: SheetRow) => (b.score ?? -1) - (a.score ?? -1);
   const out = [...rows];
