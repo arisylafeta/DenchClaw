@@ -102,3 +102,39 @@ export function modelSlug(make: string | null | undefined, raw: string | null | 
 /** Every canonical slug the list defines, for tests and the conformance checker. */
 export const CANONICAL_MODEL_SLUGS: ReadonlySet<string> = new Set(DATA.models.map((model) => model.slug));
 export const MODEL_ALIAS_DATA = DATA;
+
+type TextRow = { own: string; make: string; alias: string; slug: string; name: string; alone: boolean };
+const TEXT_ROWS: TextRow[] = (() => {
+  const owners = new Map<string, Set<string>>();
+  for (const model of DATA.models) {
+    for (const alias of model.aliases) { owners.set(alias, (owners.get(alias) ?? new Set()).add(model.slug)); }
+  }
+  const rows: TextRow[] = [];
+  for (const model of DATA.models) {
+    for (const alias of model.aliases) {
+      const alone = (owners.get(alias)?.size ?? 0) === 1 && alias.replace(/ /g, "").length > 2 && /\d/.test(alias);
+      rows.push({ own: makeFold(model.make), make: model.make, alias: spaced(unaccent(alias)), slug: model.slug, name: model.name, alone });
+    }
+  }
+  return rows.toSorted((a, b) => b.alias.length - a.alias.length);
+})();
+
+/**
+ * Models a free text names: `{make, model, slug}`, longest alias first, one per model. An alias counts when its make is named
+ * (in `makes` or as a word of the text) or when it carries a digit and one model owns it (model 3, ev6); a bare word (leaf,
+ * bolt, volt) needs its make named. Mirrors buyer_interest_text_models() in SQL and text_models() in model_aliases.py.
+ */
+export function textModels(text: string | null | undefined, makes: readonly string[] = []): { make: string; model: string; slug: string }[] {
+  const words = ` ${spaced(unaccent(text))} `;
+  const hints = new Set(words.split(" ").filter(Boolean).map((word) => makeFold(word)));
+  for (const value of makes) {
+    for (const piece of value.split(/\s*(?:,|\/|&|\band\b)\s*/i)) { if (piece.trim()) { hints.add(makeFold(piece)); } }
+  }
+  const found: { make: string; model: string; slug: string }[] = [];
+  for (const row of TEXT_ROWS) {
+    if ((hints.has(row.own) || row.alone) && words.includes(` ${row.alias} `) && !found.some((hit) => hit.slug === row.slug && hit.make === row.make)) {
+      found.push({ make: row.make, model: row.name, slug: row.slug });
+    }
+  }
+  return found;
+}

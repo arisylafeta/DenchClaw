@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   broaderKeysFor,
   expandProductFacts,
+  impliedMake,
   isProseModel,
   isVehicleMake,
   kwhKeyText,
@@ -12,6 +13,7 @@ import {
   productKeyFor,
   productKeyLevel,
   productKeysFor,
+  readDemandText,
 } from "./product-key-for";
 
 describe("productKeyFor", () => {
@@ -289,5 +291,42 @@ describe("canonical model slugs", () => {
         expect(modelSlug(model.make, alias), `${model.make} ${alias}`).toBe(model.slug);
       }
     }
+  });
+});
+
+describe("readDemandText (a demand row's own words)", () => {
+  const keys = (facts: Parameters<typeof readDemandText>[0], text: Parameters<typeof readDemandText>[1]) =>
+    expandProductFacts(readDemandText(facts, text)).facts.map((set) => productKeyFor(set));
+
+  it("reads make, model and one kWh figure from the title", () => {
+    expect(keys({ format: "pack" }, { title: "Tesla Model 3 Long Range 75 kWh packs" })).toEqual(["model:tesla-model3-75kwh"]);
+  });
+
+  it("reads the product family before the title", () => {
+    expect(keys({ format: "pack" }, { productFamily: "Hyundai Kona 64kWh pack", title: "Wanted" })).toEqual(["model:hyundai-kona-64kwh"]);
+  });
+
+  it("keys a cell request with no make by each cell format", () => {
+    expect(keys({}, { title: "18650 / 21700 cylindrical cells" })).toEqual(["broad:18650-any-cells", "broad:21700-any-cells"]);
+  });
+
+  it("reads a system maker as the make", () => {
+    expect(keys({ format: "system" }, { title: "CATL BESS units" })).toEqual(["broad:catl-any-systems"]);
+    expect(keys({ format: "pack" }, { title: "FPT battery packs" })).toEqual(["broad:fpt-any-packs"]);
+  });
+
+  it("drops a bare Bolt and keys Bolt EV to Chevrolet", () => {
+    expect(readDemandText({}, { title: "Bolt modules" }).make ?? null).toBeNull();
+    expect(readDemandText({}, { title: "Bolt modules" }).makes ?? []).toEqual([]);
+    expect(impliedMake("Bolt")).toBeNull();
+    expect(impliedMake("Bolt EV")).toBe("Chevrolet");
+    const facts = readDemandText({ format: "module" }, { models: ["Bolt EV"], title: "Bolt EV modules" });
+    expect(facts.makes).toEqual(["Chevrolet"]);
+    expect(productKeyFor(facts)).toBe("model:chevrolet-boltev");
+  });
+
+  it("never overrides a stated value", () => {
+    const facts = readDemandText({ make: "Kia", model: "EV3", kwh: 81.4 }, { title: "Tesla Model 3 75 kWh packs" });
+    expect(facts).toMatchObject({ make: "Kia", model: "EV3", kwh: 81.4 });
   });
 });

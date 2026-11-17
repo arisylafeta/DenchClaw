@@ -27,7 +27,7 @@ import {
   normalModel,
   partKey,
 } from "@/lib/commercial-stock";
-import { modelSlug } from "./model-aliases";
+import { modelSlug, textModels } from "./model-aliases";
 import { PACK_FAMILIES, type PackFamily } from "./pack-families";
 
 export type ProductFacts = {
@@ -46,6 +46,10 @@ export type ProductFacts = {
   kwhMin?: number | null;
   kwhMax?: number | null;
   cellMaker?: string | null;
+  /** A cell format (18650, 21700, pouch) a cell request states; with no make or cell maker it scopes the broad key. */
+  cellFormat?: string | null;
+  cellFormats?: (string | null | undefined)[] | null;
+  cellMakers?: (string | null | undefined)[] | null;
   /** Every make a source states, for `expandProductFacts`; `make` stays the single-value form. */
   makes?: (string | null | undefined)[] | null;
   chemistries?: (string | null | undefined)[] | null;
@@ -231,9 +235,9 @@ function broadKey(facts: ProductFacts): string {
   return `broad:${chemistry}-${format ? FORMAT_PLURAL[format] : "batteries"}`;
 }
 
-/** The broad bucket scoped to a stated make, else to a stated cell maker (broad:calb-lfp-cells); null when neither is stated. */
+/** The broad bucket scoped to a stated make, else a cell maker (broad:calb-lfp-cells), else a cell format (broad:18650-any-cells); null when none is stated. */
 function makeScopedBroadKey(facts: ProductFacts): string | null {
-  const make = makeKey(facts.make ?? null) ?? slug(facts.cellMaker ?? null);
+  const make = makeKey(facts.make ?? null) ?? slug(facts.cellMaker ?? null) ?? slug(facts.cellFormat ?? null);
   if (!make) {return null;}
   const chemistry = slug(chemistryOf(facts)) ?? "any";
   const format = formatOf(facts);
@@ -284,6 +288,16 @@ function withoutVehicleSystem(facts: ProductFacts): ProductFacts {
 }
 
 /**
+ * A cell request with no make or cell maker that states cell formats ("18650 / 21700 cells") is one line per format, each keyed
+ * broad:<format>-any-cells. With a make or a cell maker the key already scopes the line. Mirrors buyer_interest_fact_sets() in SQL.
+ */
+function splitCellFormats(set: ProductFacts): ProductFacts[] {
+  const formats = statedValues(set.cellFormats, null).filter((value): value is string => value !== null);
+  if (makeKey(set.make ?? null) || slug(set.cellMaker ?? null) || formatOf(set) !== "cell" || !formats.length) {return [set];}
+  return formats.map((format) => ({ ...set, cellFormat: format.toLowerCase(), cellFormats: [format] }));
+}
+
+/**
  * The fact sets a source's own lists state, mirroring buyer_interest_fact_sets() in SQL.
  *
  * - `products` are stated pairs: one fact set per product, a dimension the product leaves out inherited only when the
@@ -298,10 +312,10 @@ function withoutVehicleSystem(facts: ProductFacts): ProductFacts {
  */
 export function expandProductFacts(facts: ProductFacts, limit = PRODUCT_FACT_COMBINATIONS, independent = false): { facts: ProductFacts[]; stated: number } {
   const cap = Math.max(limit, 1);
-  const finish = (sets: ProductFacts[]) => {
+  const finish = (raw: ProductFacts[]) => {
     const seen = new Set<string>();
-    const unique = sets.map((set) => withoutVehicleSystem(set)).filter((set) => {
-      const id = JSON.stringify([set.make ?? null, set.chemistry ?? null, set.format ?? null, set.model ?? null, set.kwh ?? null, set.kwhMin ?? null, set.kwhMax ?? null, set.cellMaker ?? null, set.partNumbers ?? null]);
+    const unique = raw.flatMap((set) => splitCellFormats(set)).map((set) => withoutVehicleSystem(set)).filter((set) => {
+      const id = JSON.stringify([set.make ?? null, set.chemistry ?? null, set.format ?? null, set.model ?? null, set.kwh ?? null, set.kwhMin ?? null, set.kwhMax ?? null, set.cellMaker ?? null, set.cellFormat ?? null, set.partNumbers ?? null]);
       return seen.has(id) ? false : (seen.add(id), true);
     });
     return { facts: unique.slice(0, cap), stated: Math.max(unique.length, 0) };
@@ -406,4 +420,110 @@ export function productFactsFromKey(key: Pick<import("./product-key").ProductKey
     kwhMin: line.kwhMin ?? null,
     kwhMax: line.kwhMax ?? null,
   }));
+}
+
+const TEXT_MAKES = /\b(volkswagen|vw|audi|mini|skoda|cupra|porsche|bmw|mercedes-benz|mercedes|tesla|stellantis|nissan|renault|dacia|peugeot|citroen|opel|vauxhall|fiat|jeep|ford|hyundai|kia|genesis|toyota|lexus|honda|mazda|mitsubishi|suzuki|subaru|volvo|polestar|jaguar|land rover|mg|byd|lotus|lucid|rivian|nio|xpeng|zeekr|leapmotor|maxus|chevrolet|catl|fpt|sungrow|huawei)\b/g;
+const CELL_MAKERS = ["AESC", "BYD", "CALB", "CATL", "EVE", "Farasis", "Gotion", "Kokam", "LG", "Lishen", "Northvolt", "Panasonic", "Samsung SDI", "SK On", "Svolt"];
+const UPPER_MAKES = new Set(["bmw", "mg", "byd", "nio", "catl", "fpt"]);
+
+/** Makes a text names: vehicle makes and the system makers a request names (CATL, FPT). Mirrors buyer_interest_text_makes() in SQL. */
+export function textMakes(text: string | null | undefined): string[] {
+  const found = new Set<string>();
+  for (const match of unaccentText(text).matchAll(TEXT_MAKES)) {
+    const make = match[1];
+    found.add(UPPER_MAKES.has(make) ? make.toUpperCase() : make === "vw" ? "Volkswagen" : make.replace(/(^|[\s-])([a-z])/g, (_, lead: string, char: string) => lead + char.toUpperCase()));
+  }
+  return [...found].toSorted();
+}
+
+/** Cell makers a text names as words. Mirrors buyer_interest_text_cell_makers() in SQL. */
+export function textCellMakers(text: string | null | undefined): string[] {
+  const words = ` ${unaccentText(text).replace(/[^a-z0-9]+/g, " ").trim()} `;
+  return CELL_MAKERS.filter((name) => words.includes(` ${name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `)).toSorted();
+}
+
+function unaccentText(value: string | null | undefined): string {
+  return (value ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+/** Models that belong to one maker only: a model named with no maker implies it (Bolt EV is a Chevrolet; a bare Bolt names none). */
+const IMPLIED_MAKES: Record<string, string> = {
+  leaf: "Nissan", zoe: "Renault", twizy: "Renault", kangoo: "Renault", prius: "Toyota", mirai: "Toyota", ioniq: "Hyundai", kona: "Hyundai",
+  i3: "BMW", i4: "BMW", ix3: "BMW", taycan: "Porsche", etron: "Audi", e208: "Peugeot", e2008: "Peugeot", corsae: "Vauxhall", mokkae: "Vauxhall",
+  modelx: "Tesla", models: "Tesla", model3: "Tesla", modely: "Tesla", boltev: "Chevrolet", ampera: "Opel", imiev: "Mitsubishi", eniro: "Kia",
+  niro: "Kia", ev6: "Kia", id3: "Volkswagen", id4: "Volkswagen", egolf: "Volkswagen", enyaq: "Skoda", fluence: "Renault", ipace: "Jaguar",
+};
+
+/** The one maker a reviewed model name belongs to, or null. Mirrors implied_make() in scripts/rebattery/parse_interest_text.py. */
+export function impliedMake(model: string | null | undefined): string | null {
+  const key = fold(model);
+  if (!key) {return null;}
+  const prefix = Object.keys(IMPLIED_MAKES).find((name) => key.startsWith(name));
+  return prefix ? IMPLIED_MAKES[prefix] : null;
+}
+
+const CELL_FORMAT_WORDS = /\b(18650|21700|4680|26650|46800|pouch|prismatic)\b/g;
+
+/**
+ * What a demand row's own words state. A row that lacks makes, models, kWh, cell formats or cell makers still states them in its
+ * product family and title; only stated values are taken and a value in `facts` always wins. `models` is a spec's model list.
+ * Mirrors buyer_interest_text_spec() in migration 115.
+ */
+export function readDemandText(facts: ProductFacts, text: { productFamily?: string | null; title?: string | null; models?: (string | null | undefined)[] | null }): ProductFacts {
+  const out: ProductFacts = { ...facts };
+  const stated = [text.productFamily, text.title].map((part) => (part ?? "").trim()).filter(Boolean).join(" ; ");
+  if (!stated || facts.products?.length) {return out;}
+  const low = unaccentText(stated);
+
+  let makes = splitMakes([...(facts.makes ?? []), facts.make]);
+  if (!makes.length) {
+    makes = textMakes(stated);
+    if (makes.length) {out.makes = makes;}
+  }
+  const hasMake = makes.length > 0;
+
+  const hasModel = Boolean((facts.model ?? "").trim()) || partList(facts).length > 0;
+  let count = 0;
+  if (!hasModel) {
+    const named = (text.models ?? []).map((item) => (item ?? "").trim()).filter(Boolean);
+    const entries = (named.length ? named : null)?.map((item) => {
+      const hit = textModels(item, hasMake ? makes : [])[0];
+      return { make: hasMake && makes.length === 1 ? makes[0] : hit?.make ?? impliedMake(item) ?? null, model: item };
+    }) ?? textModels(stated, hasMake ? makes : []).map((hit) => ({ make: hasMake && makes.length === 1 ? makes[0] : hit.make, model: hit.model }));
+    count = entries.length;
+    if (count >= 1 && !hasMake) {
+      const found = [...new Set(entries.map((entry) => entry.make).filter((make): make is string => Boolean(make)))];
+      if (found.length) {out.makes = found;}
+    }
+    if (count === 1) {
+      out.model = entries[0].model;
+      if (!out.make && !hasMake && entries[0].make) {out.make = entries[0].make;}
+    } else if (count > 1) {
+      out.products = entries.map((entry) => ({ make: entry.make, model: entry.model }));
+    }
+  }
+
+  // one kWh figure: the one figure the text states (several models share no single figure)
+  if (singleKwh(facts) === null && facts.kwhMin == null && facts.kwhMax == null && count <= 1) {
+    const figures = [...new Set([...low.matchAll(/(?<![a-z0-9.])(\d{1,3}(?:\.\d+)?)\s?kwh\b/g)].map((match) => Number(match[1])).filter((value) => value >= 1 && value <= 200))];
+    if (figures.length === 1) {out.kwh = figures[0];}
+  }
+
+  // cell formats and cell makers the text states
+  if (!facts.cellFormats?.length && !facts.cellFormat) {
+    let formats = [...new Set([...low.matchAll(CELL_FORMAT_WORDS)].map((match) => match[1]))].toSorted();
+    if (!formats.length && /\bcylindrical\b/.test(low)) {formats = ["cylindrical"];}
+    if (formats.length) {
+      out.cellFormats = formats;
+      if (!facts.format && !facts.formats?.length && (formats.some((format) => ["18650", "21700", "4680", "26650", "46800"].includes(format)) || /\bcells?\b/.test(low))) {
+        out.format = "cells";
+      }
+    }
+  }
+  if (!facts.cellMakers?.length && !facts.cellMaker) {
+    const makers = textCellMakers(stated);
+    if (makers.length === 1) {out.cellMaker = makers[0];}
+    else if (makers.length > 1) {out.cellMakers = makers;}
+  }
+  return out;
 }
