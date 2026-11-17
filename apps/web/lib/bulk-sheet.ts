@@ -91,6 +91,7 @@ const text = (value: string | null | undefined) => (value && value.trim() ? valu
 
 const ACTIVITY_LABEL: Record<string, string> = {
   note: "Note", research: "Research", outreach: "Outreach", call: "Call", quote: "Quote", supply: "Supply", status: "Status",
+  mail: "Email", document: "Document", whatsapp: "WhatsApp",
 };
 
 /** Every Preview row is a bulk listing. */

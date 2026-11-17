@@ -73,7 +73,8 @@
   --ov-shadow: 0 0 0 1px rgba(255, 255, 255, .12), 0 8px 24px rgba(0, 0, 0, .5);
 }
 
-.page button { font: inherit; color: inherit; cursor: pointer; }
+/* :where keeps these resets below every class rule (weights and colours on .btn, .company, .stat …). */
+.page :where(button) { font: inherit; color: inherit; cursor: pointer; }
 .page button:focus-visible, .page a:focus-visible, .page input:focus-visible, .page select:focus-visible { outline: 2px solid var(--ov-focus); outline-offset: 2px; }
 
 .inner { max-width: 1280px; margin: 0 auto; padding: 20px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px; }
