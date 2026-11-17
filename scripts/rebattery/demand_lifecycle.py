@@ -371,7 +371,9 @@ def upsert_profile_interest(cur, row, basis='stated'):
         price=price, price_currency=(row.get('price_currency') or spec.get('price_currency')) if price is not None else None,
         price_unit=(row.get('price_unit') or spec.get('price_unit')) if price is not None else None,
         price_basis='target' if price is not None else None)
-        for facts in interest_facts(spec)]
+        for facts in interest_facts(spec)
+        # Research is matched on the buy box itself; only a named model or part number earns a Research want.
+        if kind != 'inferred' or facts.get('model') or facts.get('part_numbers')]
     _record_truncation(cur, row.get('source_id'), interest_fact_total(spec))
     return next((line for line in lines if line), None)
 

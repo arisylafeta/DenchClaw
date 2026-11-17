@@ -147,10 +147,14 @@ class InterestLines(unittest.TestCase):
         with self.cursor() as cur:
             self.lifecycle.upsert_profile_interest(cur, self.survey_row(
                 source_kind="research", source_id=f"research_run:{self.tag}", observed_on="2026-11-06",
+                spec={"formats": ["Packs"], "makes": ["Nissan"], "model": "Leaf", "chemistries": ["NMC"]}), "researched")
+            # A broad research guess writes nothing: research buyers are matched on their buy box.
+            self.lifecycle.upsert_profile_interest(cur, self.survey_row(
+                source_kind="research", source_id=f"research_run:{self.tag}:broad", observed_on="2026-11-06",
                 spec={"formats": ["Cells"], "chemistries": ["NMC"]}), "researched")
         self.conn.commit()
         [line] = self.lines("inferred")
-        self.assertEqual(line["product_key"], "broad:nmc-cells")
+        self.assertTrue(line["product_key"].startswith("model:nissan-leaf"))
         self.assertEqual(str(line["expires_on"]), "2027-05-05")   # inferred: first seen + 180 days
 
     def test_a_survey_answer_with_quantity_and_timing_becomes_an_ask_through_the_trigger(self):
