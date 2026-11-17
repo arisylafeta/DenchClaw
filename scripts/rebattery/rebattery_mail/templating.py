@@ -64,7 +64,19 @@ def compose(template_row, variables, identity_row, purpose, transport):
     unsubscribe_html, unsubscribe_text = policy.unsubscribe(identity_row, purpose, transport)
     # An identity with auto_sign off (supply@, buy@) signs only the one-to-one drafts a person writes, never a template.
     signs = identity_row.get('auto_sign', True)
-    values.update(signature_html=(identity_row.get('signature_html') or '') if signs else '',
+    signature_html = (identity_row.get('signature_html') or '') if signs else ''
+    # Marketing mail from a signing identity: the unsubscribe link sits inside the signature, on the same line as
+    # the email address, in the same font and colour (Ari, 11 Nov 2026). Unsigned identities keep the footer.
+    tail = '</a></span></div>'
+    if unsubscribe_html and tail in signature_html:
+        import html as _html
+        href = policy.UNSUBSCRIBE if transport.startswith('postmark') else 'mailto:' + identity_row['address'] + '?subject=unsubscribe'
+        link = ('\u00a0 \u25cf \u00a0<a href="' + _html.escape(href, quote=True) + '" style="color:rgb(86,86,91);text-decoration:none;'
+                'font-size:11.5px;display:inline!important" target="_blank">Unsubscribe</a>')
+        cut = signature_html.rfind(tail)
+        signature_html = signature_html[:cut] + '</a>' + link + '</span></div>' + signature_html[cut + len(tail):]
+        unsubscribe_html = ''
+    values.update(signature_html=signature_html,
                   signature_text=(identity_row.get('signature_text') or '') if signs else '',
                   unsubscribe_html=unsubscribe_html, unsubscribe_text=unsubscribe_text,
                   preview=variables.get('preview', ''))

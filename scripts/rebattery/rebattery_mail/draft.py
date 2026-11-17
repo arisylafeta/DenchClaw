@@ -178,7 +178,7 @@ def preview(args):
 
 def _strip_unsubscribe(text, html):
     text = re.sub(r'(?m)^Unsubscribe: \S+\n*', '', text or '')
-    html = re.sub(r'<p><a href="[^"]*">Unsubscribe</a></p>', '', html or '')
+    html = re.sub(r'\u00a0 \u25cf \u00a0<a href="[^"]*"[^>]*>Unsubscribe</a>', '', re.sub(r'<p[^>]*><a href="[^"]*"[^>]*>Unsubscribe</a></p>', '', html or ''))
     return text.replace(policy.UNSUBSCRIBE, ''), html.replace(policy.UNSUBSCRIBE, '')
 
 

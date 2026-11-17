@@ -16,7 +16,9 @@ def unsubscribe(author, purpose, transport):
         raise Refused('postmark_broadcast_stream_required')
     import html
     url = 'mailto:' + author['address'] + '?subject=unsubscribe'
-    return ('<p><a href="' + html.escape(url, quote=True) + '">Unsubscribe</a></p>',
+    # Plain black link, no underline, small, under the signature (Ari, 10 Nov 2026).
+    return ('<p style="margin:14px 0 0;font-size:12px;"><a href="' + html.escape(url, quote=True)
+            + '" style="color:#000000;text-decoration:none;">Unsubscribe</a></p>',
             'Unsubscribe: ' + url)
 
 

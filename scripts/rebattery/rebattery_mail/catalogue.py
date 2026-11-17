@@ -104,7 +104,8 @@ def links(message):
 
     parser = Destinations()
     parser.feed(message['html'])
-    return parser.urls, plain_urls(message['text'])
+    # The Postmark unsubscribe token is a provider placeholder, not a destination in the text alternative.
+    return {u for u in parser.urls if not POSTMARK.fullmatch(u.strip())}, plain_urls(message['text'])
 
 
 def validate_catalogue(rows, signatures):
