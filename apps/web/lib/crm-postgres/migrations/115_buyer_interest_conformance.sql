@@ -756,7 +756,9 @@ create or replace function buyer_interest_product_key(facts jsonb) returns text 
     case when buyer_interest_make(facts->>'make') is not null and (select slug from model) is not null
         and (select value from kwh) is null
       then 'model:' || buyer_interest_make(facts->>'make') || '-' || (select slug from model) end,
-    'broad:' || coalesce(buyer_interest_make(facts->>'make') || '-', '')
+    -- A stated make scopes the key; with no make, a stated cell maker does (broad:calb-lfp-cells), so a cell or module ask
+    -- keeps who makes the cells.
+    'broad:' || coalesce(buyer_interest_make(facts->>'make') || '-', buyer_interest_slug(facts->>'cell_maker') || '-', '')
       || coalesce(buyer_interest_slug(buyer_interest_chemistry(facts->>'chemistry')), 'any') || '-'
       || case buyer_interest_format(facts->>'format')
            when 'pack' then 'packs' when 'module' then 'modules' when 'cell' then 'cells' when 'system' then 'systems'

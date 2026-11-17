@@ -231,9 +231,9 @@ function broadKey(facts: ProductFacts): string {
   return `broad:${chemistry}-${format ? FORMAT_PLURAL[format] : "batteries"}`;
 }
 
-/** The broad bucket scoped to a stated make; null when no make is stated. */
+/** The broad bucket scoped to a stated make, else to a stated cell maker (broad:calb-lfp-cells); null when neither is stated. */
 function makeScopedBroadKey(facts: ProductFacts): string | null {
-  const make = makeKey(facts.make ?? null);
+  const make = makeKey(facts.make ?? null) ?? slug(facts.cellMaker ?? null);
   if (!make) {return null;}
   const chemistry = slug(chemistryOf(facts)) ?? "any";
   const format = formatOf(facts);

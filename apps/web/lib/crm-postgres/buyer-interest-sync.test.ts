@@ -186,6 +186,8 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       ["no make", { model: "Bolt" }, { model: "Bolt" }, "broad:any-batteries"],
       ["a prose model", { make: "BMW", model: "hybrid 2015-2022 (225xe, 330e)" }, { make: "BMW", model: "hybrid 2015-2022 (225xe, 330e)" }, "broad:bmw-any-batteries"],
       ["a part number wins", { make: "Hyundai", model: "Kona", part_numbers: ["37501-GI300"] }, { make: "Hyundai", model: "Kona", partNumbers: ["37501-GI300"] }, "part:37501GI300"],
+      ["a cell maker scopes a broad key with no make", { cell_maker: "CALB", chemistry: "LFP", format: "Cells" }, { cellMaker: "CALB", chemistry: "LFP", format: "Cells" }, "broad:calb-lfp-cells"],
+      ["a make wins over a cell maker", { make: "Tesla", cell_maker: "Panasonic", format: "Packs" }, { make: "Tesla", cellMaker: "Panasonic", format: "Packs" }, "broad:tesla-any-packs"],
     ];
     for (const [label, sql, ts, expected] of cases) {
       expect({ label, sql: await sqlKey(sql) }).toEqual({ label, sql: expected });

@@ -83,6 +83,13 @@ describe("productKeyFor", () => {
       .toBe("cell:samsung-sdi-inr21700-50e");
   });
 
+  it("keeps a stated cell maker in the broad key when no make is stated", () => {
+    expect(productKeyFor({ cellMaker: "CALB", chemistry: "LFP", format: "Cells" })).toBe("broad:calb-lfp-cells");
+    expect(productKeyFor({ cellMaker: "EVE", format: "modules" })).toBe("broad:eve-any-modules");
+    expect(broaderKeysFor({ cellMaker: "CALB", chemistry: "LFP", format: "cells" })).toEqual(["broad:calb-lfp-cells", "broad:lfp-cells"]);
+    expect(productKeyFor({ make: "Tesla", cellMaker: "Panasonic", format: "packs" })).toBe("broad:tesla-any-packs");
+  });
+
   it("falls to chemistry + format, and to a plain battery bucket when neither is stated", () => {
     expect(productKeyFor({ chemistry: "LFP", format: "Packs" })).toBe("broad:lfp-packs");
     expect(productKeyFor({ chemistry: "LiFePO4" })).toBe("broad:lfp-batteries");
