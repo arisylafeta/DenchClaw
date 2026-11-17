@@ -2172,6 +2172,27 @@
    ]
   },
   {
+   "make": "Chevrolet",
+   "slug": "volt",
+   "name": "Volt",
+   "aliases": [
+    "volt",
+    "chevrolet volt",
+    "chevy volt"
+   ]
+  },
+  {
+   "make": "Chevrolet",
+   "slug": "boltev",
+   "name": "Bolt EV",
+   "aliases": [
+    "bolt ev",
+    "bolt euv",
+    "chevrolet bolt",
+    "chevy bolt"
+   ]
+  },
+  {
    "make": "Proterra",
    "slug": "onyxstratah415",
    "name": "Onyx Strata H4-15",

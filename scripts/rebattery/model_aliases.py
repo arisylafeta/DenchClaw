@@ -114,6 +114,75 @@ def model_slug(make, raw):
     return fold(norm) or None
 
 
+def _spaced(value):
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", unaccent(value)).split())
+
+
+def _text_rows():
+    """(own make fold, display make, spaced alias, slug, display model name, names a model alone) for every alias."""
+    owners = {}
+    for model in _DATA["models"]:
+        for alias in model["aliases"]:
+            owners.setdefault(alias, set()).add(model["slug"])
+    rows = []
+    for model in _DATA["models"]:
+        for alias in model["aliases"]:
+            alone = len(owners[alias]) == 1 and len(alias.replace(" ", "")) > 2 and bool(re.search(r"\d", alias))
+            rows.append((make_fold(model["make"]), model["make"], _spaced(alias), model["slug"], model["name"], alone))
+    return rows
+
+
+TEXT_ROWS = _text_rows()
+
+
+def text_models(text, makes=()):
+    """Models a free text names: [{make, model, slug}], longest alias first, one per model. An alias counts when its make is
+    named (in `makes` or as a word of the text) or when it carries a digit and one model owns it (model 3, ev6). A bare word
+    (leaf, bolt, volt) needs its make named. Mirrors buyer_interest_text_models() in SQL and wants_conformance._model_hits."""
+    words = " " + _spaced(text) + " "
+    hints = {make_fold(w) for w in words.split()}
+    for value in makes or ():
+        hints |= {make_fold(piece) for piece in re.split(r"\s*(?:,|/|&|\band\b)\s*", str(value)) if piece.strip()}
+    found, seen = [], set()
+    for own, display, alias, slug, name, alone in sorted(TEXT_ROWS, key=lambda row: -len(row[2])):
+        if (own in hints or alone) and f" {alias} " in words and (own, slug) not in seen:
+            seen.add((own, slug))
+            found.append({"make": display, "model": name, "slug": slug})
+    return found
+
+
+def sql_text_models():
+    """The migration text for buyer_interest_text_models(), generated from the same list."""
+    values = ",\n    ".join(
+        "('{}', '{}', '{}', '{}', '{}', {})".format(own, display.replace("'", "''"), alias.replace("'", "''"), slug,
+                                                    name.replace("'", "''"), "true" if alone else "false")
+        for own, display, alias, slug, name, alone in sorted(set(TEXT_ROWS)))
+    aliases = " ".join("when '{}' then '{}'".format(k, v) for k, v in sorted(MAKE_ALIASES.items()))
+    return f"""create or replace function buyer_interest_text_models(p_text text, p_makes text[] default '{{}}') returns jsonb language plpgsql immutable as $fn$
+declare
+  words text := ' ' || btrim(regexp_replace(buyer_interest_unaccent(coalesce(p_text, '')), '[^a-z0-9]+', ' ', 'g')) || ' ';
+  hints text[];
+  found jsonb := '[]'::jsonb;
+  r record;
+begin
+  select coalesce(array_agg(distinct case h {aliases} else h end), '{{}}') into hints
+  from (select w as h from unnest(string_to_array(btrim(words), ' ')) w
+        union select buyer_interest_fold(piece) from unnest(coalesce(p_makes, '{{}}')) m
+          cross join lateral unnest(regexp_split_to_array(m, '\\s*(,|/|&|\\yand\\y)\\s*', 'i')) piece) x
+  where h is not null and h <> '';
+  for r in select * from (values
+    {values}
+  ) a(own, make, alias, slug, name, alone) order by length(alias) desc, alias
+  loop
+    if (r.own = any(hints) or r.alone) and position(' ' || r.alias || ' ' in words) > 0
+       and not exists (select 1 from jsonb_array_elements(found) f where f->>'slug' = r.slug and f->>'make' = r.make) then
+      found := found || jsonb_build_array(jsonb_build_object('make', r.make, 'model', r.name, 'slug', r.slug));
+    end if;
+  end loop;
+  return found;
+end $fn$;"""
+
+
 def sql_function():
     """The migration text for buyer_interest_model_slug(), generated so the SQL cannot drift from the JSON."""
     values = ",\n    ".join(
@@ -171,9 +240,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--slug", nargs=2, metavar=("MAKE", "MODEL"))
     parser.add_argument("--sql", action="store_true")
+    parser.add_argument("--sql-text", action="store_true")
     args = parser.parse_args()
     if args.sql:
         print(sql_function())
+    if args.sql_text:
+        print(sql_text_models())
     if args.slug:
         print(model_slug(*args.slug))
 

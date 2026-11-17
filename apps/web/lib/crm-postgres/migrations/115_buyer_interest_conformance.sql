@@ -124,6 +124,13 @@ begin
     ('byd', 'seal u', 'seal', true),
     ('byd', 't3', 't3', false),
     ('byd', 'tang', 'tang', true),
+    ('chevrolet', 'bolt euv', 'boltev', true),
+    ('chevrolet', 'bolt ev', 'boltev', true),
+    ('chevrolet', 'chevrolet bolt', 'boltev', true),
+    ('chevrolet', 'chevrolet volt', 'volt', true),
+    ('chevrolet', 'chevy bolt', 'boltev', true),
+    ('chevrolet', 'chevy volt', 'volt', true),
+    ('chevrolet', 'volt', 'volt', true),
     ('citroen', 'ami', 'ami', true),
     ('citroen', 'berlingo', 'berlingo', true),
     ('citroen', 'berlingo van', 'berlingo', true),
@@ -597,6 +604,563 @@ begin
   if exact_only or coalesce(array_length(tokens, 1), 0) >= 4 then return null; end if;
   return nullif(regexp_replace(norm, '[^a-z0-9]+', '', 'g'), '');
 end $fn$;
+
+-- Models a free text names (generated: scripts/rebattery/model_aliases.py --sql-text): a make named in the text or an alias with a
+-- digit owned by one model. Returns [{make, model, slug}].
+create or replace function buyer_interest_text_models(p_text text, p_makes text[] default '{}') returns jsonb language plpgsql immutable as $fn$
+declare
+  words text := ' ' || btrim(regexp_replace(buyer_interest_unaccent(coalesce(p_text, '')), '[^a-z0-9]+', ' ', 'g')) || ' ';
+  hints text[];
+  found jsonb := '[]'::jsonb;
+  r record;
+begin
+  select coalesce(array_agg(distinct case h when 'mb' then 'mercedesbenz' when 'mercedes' then 'mercedesbenz' when 'psa' then 'peugeot' when 'vauxhall' then 'opel' when 'vw' then 'volkswagen' else h end), '{}') into hints
+  from (select w as h from unnest(string_to_array(btrim(words), ' ')) w
+        union select buyer_interest_fold(piece) from unnest(coalesce(p_makes, '{}')) m
+          cross join lateral unnest(regexp_split_to_array(m, '\s*(,|/|&|\yand\y)\s*', 'i')) piece) x
+  where h is not null and h <> '';
+  for r in select * from (values
+    ('audi', 'Audi', 'a3', 'a3', 'A3', false),
+    ('audi', 'Audi', 'a3 s3 8v', 'a3', 'A3', true),
+    ('audi', 'Audi', 'a6', 'a6', 'A6', false),
+    ('audi', 'Audi', 'a6 c8 avant 4a5', 'a6', 'A6', true),
+    ('audi', 'Audi', 'e tron', 'etron', 'e-tron', false),
+    ('audi', 'Audi', 'e tron 55 quattro', 'etron', 'e-tron', true),
+    ('audi', 'Audi', 'e tron gt', 'etrongt', 'e-tron GT', false),
+    ('audi', 'Audi', 'e tron s ge 2019', 'etron', 'e-tron', true),
+    ('audi', 'Audi', 'e tron sportback', 'etron', 'e-tron', false),
+    ('audi', 'Audi', 'e tron sportback gea', 'etron', 'e-tron', false),
+    ('audi', 'Audi', 'etron', 'etron', 'e-tron', false),
+    ('audi', 'Audi', 'q4', 'q4etron', 'Q4 e-tron', false),
+    ('audi', 'Audi', 'q4 e tron', 'q4etron', 'Q4 e-tron', true),
+    ('audi', 'Audi', 'q4 e tron fz', 'q4etron', 'Q4 e-tron', true),
+    ('audi', 'Audi', 'q4 etron', 'q4etron', 'Q4 e-tron', true),
+    ('audi', 'Audi', 'q5', 'q5', 'Q5', false),
+    ('audi', 'Audi', 'q5 fy', 'q5', 'Q5', true),
+    ('audi', 'Audi', 'q7', 'q7', 'Q7', false),
+    ('audi', 'Audi', 'q8 4m', 'q8etron', 'Q8 e-tron', true),
+    ('audi', 'Audi', 'q8 e tron', 'q8etron', 'Q8 e-tron', true),
+    ('audi', 'Audi', 'q8 e tron sportback', 'q8etron', 'Q8 e-tron', true),
+    ('bmw', 'BMW', '2 f45 active tourer', '2series', '2 Series', true),
+    ('bmw', 'BMW', '2 series', '2series', '2 Series', true),
+    ('bmw', 'BMW', '2 u06 active tourer', '2series', '2 Series', true),
+    ('bmw', 'BMW', '225xe', '225xe', '225xe', true),
+    ('bmw', 'BMW', '3 serie', '3series', '3 Series', true),
+    ('bmw', 'BMW', '3 series', '3series', '3 Series', true),
+    ('bmw', 'BMW', '330e', '330e', '330e', true),
+    ('bmw', 'BMW', '5 serie', '5series', '5 Series', true),
+    ('bmw', 'BMW', '5 series', '5series', '5 Series', true),
+    ('bmw', 'BMW', '530e', '530e', '530e', true),
+    ('bmw', 'BMW', '740e', '740e', '740e', true),
+    ('bmw', 'BMW', 'i3', 'i3', 'i3', false),
+    ('bmw', 'BMW', 'i3 120ah', 'i3', 'i3', true),
+    ('bmw', 'BMW', 'i3 94ah', 'i3', 'i3', true),
+    ('bmw', 'BMW', 'i3 i01', 'i3', 'i3', true),
+    ('bmw', 'BMW', 'i3s', 'i3', 'i3', true),
+    ('bmw', 'BMW', 'i4', 'i4', 'i4', false),
+    ('bmw', 'BMW', 'i4 g26', 'i4', 'i4', true),
+    ('bmw', 'BMW', 'ix', 'ix', 'iX', false),
+    ('bmw', 'BMW', 'ix xdrive', 'ix', 'iX', false),
+    ('bmw', 'BMW', 'ix1', 'ix1', 'iX1', true),
+    ('bmw', 'BMW', 'x1', 'x1', 'X1', false),
+    ('bmw', 'BMW', 'x1 f48', 'x1', 'X1', true),
+    ('bmw', 'BMW', 'x1 ix1 u11', 'ix1', 'iX1', true),
+    ('bmw', 'BMW', 'x1 u11', 'x1', 'X1', true),
+    ('bmw', 'BMW', 'x3', 'x3', 'X3', false),
+    ('bmw', 'BMW', 'x3 g01', 'x3', 'X3', true),
+    ('bmw', 'BMW', 'x5', 'x5', 'X5', false),
+    ('bmw', 'BMW', 'x5 g05', 'x5', 'X5', true),
+    ('bmw', 'BMW', 'x5 g05 f95', 'x5', 'X5', true),
+    ('bmw', 'BMW', 'x5 xdrive45e', 'x5', 'X5', true),
+    ('byd', 'BYD', 'atto 3', 'atto3', 'Atto 3', true),
+    ('byd', 'BYD', 'atto3', 'atto3', 'Atto 3', true),
+    ('byd', 'BYD', 'dolphin', 'dolphin', 'Dolphin', false),
+    ('byd', 'BYD', 'han', 'han', 'Han', false),
+    ('byd', 'BYD', 'seal', 'seal', 'Seal', false),
+    ('byd', 'BYD', 'seal u', 'seal', 'Seal', false),
+    ('byd', 'BYD', 't3', 't3', 'T3', false),
+    ('byd', 'BYD', 'tang', 'tang', 'Tang', false),
+    ('chevrolet', 'Chevrolet', 'bolt euv', 'boltev', 'Bolt EV', false),
+    ('chevrolet', 'Chevrolet', 'bolt ev', 'boltev', 'Bolt EV', false),
+    ('chevrolet', 'Chevrolet', 'chevrolet bolt', 'boltev', 'Bolt EV', false),
+    ('chevrolet', 'Chevrolet', 'chevrolet volt', 'volt', 'Volt', false),
+    ('chevrolet', 'Chevrolet', 'chevy bolt', 'boltev', 'Bolt EV', false),
+    ('chevrolet', 'Chevrolet', 'chevy volt', 'volt', 'Volt', false),
+    ('chevrolet', 'Chevrolet', 'volt', 'volt', 'Volt', false),
+    ('citroen', 'Citroen', 'ami', 'ami', 'Ami', false),
+    ('citroen', 'Citroen', 'berlingo', 'berlingo', 'Berlingo', false),
+    ('citroen', 'Citroen', 'berlingo van', 'berlingo', 'Berlingo', false),
+    ('citroen', 'Citroen', 'c3', 'c3', 'C3', false),
+    ('citroen', 'Citroen', 'c3 aircross', 'c3', 'C3', true),
+    ('citroen', 'Citroen', 'c4', 'c4', 'C4', false),
+    ('citroen', 'Citroen', 'c4 e c4', 'c4', 'C4', true),
+    ('citroen', 'Citroen', 'c4 e c4 c4x e c4x', 'c4', 'C4', true),
+    ('citroen', 'Citroen', 'e berlingo', 'berlingo', 'Berlingo', false),
+    ('citroen', 'Citroen', 'e c4', 'c4', 'C4', true),
+    ('citroen', 'Citroen', 'e jumpy', 'jumpy', 'Jumpy', false),
+    ('citroen', 'Citroen', 'jumpy', 'jumpy', 'Jumpy', false),
+    ('cupra', 'Cupra', 'born', 'born', 'Born', false),
+    ('cupra', 'Cupra', 'formentor', 'formentor', 'Formentor', false),
+    ('cupra', 'Cupra', 'leon', 'leon', 'Leon', false),
+    ('dacia', 'Dacia', 'spring', 'spring', 'Spring', false),
+    ('ds', 'DS', '3 crossback', 'ds3crossback', 'DS3 Crossback', true),
+    ('ds', 'DS', 'ds3', 'ds3crossback', 'DS3 Crossback', true),
+    ('ds', 'DS', 'ds3 crossback', 'ds3crossback', 'DS3 Crossback', true),
+    ('ds', 'DS', 'ds7', 'ds7', 'DS7', true),
+    ('ds', 'DS', 'ds7 crossback', 'ds7', 'DS7', true),
+    ('fiat', 'Fiat', '500', '500', '500', true),
+    ('fiat', 'Fiat', '500 e', '500e', '500e', true),
+    ('fiat', 'Fiat', '500e', '500e', '500e', true),
+    ('fiat', 'Fiat', '500e low range', '500e', '500e', true),
+    ('fiat', 'Fiat', 'doblo', 'doblo', 'Doblo', false),
+    ('fiat', 'Fiat', 'ducato', 'ducato', 'Ducato', false),
+    ('fiat', 'Fiat', 'e doblo', 'doblo', 'Doblo', false),
+    ('fiat', 'Fiat', 'e ducato', 'ducato', 'Ducato', false),
+    ('fiat', 'Fiat', 'fiat 500e', '500e', '500e', true),
+    ('fiat', 'Fiat', 'panda', 'panda', 'Panda', false),
+    ('ford', 'Ford', 'e transit', 'etransit', 'E-Transit', false),
+    ('ford', 'Ford', 'e transit custom', 'transitcustom', 'Transit Custom', false),
+    ('ford', 'Ford', 'explorer', 'explorer', 'Explorer', false),
+    ('ford', 'Ford', 'fiesta', 'fiesta', 'Fiesta', false),
+    ('ford', 'Ford', 'focus', 'focus', 'Focus', false),
+    ('ford', 'Ford', 'kuga', 'kuga', 'Kuga', false),
+    ('ford', 'Ford', 'kuga fhev', 'kuga', 'Kuga', false),
+    ('ford', 'Ford', 'kuga kuga phev fhev', 'kuga', 'Kuga', false),
+    ('ford', 'Ford', 'kuga phev', 'kuga', 'Kuga', false),
+    ('ford', 'Ford', 'mach e', 'mustangmache', 'Mustang Mach-E', false),
+    ('ford', 'Ford', 'mache', 'mustangmache', 'Mustang Mach-E', false),
+    ('ford', 'Ford', 'mondeo', 'mondeo', 'Mondeo', false),
+    ('ford', 'Ford', 'mustang mach e', 'mustangmache', 'Mustang Mach-E', false),
+    ('ford', 'Ford', 'puma', 'puma', 'Puma', false),
+    ('ford', 'Ford', 'puma j2k cf7', 'puma', 'Puma', true),
+    ('ford', 'Ford', 'puma mhev', 'puma', 'Puma', false),
+    ('ford', 'Ford', 'transit custom', 'transitcustom', 'Transit Custom', false),
+    ('genesis', 'Genesis', 'electrified gv70', 'gv70', 'GV70', true),
+    ('genesis', 'Genesis', 'g80', 'g80', 'G80', true),
+    ('genesis', 'Genesis', 'gv60', 'gv60', 'GV60', true),
+    ('genesis', 'Genesis', 'gv70', 'gv70', 'GV70', true),
+    ('honda', 'Honda', 'civic', 'civic', 'Civic', false),
+    ('honda', 'Honda', 'cr v', 'crv', 'CR-V', false),
+    ('honda', 'Honda', 'crv', 'crv', 'CR-V', false),
+    ('honda', 'Honda', 'e', 'hondae', 'Honda e', false),
+    ('honda', 'Honda', 'e ny1', 'eny1', 'e:Ny1', true),
+    ('honda', 'Honda', 'honda e', 'hondae', 'Honda e', false),
+    ('honda', 'Honda', 'hr v', 'hrv', 'HR-V', false),
+    ('honda', 'Honda', 'hrv', 'hrv', 'HR-V', false),
+    ('honda', 'Honda', 'insight', 'insight', 'Insight', false),
+    ('honda', 'Honda', 'jazz', 'jazz', 'Jazz', false),
+    ('honda', 'Honda', 'jazz v gr', 'jazz', 'Jazz', false),
+    ('hyundai', 'Hyundai', 'bayon', 'bayon', 'Bayon', false),
+    ('hyundai', 'Hyundai', 'genesis', 'genesis', 'Genesis', false),
+    ('hyundai', 'Hyundai', 'i20', 'i20', 'i20', true),
+    ('hyundai', 'Hyundai', 'i30', 'i30', 'i30', true),
+    ('hyundai', 'Hyundai', 'ioniq', 'ioniq', 'Ioniq', false),
+    ('hyundai', 'Hyundai', 'ioniq 5', 'ioniq5', 'Ioniq 5', true),
+    ('hyundai', 'Hyundai', 'ioniq 5 long range', 'ioniq5', 'Ioniq 5', true),
+    ('hyundai', 'Hyundai', 'ioniq 5 n', 'ioniq5', 'Ioniq 5', true),
+    ('hyundai', 'Hyundai', 'ioniq 5 ne', 'ioniq5', 'Ioniq 5', true),
+    ('hyundai', 'Hyundai', 'ioniq 5 standard range', 'ioniq5', 'Ioniq 5', true),
+    ('hyundai', 'Hyundai', 'ioniq 6', 'ioniq6', 'Ioniq 6', true),
+    ('hyundai', 'Hyundai', 'ioniq ae', 'ioniq', 'Ioniq', false),
+    ('hyundai', 'Hyundai', 'ioniq electric', 'ioniq', 'Ioniq', false),
+    ('hyundai', 'Hyundai', 'ioniq hybrid', 'ioniq', 'Ioniq', false),
+    ('hyundai', 'Hyundai', 'ioniq phev', 'ioniq', 'Ioniq', false),
+    ('hyundai', 'Hyundai', 'ioniq premium', 'ioniq', 'Ioniq', false),
+    ('hyundai', 'Hyundai', 'ioniq premium se bev', 'ioniq', 'Ioniq', false),
+    ('hyundai', 'Hyundai', 'ioniq5', 'ioniq5', 'Ioniq 5', true),
+    ('hyundai', 'Hyundai', 'ioniq6', 'ioniq6', 'Ioniq 6', true),
+    ('hyundai', 'Hyundai', 'kona', 'kona', 'Kona', false),
+    ('hyundai', 'Hyundai', 'kona 39 kwh', 'kona', 'Kona', true),
+    ('hyundai', 'Hyundai', 'kona 64 kwh', 'kona', 'Kona', true),
+    ('hyundai', 'Hyundai', 'kona electric', 'kona', 'Kona', false),
+    ('hyundai', 'Hyundai', 'kona electric 64 kwh', 'kona', 'Kona', true),
+    ('hyundai', 'Hyundai', 'kona electric os', 'kona', 'Kona', false),
+    ('hyundai', 'Hyundai', 'kona ev', 'kona', 'Kona', false),
+    ('hyundai', 'Hyundai', 'kona hybrid', 'kona', 'Kona', false),
+    ('hyundai', 'Hyundai', 'santa fe', 'santafe', 'Santa Fe', false),
+    ('hyundai', 'Hyundai', 'tucson', 'tucson', 'Tucson', false),
+    ('jaguar', 'Jaguar', 'i pace', 'ipace', 'I-Pace', false),
+    ('jaguar', 'Jaguar', 'ipace', 'ipace', 'I-Pace', false),
+    ('jeep', 'Jeep', 'avenger', 'avenger', 'Avenger', false),
+    ('jeep', 'Jeep', 'avenger 1 generation', 'avenger', 'Avenger', true),
+    ('jeep', 'Jeep', 'compass', 'compass', 'Compass', false),
+    ('jeep', 'Jeep', 'renegade', 'renegade', 'Renegade', false),
+    ('kia', 'Kia', 'ceed', 'ceed', 'Ceed', false),
+    ('kia', 'Kia', 'ceed ceed sw', 'ceed', 'Ceed', false),
+    ('kia', 'Kia', 'ceed sw', 'ceed', 'Ceed', false),
+    ('kia', 'Kia', 'e niro', 'niro', 'Niro', false),
+    ('kia', 'Kia', 'e soul', 'soul', 'Soul', false),
+    ('kia', 'Kia', 'ev3', 'ev3', 'EV3', true),
+    ('kia', 'Kia', 'ev3 long range', 'ev3', 'EV3', true),
+    ('kia', 'Kia', 'ev3 standard range', 'ev3', 'EV3', true),
+    ('kia', 'Kia', 'ev4', 'ev4', 'EV4', true),
+    ('kia', 'Kia', 'ev6', 'ev6', 'EV6', true),
+    ('kia', 'Kia', 'ev6 cv', 'ev6', 'EV6', true),
+    ('kia', 'Kia', 'ev6 gt', 'ev6', 'EV6', true),
+    ('kia', 'Kia', 'ev6 long range', 'ev6', 'EV6', true),
+    ('kia', 'Kia', 'ev6 standard range', 'ev6', 'EV6', true),
+    ('kia', 'Kia', 'ev9', 'ev9', 'EV9', true),
+    ('kia', 'Kia', 'ev9 long range', 'ev9', 'EV9', true),
+    ('kia', 'Kia', 'kia soul', 'soul', 'Soul', false),
+    ('kia', 'Kia', 'niro', 'niro', 'Niro', false),
+    ('kia', 'Kia', 'niro 2', 'niro', 'Niro', true),
+    ('kia', 'Kia', 'niro de', 'niro', 'Niro', false),
+    ('kia', 'Kia', 'niro electric', 'niro', 'Niro', false),
+    ('kia', 'Kia', 'niro ev', 'niro', 'Niro', false),
+    ('kia', 'Kia', 'niro hybrid', 'niro', 'Niro', false),
+    ('kia', 'Kia', 'niro ii', 'niro', 'Niro', false),
+    ('kia', 'Kia', 'niro mk1', 'niro', 'Niro', true),
+    ('kia', 'Kia', 'niro mk2', 'niro', 'Niro', true),
+    ('kia', 'Kia', 'niro phev', 'niro', 'Niro', false),
+    ('kia', 'Kia', 'niro sg2', 'niro', 'Niro', true),
+    ('kia', 'Kia', 'optima', 'optima', 'Optima', false),
+    ('kia', 'Kia', 'rio', 'rio', 'Rio', false),
+    ('kia', 'Kia', 'sorento', 'sorento', 'Sorento', false),
+    ('kia', 'Kia', 'soul', 'soul', 'Soul', false),
+    ('kia', 'Kia', 'soul ev', 'soul', 'Soul', false),
+    ('kia', 'Kia', 'sportage', 'sportage', 'Sportage', false),
+    ('kia', 'Kia', 'sportage nq5', 'sportage', 'Sportage', true),
+    ('kia', 'Kia', 'stonic', 'stonic', 'Stonic', false),
+    ('kia', 'Kia', 'xceed', 'xceed', 'Xceed', false),
+    ('landrover', 'Land Rover', 'defender', 'defender', 'Defender', false),
+    ('landrover', 'Land Rover', 'evoque', 'evoque', 'Evoque', false),
+    ('landrover', 'Land Rover', 'range rover sport', 'rangeroversport', 'Range Rover Sport', false),
+    ('lexus', 'Lexus', 'ct', 'ct', 'CT', false),
+    ('lexus', 'Lexus', 'ct 200h', 'ct', 'CT', true),
+    ('lexus', 'Lexus', 'ct zwa10', 'ct', 'CT', true),
+    ('lexus', 'Lexus', 'nx', 'nx', 'NX', false),
+    ('lexus', 'Lexus', 'nx 350h', 'nx', 'NX', true),
+    ('lexus', 'Lexus', 'nx 350h 450h', 'nx', 'NX', true),
+    ('lexus', 'Lexus', 'rx', 'rx', 'RX', false),
+    ('lexus', 'Lexus', 'rx series', 'rx', 'RX', false),
+    ('lexus', 'Lexus', 'ux', 'ux', 'UX', false),
+    ('lynkco', 'Lynk & Co', '01', '01', '01', false),
+    ('lynkco', 'Lynk & Co', '1', '01', '01', false),
+    ('lynkco', 'Lynk & Co', 'lynk o co 01', '01', '01', true),
+    ('maxus', 'Maxus', 'deliver 3', 'edeliver3', 'e-Deliver 3', true),
+    ('maxus', 'Maxus', 'deliver 9', 'edeliver9', 'e-Deliver 9', true),
+    ('maxus', 'Maxus', 'e deliver 3', 'edeliver3', 'e-Deliver 3', true),
+    ('maxus', 'Maxus', 'e deliver 9', 'edeliver9', 'e-Deliver 9', true),
+    ('maxus', 'Maxus', 'e deliver3 ev30', 'edeliver3', 'e-Deliver 3', true),
+    ('maxus', 'Maxus', 'ev80', 'ev80', 'EV80', true),
+    ('mazda', 'Mazda', '2', '2', '2', false),
+    ('mazda', 'Mazda', '2 kb hybrid', '2', '2', true),
+    ('mazda', 'Mazda', '3', '3', '3', false),
+    ('mazda', 'Mazda', 'cx 30', 'cx30', 'CX-30', true),
+    ('mazda', 'Mazda', 'cx 30 dm', 'cx30', 'CX-30', true),
+    ('mazda', 'Mazda', 'cx 5', 'cx5', 'CX-5', true),
+    ('mazda', 'Mazda', 'cx 5 kf', 'cx5', 'CX-5', true),
+    ('mazda', 'Mazda', 'cx 60', 'cx60', 'CX-60', true),
+    ('mazda', 'Mazda', 'cx 60 kh', 'cx60', 'CX-60', true),
+    ('mazda', 'Mazda', 'mazda 2', '2', '2', true),
+    ('mazda', 'Mazda', 'mazda 3', '3', '3', true),
+    ('mazda', 'Mazda', 'mazda2', '2', '2', true),
+    ('mazda', 'Mazda', 'mazda3', '3', '3', true),
+    ('mazda', 'Mazda', 'mx 30', 'mx30', 'MX-30', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'a class', 'aclass', 'A-Class', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'a class w177', 'aclass', 'A-Class', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'b 180 200 w246 w242', 'bclass', 'B-Class', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'b class', 'bclass', 'B-Class', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'c class', 'cclass', 'C-Class', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'c class w206', 'cclass', 'C-Class', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'c klasse', 'cclass', 'C-Class', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'cla', 'cla', 'CLA', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'cla class', 'cla', 'CLA', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'cla class c118 x118', 'cla', 'CLA', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'e class', 'eclass', 'E-Class', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'e class w213', 'eclass', 'E-Class', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'eq', 'eq', 'EQ', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'eqa', 'eqa', 'EQA', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'eqa h243', 'eqa', 'EQA', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'eqb', 'eqb', 'EQB', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'eqb x243', 'eqb', 'EQB', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'eqc', 'eqc', 'EQC', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'eqc 400', 'eqc', 'EQC', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'eqc 400 amg line premium 4matic', 'eqc', 'EQC', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'eqc n293', 'eqc', 'EQC', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'eqe', 'eqe', 'EQE', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'eqe v295', 'eqe', 'EQE', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'eqs', 'eqs', 'EQS', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'eqv', 'eqv', 'EQV', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'gla', 'gla', 'GLA', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'gla class h247', 'gla', 'GLA', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'glc', 'glc', 'GLC', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'glc class', 'glc', 'GLC', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'glc class x253 c253', 'glc', 'GLC', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'glc class x254', 'glc', 'GLC', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'gle', 'gle', 'GLE', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'gle class', 'gle', 'GLE', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'gle class w167 v167 c167', 'gle', 'GLE', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'gle w167', 'gle', 'GLE', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'sprinter', 'sprinter', 'Sprinter', false),
+    ('mercedesbenz', 'Mercedes-Benz', 'sprinter 3 5 t van', 'sprinter', 'Sprinter', true),
+    ('mercedesbenz', 'Mercedes-Benz', 'sprinter 3 5 t van 907 910', 'sprinter', 'Sprinter', true),
+    ('mg', 'MG', '3', 'mg3', '3', false),
+    ('mg', 'MG', '4', 'mg4', '4', false),
+    ('mg', 'MG', '4 eh32', 'mg4', '4', true),
+    ('mg', 'MG', '5', 'mg5', '5', false),
+    ('mg', 'MG', 'ehs', 'hs', 'HS', false),
+    ('mg', 'MG', 'hs', 'hs', 'HS', false),
+    ('mg', 'MG', 'hs ehs', 'hs', 'HS', false),
+    ('mg', 'MG', 'hs ehs as23', 'hs', 'HS', true),
+    ('mg', 'MG', 'marvel r', 'marvelr', 'Marvel R', false),
+    ('mg', 'MG', 'mg 3', 'mg3', '3', true),
+    ('mg', 'MG', 'mg 4', 'mg4', '4', true),
+    ('mg', 'MG', 'mg 5', 'mg5', '5', true),
+    ('mg', 'MG', 'mg hs', 'hs', 'HS', false),
+    ('mg', 'MG', 'mg zs ev', 'zsev', 'ZS EV', false),
+    ('mg', 'MG', 'mg3', 'mg3', '3', true),
+    ('mg', 'MG', 'mg4', 'mg4', '4', true),
+    ('mg', 'MG', 'mg5', 'mg5', '5', true),
+    ('mg', 'MG', 'zs', 'zsev', 'ZS EV', false),
+    ('mg', 'MG', 'zs ev', 'zsev', 'ZS EV', false),
+    ('mg', 'MG', 'zs hybrid', 'zsev', 'ZS EV', false),
+    ('mitsubishi', 'Mitsubishi', 'eclipse cross', 'eclipsecross', 'Eclipse Cross', false),
+    ('mitsubishi', 'Mitsubishi', 'i miev', 'imiev', 'i-MiEV', false),
+    ('mitsubishi', 'Mitsubishi', 'imiev', 'imiev', 'i-MiEV', false),
+    ('mitsubishi', 'Mitsubishi', 'mits outlander', 'outlander', 'Outlander', false),
+    ('mitsubishi', 'Mitsubishi', 'outlander', 'outlander', 'Outlander', false),
+    ('mitsubishi', 'Mitsubishi', 'outlander 2013 21', 'outlander', 'Outlander', true),
+    ('mitsubishi', 'Mitsubishi', 'outlander iii gg w gf w zj', 'outlander', 'Outlander', false),
+    ('mitsubishi', 'Mitsubishi', 'outlander phev', 'outlander', 'Outlander', false),
+    ('nissan', 'Nissan', 'ariya', 'ariya', 'Ariya', false),
+    ('nissan', 'Nissan', 'ariya fe0', 'ariya', 'Ariya', true),
+    ('nissan', 'Nissan', 'e nv200', 'nv200', 'NV200', true),
+    ('nissan', 'Nissan', 'envy200', 'nv200', 'NV200', true),
+    ('nissan', 'Nissan', 'juke', 'juke', 'Juke', false),
+    ('nissan', 'Nissan', 'leaf', 'leaf', 'Leaf', false),
+    ('nissan', 'Nissan', 'leaf gen1', 'leaf', 'Leaf', true),
+    ('nissan', 'Nissan', 'leaf gen2', 'leaf', 'Leaf', true),
+    ('nissan', 'Nissan', 'leaf ze0', 'leaf', 'Leaf', true),
+    ('nissan', 'Nissan', 'leaf ze1', 'leaf', 'Leaf', true),
+    ('nissan', 'Nissan', 'leaf zeo', 'leaf', 'Leaf', false),
+    ('nissan', 'Nissan', 'nissan leaf', 'leaf', 'Leaf', false),
+    ('nissan', 'Nissan', 'nv 200', 'nv200', 'NV200', true),
+    ('nissan', 'Nissan', 'nv200', 'nv200', 'NV200', true),
+    ('nissan', 'Nissan', 'qashqai', 'qashqai', 'Qashqai', false),
+    ('nissan', 'Nissan', 'townstar', 'townstar', 'Townstar', false),
+    ('opel', 'Opel', 'ampera', 'ampera', 'Ampera', false),
+    ('opel', 'Opel', 'ampera e', 'ampera', 'Ampera', false),
+    ('opel', 'Opel', 'astra', 'astra', 'Astra', false),
+    ('opel', 'Opel', 'combo', 'combo', 'Combo', false),
+    ('opel', 'Opel', 'combo e', 'combo', 'Combo', false),
+    ('opel', 'Opel', 'combo life', 'combo', 'Combo', false),
+    ('opel', 'Opel', 'corsa', 'corsa', 'Corsa', false),
+    ('opel', 'Opel', 'corsa e', 'corsa', 'Corsa', false),
+    ('opel', 'Opel', 'corsa f', 'corsa', 'Corsa', false),
+    ('opel', 'Opel', 'corsa f corsa e', 'corsa', 'Corsa', false),
+    ('opel', 'Opel', 'mokka', 'mokka', 'Mokka', false),
+    ('opel', 'Opel', 'mokka e', 'mokka', 'Mokka', false),
+    ('opel', 'Opel', 'vivaro', 'vivaro', 'Vivaro', false),
+    ('opel', 'Opel', 'vivaro c', 'vivaro', 'Vivaro', false),
+    ('opel', 'Opel', 'vivaro e', 'vivaro', 'Vivaro', false),
+    ('opel', 'Opel', 'zafira', 'zafira', 'Zafira', false),
+    ('peugeot', 'Peugeot', '2008', '2008', '2008', true),
+    ('peugeot', 'Peugeot', '208', '208', '208', true),
+    ('peugeot', 'Peugeot', '208 e 208', '208', '208', true),
+    ('peugeot', 'Peugeot', '208 ii ub up uw uj', '208', '208', true),
+    ('peugeot', 'Peugeot', '208 mk2', '208', '208', true),
+    ('peugeot', 'Peugeot', '208 peugeot 208', '208', '208', true),
+    ('peugeot', 'Peugeot', '3008', '3008', '3008', true),
+    ('peugeot', 'Peugeot', '308', '308', '308', true),
+    ('peugeot', 'Peugeot', '5008', '5008', '5008', true),
+    ('peugeot', 'Peugeot', '508', '508', '508', true),
+    ('peugeot', 'Peugeot', 'boxer', 'boxer', 'Boxer', false),
+    ('peugeot', 'Peugeot', 'e 208', '208', '208', true),
+    ('peugeot', 'Peugeot', 'e expert', 'expert', 'Expert', false),
+    ('peugeot', 'Peugeot', 'e partner', 'partner', 'Partner', false),
+    ('peugeot', 'Peugeot', 'expert', 'expert', 'Expert', false),
+    ('peugeot', 'Peugeot', 'expert furgon', 'expert', 'Expert', false),
+    ('peugeot', 'Peugeot', 'partner', 'partner', 'Partner', false),
+    ('peugeot', 'Peugeot', 'partner furgon', 'partner', 'Partner', false),
+    ('peugeot', 'Peugeot', 'rifter', 'rifter', 'Rifter', false),
+    ('polestar', 'Polestar', '2', '2', '2', false),
+    ('polestar', 'Polestar', '3', '3', '3', false),
+    ('polestar', 'Polestar', '4', '4', '4', false),
+    ('polestar', 'Polestar', 'polestar 2', '2', '2', true),
+    ('polestar', 'Polestar', 'polestar 2 2020', '2', '2', true),
+    ('polestar', 'Polestar', 'polestar 3', '3', '3', true),
+    ('polestar', 'Polestar', 'polestar 4', '4', '4', true),
+    ('polestar', 'Polestar', 'polestar2', '2', '2', true),
+    ('porsche', 'Porsche', 'cayenne', 'cayenne', 'Cayenne', false),
+    ('porsche', 'Porsche', 'cayenne e hybrid', 'cayenne', 'Cayenne', false),
+    ('porsche', 'Porsche', 'macan', 'macan', 'Macan', false),
+    ('porsche', 'Porsche', 'panamera', 'panamera', 'Panamera', false),
+    ('porsche', 'Porsche', 'panamera 971', 'panamera', 'Panamera', true),
+    ('porsche', 'Porsche', 'taycan', 'taycan', 'Taycan', false),
+    ('porsche', 'Porsche', 'taycan 4s', 'taycan', 'Taycan', true),
+    ('porsche', 'Porsche', 'taycan turbo', 'taycan', 'Taycan', false),
+    ('proterra', 'Proterra', 'onyx strata h4 15', 'onyxstratah415', 'Onyx Strata H4-15', true),
+    ('renault', 'Renault', 'arkana', 'arkana', 'Arkana', false),
+    ('renault', 'Renault', 'austral', 'austral', 'Austral', false),
+    ('renault', 'Renault', 'captur', 'captur', 'Captur', false),
+    ('renault', 'Renault', 'captur e tech plug in', 'captur', 'Captur', false),
+    ('renault', 'Renault', 'clio', 'clio', 'Clio', false),
+    ('renault', 'Renault', 'clio e tech', 'clio', 'Clio', false),
+    ('renault', 'Renault', 'kangoo', 'kangoo', 'Kangoo', false),
+    ('renault', 'Renault', 'kangoo e tech', 'kangoo', 'Kangoo', false),
+    ('renault', 'Renault', 'kangoo express', 'kangoo', 'Kangoo', false),
+    ('renault', 'Renault', 'kangoo gen1', 'kangoo', 'Kangoo', true),
+    ('renault', 'Renault', 'kangoo ii', 'kangoo', 'Kangoo', false),
+    ('renault', 'Renault', 'kangoo ze', 'kangoo', 'Kangoo', false),
+    ('renault', 'Renault', 'master', 'master', 'Master', false),
+    ('renault', 'Renault', 'master ze', 'master', 'Master', false),
+    ('renault', 'Renault', 'megane', 'megane', 'Megane', false),
+    ('renault', 'Renault', 'megane break', 'megane', 'Megane', false),
+    ('renault', 'Renault', 'megane e tech', 'megane', 'Megane', false),
+    ('renault', 'Renault', 'twingo', 'twingo', 'Twingo', false),
+    ('renault', 'Renault', 'twingo ze', 'twingo', 'Twingo', false),
+    ('renault', 'Renault', 'ze', 'ze', 'ZE', false),
+    ('renault', 'Renault', 'zoe', 'zoe', 'Zoe', false),
+    ('renault', 'Renault', 'zoe 2', 'zoe', 'Zoe', true),
+    ('renault', 'Renault', 'zoe bfm', 'zoe', 'Zoe', false),
+    ('renault', 'Renault', 'zoe e tech', 'zoe', 'Zoe', false),
+    ('renault', 'Renault', 'zoe r110', 'zoe', 'Zoe', true),
+    ('renault', 'Renault', 'zoe r135', 'zoe', 'Zoe', true),
+    ('renault', 'Renault', 'zoe r90', 'zoe', 'Zoe', true),
+    ('renault', 'Renault', 'zoe z e', 'zoe', 'Zoe', false),
+    ('renault', 'Renault', 'zoe ze', 'zoe', 'Zoe', false),
+    ('rivian', 'Rivian', 'r1s', 'r1s', 'R1S', true),
+    ('rivian', 'Rivian', 'r1t', 'r1t', 'R1T', true),
+    ('seat', 'Seat', 'leon', 'leon', 'Leon', false),
+    ('seat', 'Seat', 'mii', 'mii', 'Mii', false),
+    ('seat', 'Seat', 'mii electric', 'mii', 'Mii', false),
+    ('skoda', 'Skoda', 'elroq', 'elroq', 'Elroq', false),
+    ('skoda', 'Skoda', 'enyaq', 'enyaq', 'Enyaq', false),
+    ('skoda', 'Skoda', 'enyaq iv', 'enyaq', 'Enyaq', false),
+    ('skoda', 'Skoda', 'enyaq iv 60', 'enyaq', 'Enyaq', true),
+    ('skoda', 'Skoda', 'enyaq iv 80', 'enyaq', 'Enyaq', true),
+    ('skoda', 'Skoda', 'kodiaq', 'kodiaq', 'Kodiaq', false),
+    ('skoda', 'Skoda', 'octavia', 'octavia', 'Octavia', false),
+    ('skoda', 'Skoda', 'superb', 'superb', 'Superb', false),
+    ('skoda', 'Skoda', 'superb iv', 'superb', 'Superb', false),
+    ('smart', 'Smart', 'eq forfour', 'eqfortwo', 'EQ Fortwo', false),
+    ('smart', 'Smart', 'eq fortwo', 'eqfortwo', 'EQ Fortwo', false),
+    ('subaru', 'Subaru', 'forester', 'forester', 'Forester', false),
+    ('subaru', 'Subaru', 'solterra', 'solterra', 'Solterra', false),
+    ('suzuki', 'Suzuki', 'across', 'across', 'Across', false),
+    ('suzuki', 'Suzuki', 'ignis', 'ignis', 'Ignis', false),
+    ('suzuki', 'Suzuki', 's cross', 'scross', 'S-Cross', false),
+    ('suzuki', 'Suzuki', 'swace', 'swace', 'Swace', false),
+    ('suzuki', 'Suzuki', 'swift', 'swift', 'Swift', false),
+    ('suzuki', 'Suzuki', 'sx4 s cross', 'scross', 'S-Cross', true),
+    ('suzuki', 'Suzuki', 'vitara', 'vitara', 'Vitara', false),
+    ('tesla', 'Tesla', 'cybertruck', 'cybertruck', 'Cybertruck', false),
+    ('tesla', 'Tesla', 'megapack', 'megapack', 'Megapack', false),
+    ('tesla', 'Tesla', 'megapack 2', 'megapack', 'Megapack', true),
+    ('tesla', 'Tesla', 'model 3', 'model3', 'Model 3', true),
+    ('tesla', 'Tesla', 'model s', 'models', 'Model S', false),
+    ('tesla', 'Tesla', 'model three', 'model3', 'Model 3', false),
+    ('tesla', 'Tesla', 'model x', 'modelx', 'Model X', false),
+    ('tesla', 'Tesla', 'model y', 'modely', 'Model Y', false),
+    ('tesla', 'Tesla', 'powerpack', 'powerpack', 'Powerpack', false),
+    ('tesla', 'Tesla', 'powerwall', 'powerwall', 'Powerwall', false),
+    ('tesla', 'Tesla', 'powerwall 2', 'powerwall', 'Powerwall', true),
+    ('tesla', 'Tesla', 'powerwall 3', 'powerwall', 'Powerwall', true),
+    ('toyota', 'Toyota', 'auris', 'auris', 'Auris', false),
+    ('toyota', 'Toyota', 'aygo', 'aygo', 'Aygo', false),
+    ('toyota', 'Toyota', 'bz4x', 'bz4x', 'bZ4X', true),
+    ('toyota', 'Toyota', 'bz4x ea10', 'bz4x', 'bZ4X', true),
+    ('toyota', 'Toyota', 'c hr', 'chr', 'C-HR', false),
+    ('toyota', 'Toyota', 'camry', 'camry', 'Camry', false),
+    ('toyota', 'Toyota', 'chr', 'chr', 'C-HR', false),
+    ('toyota', 'Toyota', 'corolla', 'corolla', 'Corolla', false),
+    ('toyota', 'Toyota', 'corolla cross', 'corollacross', 'Corolla Cross', false),
+    ('toyota', 'Toyota', 'corolla cross xg10', 'corollacross', 'Corolla Cross', true),
+    ('toyota', 'Toyota', 'corolla hybrid', 'corolla', 'Corolla', false),
+    ('toyota', 'Toyota', 'prius', 'prius', 'Prius', false),
+    ('toyota', 'Toyota', 'prius', 'prius', 'Prius+', false),
+    ('toyota', 'Toyota', 'prius 50', 'prius', 'Prius', true),
+    ('toyota', 'Toyota', 'prius 7', 'prius', 'Prius+', true),
+    ('toyota', 'Toyota', 'prius hybrid', 'prius', 'Prius', false),
+    ('toyota', 'Toyota', 'prius plus', 'prius', 'Prius+', false),
+    ('toyota', 'Toyota', 'prius w3', 'prius', 'Prius', true),
+    ('toyota', 'Toyota', 'prius zvw30', 'prius', 'Prius', true),
+    ('toyota', 'Toyota', 'prius zvw40', 'prius', 'Prius+', true),
+    ('toyota', 'Toyota', 'prius zvw50', 'prius', 'Prius', true),
+    ('toyota', 'Toyota', 'proace', 'proace', 'Proace', false),
+    ('toyota', 'Toyota', 'proace city', 'proace', 'Proace', false),
+    ('toyota', 'Toyota', 'proace city verso mpv bky', 'proace', 'Proace', false),
+    ('toyota', 'Toyota', 'proace electric', 'proace', 'Proace', false),
+    ('toyota', 'Toyota', 'proace ii', 'proace', 'Proace', false),
+    ('toyota', 'Toyota', 'proace verso', 'proace', 'Proace', false),
+    ('toyota', 'Toyota', 'rav 4', 'rav4', 'RAV4', true),
+    ('toyota', 'Toyota', 'rav 4 prime', 'rav4', 'RAV4', true),
+    ('toyota', 'Toyota', 'rav4', 'rav4', 'RAV4', true),
+    ('toyota', 'Toyota', 'rav4 plug in', 'rav4', 'RAV4', true),
+    ('toyota', 'Toyota', 'rav4 plug in prime', 'rav4', 'RAV4', true),
+    ('toyota', 'Toyota', 'rav4 xa50', 'rav4', 'RAV4', true),
+    ('toyota', 'Toyota', 'swace', 'swace', 'Swace', false),
+    ('toyota', 'Toyota', 'yaris', 'yaris', 'Yaris', false),
+    ('toyota', 'Toyota', 'yaris cross', 'yariscross', 'Yaris Cross', false),
+    ('toyota', 'Toyota', 'yaris cross mxp', 'yariscross', 'Yaris Cross', false),
+    ('toyota', 'Toyota', 'yaris cross suv', 'yariscross', 'Yaris Cross', false),
+    ('toyota', 'Toyota', 'yaris cross xp21', 'yariscross', 'Yaris Cross', true),
+    ('toyota', 'Toyota', 'yaris hybrid', 'yaris', 'Yaris', false),
+    ('toyota', 'Toyota', 'yaris p21', 'yaris', 'Yaris', true),
+    ('toyota', 'Toyota', 'yaris xp21', 'yaris', 'Yaris', true),
+    ('volkswagen', 'Volkswagen', 'e golf', 'egolf', 'e-Golf', false),
+    ('volkswagen', 'Volkswagen', 'e golf vii', 'egolf', 'e-Golf', false),
+    ('volkswagen', 'Volkswagen', 'e up', 'eup', 'e-Up', false),
+    ('volkswagen', 'Volkswagen', 'egolf', 'egolf', 'e-Golf', false),
+    ('volkswagen', 'Volkswagen', 'golf', 'golf', 'Golf', false),
+    ('volkswagen', 'Volkswagen', 'golf e golf vii', 'egolf', 'e-Golf', false),
+    ('volkswagen', 'Volkswagen', 'golf gte', 'golf', 'Golf', false),
+    ('volkswagen', 'Volkswagen', 'golf vii', 'golf', 'Golf', false),
+    ('volkswagen', 'Volkswagen', 'golf viii', 'golf', 'Golf', false),
+    ('volkswagen', 'Volkswagen', 'id 3', 'id3', 'ID.3', true),
+    ('volkswagen', 'Volkswagen', 'id 3 e11', 'id3', 'ID.3', true),
+    ('volkswagen', 'Volkswagen', 'id 4', 'id4', 'ID.4', true),
+    ('volkswagen', 'Volkswagen', 'id 5', 'id5', 'ID.5', true),
+    ('volkswagen', 'Volkswagen', 'id 7', 'id7', 'ID.7', true),
+    ('volkswagen', 'Volkswagen', 'id 7 tourer', 'id7', 'ID.7', true),
+    ('volkswagen', 'Volkswagen', 'id buzz', 'idbuzz', 'ID. Buzz', false),
+    ('volkswagen', 'Volkswagen', 'id3', 'id3', 'ID.3', true),
+    ('volkswagen', 'Volkswagen', 'id4', 'id4', 'ID.4', true),
+    ('volkswagen', 'Volkswagen', 'id5', 'id5', 'ID.5', true),
+    ('volkswagen', 'Volkswagen', 'id7', 'id7', 'ID.7', true),
+    ('volkswagen', 'Volkswagen', 'idbuzz', 'idbuzz', 'ID. Buzz', false),
+    ('volkswagen', 'Volkswagen', 'passat', 'passat', 'Passat', false),
+    ('volkswagen', 'Volkswagen', 'passat gte', 'passat', 'Passat', false),
+    ('volkswagen', 'Volkswagen', 'tayron', 'tayron', 'Tayron', false),
+    ('volkswagen', 'Volkswagen', 'tiguan', 'tiguan', 'Tiguan', false),
+    ('volkswagen', 'Volkswagen', 'tiguan ehybrid', 'tiguan', 'Tiguan', false),
+    ('volkswagen', 'Volkswagen', 'up', 'eup', 'e-Up', false),
+    ('volkswagen', 'Volkswagen', 'up e up', 'eup', 'e-Up', false),
+    ('volvo', 'Volvo', 'c40', 'c40', 'C40', true),
+    ('volvo', 'Volvo', 'c40 recharge', 'c40', 'C40', true),
+    ('volvo', 'Volvo', 'c40 recharge 21', 'c40', 'C40', true),
+    ('volvo', 'Volvo', 'ex30', 'ex30', 'EX30', true),
+    ('volvo', 'Volvo', 'ex30 2024', 'ex30', 'EX30', true),
+    ('volvo', 'Volvo', 'ex90', 'ex90', 'EX90', true),
+    ('volvo', 'Volvo', 's90', 's90', 'S90', true),
+    ('volvo', 'Volvo', 'v60', 'v60', 'V60', true),
+    ('volvo', 'Volvo', 'v60 18', 'v60', 'V60', true),
+    ('volvo', 'Volvo', 'v60 19', 'v60', 'V60', true),
+    ('volvo', 'Volvo', 'v60 2014 18', 'v60', 'V60', true),
+    ('volvo', 'Volvo', 'v90', 'v90', 'V90', true),
+    ('volvo', 'Volvo', 'v90 cc', 'v90', 'V90', true),
+    ('volvo', 'Volvo', 'v90 v90 cc s90', 'v90', 'V90', true),
+    ('volvo', 'Volvo', 'xc40', 'xc40', 'XC40', true),
+    ('volvo', 'Volvo', 'xc40 536', 'xc40', 'XC40', true),
+    ('volvo', 'Volvo', 'xc40 recharge', 'xc40', 'XC40', true),
+    ('volvo', 'Volvo', 'xc40 recharge 18', 'xc40', 'XC40', true),
+    ('volvo', 'Volvo', 'xc60', 'xc60', 'XC60', true),
+    ('volvo', 'Volvo', 'xc60 18', 'xc60', 'XC60', true),
+    ('volvo', 'Volvo', 'xc90', 'xc90', 'XC90', true),
+    ('xpeng', 'Xpeng', 'g6', 'g6', 'G6', false),
+    ('xpeng', 'Xpeng', 'g9', 'g9', 'G9', false),
+    ('xpeng', 'Xpeng', 'p7', 'p7', 'P7', false),
+    ('xpeng', 'Xpeng', 'xpeng p7', 'p7', 'P7', true)
+  ) a(own, make, alias, slug, name, alone) order by length(alias) desc, alias
+  loop
+    if (r.own = any(hints) or r.alone) and position(' ' || r.alias || ' ' in words) > 0
+       and not exists (select 1 from jsonb_array_elements(found) f where f->>'slug' = r.slug and f->>'make' = r.make) then
+      found := found || jsonb_build_array(jsonb_build_object('make', r.make, 'model', r.name, 'slug', r.slug));
+    end if;
+  end loop;
+  return found;
+end $fn$;
 ;
 
 -- ---------------------------------------------------------------------------
@@ -763,14 +1327,192 @@ create or replace function buyer_interest_product_key(facts jsonb) returns text 
         and (select value from kwh) is null
       then 'model:' || buyer_interest_make(facts->>'make') || '-' || (select slug from model) end,
     -- A stated make scopes the key; with no make, a stated cell maker does (broad:calb-lfp-cells), so a cell or module ask
-    -- keeps who makes the cells.
-    'broad:' || coalesce(buyer_interest_make(facts->>'make') || '-', buyer_interest_slug(facts->>'cell_maker') || '-', '')
+    -- keeps who makes the cells, and with neither, a stated cell format does (broad:18650-any-cells).
+    'broad:' || coalesce(buyer_interest_make(facts->>'make') || '-', buyer_interest_slug(facts->>'cell_maker') || '-',
+        buyer_interest_slug(facts->>'cell_format') || '-', '')
       || coalesce(buyer_interest_slug(buyer_interest_chemistry(facts->>'chemistry')), 'any') || '-'
       || case buyer_interest_format(facts->>'format')
            when 'pack' then 'packs' when 'module' then 'modules' when 'cell' then 'cells' when 'system' then 'systems'
            else 'batteries' end
   )
 $$;
+
+-- ---------------------------------------------------------------------------
+-- What a request's own words state (conformance R8/R9): a row that lacks makes, models, kWh, cell formats or cell
+-- makers in its spec still states them in product_family and the summary. Only stated values are taken; a spec value
+-- always wins.
+-- ---------------------------------------------------------------------------
+
+-- A price unit the table accepts: kWh, pack or cell. Anything else (a lot, a batch, a dangling "/") is no unit.
+create or replace function buyer_interest_price_unit(p_unit text) returns text language sql immutable as $$
+  select case regexp_replace(lower(btrim(coalesce(p_unit, ''))), '^[\s/]+|[\s/]+$|^per\s+', '', 'g')
+    when 'kwh' then 'kWh' when 'pack' then 'pack' when 'packs' then 'pack' when 'cell' then 'cell' when 'cells' then 'cell'
+    else null end
+$$;
+
+-- Reviewed cell makers (scripts/rebattery/buyer_dossier.py CELL_MAKERS + EXTRA_CELL_MAKERS) a text names as words.
+create or replace function buyer_interest_text_cell_makers(p_text text) returns text[] language sql immutable as $$
+  select coalesce(array_agg(m.name order by m.name), '{}') from (values ('AESC'), ('BYD'), ('CALB'), ('CATL'), ('EVE'),
+    ('Farasis'), ('Gotion'), ('Kokam'), ('LG'), ('Lishen'), ('Northvolt'), ('Panasonic'), ('Samsung SDI'), ('SK On'), ('Svolt')) m(name)
+  where position(' ' || btrim(regexp_replace(buyer_interest_unaccent(m.name), '[^a-z0-9]+', ' ', 'g')) || ' ' in
+    ' ' || btrim(regexp_replace(buyer_interest_unaccent(p_text), '[^a-z0-9]+', ' ', 'g')) || ' ') > 0
+$$;
+
+-- Makes a text names: vehicle makes and the system makers a request names (CATL, FPT).
+create or replace function buyer_interest_text_makes(p_text text) returns text[] language sql immutable as $$
+  select coalesce(array_agg(distinct case when m in ('bmw', 'mg', 'byd', 'nio', 'catl', 'fpt') then upper(m) when m = 'vw' then 'Volkswagen'
+      else initcap(m) end), '{}')
+  from (select (regexp_matches(buyer_interest_unaccent(p_text),
+    '\y(volkswagen|vw|audi|mini|skoda|cupra|porsche|bmw|mercedes-benz|mercedes|tesla|stellantis|nissan|renault|dacia|peugeot|citroen|opel|vauxhall|fiat|jeep|ford|hyundai|kia|genesis|toyota|lexus|honda|mazda|mitsubishi|suzuki|subaru|volvo|polestar|jaguar|land rover|mg|byd|lotus|lucid|rivian|nio|xpeng|zeekr|leapmotor|maxus|chevrolet|catl|fpt|sungrow|huawei)\y', 'g'))[1] as m) found
+$$;
+
+-- One quantity a text states ("10 packs", "100,000 cells"): only when the text states exactly one. A cell format is not a quantity.
+create or replace function buyer_interest_text_quantity(p_text text) returns jsonb language plpgsql immutable as $fn$
+declare
+  m text[];
+  raw text;
+  v numeric;
+  found jsonb := '[]'::jsonb;
+  item jsonb;
+begin
+  for m in select regexp_matches(buyer_interest_unaccent(p_text),
+      '(?:^|[^a-z0-9])(?:(model|id|ev|gen|series|type|class|kona|leaf)\s+)?(\d{1,3}(?:[,.]\d{3})+|\d+)\s*(?:x\s*)?(?:single\s+)?(packs?|modules?|cells?|units?|pcs|pieces|systems?|vehicles?)\y', 'g')
+  loop
+    continue when m[1] is not null;
+    raw := m[2];
+    continue when raw in ('18650', '21700', '4680', '26650', '46800');
+    v := case when raw ~ '^\d{1,3}([,.]\d{3})+$' then replace(replace(raw, ',', ''), '.', '')::numeric else raw::numeric end;
+    continue when v <= 0;
+    item := jsonb_build_object('quantity', v, 'unit', case when m[3] in ('pcs', 'pieces') then 'pieces' else regexp_replace(m[3], 's$', '') || 's' end);
+    if not found @> jsonb_build_array(item) then found := found || jsonb_build_array(item); end if;
+  end loop;
+  return case when jsonb_array_length(found) = 1 then found->0 end;
+end $fn$;
+
+-- One price a text states ("EUR 2,500", "£3,000 per pack"): amount, currency and a unit only when the text gives one.
+create or replace function buyer_interest_text_price(p_text text) returns jsonb language plpgsql immutable as $fn$
+declare
+  m text[];
+  amount numeric;
+  found jsonb := '[]'::jsonb;
+  item jsonb;
+  cur text;
+begin
+  for m in select regexp_matches(buyer_interest_unaccent(p_text),
+      '(€|£|\$|\yeur\y|\ygbp\y|\yusd\y)\s?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?:\s?(?:/|per)\s?(kwh|packs?|cells?)\y)?|(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?(€|£|\$|\yeur\y|\ygbp\y|\yusd\y)(?:\s?(?:/|per)\s?(kwh|packs?|cells?)\y)?', 'g')
+  loop
+    cur := coalesce(m[1], m[5]);
+    amount := replace(coalesce(m[2], m[4]), ',', '')::numeric;
+    continue when amount <= 0;
+    item := jsonb_build_object('price', amount,
+      'currency', case when cur in ('€', 'eur') then 'EUR' when cur in ('£', 'gbp') then 'GBP' else 'USD' end,
+      'unit', buyer_interest_price_unit(coalesce(m[3], m[6])));
+    if not found @> jsonb_build_array(item) then found := found || jsonb_build_array(item); end if;
+  end loop;
+  return case when jsonb_array_length(found) = 1 then found->0 end;
+end $fn$;
+
+-- The spec with what its product_family and the title state added, never overriding a value the spec has.
+create or replace function buyer_interest_text_spec(p_spec jsonb, p_context jsonb, p_title text) returns jsonb language plpgsql immutable as $fn$
+declare
+  spec jsonb := coalesce(p_spec, '{}'::jsonb);
+  ctx jsonb := coalesce(p_context, '{}'::jsonb);
+  txt text := concat_ws(' ; ', nullif(btrim(coalesce(spec->>'product_family', '')), ''), nullif(btrim(coalesce(p_title, '')), ''));
+  low text;
+  makes text[];
+  has_make boolean;
+  has_model boolean;
+  items text[] := '{}';
+  entries jsonb := '[]'::jsonb;
+  item text;
+  hit jsonb;
+  mk text;
+  figures numeric[];
+  formats_ text[];
+  cell_makers_ text[];
+  n int;
+begin
+  if txt = '' or spec ? 'products' then return spec; end if;
+  low := buyer_interest_unaccent(txt);
+  makes := buyer_interest_make_list(buyer_interest_stated_list(
+    case when jsonb_typeof(spec->'makes') = 'array' then spec->'makes' else spec->'system_brands' end,
+    buyer_interest_first_text(spec->'make'), buyer_interest_first_text(ctx->'make')));
+  has_make := makes <> array[null]::text[];
+  if has_make and jsonb_typeof(spec->'makes') is distinct from 'array' then
+    spec := spec || jsonb_build_object('makes', to_jsonb(makes));
+  end if;
+  if not has_make then
+    makes := buyer_interest_text_makes(txt);
+    if cardinality(makes) > 0 then
+      has_make := true;
+      spec := spec || jsonb_build_object('makes', to_jsonb(makes));
+    end if;
+  end if;
+
+  -- models: the spec's own list, else the models the text names
+  has_model := coalesce(buyer_interest_first_text(spec->'model'), buyer_interest_first_text(ctx->'model')) is not null
+    or jsonb_typeof(coalesce(spec->'part_numbers', spec->'partNumbers', ctx->'part_numbers')) = 'array';
+  if not has_model then
+    if jsonb_typeof(spec->'models') = 'array' and jsonb_array_length(spec->'models') > 0 then
+      for item in select btrim(v) from jsonb_array_elements_text(spec->'models') v where btrim(v) <> '' loop
+        hit := (buyer_interest_text_models(item, case when has_make then makes else '{}' end))->0;
+        mk := case when has_make and cardinality(makes) = 1 then makes[1] else hit->>'make' end;
+        entries := entries || jsonb_build_array(jsonb_strip_nulls(jsonb_build_object('make', mk, 'model', item)));
+      end loop;
+    else
+      for hit in select value from jsonb_array_elements(buyer_interest_text_models(txt, case when has_make then makes else '{}' end)) loop
+        mk := case when has_make and cardinality(makes) = 1 then makes[1] else hit->>'make' end;
+        entries := entries || jsonb_build_array(jsonb_build_object('make', mk, 'model', hit->>'model'));
+      end loop;
+    end if;
+    n := jsonb_array_length(entries);
+    if n >= 1 and not has_make then
+      select coalesce(array_agg(distinct e->>'make') filter (where e->>'make' is not null), '{}') into makes
+        from jsonb_array_elements(entries) e;
+      if cardinality(makes) > 0 then spec := spec || jsonb_build_object('makes', to_jsonb(makes)); end if;
+    end if;
+    if n = 1 then
+      spec := spec || jsonb_build_object('model', entries->0->>'model');
+    elsif n > 1 then
+      spec := spec || jsonb_build_object('products', entries);
+    end if;
+  else
+    n := 0;
+  end if;
+
+  -- one kWh figure: a stated pack capacity, else the one figure the text states (several models share no single figure)
+  if buyer_interest_number(spec->'kwh') is null and buyer_interest_number(spec->'capacity_kwh') is null
+     and buyer_interest_number(spec->'kwh_min') is null and buyer_interest_number(spec->'kwh_max') is null
+     and buyer_interest_number(ctx->'kwh') is null and buyer_interest_number(ctx->'capacity_kwh') is null then
+    if buyer_interest_number(spec->'pack_kwh') is not null then
+      spec := spec || jsonb_build_object('kwh', spec->'pack_kwh');
+    elsif coalesce(n, 0) <= 1 then
+      select coalesce(array_agg(distinct f::numeric), '{}') into figures
+        from (select (regexp_matches(low, '(?<![a-z0-9.])(\d{1,3}(?:\.\d+)?)\s?kwh\y', 'g'))[1] as f) k
+       where f::numeric between 1 and 200;
+      if cardinality(figures) = 1 then spec := spec || jsonb_build_object('kwh', figures[1]); end if;
+    end if;
+  end if;
+
+  -- cell formats and cell makers the text states
+  if jsonb_typeof(spec->'cell_formats') is distinct from 'array' and buyer_interest_first_text(spec->'cell_format') is null then
+    select coalesce(array_agg(distinct f order by f), '{}') into formats_
+      from (select (regexp_matches(low, '\y(18650|21700|4680|26650|46800|pouch|prismatic)\y', 'g'))[1] as f) k;
+    if cardinality(formats_) = 0 and low ~ '\ycylindrical\y' then formats_ := array['cylindrical']; end if;
+    if cardinality(formats_) > 0 then
+      spec := spec || jsonb_build_object('cell_formats', to_jsonb(formats_));
+      if jsonb_typeof(spec->'formats') is distinct from 'array' and buyer_interest_first_text(spec->'format') is null
+         and (formats_ && array['18650', '21700', '4680', '26650', '46800'] or low ~ '\ycells?\y') then
+        spec := spec || jsonb_build_object('formats', jsonb_build_array('Cells'));
+      end if;
+    end if;
+  end if;
+  if jsonb_typeof(spec->'cell_makers') is distinct from 'array' and buyer_interest_first_text(spec->'cell_maker') is null then
+    cell_makers_ := buyer_interest_text_cell_makers(txt);
+    if cardinality(cell_makers_) > 0 then spec := spec || jsonb_build_object('cell_makers', to_jsonb(cell_makers_)); end if;
+  end if;
+  return spec;
+end $fn$;
 
 -- ---------------------------------------------------------------------------
 -- Fact sets: products stay paired (R1), no vehicle make on a system (R5), nothing redundant (R4), nothing stated is lost (R6)
@@ -812,6 +1554,9 @@ declare
   base jsonb := coalesce(p_spec, '{}'::jsonb) - 'products';
   built jsonb;
   spec_ jsonb;
+  split_ jsonb[];
+  s_ jsonb;
+  cf text;
 begin
   if makes = array[null]::text[] and buyer_interest_title_make(p_title) is not null then
     makes := array[buyer_interest_title_make(p_title)];
@@ -879,6 +1624,21 @@ begin
     end loop;
   end if;
 
+  -- A cell request with no make or cell maker states its cell formats ("18650 / 21700 cells"): one line per format, each keyed
+  -- broad:<format>-any-cells. With a make or a cell maker the key already scopes the line; the formats stay in stated.
+  split_ := '{}';
+  foreach s_ in array sets loop
+    if buyer_interest_make(s_->>'make') is null and buyer_interest_slug(s_->>'cell_maker') is null
+       and jsonb_typeof(s_->'stated'->'cell_formats') = 'array' and buyer_interest_format(s_->>'format') is not distinct from 'cell' then
+      for cf in select jsonb_array_elements_text(s_->'stated'->'cell_formats') loop
+        split_ := split_ || (s_ || jsonb_build_object('cell_format', lower(cf)));
+      end loop;
+    else
+      split_ := split_ || s_;
+    end if;
+  end loop;
+  sets := split_;
+
   -- R5: a vehicle make on a battery system is a system of no stated make (unless the model is itself stationary).
   select coalesce(array_agg(case when buyer_interest_format(s->>'format') = 'system' and buyer_interest_is_vehicle_make(s->>'make')
       and coalesce(s->>'model', '') !~* '\y(megapack|powerwall|powerpack|bess|container|cabinet|rack|ess)\y'
@@ -917,6 +1677,10 @@ declare
   expiry date;
   expiry_sticky boolean := false;
   refs text[];
+  stated_text text;
+  text_qty jsonb;
+  text_price jsonb;
+  price_max_v numeric;
 begin
   -- One writer per source: the trigger and the backfill queue here, and each reads the row after the lock is
   -- granted, so the last one in always writes the newest facts. FOR KEY SHARE re-reads the current row version
@@ -938,11 +1702,34 @@ begin
   first_d := coalesce(row_.observed_on, row_.created_at::date, current_date);
   last_d := greatest(coalesce(buyer_interest_first_text(row_.spec->'confirmed_on')::date, first_d), first_d);
 
+  -- Quantity and price: the spec's fields, else the one figure the request's own words state.
+  stated_text := concat_ws(' ; ', nullif(btrim(coalesce(row_.spec->>'product_family', '')), ''), nullif(btrim(coalesce(row_.summary, '')), ''));
   qty := buyer_interest_number(row_.spec->'volume');
   unit := nullif(btrim(coalesce(row_.spec->>'volume_unit', '')), '');
-  price_v := buyer_interest_number(row_.spec->'max_price');
+  if qty is null then
+    text_qty := buyer_interest_text_quantity(stated_text);
+    qty := (text_qty->>'quantity')::numeric;
+    unit := text_qty->>'unit';
+  end if;
+  -- A buyer's target per pack, with the ceiling beside it, is the price; else the ceiling is the price.
+  price_max_v := buyer_interest_number(row_.spec->'max_price');
+  price_v := coalesce(buyer_interest_number(row_.spec->'target_price_per_pack'), price_max_v);
   currency_v := nullif(btrim(coalesce(row_.spec->>'price_currency', '')), '');
-  price_unit_v := nullif(btrim(coalesce(row_.spec->>'price_unit', '')), '');
+  price_unit_v := buyer_interest_price_unit(coalesce(row_.spec->>'price_unit',
+    case when row_.spec ? 'target_price_per_pack' then 'pack' end));
+  if price_v is null then
+    text_price := buyer_interest_text_price(stated_text);
+    price_v := (text_price->>'price')::numeric;
+    currency_v := coalesce(currency_v, text_price->>'currency');
+    price_unit_v := coalesce(price_unit_v, text_price->>'unit');
+  end if;
+  -- A price carries its unit or is not written; the unit comes from the source (the volume unit of a pack or cell ask).
+  price_unit_v := coalesce(price_unit_v, case when price_v is not null then buyer_interest_price_unit(row_.spec->>'volume_unit') end);
+  if price_v is null or price_unit_v is null then
+    price_v := null; price_max_v := null; currency_v := null; price_unit_v := null;
+  elsif price_max_v is not null and price_max_v <= price_v then
+    price_max_v := null;
+  end if;
   price_basis_v := case when price_v is null then null else 'target' end;
   needed := case when coalesce(row_.spec->>'needed_by', '') ~ '^\d{4}-\d{2}-\d{2}$'
     then (row_.spec->>'needed_by')::date end;
@@ -972,7 +1759,7 @@ begin
   end if;
 
   select fs.facts, fs.stated_total into fact_sets, stated_total
-  from buyer_interest_fact_sets(row_.spec, row_.context, '{}'::jsonb, 12, row_.summary) fs;
+  from buyer_interest_fact_sets(buyer_interest_text_spec(row_.spec, row_.context, row_.summary), row_.context, '{}'::jsonb, 12, row_.summary) fs;
 
   -- A row that states no product at all is not a want: it is not written, only recorded for a person to fix.
   select coalesce(array_agg(fact), '{}') into product_sets from unnest(fact_sets) fact
@@ -998,7 +1785,7 @@ begin
   foreach facts in array product_sets loop
     insert into buyer_interest (id, company_id, person_id, kind, ownership, product_key, product_key_level,
       make, model, raw_product, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit,
-      quantity_basis, price, price_currency, price_unit, price_basis, source_refs, expires_on, demand_id,
+      quantity_basis, price, price_max, price_currency, price_unit, price_basis, source_refs, expires_on, demand_id,
       decline_reason, stated)
     values ('bi_' || replace(gen_random_uuid()::text, '-', ''), row_.company_id, row_.person_id, line_kind, 'synced',
       buyer_interest_product_key(facts), buyer_interest_key_level(buyer_interest_product_key(facts)),
@@ -1007,7 +1794,7 @@ begin
       buyer_interest_chemistry(facts->>'chemistry'), buyer_interest_number(facts->'kwh_min'),
       buyer_interest_number(facts->'kwh_max'), first_d, last_d, qty, unit,
       case when qty is null then 'not_stated' else 'stated' end,
-      price_v, currency_v, price_unit_v, price_basis_v, refs, expiry, row_.id, line_reason, facts->'stated')
+      price_v, price_max_v, currency_v, price_unit_v, price_basis_v, refs, expiry, row_.id, line_reason, facts->'stated')
     on conflict (kind, demand_id, product_key) where demand_id is not null do update set
       company_id = excluded.company_id,
       person_id = coalesce(excluded.person_id, buyer_interest.person_id),
@@ -1025,6 +1812,7 @@ begin
       quantity_unit = coalesce(excluded.quantity_unit, buyer_interest.quantity_unit),
       quantity_basis = coalesce(excluded.quantity_basis, buyer_interest.quantity_basis),
       price = coalesce(excluded.price, buyer_interest.price),
+      price_max = case when excluded.price is not null then excluded.price_max else buyer_interest.price_max end,
       price_currency = coalesce(excluded.price_currency, buyer_interest.price_currency),
       price_unit = coalesce(excluded.price_unit, buyer_interest.price_unit),
       price_basis = coalesce(excluded.price_basis, buyer_interest.price_basis),
@@ -1127,8 +1915,11 @@ begin
   unit := nullif(btrim(coalesce(listing.spec->>'volume_unit', '')), '');
   price_v := buyer_interest_number(offer.terms->'amount');
   currency_v := nullif(btrim(coalesce(offer.terms->>'currency', '')), '');
-  price_unit_v := case when btrim(coalesce(offer.terms->>'unit', '')) in ('kWh', 'pack', 'cell')
-    then btrim(offer.terms->>'unit') end;
+  price_unit_v := buyer_interest_price_unit(offer.terms->>'unit');
+  -- A price with no unit the source gives ("EUR 6,175 whole batch") is not written: a dangling "EUR/" says nothing.
+  if price_v is not null and price_unit_v is null then
+    price_v := null; currency_v := null; price_unit_v := null;
+  end if;
   price_basis_v := case when price_v is null then null when line_kind = 'bought' then 'paid' else 'bid' end;
   refs := array_remove(array['crm:' || offer.id, 'crm:' || listing.id]::text[]
     || case when offer.counterpart_id is not null then array['crm:' || offer.counterpart_id]::text[] else '{}'::text[] end,
