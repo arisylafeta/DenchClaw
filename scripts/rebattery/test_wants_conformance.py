@@ -132,6 +132,93 @@ class R6(unittest.TestCase):
         self.assertIn("kWh 0.2", why)
         self.assertNotIn("cell maker", why)
 
+    def test_stated_column_does_not_carry_a_cell_maker_or_part_number(self):
+        demand = {"id": "d1", "status": "open", "summary": "", "spec": {"cell_makers": ["CALB"], "part_numbers": ["L135F72H"]}}
+        bare = line("a", demand_id="d1", format="cell", product_key="broad:any-cells",
+                    stated={"cell_makers": ["CALB"], "part_numbers": ["L135F72H"]})
+        why = wc.r6(ctx([bare], [demand]))[0]["why"]
+        self.assertIn("cell maker CALB", why)
+        self.assertIn("part number L135F72H", why)
+
+    def test_cell_format_may_sit_in_stated(self):
+        demand = {"id": "d1", "status": "open", "summary": "", "spec": {"cell_formats": ["Prismatic"]}}
+        kept = line("a", demand_id="d1", format="cell", product_key="broad:any-cells", stated={"cell_formats": ["Prismatic"]})
+        self.assertEqual(wc.r6(ctx([kept], [demand])), [])
+
+    def test_cell_maker_in_a_broad_key_is_carried(self):
+        demand = {"id": "d1", "status": "open", "summary": "", "spec": {"cell_makers": ["CALB"]}}
+        keyed = line("a", demand_id="d1", make="CALB", format="cell", product_key="broad:calb-any-cells")
+        self.assertEqual(wc.r6(ctx([keyed], [demand])), [])
+
+
+class R7(unittest.TestCase):
+    def run7(self, old, new, demands=None, products=None):
+        c = ctx(new, demands, products=products)
+        c["baseline_lines"] = old
+        return wc.r7(c), c["r7_explained"]
+
+    DEMAND = {"id": "d1", "status": "closed", "closed_reason": "bought_from_us", "summary": "CALB L135F72H cells", "spec": {}}
+
+    def test_level_drop_with_detail_still_stated_is_a_regression(self):
+        old = [line("o", kind="bought", demand_id="d1", product_key="part:L135F72H", product_key_level="part")]
+        new = [line("n", kind="bought", demand_id="d1")]
+        hits, explained = self.run7(old, new, [self.DEMAND])
+        self.assertTrue(any("fell" in h["why"] for h in hits))
+        self.assertTrue(any("part number L135F72H" in h["why"] for h in hits))
+        self.assertEqual(explained, [])
+
+    def test_part_number_kept_in_a_key_is_not_a_regression(self):
+        old = [line("o", kind="bought", demand_id="d1", product_key="part:L135F72H", product_key_level="part")]
+        new = [line("n", kind="bought", demand_id="d1", product_key="part:L135F72H", product_key_level="part")]
+        self.assertEqual(self.run7(old, new, [self.DEMAND]), ([], []))
+
+    def test_detail_the_source_no_longer_states_is_explained(self):
+        old = [line("bi_dossier_o", kind="bought", product_key="part:L135F72H", product_key_level="part"),
+               line("bi_dossier_p", kind="bought", product_key="model:vauxhall-vivaro-75kwh", product_key_level="model", make="Vauxhall", model="Vivaro")]
+        new = [line("bi_dossier_p", kind="bought", product_key="model:vauxhall-vivaro-75kwh", product_key_level="model", make="Vauxhall", model="Vivaro")]
+        hits, explained = self.run7(old, new, products=[{"make": "Vauxhall", "model": "Vivaro", "status": "bought"}])
+        self.assertEqual(hits, [])
+        self.assertTrue(all("no longer states" in e["explained"] for e in explained) and explained)
+
+    def test_canonical_model_slug_is_not_a_lost_model(self):
+        old = [line("bi_dossier_o", kind="ask", product_key="model:hyundai-konaelectric-64kwh", product_key_level="model", make="Hyundai", model="Kona Electric")]
+        new = [line("bi_dossier_n", kind="ask", product_key="model:hyundai-kona-64kwh", product_key_level="model", make="Hyundai", model="Kona Electric")]
+        self.assertEqual(self.run7(old, new)[0], [])
+
+    def test_cell_maker_of_a_broad_key_must_stay_in_a_key(self):
+        old = [line("o", kind="bought", demand_id="d1", product_key="broad:calb-any-cells", make="CALB", format="cell")]
+        new = [line("n", kind="bought", demand_id="d1", product_key="broad:any-cells", format="cell")]
+        hits, _ = self.run7(old, new, [self.DEMAND])
+        self.assertTrue(any("cell maker CALB" in h["why"] for h in hits))
+
+    def test_broad_maker_covered_by_a_more_specific_line_is_explained(self):
+        old = [line("bi_dossier_o", product_key="broad:samsung-sdi-nmc-cells", make="Samsung SDI", format="cell")]
+        new = [line("bi_dossier_n", product_key="part:INR1865025R", product_key_level="part", make="Samsung SDI", format="cell")]
+        hits, explained = self.run7(old, new, products=[{"make": "Samsung SDI", "part_number": "INR1865025R", "status": "asked"}])
+        self.assertEqual(hits, [])
+        self.assertIn("R4", explained[0]["explained"])
+
+    def test_company_losing_every_line_of_a_kind(self):
+        old = [line("o", kind="declined", demand_id="d9", product_key="broad:any-packs")]
+        hits, _ = self.run7(old, [line("n", kind="ask", demand_id="d1")])
+        self.assertTrue(any("lost all" in h["why"] for h in hits))
+
+    def test_closed_request_decline_removed_is_explained_by_r2(self):
+        demand = {"id": "d9", "status": "closed", "closed_reason": "bought_elsewhere", "summary": "packs", "spec": {}}
+        old = [line("o", kind="declined", demand_id="d9", product_key="broad:any-packs")]
+        hits, explained = self.run7(old, [line("n", kind="ask", demand_id="d1")], [demand])
+        self.assertEqual(hits, [])
+        self.assertIn("R2", explained[0]["explained"])
+
+    def test_open_source_that_writes_nothing_now_is_a_regression(self):
+        old = [line("o", kind="ask", saved_search_id="s1", product_key="model:toyota-corolla", product_key_level="model")]
+        hits, _ = self.run7(old, [line("n", kind="ask", demand_id="d1")])
+        self.assertTrue(any("writes none now" in h["why"] for h in hits))
+
+    def test_no_baseline_means_no_check(self):
+        c = ctx([line("n")])
+        self.assertEqual(wc.r7(c), [])
+
 
 class Report(unittest.TestCase):
     def test_counts_and_example_cap(self):

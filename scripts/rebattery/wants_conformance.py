@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only conformance checker for the Wants (buyer_interest) lines.
 
-Reports every violation of six rules, from the lines against the sources that produced them:
+Reports every violation of seven rules, from the lines against the sources that produced them:
 
   R1  invented combination: a make/chemistry/format pairing the source does not state together (demand rows, offers,
       dossier products, parsed text; not buy-box lists, whose cross product is independent criteria).
@@ -11,7 +11,12 @@ Reports every violation of six rules, from the lines against the sources that pr
       from the same source.
   R5  vehicle make carrying the systems format.
   R6  lost detail: cell makers, cell formats, part numbers, kWh or voltage the source states and no line of
-      that source carries.
+      that source carries. Cell maker, part number and kWh count only in product_key, raw_product, make, model or the
+      kWh columns (matching reads those, not `stated`); cell format and voltage may sit in `stated`.
+  R7  regression against a baseline table (default buyer_interest_pre_rebuild): per source and kind the best key level
+      dropped (part > pack > model > cell > broad), a part number, cell maker, cell key or model key of the old keys is
+      in none of the source's new keys, or a company lost all lines of a kind. A hit whose detail the source (demand
+      row text, dossier products) no longer states, or a decline removed by R2, is listed as explained.
 
 The rule functions take plain dicts (see `check`), so they need no database. `main` reads one database in a
 read-only session and writes nothing to it.
@@ -37,6 +42,7 @@ RULES = {
     "R4": "Duplicate or redundant less specific line",
     "R5": "Vehicle make with the systems format",
     "R6": "Detail the source states and no line carries",
+    "R7": "Regression against the baseline lines",
 }
 EXAMPLES_PER_RULE = 20
 LEVEL_RANK = {"broad": 0, "model": 1, "cell": 1, "pack": 1, "part": 2}
@@ -87,11 +93,13 @@ def kwh_numbers(line):
     return found
 
 
-def line_blob(line):
+def line_blob(line, with_stated=False):
+    """What matching reads of a line: key, raw product, make, model. `stated` only for detail matching never uses."""
+    text = " ".join(str(line.get(k) or "") for k in ("product_key", "raw_product", "make", "model"))
     stated = line.get("stated")
-    if isinstance(stated, (dict, list)):
-        stated = json.dumps(stated, ensure_ascii=False)  # R6: detail kept in buyer_interest.stated counts as carried
-    return fold(" ".join(str(line.get(k) or "") for k in ("product_key", "raw_product", "make", "model")) + " " + str(stated or ""))
+    if with_stated and stated:
+        text += " " + (json.dumps(stated, ensure_ascii=False) if isinstance(stated, (dict, list)) else str(stated))
+    return fold(text)
 
 
 def _words(text):
@@ -358,8 +366,18 @@ def _carried(blob, numbers, kind, value):
     return fold(str(value)) in blob
 
 
-def _lost(blob, numbers, items):
-    return [f"{label} {value}" for label, kind, value in items if value not in (None, "") and not _carried(blob, numbers, kind, value)]
+STATED_OK = ("cell format", "voltage")  # descriptive detail: carried by `stated`, which matching does not read
+
+
+def _lost(blob, numbers, items, stated_blob=None):
+    out = []
+    for label, kind, value in items:
+        if value in (None, ""):
+            continue
+        use = stated_blob if (stated_blob is not None and label in STATED_OK) else blob
+        if not _carried(use, numbers, kind, value):
+            out.append(f"{label} {value}")
+    return out
 
 
 def _voltages(*texts):
@@ -388,8 +406,9 @@ def r6(ctx):
         items += [("kWh", "kwh", n) for n in (num(spec.get("kwh_min")), num(spec.get("kwh_max")))]
         items += [("voltage", "text", v) for v in dict.fromkeys(_voltages(demand.get("summary"), spec.get("min_pack_voltage") and f"{spec['min_pack_voltage']}V"))]
         blob = "".join(line_blob(line) for line in lines)
+        stated_blob = "".join(line_blob(line, True) for line in lines)
         numbers = set().union(*(kwh_numbers(line) for line in lines))
-        lost = _lost(blob, numbers, items)
+        lost = _lost(blob, numbers, items, stated_blob)
         if lost:
             found.append(_violation(ctx, "R6", lines[0], f"source states {'; '.join(lost)} but none of its {len(lines)} line(s) carries it", f"demand {demand_id}", key=f"{len(lines)} line(s): {lines[0]['product_key']}"))
     for company_id, lines in by_company_dossier.items():
@@ -397,6 +416,7 @@ def r6(ctx):
         # A product the dossier shares with a demand row or offer is written once, by that source: any line of the company carries it.
         everything = by_company[company_id]
         blob = "".join(line_blob(line) for line in everything)
+        stated_blob = "".join(line_blob(line, True) for line in everything)
         numbers = set().union(*(kwh_numbers(line) for line in everything))
         for product in company.get("dossier_products") or []:
             items = [("part number", "text", v) for v in as_list(product.get("part_number"))]
@@ -405,16 +425,154 @@ def r6(ctx):
             maker = product.get("make")
             if maker and fold(maker) in {fold(n) for n in buyer_dossier.CELL_MAKERS + buyer_dossier.EXTRA_CELL_MAKERS}:
                 items.append(("cell maker", "text", maker))
-            lost = _lost(blob, numbers, [i for i in items if i[2] is not None])
+            lost = _lost(blob, numbers, [i for i in items if i[2] is not None], stated_blob)
             if lost:
                 label = " ".join(str(product.get(k)) for k in ("make", "model") if product.get(k)) or "product"
                 found.append(_violation(ctx, "R6", lines[0], f"dossier product {label} states {'; '.join(lost)} but no dossier line carries it", f"dossier of {company_id}", key=f"dossier product {label}"))
     return found
 
 
+
+# ---------------------------------------------------------------------------------------------- R7
+
+LEVEL7 = {"broad": 0, "cell": 1, "model": 2, "pack": 3, "part": 4}
+_CELL_MAKER_FOLDS = None
+
+
+def _cell_maker_folds():
+    global _CELL_MAKER_FOLDS
+    if _CELL_MAKER_FOLDS is None:
+        _CELL_MAKER_FOLDS = {fold(n) for n in buyer_dossier.CELL_MAKERS + buyer_dossier.EXTRA_CELL_MAKERS}
+    return _CELL_MAKER_FOLDS
+
+
+def _key_tokens(line):
+    """The details a key states, as (label, value to find in new keys, value to find in the source's text)."""
+    key = str(line.get("product_key") or "")
+    out = []
+    if key.startswith("part:"):
+        out.append(("part number", key[5:], key[5:]))
+    elif key.startswith("model:") and line.get("model"):
+        slug = model_aliases.model_slug(line.get("make"), line.get("model")) or key_model_text(line)
+        out.append(("model", slug, line["model"]))
+    elif key.startswith("model:"):
+        out.append(("model", key_model_text(line), key_model_text(line)))
+    elif key.startswith("cell:"):
+        out.append(("cell key", key, line.get("model") or key[5:]))
+    # Only a broad key can hold a cell maker (a part number or a model key names the product itself).
+    if key.startswith("broad:") and line.get("make") and fold(line["make"]) in _cell_maker_folds() and fold(line["make"]) in fold(key):
+        out.append(("cell maker", line["make"], line["make"]))
+    return out
+
+
+def _token_in(text, value):
+    return bool(value) and fold(value) in text
+
+
+def _source_text(ctx, source):
+    """Free text the source states things in, or None when it has none (offers, profile, saved searches)."""
+    company, kind, ident = source
+    if kind == "demand_id":
+        demand = ctx["demands"].get(ident)
+        if not demand:
+            return ""
+        return fold(" ".join(str(demand.get(k) or "") for k in ("summary", "note", "source_quote")) + " " + json.dumps(demand.get("spec") or {}, ensure_ascii=False, default=str))
+    if kind == "dossier":
+        products = (ctx["companies"].get(company) or {}).get("dossier_products") or []
+        return fold(json.dumps(products, ensure_ascii=False, default=str))
+    return None
+
+
+def _load_exceptions():
+    path = Path(__file__).with_name("wants_conformance_exceptions.json")
+    if not path.exists():
+        return {}
+    return {(e["company_id"], e["product_key"]): e["reason"] for e in json.loads(path.read_text(encoding="utf-8"))}
+
+
+EXCEPTIONS = _load_exceptions()
+
+
+def r7(ctx):
+    base = ctx.get("baseline_lines")
+    ctx["r7_explained"] = []
+    if not base:
+        return []
+    new_by_source, old_by_source = collections.defaultdict(list), collections.defaultdict(list)
+    for line in ctx["lines"]:
+        new_by_source[_source_key(line)].append(line)
+    for line in base:
+        old_by_source[_source_key(line)].append(line)
+    found = []
+
+    def add(line, why, source, token_text, explained_text):
+        v = _violation(ctx, "R7", line, why, source=source)
+        v["explained"] = explained_text
+        (ctx["r7_explained"] if explained_text else found).append(v)
+
+    for source, olds in old_by_source.items():
+        news = new_by_source.get(source)
+        if not news:
+            continue  # the source wrote nothing now: a removed source, not a regression of what it still writes
+        new_keys = " ".join(fold(n.get("product_key") or "") for n in news)
+        text = _source_text(ctx, source)
+        label = f"{source[1].replace('_id', '')} {source[2]}".strip()
+        for kind in sorted({o["kind"] for o in olds}):
+            o_kind = [o for o in olds if o["kind"] == kind]
+            n_kind = [n for n in news if n["kind"] == kind]
+            if not n_kind:
+                continue  # a kind change belongs to the company-level check below
+            best_old = max(o_kind, key=lambda o: LEVEL7.get(o.get("product_key_level"), 0))
+            best_new = max(LEVEL7.get(n.get("product_key_level"), 0) for n in n_kind)
+            if LEVEL7.get(best_old.get("product_key_level"), 0) > best_new:
+                toks = _key_tokens(best_old)
+                why_gone = all(text is not None and not _token_in(text, t) for _, _, t in toks) and bool(toks)
+                add(best_old, f"best level {best_old.get('product_key_level')} ({best_old['product_key']}) fell to {[n['product_key_level'] for n in n_kind]}",
+                    label, None, "source no longer states " + ", ".join(t for _, _, t in toks) if why_gone else None)
+        for old in olds:
+            for k, v, t in _key_tokens(old):
+                if _token_in(new_keys, v):
+                    continue
+                gone = text is not None and not _token_in(text, t)
+                covered = k == "cell maker" and any(
+                    LEVEL7.get(n.get("product_key_level"), 0) > LEVEL7.get(old.get("product_key_level"), 0)
+                    and n["kind"] == old["kind"] and make_folds(old.get("make")) & make_folds(n.get("make")) for n in news)
+                add(old, f"{k} {v} of the old key {old['product_key']} is in none of the source's new keys", label, None,
+                    f"source no longer states {t}" if gone else "R4: a more specific line of the same source and make carries it" if covered else None)
+    # a company that lost every line of a kind
+    old_kinds = collections.defaultdict(list)
+    for line in base:
+        old_kinds[(line["company_id"], line["kind"])].append(line)
+    new_kinds = {(l["company_id"], l["kind"]) for l in ctx["lines"]}
+    for (company, kind), olds in old_kinds.items():
+        if (company, kind) in new_kinds or company not in ctx["companies"]:
+            continue
+        only_closed = kind == "declined" and all(
+            o.get("demand_id") and (ctx["demands"].get(o["demand_id"]) or {}).get("status") == "closed" for o in olds)
+        explained = "R2: a closed request is not a decline" if only_closed else None
+        add(olds[0], f"company lost all {len(olds)} {kind} line(s)", f"{kind} lines", None, explained)
+    # a demand row, offer or saved search that wrote lines before and writes none now
+    for source, olds in old_by_source.items():
+        if new_by_source.get(source) or source[1] not in ("demand_id", "offer_id", "saved_search_id"):
+            continue
+        demand = ctx["demands"].get(source[2]) if source[1] == "demand_id" else None
+        if source[1] == "demand_id" and (not demand or demand.get("status") not in ("open", "qualifying", "closed")
+                                         or (demand.get("status") == "closed" and demand.get("closed_reason") not in ("expired", "bought_from_us"))):
+            continue  # the row is gone or no longer a buying fact
+        add(olds[0], f"{source[1].replace('_id', '')} {source[2]} wrote {len(olds)} line(s) before and writes none now",
+            f"{source[1].replace('_id', '')} {source[2]}", None, None)
+    # explained exceptions kept in the repo: a deliberate change under R1-R5, one entry per old line
+    for v in list(found):
+        reason = EXCEPTIONS.get((v["company_id"], v["key"]))
+        if reason:
+            found.remove(v)
+            v["explained"] = reason
+            ctx["r7_explained"].append(v)
+    return found
+
 # ---------------------------------------------------------------------------------------------- run and report
 
-RULE_FUNCTIONS = {"R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5, "R6": r6}
+RULE_FUNCTIONS = {"R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5, "R6": r6, "R7": r7}
 
 
 def check(ctx):
@@ -432,7 +590,9 @@ def summarise(ctx, results):
             "counts": {rule: len(items) for rule, items in results.items()},
             "companies": {rule: len({v["company_id"] for v in items}) for rule, items in results.items()},
             "by_source": {rule: dict(collections.Counter(source_kind(v["source"]) for v in items)) for rule, items in results.items()},
-            "examples": {rule: top_examples(items) for rule, items in results.items()}}
+            "examples": {rule: top_examples(items) for rule, items in results.items()},
+            "r7_explained": len(ctx.get("r7_explained") or []),
+            "r7_explained_examples": top_examples(ctx.get("r7_explained") or [])}
 
 
 def top_examples(items, limit=EXAMPLES_PER_RULE):
@@ -453,13 +613,25 @@ def render_markdown(ctx, results, dsn_label=""):
         out += ["", f"## {rule} {title}", "", f"{total} violation(s); showing {len(summary['examples'][rule])}.", ""]
         for v in summary["examples"][rule]:
             out.append(f"- **{v['company']}** | line `{v['line_id']}` | key `{v['key']}` | source {v['source']} | {v['why']}")
+    explained = ctx.get("r7_explained") or []
+    out += ["", f"## R7 explained exceptions", "", f"{len(explained)} hit(s) the source itself explains; showing {len(summary['r7_explained_examples'])}.", ""]
+    for v in summary["r7_explained_examples"]:
+        out.append(f"- **{v['company']}** | key `{v['key']}` | source {v['source']} | {v['why']} | explained: {v['explained']}")
     return "\n".join(out) + "\n"
 
 
-def load_context(conn):
+def load_context(conn, baseline_table=None):
     """Read every table the rules need. The connection must already be read-only."""
     import psycopg2.extras
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        baseline = []
+        if baseline_table:
+            if not re.fullmatch(r"[a-z_][a-z0-9_]*", baseline_table):
+                raise SystemExit("refusing to run: the baseline table name is not a plain identifier")
+            cur.execute("select to_regclass(%s) as t", (baseline_table,))
+            if cur.fetchone()["t"]:
+                cur.execute(f"select * from {baseline_table} order by company_id, id")
+                baseline = [dict(r) for r in cur.fetchall()]
         cur.execute("select * from buyer_interest order by company_id, id")
         lines = [dict(r) for r in cur.fetchall()]
         cur.execute("select id, company_id, summary, status, closed_reason, spec, note, source_quote from crm_bulk_listings where kind = 'demand'")
@@ -475,7 +647,7 @@ def load_context(conn):
                 frontmatter, _ = buyer_dossier.parse(r["buyer_dossier"])
                 products = [p for p in (frontmatter.get("products") or []) if isinstance(p, dict)]
             companies[r["id"]] = {"name": r["name"], "buyer_profile": r["buyer_profile"] or {}, "dossier_products": products}
-    return {"lines": lines, "demands": demands, "offers": offers, "companies": companies}
+    return {"lines": lines, "demands": demands, "offers": offers, "companies": companies, "baseline_lines": baseline}
 
 
 def connect_read_only(dsn):
@@ -494,10 +666,12 @@ def main(argv=None):
     parser.add_argument("--dsn", required=True)
     parser.add_argument("--out", help="Markdown report path")
     parser.add_argument("--json", dest="json_out", help="JSON summary path")
+    parser.add_argument("--baseline-table", default="buyer_interest_pre_rebuild",
+                        help="table of the lines before the change, for R7 (R7 is skipped when it does not exist)")
     args = parser.parse_args(argv)
     conn = connect_read_only(args.dsn)
     try:
-        ctx = load_context(conn)
+        ctx = load_context(conn, args.baseline_table)
     finally:
         conn.rollback()
         conn.close()
