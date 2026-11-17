@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only conformance checker for the Wants (buyer_interest) lines.
 
-Reports every violation of seven rules, from the lines against the sources that produced them:
+Reports every violation of ten rules, from the lines against the sources that produced them:
 
   R1  invented combination: a make/chemistry/format pairing the source does not state together (demand rows, offers,
       dossier products, parsed text; not buy-box lists, whose cross product is independent criteria).
@@ -17,6 +17,13 @@ Reports every violation of seven rules, from the lines against the sources that 
       dropped (part > pack > model > cell > broad), a part number, cell maker, cell key or model key of the old keys is
       in none of the source's new keys, or a company lost all lines of a kind. A hit whose detail the source (demand
       row text, dossier products) no longer states, or a decline removed by R2, is listed as explained.
+  R8  widening: a line broader than its source. Buy box (makes, cell_makers, chemistries, formats): the line carries no
+      listed make, or a chemistry/format outside the list (model and part keys are exempt from chemistry/format).
+      Demand row or dossier product: the line drops a stated make, model, chemistry or format.
+  R9  open request (demand open/qualifying) with no line, or whose lines together miss a make, model, kWh, cell format,
+      cell maker, quantity or price the row states in spec or summary. Lines are taken together, since a multi-make
+      request cannot sit on one line.
+  R10 two saved-search lines of one company with the same product_key (report only).
 
 The rule functions take plain dicts (see `check`), so they need no database. `main` reads one database in a
 read-only session and writes nothing to it.
@@ -43,6 +50,9 @@ RULES = {
     "R5": "Vehicle make with the systems format",
     "R6": "Detail the source states and no line carries",
     "R7": "Regression against the baseline lines",
+    "R8": "Line broader than its source (widening)",
+    "R9": "Open request not fully covered by its lines",
+    "R10": "Same product key in two saved searches of one company (report only)",
 }
 EXAMPLES_PER_RULE = 20
 LEVEL_RANK = {"broad": 0, "model": 1, "cell": 1, "pack": 1, "part": 2}
@@ -570,9 +580,224 @@ def r7(ctx):
             ctx["r7_explained"].append(v)
     return found
 
+# ---------------------------------------------------------------------------------------------- R8
+
+def _is_specific_key(line):
+    return str(line.get("product_key") or "").startswith(("model:", "part:"))
+
+
+def _line_make_ok(line, allowed_folds):
+    if not line.get("make"):
+        return False
+    folds = make_folds(line["make"])
+    # "LG Chem" is the LG of a buy box, "Samsung" the Samsung SDI: one fold may be the other's front part.
+    return any(a == b or (min(len(a), len(b)) >= 2 and (a.startswith(b) or b.startswith(a))) for a in folds for b in allowed_folds)
+
+
+def _model_hits(text_values, make_hint_folds=()):
+    """(owner make fold, slug) of every model the texts name. An alias counts when one model owns it or its make is hinted."""
+    words = " ".join(_words(t) for t in text_values)
+    hits = set()
+    for own, alias, slug, is_global in model_aliases.ALIAS_ROWS:
+        # A bare word alias (zoe, focus, across) needs its make named too; one with a digit (model 3, ev6) names a model alone.
+        if (own in make_hint_folds or (is_global and re.search(r"\d", alias))) and f" {_words(alias).strip()} " in words:
+            hits.add((own, slug))
+    return hits
+
+
+def _line_model_slugs(line):
+    out = set()
+    if line.get("model"):
+        slug = model_aliases.model_slug(line.get("make"), line.get("model"))
+        if slug:
+            out.add(slug)
+    tail = key_model_text(line)
+    if tail:
+        out.add(tail)
+    return out
+
+
+def _line_has_model(line, slug):
+    tail = key_model_text(line)
+    return slug in _line_model_slugs(line) or bool(tail and re.search(rf"(?:^|-){re.escape(slug)}(?:-|$)", tail))
+
+
+def _dropped(line, makes=(), chemistries=(), formats=(), models=(), exempt_chem_format=False):
+    """What the line leaves out of a product that states makes, chemistries, formats or models (a list = alternatives)."""
+    out = []
+    make_set = {f for m in makes for f in make_folds(m)}
+    if make_set and not _line_make_ok(line, make_set):
+        out.append(f"make ({'/'.join(map(str, makes))})" + (f", line says {line['make']}" if line.get("make") else ""))
+    if chemistries and not exempt_chem_format and str(line.get("chemistry") or "").upper() not in {str(c).upper() for c in chemistries}:
+        out.append(f"chemistry ({'/'.join(map(str, chemistries))})" + (f", line says {line['chemistry']}" if line.get("chemistry") else ""))
+    if formats and not exempt_chem_format and norm_format(line.get("format")) not in {norm_format(f) for f in formats}:
+        out.append(f"format ({'/'.join(map(str, formats))})" + (f", line says {line['format']}" if line.get("format") else ""))
+    line_make = make_folds(line.get("make")) if line.get("make") else set()
+    # A model the source states is dropped when the line is of that model's make (or states no make) and carries no stated model.
+    stated = [(own, slug) for own, slug in models if not line_make or own in line_make]
+    if stated and not any(_line_has_model(line, slug) for _, slug in stated):
+        out.append("model (" + "/".join(sorted({slug for _, slug in stated})) + ")")
+    return out
+
+
+def _demand_models(demand):
+    spec = demand.get("spec") or {}
+    makes = {model_aliases.make_fold(m) for v in as_list(spec.get("makes")) for m in make_pieces(v)}
+    texts = [t for t in [demand.get("summary"), spec.get("product_family")] + [str(m) for m in as_list(spec.get("models"))] if t]
+    makes |= {model_aliases.make_fold(w) for t in texts for w in _words(t).split()}  # makes the text itself names
+    return _model_hits(texts, makes)
+
+
+def r8(ctx):
+    found = []
+    for line in ctx["lines"]:
+        company = ctx["companies"].get(line.get("company_id")) or {}
+        if line.get("demand_id") and line["demand_id"] in ctx["demands"]:
+            demand = ctx["demands"][line["demand_id"]]
+            spec = demand.get("spec") or {}
+            drops = _dropped(line, as_list(spec.get("makes")), as_list(spec.get("chemistries")), as_list(spec.get("formats")), _demand_models(demand))
+            if drops:
+                found.append(_violation(ctx, "R8", line, f"line is broader than the request: dropped {'; '.join(drops)}", f"demand {demand['id']}"))
+        elif _is_profile_line(line):
+            box = company.get("buyer_profile") or {}
+            makes = [m for key in ("makes", "cell_makers") for m in as_list(box.get(key))]
+            drops = _dropped(line, makes, as_list(box.get("chemistries")), as_list(box.get("formats")), exempt_chem_format=_is_specific_key(line))
+            if _is_specific_key(line):  # a model or part key narrows the buy box; only a make outside it is wrong
+                drops = [d for d in drops if d.startswith("make")]
+            if drops:
+                found.append(_violation(ctx, "R8", line, f"line is broader than the buy box: dropped {'; '.join(drops)}", f"buyer_profile of {line.get('company_id')}"))
+        elif _is_dossier_line(line):
+            products = [p for p in (company.get("dossier_products") or [])]
+            candidates = []
+            for product in products:
+                make, chem, fmt = product.get("make"), as_list(product.get("chemistry")), as_list(product.get("format"))
+                if line.get("make") and make and not (make_folds(line["make"]) & make_folds(make)):
+                    continue
+                if line.get("chemistry") and chem and str(line["chemistry"]).upper() not in {str(c).upper() for c in chem}:
+                    continue
+                if line.get("format") and fmt and norm_format(line["format"]) not in {norm_format(f) for f in fmt}:
+                    continue
+                slug = model_aliases.model_slug(make, product.get("model")) if product.get("model") else None
+                if slug and line.get("model") and slug not in _line_model_slugs(line):
+                    continue
+                shared = ((line.get("make") and make) or (line.get("chemistry") and chem) or (line.get("format") and fmt) or (slug and line.get("model")))
+                if not shared:
+                    continue
+                models = {(model_aliases.make_fold(make) if make else "", slug)} if slug else set()
+                candidates.append(_dropped(line, [make] if make else [], chem, fmt, models))
+            if candidates and all(candidates):
+                best = min(candidates, key=len)
+                found.append(_violation(ctx, "R8", line, f"line is broader than its dossier product: dropped {'; '.join(best)}", f"dossier of {line.get('company_id')}"))
+    return found
+
+
+# ---------------------------------------------------------------------------------------------- R9
+
+KWH_FIGURE = re.compile(r"(?<![\w.])(\d{1,3}(?:\.\d+)?)\s?kwh\b", re.IGNORECASE)
+CELL_FORMAT_NUMBERS = ("18650", "21700", "4680", "26650", "46800")
+CELL_FORMAT_WORDS = ("prismatic", "pouch", "cylindrical")
+OPEN_STATUSES = ("open", "qualifying")
+
+
+def _kwh_stated(demand):
+    spec = demand.get("spec") or {}
+    figures = {n for n in (num(spec.get("kwh_min")), num(spec.get("kwh_max")), num(spec.get("pack_kwh"))) if n}
+    texts = [demand.get("summary"), spec.get("product_family")] + [str(m) for m in as_list(spec.get("models"))]
+    for text in texts:
+        figures |= {float(m) for m in KWH_FIGURE.findall(str(text or "")) if 1 <= float(m) <= 200}  # pack scale; MWh-size figures are volumes
+    return sorted(figures)
+
+
+def _line_has_kwh(line, value):
+    lo, hi = num(line.get("kwh_min")), num(line.get("kwh_max"))
+    near = lambda a, b: a is not None and abs(a - b) < 1e-9
+    return near(lo, value) or near(hi, value) or (lo is not None and hi is not None and lo <= value <= hi) or value in kwh_numbers(line)
+
+
+def _cell_formats_stated(demand):
+    spec = demand.get("spec") or {}
+    text = " ".join(str(t or "") for t in [demand.get("summary"), spec.get("product_family")] + as_list(spec.get("cell_formats")))
+    low = text.lower()
+    return [f for f in CELL_FORMAT_NUMBERS + CELL_FORMAT_WORDS if re.search(rf"\b{f}\b", low)]
+
+
+def _cell_makers_stated(demand):
+    spec = demand.get("spec") or {}
+    stated = {str(m) for m in as_list(spec.get("cell_makers"))}
+    words = _words(" ".join(str(t or "") for t in [demand.get("summary"), spec.get("product_family")]))
+    for name in buyer_dossier.CELL_MAKERS + buyer_dossier.EXTRA_CELL_MAKERS:
+        if f" {_words(name).strip()} " in words:
+            stated.add(name)
+    return sorted(stated)
+
+
+def r9(ctx):
+    found = []
+    by_demand = collections.defaultdict(list)
+    for line in ctx["lines"]:
+        if line.get("demand_id"):
+            by_demand[line["demand_id"]].append(line)
+    for demand_id, demand in sorted(ctx["demands"].items()):
+        if demand.get("status") not in OPEN_STATUSES:
+            continue
+        lines = by_demand.get(demand_id) or []
+        label = f"demand {demand_id}"
+        spec = demand.get("spec") or {}
+        stub = {"company_id": demand.get("company_id"), "id": None, "product_key": (lines[0]["product_key"] if lines else None)}
+        if not lines:
+            found.append(_violation(ctx, "R9", stub, f"open request has no line: {str(demand.get('summary'))[:120]}", label, key="no line"))
+            continue
+        missing = []
+        for make in as_list(spec.get("makes")):
+            if not any(make_folds(line.get("make")) & make_folds(make) for line in lines if line.get("make")):
+                missing.append(f"make {make}")
+        for own, slug in sorted(_demand_models(demand)):
+            if not any(_line_has_model(line, slug) for line in lines):
+                missing.append(f"model {slug}")
+        for value in _kwh_stated(demand):
+            if not any(_line_has_kwh(line, value) for line in lines):
+                missing.append(f"kWh {value:g}")
+        blob = " ".join(line_blob(line, True) for line in lines)
+        for value in _cell_formats_stated(demand):
+            cylindrical = value == "cylindrical" and any(n in blob for n in CELL_FORMAT_NUMBERS)
+            if value not in blob and not cylindrical:
+                missing.append(f"cell format {value}")
+        key_blob = " ".join(line_blob(line) for line in lines)
+        for name in _cell_makers_stated(demand):
+            if fold(name) not in key_blob:
+                missing.append(f"cell maker {name}")
+        volume = num(spec.get("volume"))
+        if volume is not None and not any(num(line.get("quantity")) == volume for line in lines):
+            missing.append(f"quantity {volume:g} {spec.get('volume_unit') or ''}".strip())
+        for field in ("max_price", "target_price_per_pack"):
+            value = num(spec.get(field))
+            if value is not None and not any(value in (num(line.get("price")), num(line.get("price_max"))) for line in lines):
+                missing.append(f"price {field} {value:g}")
+        if missing:
+            found.append(_violation(ctx, "R9", lines[0], f"open request not fully covered by its {len(lines)} line(s), missing: {'; '.join(missing)}", label,
+                                    key=f"{len(lines)} line(s): {lines[0]['product_key']}"))
+    return found
+
+
+# ---------------------------------------------------------------------------------------------- R10
+
+def r10(ctx):
+    """Report only: two saved-search lines of one company with the same product_key."""
+    groups = collections.defaultdict(list)
+    for line in ctx["lines"]:
+        if line.get("saved_search_id"):
+            groups[(line.get("company_id"), line.get("product_key"))].append(line)
+    found = []
+    for (_company, key), items in groups.items():
+        if len(items) > 1:
+            ids = ", ".join(f"{i['id']} (search {i['saved_search_id']})" for i in items)
+            for item in items[1:]:
+                found.append(_violation(ctx, "R10", item, f"same product_key as {items[0]['id']} from another saved search; lines: {ids}"))
+    return found
+
 # ---------------------------------------------------------------------------------------------- run and report
 
-RULE_FUNCTIONS = {"R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5, "R6": r6, "R7": r7}
+RULE_FUNCTIONS = {"R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5, "R6": r6, "R7": r7, "R8": r8, "R9": r9, "R10": r10}
 
 
 def check(ctx):

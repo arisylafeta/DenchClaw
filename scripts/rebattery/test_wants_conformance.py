@@ -220,6 +220,88 @@ class R7(unittest.TestCase):
         self.assertEqual(wc.r7(c), [])
 
 
+class R8(unittest.TestCase):
+    ERAZBORKA = {"makes": ["Nissan", "Tesla", "BMW or Mini"], "formats": ["Modules", "Packs"], "chemistries": ["NMC"]}
+
+    def test_buy_box_makeless_broad_line_is_widening(self):
+        wide = line("a", kind="inferred", format="module", chemistry="NMC", product_key="broad:nmc-modules")
+        ok = line("b", kind="inferred", make="Nissan", format="pack", chemistry="NMC", product_key="broad:nissan-nmc-packs")
+        out = wc.r8(ctx([wide, ok], profile=self.ERAZBORKA))
+        self.assertEqual([v["line_id"] for v in out], ["a"])
+        self.assertIn("make", out[0]["why"])
+
+    def test_buy_box_format_outside_the_list_but_model_key_is_fine(self):
+        cell = line("a", kind="inferred", make="Tesla", format="cell", chemistry="NMC", product_key="broad:tesla-nmc-cells")
+        model = line("b", kind="inferred", make="Tesla", format="cell", product_key="model:tesla-model3", product_key_level="model")
+        out = wc.r8(ctx([cell, model], profile=self.ERAZBORKA))
+        self.assertEqual([v["line_id"] for v in out], ["a"])
+        self.assertIn("format", out[0]["why"])
+
+    FELLTEN = {"id": "d1", "company_id": "c1", "status": "open", "summary": "Tesla Model 3 Long Range 75 kWh packs",
+               "spec": {"makes": ["Tesla"], "models": ["Model 3"], "volume": 10, "max_price": 4000, "pack_kwh": 75,
+                        "product_family": "Tesla Model 3 Long Range 75 kWh packs"}}
+
+    def test_demand_line_dropping_the_model_is_widening(self):
+        wide = line("a", demand_id="d1", make="Tesla", product_key="broad:tesla-any-batteries")
+        out = wc.r8(ctx([wide], [self.FELLTEN]))
+        self.assertEqual(len(out), 1)
+        self.assertIn("model (model3)", out[0]["why"])
+
+    def test_demand_model_line_is_not_widening(self):
+        ok = line("a", demand_id="d1", make="Tesla", model="Model 3", product_key="model:tesla-model3-75kwh", product_key_level="model")
+        self.assertEqual(wc.r8(ctx([ok], [self.FELLTEN])), [])
+
+    def test_dossier_line_dropping_the_product_make_is_widening(self):
+        products = [{"make": "Tesla", "chemistry": "NMC", "format": "packs"}]
+        wide = line("bi_dossier_1", chemistry="NMC", format="pack", product_key="broad:nmc-packs")
+        ok = line("bi_dossier_2", make="Tesla", chemistry="NMC", format="pack", product_key="broad:tesla-nmc-packs")
+        self.assertEqual([v["line_id"] for v in wc.r8(ctx([wide, ok], products=products))], ["bi_dossier_1"])
+
+
+class R9(unittest.TestCase):
+    def test_no_line_for_an_open_request(self):
+        elg = {"id": "d2", "company_id": "c1", "status": "open", "summary": "21700 18650",
+               "spec": {"product_family": "18650 / 21700 cylindrical cells", "volume": 100000, "max_price": 1}}
+        out = wc.r9(ctx([], [elg]))
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["key"], "no line")
+
+    def test_closed_request_needs_no_line(self):
+        closed = {"id": "d2", "company_id": "c1", "status": "closed", "closed_reason": "expired", "summary": "x", "spec": {}}
+        self.assertEqual(wc.r9(ctx([], [closed])), [])
+
+    def test_broad_line_misses_model_kwh_and_keeps_quantity_price(self):
+        demand = R8.FELLTEN
+        broad = line("a", demand_id="d1", make="Tesla", product_key="broad:tesla-any-batteries", quantity=10, price=4000)
+        why = wc.r9(ctx([broad], [demand]))[0]["why"]
+        self.assertIn("model model3", why)
+        self.assertIn("kWh 75", why)
+        self.assertNotIn("make", why)
+        self.assertNotIn("quantity", why)
+        self.assertNotIn("price", why)
+
+    def test_fully_covered_request_is_clean(self):
+        full = line("a", demand_id="d1", make="Tesla", model="Model 3", product_key="model:tesla-model3-75kwh",
+                    product_key_level="model", kwh_min=75, kwh_max=75, quantity=10, price=4000)
+        self.assertEqual(wc.r9(ctx([full], [R8.FELLTEN])), [])
+
+    def test_lost_quantity_price_cell_format_and_maker(self):
+        demand = {"id": "d3", "company_id": "c1", "status": "qualifying", "summary": "500,000 Samsung 50E (21700) cylindrical cells",
+                  "spec": {"volume": 500000, "max_price": 1, "cell_formats": ["Cylindrical"], "cell_makers": ["Samsung SDI"]}}
+        bare = line("a", demand_id="d3", format="cell", product_key="broad:any-cells")
+        why = wc.r9(ctx([bare], [demand]))[0]["why"]
+        for text in ("cell format 21700", "cell maker Samsung SDI", "quantity 500000", "price max_price 1"):
+            self.assertIn(text, why)
+
+
+class R10(unittest.TestCase):
+    def test_same_key_in_two_saved_searches(self):
+        lines = [line("a", kind="saved_search", saved_search_id="s1", product_key="model:kia-ev6"),
+                 line("b", kind="saved_search", saved_search_id="s2", product_key="model:kia-ev6"),
+                 line("c", kind="saved_search", saved_search_id="s3", product_key="model:kia-niro")]
+        self.assertEqual([v["line_id"] for v in wc.r10(ctx(lines))], ["b"])
+
+
 class Report(unittest.TestCase):
     def test_counts_and_example_cap(self):
         lines = [line(f"a{i}", make="Nissan", format="system", product_key=f"broad:nissan-any-systems-{i}") for i in range(30)]
