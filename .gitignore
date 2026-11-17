@@ -123,3 +123,6 @@ accepted-results.jsonl
 batch-inputs/
 batch-outputs/
 verification-outputs/
+
+# Supabase CLI link state (written by `supabase link` in any checkout)
+supabase/.temp/
