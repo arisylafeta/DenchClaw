@@ -610,8 +610,13 @@ def _remove_dossier_lines(cur, company_id):
     archive table exists; otherwise skipped."""
     cur.execute("select to_regclass(%s) as name", (f"public.{ARCHIVE_TABLE}",))
     if (cur.fetchone() or {}).get("name"):
-        cur.execute(f"insert into {ARCHIVE_TABLE} select * from buyer_interest where company_id = %s and id like 'bi_dossier_%%'",
-                    (company_id,))
+        # Columns both tables have: the archive predates later additions (price_max, stated).
+        cur.execute("select column_name from information_schema.columns where table_schema = 'public' "
+                    "and table_name = %s intersect select column_name from information_schema.columns "
+                    "where table_schema = 'public' and table_name = 'buyer_interest'", (ARCHIVE_TABLE,))
+        cols = ", ".join(f'"{r["column_name"]}"' for r in cur.fetchall())
+        cur.execute(f"insert into {ARCHIVE_TABLE} ({cols}) select {cols} from buyer_interest "
+                    "where company_id = %s and id like 'bi_dossier_%%'", (company_id,))
     cur.execute("delete from buyer_interest where company_id = %s and id like 'bi_dossier_%%'", (company_id,))
     return cur.rowcount
 
