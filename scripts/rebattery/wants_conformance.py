@@ -585,24 +585,24 @@ def source_kind(source):
     return first if first in ("demand", "buyer_profile", "dossier", "offer", "saved") else "other"
 
 
-def summarise(ctx, results):
+def summarise(ctx, results, limit=EXAMPLES_PER_RULE):
     return {"lines": len(ctx["lines"]),
             "counts": {rule: len(items) for rule, items in results.items()},
             "companies": {rule: len({v["company_id"] for v in items}) for rule, items in results.items()},
             "by_source": {rule: dict(collections.Counter(source_kind(v["source"]) for v in items)) for rule, items in results.items()},
-            "examples": {rule: top_examples(items) for rule, items in results.items()},
+            "examples": {rule: top_examples(items, limit) for rule, items in results.items()},
             "r7_explained": len(ctx.get("r7_explained") or []),
-            "r7_explained_examples": top_examples(ctx.get("r7_explained") or [])}
+            "r7_explained_examples": top_examples(ctx.get("r7_explained") or [], limit)}
 
 
 def top_examples(items, limit=EXAMPLES_PER_RULE):
-    """The companies with the most violations first, so the worst offenders show."""
+    """The companies with the most violations first, so the worst offenders show. limit 0 lists every hit."""
     per_company = collections.Counter(v["company_id"] for v in items)
-    return sorted(items, key=lambda v: (-per_company[v["company_id"]], str(v["company_id"]), str(v["line_id"])))[:limit]
+    return sorted(items, key=lambda v: (-per_company[v["company_id"]], str(v["company_id"]), str(v["line_id"])))[:limit or None]
 
 
-def render_markdown(ctx, results, dsn_label=""):
-    summary = summarise(ctx, results)
+def render_markdown(ctx, results, dsn_label="", limit=EXAMPLES_PER_RULE):
+    summary = summarise(ctx, results, limit)
     out = ["# Wants conformance report", "", f"Database: {dsn_label or 'n/a'}. Lines checked: {summary['lines']}.", "",
            "| Rule | Violations | Companies | Meaning |", "| --- | ---: | ---: | --- |"]
     for rule, title in RULES.items():
@@ -666,6 +666,8 @@ def main(argv=None):
     parser.add_argument("--dsn", required=True)
     parser.add_argument("--out", help="Markdown report path")
     parser.add_argument("--json", dest="json_out", help="JSON summary path")
+    parser.add_argument("--limit", type=int, default=EXAMPLES_PER_RULE,
+                        help="hits listed per rule in the report and JSON (default 20, 0 = all)")
     parser.add_argument("--baseline-table", default="buyer_interest_pre_rebuild",
                         help="table of the lines before the change, for R7 (R7 is skipped when it does not exist)")
     args = parser.parse_args(argv)
@@ -677,14 +679,14 @@ def main(argv=None):
         conn.close()
     results = check(ctx)
     label = re.sub(r"password=\S+", "password=***", args.dsn)
-    report = render_markdown(ctx, results, label)
+    report = render_markdown(ctx, results, label, args.limit)
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(report, encoding="utf-8")
     else:
         print(report)
     if args.json_out:
-        Path(args.json_out).write_text(json.dumps(summarise(ctx, results), indent=2, default=str), encoding="utf-8")
+        Path(args.json_out).write_text(json.dumps(summarise(ctx, results, args.limit), indent=2, default=str), encoding="utf-8")
     print(json.dumps({"lines": len(ctx["lines"]), "counts": {r: len(v) for r, v in results.items()}}))
 
 
