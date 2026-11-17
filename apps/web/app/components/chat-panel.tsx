@@ -3130,13 +3130,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 									style={{
 										color: "var(--color-text)",
 									}}
-									title={sessionTitle || "Chat Session"}
+									title={sessionTitle || "Untitled chat"}
 								>
-									{sessionTitle || "Chat Session"}
+									{sessionTitle || "Untitled chat"}
 								</h2>
 								{headerBadge}
 							</div>
-						) : <span className="block truncate text-sm font-semibold lg:hidden">{sessionTitle || "Chat"}</span>}
+						) : <span className="block truncate text-sm font-semibold lg:hidden">{sessionTitle || "Untitled chat"}</span>}
 					</div>
 					{!hideHeaderActions && (
 					<div className="flex items-center gap-1 shrink-0">

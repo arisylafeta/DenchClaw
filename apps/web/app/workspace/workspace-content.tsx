@@ -2943,7 +2943,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
                   nativeConversationKey={nativeKey}
                   headerBadge={groupRow ? <GroupBadge row={groupRow} /> : undefined}
                   ref={(handle) => setMainChatPanelRef(tab.id, handle)}
-                  sessionTitle={tab.title}
+                  sessionTitle={nativeRow?.title || tab.title}
                   initialSessionId={isGateway ? undefined : (tab.sessionKey ? undefined : tab.sessionId ?? undefined)}
                   onActiveSessionChange={isGateway || tab.sessionKey ? undefined : (id) => handleChatTabSessionChange(tab.id, id)}
                   onSessionsChange={nativeKey ? () => void hermesChats.reload() : isGateway ? undefined : refreshSessions}
