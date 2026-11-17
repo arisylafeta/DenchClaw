@@ -769,6 +769,27 @@ def buy_box_spec(profile):
     return {key: profile[key] for key in BUY_BOX_KEYS if profile.get(key) not in (None, "", [], {})}
 
 
+def wants_text_facts(profile):
+    """Fact dicts for what the buy box's free `wants` text names and its lists miss: a make, a model with its make, a cell
+    format (18650/21700). Bare Bolt names nothing. Returns (fact dicts, minimum Ah or None)."""
+    import model_aliases as ma
+    text = (profile or {}).get("wants")
+    if not isinstance(text, str) or not text.strip():
+        return [], None
+    listed = {ma.make_fold(m) for key in ("makes", "cell_makers") for m in (profile.get(key) or [])
+              if isinstance(m, str) for m in re.split(r"\s*(?:,|/|&|\band\b)\s*", m) if m}
+    facts = []
+    models = ma.text_stated_models(text, profile.get("makes") or ())
+    for row in models:
+        facts.append({"make": row["make"], "model": row["model"]})
+    for make in ma.text_makes(text):
+        if ma.make_fold(make) not in listed and not any(ma.make_fold(f["make"]) == ma.make_fold(make) for f in facts):
+            facts.append({"make": make})
+    for cell_format in ma.text_cell_formats(text):
+        facts.append({"format": "cell", "cell_format": cell_format})
+    return facts, ma.text_min_ah(text)
+
+
 def sync_buy_box_rows(cur, companies):
     """An inferred line per stated fact, first seen when the profile was made.
 
@@ -783,6 +804,20 @@ def sync_buy_box_rows(cur, companies):
             _clear_notes(cur, company["id"])
             fact_sets, stated = _fact_sets(cur, buy_box_spec(profile), independent=True)
             keyed_lines = [keyed for keyed in (_keyed(cur, fact) for fact in fact_sets) if keyed and keyed["stated"]]
+            text_facts, min_ah = wants_text_facts(profile)
+            have = {keyed["key"] for keyed in keyed_lines}
+            for fact in text_facts:
+                keyed = _keyed(cur, fact)
+                if keyed and keyed["stated"] and keyed["key"] not in have:
+                    keyed = dict(keyed)
+                    if fact.get("cell_format"):
+                        keyed["stated_facts"] = {"cell_formats": [fact["cell_format"]]}
+                    keyed_lines.append(keyed)
+                    have.add(keyed["key"])
+            if min_ah is not None:
+                label = f"min {min_ah:g} Ah"
+                keyed_lines = [{**keyed, "raw_product": f"{keyed['raw_product']}; {label}" if keyed["raw_product"] else label}
+                               for keyed in keyed_lines]
             if not keyed_lines:
                 cur.execute("release savepoint bi_row")
                 skipped += 1

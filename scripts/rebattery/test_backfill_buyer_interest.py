@@ -884,3 +884,42 @@ The story.
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WantsTextFacts(unittest.TestCase):
+    """The buy box's free `wants` text keeps the makes, models and cell formats it names (no database)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.backfill = load("backfill_buyer_interest")
+
+    def facts(self, wants, **profile):
+        facts, ah = self.backfill.wants_text_facts({"wants": wants, **profile})
+        return facts, ah
+
+    def test_foremost_ev_tesla_and_leaf_with_a_makes_list_that_misses_them(self):
+        facts, _ = self.facts("Tesla, Leaf, Bolt-class", makes=["Hyundai"])
+        self.assertIn({"make": "Nissan", "model": "Leaf"}, facts)
+        self.assertIn({"make": "Tesla"}, facts)
+        self.assertFalse([f for f in facts if "Bolt" in str(f.get("model"))])
+
+    def test_ev_battery_center_leaf_and_volt(self):
+        facts, _ = self.facts("Leaf and Volt modules")
+        self.assertEqual([(f["make"], f["model"]) for f in facts], [("Nissan", "Leaf"), ("Chevrolet", "Volt")])
+
+    def test_left_coast_tesla_or_leaf(self):
+        facts, _ = self.facts("often Tesla or Leaf modules")
+        self.assertEqual({(f["make"], f.get("model")) for f in facts}, {("Nissan", "Leaf"), ("Tesla", None)})
+
+    def test_a_make_the_list_already_has_is_not_repeated(self):
+        facts, _ = self.facts("Tesla modules", makes=["Tesla"])
+        self.assertEqual(facts, [])
+
+    def test_cell_formats_and_ah(self):
+        facts, _ = self.facts("Salvaged 18650/21700 cells")
+        self.assertEqual(facts, [{"format": "cell", "cell_format": "18650"}, {"format": "cell", "cell_format": "21700"}])
+        self.assertEqual(self.facts("we need at least 200ah")[1], 200.0)
+
+    def test_no_wants_no_facts(self):
+        self.assertEqual(self.backfill.wants_text_facts({}), ([], None))
+        self.assertEqual(self.backfill.wants_text_facts({"wants": "   "}), ([], None))
