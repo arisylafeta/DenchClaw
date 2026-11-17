@@ -19,14 +19,23 @@ case "${1:-}" in
       -e POSTGRES_PASSWORD=test -e POSTGRES_DB=denchclaw postgres:16 >/dev/null
     for _ in $(seq 1 30); do docker exec "$NAME" pg_isready -U postgres -q && break; sleep 1; done
     sleep 2
+    # Migration numbers are not a strict dependency order (046_dismantler_stock_sync needs 076's table), so a
+    # migration that fails is rolled back whole (--single-transaction) and retried after the rest.
+    deferred=()
     for file in "$SQL_DIR/schema.sql" $(ls "$SQL_DIR"/migrations/*.sql | sort); do
-      "${PSQL[@]}" < "$file" >/dev/null || { echo "Failed loading $(basename "$file")" >&2; exit 1; }
+      if ! "${PSQL[@]}" --single-transaction < "$file" >/dev/null 2>&1; then
+        [[ "$(basename "$file")" == schema.sql ]] && { echo "Failed loading schema.sql" >&2; exit 1; }
+        deferred+=("$file"); continue
+      fi
       if [[ "$(basename "$file")" == schema.sql ]]; then
         "${PSQL[@]}" -c "insert into crm_objects (id, name, entity_table, display_field) values ('obj_people','people','crm_people','full_name'), ('obj_company','company','crm_companies','name') on conflict do nothing" >/dev/null
       fi
       if [[ "$(basename "$file")" == 050_mail_log.sql ]]; then
         "${PSQL[@]}" -c 'create database mail_pre_cutover_test template denchclaw' >/dev/null
       fi
+    done
+    for file in "${deferred[@]}"; do
+      "${PSQL[@]}" --single-transaction < "$file" >/dev/null || { echo "Failed loading $(basename "$file")" >&2; exit 1; }
     done
     echo "dbname=denchclaw host=127.0.0.1 port=${PORT} user=postgres password=test"
     ;;
