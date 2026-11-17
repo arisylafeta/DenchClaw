@@ -11,6 +11,8 @@ export type BotConfig = { mode: BotMode; scope: BotScope; name?: string };
 const BOTS: Record<string, BotConfig> = {
   sorcerer: { mode: "single", scope: "personal", name: "Sourcing Requests" },
   papajules: { mode: "single", scope: "personal", name: "Jules Watcher" },
+  dismantlercampaigns: { mode: "single", scope: "personal", name: "Dismantler Campaigns" },
+  auctions: { mode: "single", scope: "personal", name: "Auctions" },
 };
 const MULTI: BotConfig = { mode: "multi", scope: "personal" };
 
