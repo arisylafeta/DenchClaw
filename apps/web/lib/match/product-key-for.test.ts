@@ -163,6 +163,17 @@ describe("productKeyFor", () => {
       .toEqual(["broad:stellantis-nmc-packs", "broad:toyota-nmc-packs"]);
   });
 
+  it("a buy box multiplies make x chemistry x format (independent criteria), never a make-free format line", () => {
+    const { facts, stated } = expandProductFacts({
+      makes: ["Nissan", "Tesla"], chemistries: ["NMC", "LFP"], formats: ["Modules", "Packs"],
+    }, 12, true);
+    expect(stated).toBe(8);
+    expect(facts.map(productKeyFor).toSorted()).toEqual([
+      "broad:nissan-lfp-modules", "broad:nissan-lfp-packs", "broad:nissan-nmc-modules", "broad:nissan-nmc-packs",
+      "broad:tesla-lfp-modules", "broad:tesla-lfp-packs", "broad:tesla-nmc-modules", "broad:tesla-nmc-packs",
+    ]);
+  });
+
   it("keeps stated products paired: STN's Toyota Proace 50 kWh NMC and Stellantis 52 kWh LFP", () => {
     const { facts, stated } = expandProductFacts({
       makes: ["Toyota or Lexus", "Stellantis"], chemistries: ["NMC", "LFP"], formats: ["Packs"], kwhMin: 50, kwhMax: 52,

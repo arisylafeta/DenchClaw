@@ -252,6 +252,7 @@ def sync_profile_rows(cur, rows):
         spec = dict(row.get("spec") or {})
         buy_box = row.get("buyer_profile") or {}
         source_refs = [row["source_id"]] if row.get("source_id") else []
+        box_spec = False
         if not _states_product(spec):
             filled = {key: buy_box[key] for key in BUY_BOX_KEYS if buy_box.get(key) not in (None, "", [], {})}
             if not filled:
@@ -260,6 +261,7 @@ def sync_profile_rows(cur, rows):
             spec = {**filled, **spec}
             source_refs = [f"crm:{row['company_id']}"]
             from_buy_box += 1
+            box_spec = True
         basis = "stated" if str(spec.get("basis") or "").lower() == "stated" else "researched"
         payload = {
             "company_id": row["company_id"], "person_id": row.get("person_id"), "spec": spec,
@@ -270,7 +272,7 @@ def sync_profile_rows(cur, rows):
         }
         cur.execute("savepoint bi_row")
         try:
-            upsert_profile_interest(cur, payload, basis)
+            upsert_profile_interest(cur, payload, basis, independent=box_spec)
             cur.execute("release savepoint bi_row")
             written += 1
         except Exception as exc:  # noqa: BLE001
@@ -517,10 +519,12 @@ def product_facts(product):
     return variants
 
 
-def _fact_sets(cur, facts):
-    """The fact sets the SQL builder fans one source row into, plus how many combinations it states."""
+def _fact_sets(cur, facts, independent=False):
+    """The fact sets the SQL builder fans one source row into, plus how many combinations it states.
+    independent: a buy box's lists multiply out (make x chemistry x format), as before 115."""
     cur.execute("""select fs.facts as fact_sets, fs.stated_total as stated
-                     from buyer_interest_fact_sets(%s::jsonb) fs""", (json.dumps(facts or {}),))
+                     from buyer_interest_fact_sets(%s::jsonb, '{}'::jsonb, '{}'::jsonb, 12, null, %s) fs""",
+                (json.dumps(facts or {}), bool(independent)))
     row = cur.fetchone()
     return list(row["fact_sets"] or []), int(row["stated"] or 0)
 
@@ -619,8 +623,16 @@ def drop_covered_lines(cur):
     groups = {}
     for line in lines:
         groups.setdefault((wc._source_key(line), line.get("kind")), []).append(line)
+    def same_product(a, b):
+        # Only the same product is covered: a broad line the source states on its own (packs, modules and cells) stays
+        # next to model lines of another make or format.
+        fa, fb = wc.make_folds(a.get("make")), wc.make_folds(b.get("make"))
+        if not ((not fa and not fb) or fa & fb):
+            return False
+        return a.get("product_key_level") not in ("broad", "cell") or wc.norm_format(a.get("format")) == wc.norm_format(b.get("format"))
+
     doomed = sorted({a["id"] for items in groups.values() for a in items
-                     if any(a is not b and wc._less_specific(a, b) for b in items)})
+                     if any(a is not b and wc._less_specific(a, b) and same_product(a, b) for b in items)})
     if doomed:
         cur.execute("select to_regclass(%s) as name", (f"public.{ARCHIVE_TABLE}",))
         if (cur.fetchone() or {}).get("name"):
@@ -769,7 +781,7 @@ def sync_buy_box_rows(cur, companies):
         cur.execute("savepoint bi_row")
         try:
             _clear_notes(cur, company["id"])
-            fact_sets, stated = _fact_sets(cur, buy_box_spec(profile))
+            fact_sets, stated = _fact_sets(cur, buy_box_spec(profile), independent=True)
             keyed_lines = [keyed for keyed in (_keyed(cur, fact) for fact in fact_sets) if keyed and keyed["stated"]]
             if not keyed_lines:
                 cur.execute("release savepoint bi_row")

@@ -4,7 +4,8 @@
 --       (spec.products, or a title such as "Toyota Proace 50 kWh NMC + Stellantis 52 kWh LFP") gives one line per
 --       product. Two or more dimensions with several values and no stated pairing give one line per value of each
 --       dimension, never the cross product.
---   R2  A closed request never writes a declined line: closed 'bought_elsewhere' / 'no_longer_needed' write nothing.
+--   R2  A closed request never writes a declined line: closed 'bought_from_us' is a bought line, every other closed
+--       reason except not_demand / duplicate / supply_misfiled (and the profile reasons) is an ask that expires as closed.
 --       Declined lines come only from an offer the buyer declined or a dossier declined product. Existing declined
 --       lines synced from demand rows are removed here.
 --   R3  Model keys use the canonical slug of the shared alias list (buyer_interest_model_slug, generated from
@@ -702,7 +703,12 @@ create or replace function buyer_interest_drop_redundant(p_sets jsonb[]) returns
   where not exists (
     select 1 from unnest(p_sets) b
     where buyer_interest_key_rank(buyer_interest_product_key(b)) < buyer_interest_key_rank(buyer_interest_product_key(a))
-      and (buyer_interest_make(a->>'make') is null or buyer_interest_make(a->>'make') = buyer_interest_make(b->>'make'))
+      -- Only the SAME product is redundant: same make (both none counts) and, for a broad or cell line, the same format.
+      -- A broad line a source states on its own (packs, modules and cells; Packs and modules) is the buyer's breadth and
+      -- stays next to model lines of another make or format.
+      and buyer_interest_make(a->>'make') is not distinct from buyer_interest_make(b->>'make')
+      and (buyer_interest_key_rank(buyer_interest_product_key(a)) < 5
+           or buyer_interest_format(a->>'format') is not distinct from buyer_interest_format(b->>'format'))
       and (buyer_interest_key_rank(buyer_interest_product_key(a)) >= 5
            or (buyer_interest_model_slug(a->>'make', a->>'model') = buyer_interest_model_slug(b->>'make', b->>'model')
                and buyer_interest_make(a->>'make') = buyer_interest_make(b->>'make')))
@@ -776,9 +782,12 @@ $$;
 -- - Two or more dimensions with several values ("Tesla, Nissan; NMC, LFP") do not say which goes with which, so no line
 --   pairs them: one set per value of each such dimension, carrying only the single-valued dimensions.
 -- - A vehicle make is never paired with a battery system from a list.
+-- p_independent (a buy box's lists): the lists are the buyer's criteria, so make x chemistry x format multiply out as
+-- before 115 (Nissan, Tesla x NMC x Modules, Packs gives broad:nissan-nmc-modules, ...), never one make-free format line.
 drop function if exists buyer_interest_fact_sets(jsonb, jsonb, jsonb, int, text);
+drop function if exists buyer_interest_fact_sets(jsonb, jsonb, jsonb, int, text, boolean);
 create or replace function buyer_interest_fact_sets(p_spec jsonb, p_context jsonb default '{}'::jsonb,
-  p_fields jsonb default '{}'::jsonb, p_limit int default 12, p_title text default null)
+  p_fields jsonb default '{}'::jsonb, p_limit int default 12, p_title text default null, p_independent boolean default false)
 returns table (facts jsonb[], stated_total int) language plpgsql immutable as $$
 declare
   makes text[] := buyer_interest_make_list(buyer_interest_stated_list(p_spec->'makes', buyer_interest_first_text(p_spec->'make'),
@@ -817,7 +826,7 @@ begin
   one_chem := case when cardinality(chemists) = 1 then chemists[1] end;
   one_format := case when cardinality(formats) = 1 then formats[1] end;
 
-  if products is null and multi >= 2 then
+  if products is null and multi >= 2 and not p_independent then
     pair := buyer_interest_text_pairs(p_title, makes, chemists);
     if pair is not null then products := pair; end if;
   end if;
@@ -844,7 +853,7 @@ begin
         sets := sets || jsonb_strip_nulls(built);
       end loop;
     end loop;
-  elsif multi <= 1 then
+  elsif multi <= 1 or p_independent then
     for m, c, f in
       select x.value, y.value, z.value from unnest(makes) x(value) cross join unnest(chemists) y(value) cross join unnest(formats) z(value)
     loop
@@ -942,19 +951,22 @@ begin
   if row_.status in ('open', 'qualifying') then
     line_kind := 'ask';
     expiry := needed;
-  elsif row_.status = 'closed' and row_.closed_reason = 'expired' then
-    -- An expired ask stays visible as history with its expiry; the stale-line delete below drops an older
-    -- bought/declined outcome, so a re-staged ask never keeps a superseded decision.
-    line_kind := 'ask';
-    expiry := coalesce(needed, current_date);
-    expiry_sticky := true;  -- the day it lapsed, not the day a later edit touched the row
   elsif row_.status = 'closed' and row_.closed_reason = 'bought_from_us' then
-    -- R2: a closed request is a purchase or nothing. 'bought_elsewhere' and 'no_longer_needed' say the request ended,
-    -- not that the buyer declined a product, so they write no line (declined comes only from a declined offer or dossier).
+    -- A purchase from us: a bought line, no expiry.
     line_kind := 'bought';
     expiry := null;
+  elsif row_.status = 'closed' and row_.closed_reason <> all (array['not_demand', 'duplicate',
+      'supply_misfiled', 'moved_to_profile', 'research_profile']) then
+    -- R2: a closed request is history, never a decline. Expired, 'no_longer_needed', 'bought_elsewhere' and every other
+    -- reason that is still a buyer's ask stays visible as an ask that expires as closed (the day it lapsed or was
+    -- closed), so a re-staged ask never keeps a superseded decision. Declined lines come only from a declined offer
+    -- or dossier product.
+    line_kind := 'ask';
+    expiry := coalesce(needed, current_date);
+    expiry_sticky := true;
   else
-    -- Not a buying fact (duplicate, moved to profile, converted to supply/trade, research row): drop the asks.
+    -- Not a buying fact (duplicate, not a demand, misfiled supply) or owned by the profile path (moved to profile,
+    -- research row): drop the asks.
     delete from buyer_interest where demand_id = row_.id;
     return;
   end if;

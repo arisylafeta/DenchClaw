@@ -293,9 +293,10 @@ function withoutVehicleSystem(facts: ProductFacts): ProductFacts {
  *   with which chemistry, so no line pairs them: one set per value of each such dimension, carrying only the single-valued
  *   dimensions. A make never pairs with a chemistry, a format or a capacity the source did not give it.
  * - A vehicle make is never paired with a battery system from a list.
+ * - `independent` (a buy box's lists): the lists are criteria, so make x chemistry x format always multiply out.
  * Capped at `limit`; `stated` is how many sets the source really states, so a caller can record a truncation.
  */
-export function expandProductFacts(facts: ProductFacts, limit = PRODUCT_FACT_COMBINATIONS): { facts: ProductFacts[]; stated: number } {
+export function expandProductFacts(facts: ProductFacts, limit = PRODUCT_FACT_COMBINATIONS, independent = false): { facts: ProductFacts[]; stated: number } {
   const cap = Math.max(limit, 1);
   const finish = (sets: ProductFacts[]) => {
     const seen = new Set<string>();
@@ -327,7 +328,7 @@ export function expandProductFacts(facts: ProductFacts, limit = PRODUCT_FACT_COM
     }));
   }
   const multi = [makes.length > 1, chemistries.length > 1, formats.length > 1].filter(Boolean).length;
-  if (multi <= 1) {
+  if (multi <= 1 || independent) {
     return finish(makes.flatMap((make) => chemistries.flatMap((chemistry) => formats.map((format) => carry(make, chemistry, format)))));
   }
   const sets: ProductFacts[] = [];

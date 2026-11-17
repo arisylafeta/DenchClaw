@@ -823,6 +823,64 @@ The story.
         finally:
             self.drop_company(company)
 
+    def test_a_buy_box_pairs_make_chemistry_and_format_never_a_make_free_format_line(self):
+        company = self.buy_box_company({"makes": ["Nissan", "Tesla"], "chemistries": ["NMC"], "formats": ["Modules", "Packs"]})
+        try:
+            with self.cursor() as cur:
+                rows = [row for row in self.backfill.buy_box_rows(cur) if row["id"] == company]
+                self.backfill.sync_buy_box_rows(cur, rows)
+            self.conn.commit()
+            self.assertEqual([line["product_key"] for line in self.lines(company)], [
+                "broad:nissan-nmc-modules", "broad:nissan-nmc-packs", "broad:tesla-nmc-modules", "broad:tesla-nmc-packs"])
+        finally:
+            self.drop_company(company)
+
+    def test_a_closed_no_longer_needed_request_is_an_ask_that_expires_as_closed(self):
+        row_id = self.demand_row(status="closed", closed_reason="no_longer_needed", observed_on="2026-09-01",
+                                 spec={"makes": ["Kokam"], "chemistries": ["NMC"], "formats": ["Cells"]})
+        self.sync([row_id])
+        [line] = self.lines()
+        self.assertEqual((line["kind"], line["product_key"]), ("ask", "broad:kokam-nmc-cells"))
+        self.assertIsNotNone(line["expires_on"])
+        dup = self.demand_row(status="closed", closed_reason="duplicate", spec={"makes": ["Kokam"], "formats": ["Cells"]})
+        self.sync([dup])
+        self.assertEqual(len(self.lines()), 1)  # a duplicate writes nothing
+
+    def test_a_broad_line_the_source_states_on_its_own_stays_beside_model_lines_of_another_make(self):
+        company = self.buy_box_company({})
+        try:
+            with self.cursor() as cur:
+                for key, level, make, fmt in (("broad:any-packs", "broad", None, "pack"), ("broad:any-modules", "broad", None, "module"),
+                                              ("model:kia-ev3", "model", "Kia", "pack")):
+                    cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key, product_key_level, make,
+                                     format, first_seen, last_seen, quantity_basis, source_refs)
+                                   values (%s, %s, 'interest', 'mastered', %s, %s, %s, %s, '2026-10-01', '2026-10-01', 'not_stated',
+                                     '{x}')""", (f"bi_t_{uuid.uuid4().hex[:10]}", company, key, level, make, fmt))
+                self.backfill.drop_covered_lines(cur)
+            self.conn.commit()
+            self.assertEqual(sorted(line["product_key"] for line in self.lines(company)),
+                             ["broad:any-modules", "broad:any-packs", "model:kia-ev3"])
+        finally:
+            self.drop_company(company)
+
+    def test_two_saved_searches_for_one_product_are_one_line(self):
+        dl = load("demand_lifecycle")
+        a, b = f"{self.tag}a", f"{self.tag}b"
+        with self.cursor() as cur:
+            for sid, seen in ((a, "2026-10-14"), (b, "2026-10-02")):
+                dl.upsert_saved_search_interest(cur, {"company_id": self.company, "source_id": f"saved_search:{sid}", "observed_on": seen,
+                                                      "spec": {"makes": ["Tesla"], "chemistries": ["NMC"], "formats": ["Packs"]}},
+                                                today=__import__("datetime").date(2026, 11, 1))
+            # a re-run changes nothing
+            dl.upsert_saved_search_interest(cur, {"company_id": self.company, "source_id": f"saved_search:{b}", "observed_on": "2026-10-02",
+                                                  "spec": {"makes": ["Tesla"], "chemistries": ["NMC"], "formats": ["Packs"]}},
+                                            today=__import__("datetime").date(2026, 11, 2))
+        self.conn.commit()
+        [line] = self.lines(kind="saved_search")
+        self.assertEqual(str(line["first_seen"]), "2026-10-02")
+        self.assertEqual(str(line["last_seen"]), "2026-11-02")
+        self.assertEqual(sorted(line["source_refs"]), sorted([f"saved_search:{a}", f"saved_search:{b}"]))
+
 
 if __name__ == "__main__":
     unittest.main()

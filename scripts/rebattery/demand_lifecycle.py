@@ -269,11 +269,12 @@ def model_interest_facts(spec, model):
             'kwh_min': spec.get('kwh_min') or spec.get('kwhMin'), 'kwh_max': spec.get('kwh_max') or spec.get('kwhMax')}
 
 
-def sql_fact_sets(cur, spec):
+def sql_fact_sets(cur, spec, independent=False):
     """(fact dicts, stated total) from buyer_interest_fact_sets() of migration 115, the one builder the triggers use:
-    products stay paired (R1), no vehicle make on a system (R5), nothing repeated (R4), stated detail kept (R6)."""
-    cur.execute("select fs.facts as fact_sets, fs.stated_total as stated from buyer_interest_fact_sets(%s::jsonb, '{}'::jsonb, '{}'::jsonb, %s) fs",
-                (json.dumps(spec or {}), INTEREST_FACT_COMBINATIONS))
+    products stay paired (R1), no vehicle make on a system (R5), nothing repeated (R4), stated detail kept (R6).
+    independent: a buy box's lists are criteria, so make x chemistry x format multiply out (as before 115)."""
+    cur.execute("select fs.facts as fact_sets, fs.stated_total as stated from buyer_interest_fact_sets(%s::jsonb, '{}'::jsonb, '{}'::jsonb, %s, null, %s) fs",
+                (json.dumps(spec or {}), INTEREST_FACT_COMBINATIONS, bool(independent)))
     row = cur.fetchone()
     row = row if isinstance(row, dict) else {'fact_sets': row[0], 'stated': row[1]}
     return list(row['fact_sets'] or []), int(row['stated'] or 0)
@@ -334,6 +335,33 @@ def upsert_interest(cur, *, company_id, kind, facts, first_seen, last_seen, pers
         values = keyed if isinstance(keyed, dict) else dict(zip(
             ('key', 'level', 'make', 'model', 'format', 'chemistry', 'kwh_min', 'kwh_max', 'stated'), keyed))
         mastered = kind in INTEREST_KINDS
+        if kind == 'saved_search' and saved_search_id:
+            # One line per company and product key: a second alert for the same product merges into the first line
+            # (earliest first_seen, latest last_seen, every source ref); an active alert keeps the line open.
+            cur.execute("""update buyer_interest set
+                             first_seen = least(first_seen, %s::date), last_seen = greatest(last_seen, %s::date),
+                             expires_on = case when expires_on is null or %s::date is null then null
+                                          else greatest(expires_on, %s::date) end,
+                             person_id = coalesce(person_id, %s),
+                             stated = coalesce(%s::jsonb, stated),
+                             source_refs = coalesce((select array_agg(distinct ref order by ref)
+                                           from unnest(source_refs || %s::text[]) ref), '{}'),
+                             updated_at = now()
+                           where id = (select id from buyer_interest
+                                        where company_id = %s and kind = 'saved_search' and product_key = %s
+                                          and saved_search_id <> %s
+                                        order by first_seen, id limit 1)
+                           returning id""",
+                        (first_seen, last_seen, expires_on, expires_on, person_id,
+                         json.dumps(values['stated']) if values['stated'] else None,
+                         list(source_refs or []), company_id, values['key'], saved_search_id))
+            merged = cur.fetchone()
+            if merged:
+                # This search's own earlier line for the same product is the duplicate now.
+                cur.execute("delete from buyer_interest where company_id = %s and kind = 'saved_search' \
+                            and product_key = %s and saved_search_id = %s", (company_id, values['key'], saved_search_id))
+                cur.execute("release savepoint buyer_interest_line")
+                return merged['id'] if isinstance(merged, dict) else merged[0]
         conflict = ("on conflict (company_id, product_key, kind) where ownership = 'mastered'"
                     if mastered else "on conflict (kind, saved_search_id, product_key) where saved_search_id is not null")
         refresh = ("last_seen = greatest(buyer_interest.last_seen, excluded.last_seen), person_id = coalesce(excluded.person_id, buyer_interest.person_id), "
@@ -367,7 +395,7 @@ def upsert_interest(cur, *, company_id, kind, facts, first_seen, last_seen, pers
         return None
 
 
-def upsert_profile_interest(cur, row, basis='stated'):
+def upsert_profile_interest(cur, row, basis='stated', independent=False):
     """A profile merge (survey answer or research) is also a mastered want: standing when the buyer said it, inferred otherwise.
 
     Every stated make and chemistry is written, and the survey row's quantity and price are kept on the line.
@@ -380,7 +408,7 @@ def upsert_profile_interest(cur, row, basis='stated'):
     spec = row.get('spec') or {}
     quantity = row.get('volume') if row.get('volume') is not None else spec.get('volume')
     price = row.get('max_price') if row.get('max_price') is not None else spec.get('max_price')
-    fact_list, stated_total = sql_fact_sets(cur, spec)
+    fact_list, stated_total = sql_fact_sets(cur, spec, independent)
     lines = [upsert_interest(
         cur, company_id=row['company_id'], kind=kind, facts=facts,
         person_id=row.get('person_id'), first_seen=str(observed)[:10], last_seen=str(observed)[:10],
