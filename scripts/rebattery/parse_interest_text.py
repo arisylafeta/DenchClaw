@@ -868,7 +868,8 @@ def fact_sets(product):
         sql = {"make": make, "model": model, "format": product["format"], "chemistry": product["chemistry"],
                "kwh": kwh, "kwh_min": product["kwh_min"], "kwh_max": product["kwh_max"],
                "part_numbers": [product["part_number"]] if product["part_number"] else None,
-               "cell_maker": make if product["format"] == "cell" and model and fold(make) in CELL_MAKERS else None}
+               "cell_maker": make if product["format"] == "cell" and model and fold(make) in CELL_MAKERS else None,
+               "cell_format": product.get("cell_format") if product["format"] == "cell" else None}
         ts = {"make": make, "model": model, "format": product["format"], "chemistry": product["chemistry"], "kwh": kwh,
               "kwhMin": product["kwh_min"], "kwhMax": product["kwh_max"],
               "partNumbers": [product["part_number"]] if product["part_number"] else None,
@@ -967,6 +968,8 @@ def key_lines(cur, product, builder="sql", ts_table=None):
         keyed = sql_keyed(cur, fact["sql"])
         if not keyed or not keyed["stated"]:
             continue
+        if ts and fact["sql"].get("cell_format") and ts["level"] == keyed["level"] == "broad":
+            ts = None  # the app's builder has no cell format yet; the SQL key is cell-format scoped
         key, level = (ts["key"], ts["level"]) if ts else (keyed["key"], keyed["level"])
         if key == "broad:any-batteries":
             continue  # nothing that names a product
@@ -974,10 +977,62 @@ def key_lines(cur, product, builder="sql", ts_table=None):
                 and not fact["ts"].get("partNumbers") and not product["platform"]):
             continue  # a bare model no maker owns (\"Bolt\"): not a product, and never an any-pack line
         raw = keyed["raw_product"] or (f"platform {fact['platform_unused']}" if fact["platform_unused"] else None)
+        if product.get("min_ah"):
+            raw = f"{raw}; {min_ah_text(product['min_ah'])}" if raw else min_ah_text(product["min_ah"])
         lines.append({"key": key, "level": level, "make": keyed["make"], "model": keyed["model"], "format": keyed["format"],
                       "chemistry": keyed["chemistry"], "kwh_min": keyed["kwh_min"], "kwh_max": keyed["kwh_max"], "raw_product": raw,
                       "stated": stated, "fact": fact["sql"]})
     return lines
+
+
+def _blank_product(**fields):
+    product = {key: None for key in PRODUCT_KEYS}
+    product.update({"status": "asked", "text_stated": True}, **fields)
+    return product
+
+
+def augment_products(text, products):
+    """Products the text itself states and the model's answer left out, plus the Ah minimum and quantity it states.
+
+    Research and buy-box text keeps what it says: a make or model it names (Tesla, Leaf, Volt; a bare Bolt names none),
+    a cell format (18650, 21700), a minimum Ah (kept on raw_product), and one quantity when the source has one product.
+    Nothing here overrides a value the model already gave.
+    """
+    import model_aliases as ma
+    products = list(products)
+    folds = set()
+    for product in products:
+        folds |= {ma.make_fold(m) for m in split_makes(product["make"]) if m}
+        if product["model"] and not product["make"] and implied_make(product["model"]):
+            folds.add(ma.make_fold(implied_make(product["model"])))
+    named = {(ma.make_fold(row["make"]), row["slug"]): row for row in ma.text_stated_models(text)}
+    have = {(ma.make_fold(p["make"] or implied_make(p["model"]) or ""), ma.model_slug(p["make"] or implied_make(p["model"]), p["model"]))
+            for p in products if p["model"]}
+    for (make_fold, slug), row in named.items():
+        if (make_fold, slug) not in have:
+            products.append(_blank_product(make=row["make"], model=row["model"], quote=row["model"]))
+            have.add((make_fold, slug))
+            folds.add(make_fold)
+    for make in ma.text_makes(text):
+        if ma.make_fold(make) not in folds:
+            products.append(_blank_product(make=make, quote=make))
+            folds.add(ma.make_fold(make))
+    shown = " ".join(str(p["cell_format"] or "") for p in products)
+    for cell_format in ma.text_cell_formats(text):
+        if cell_format not in shown:
+            products.append(_blank_product(format="cell", cell_format=cell_format, quote=cell_format))
+    ah = ma.text_min_ah(text)
+    qty = ma.text_quantity(text)
+    for product in products:
+        if ah is not None and not product.get("min_ah"):
+            product["min_ah"] = ah
+    if qty and len(products) == 1 and products[0]["quantity"] is None:
+        products[0]["quantity"], products[0]["quantity_unit"] = qty
+    return products
+
+
+def min_ah_text(ah):
+    return f"min {ah:g} Ah"
 
 
 def one_per_key(cur, pairs):
@@ -1011,7 +1066,8 @@ def line_id(company_id, kind, key):
 def adds_information(line, product):
     """A broad line only earns a row when it carries something the buy box's own broad line lacks."""
     return (line["level"] != "broad" or line["kwh_min"] is not None or line["kwh_max"] is not None
-            or bool(line["model"]) or bool(line["raw_product"]) or product["quantity"] is not None or product["price"] is not None)
+            or bool(line["model"]) or bool(line["raw_product"]) or product["quantity"] is not None or product["price"] is not None
+            or bool(product.get("text_stated")) or bool(product.get("min_ah")))
 
 
 def synced_keys(cur, source):
@@ -1115,7 +1171,8 @@ def write_sources(conn, parsed, report, run_id, builder, apply_writes, batch_siz
                 try:
                     source["lines"] = []
                     asked = synced_keys(cur, source)
-                    pairs = [(product, line) for product in source["result"]["products"]
+                    products = augment_products(source.get("text"), source["result"]["products"])
+                    pairs = [(product, line) for product in products
                              for line in key_lines(cur, product, builder, ts_table)]
                     for product, line in one_per_key(cur, pairs):
                         kind = source["line_kind"]

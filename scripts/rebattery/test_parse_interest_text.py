@@ -892,3 +892,116 @@ class CoveredByAskTest(unittest.TestCase):
 
     def test_no_synced_lines_keeps_everything(self):
         self.assertFalse(self.p.covered_by_ask({"key": "broad:any-modules"}, set()))
+
+
+class TextKeepsWhatItStates(unittest.TestCase):
+    """Research and buy-box text keeps the makes, models, cell formats, Ah minimum and quantity it states."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.p = load("parse_interest_text")
+
+    def added(self, text, products=()):
+        return self.p.augment_products(text, list(products))
+
+    def pairs(self, products):
+        return {(p["make"], p["model"]) for p in products}
+
+    def test_a_make_and_a_bare_model_the_text_names_are_kept(self):
+        got = self.pairs(self.added("Tesla, Leaf, Bolt-class"))
+        self.assertEqual(got, {("Tesla", None), ("Nissan", "Leaf")})  # bare Bolt names nothing
+
+    def test_two_bare_models_get_their_makes(self):
+        self.assertEqual(self.pairs(self.added("Leaf and Volt modules")), {("Nissan", "Leaf"), ("Chevrolet", "Volt")})
+
+    def test_or_list_keeps_both(self):
+        self.assertEqual(self.pairs(self.added("often Tesla or Leaf modules")), {("Tesla", None), ("Nissan", "Leaf")})
+
+    def test_bare_bolt_alone_is_dropped(self):
+        self.assertEqual(self.added("Bolt packs"), [])
+
+    def test_what_the_model_already_gave_is_not_repeated(self):
+        given = product(make="Nissan", model="Leaf", quote="Leaf")
+        got = self.added("Tesla, Leaf", [given])
+        self.assertEqual(self.pairs(got), {("Nissan", "Leaf"), ("Tesla", None)})
+        self.assertEqual(len(got), 2)
+
+    def test_a_refused_make_is_not_asked_for(self):
+        self.assertEqual(self.added("We sell Leaf modules. No Tesla."), [])
+
+    def test_cell_formats_become_make_free_cell_products(self):
+        got = self.added("Salvaged 18650/21700 cells")
+        self.assertEqual([(p["format"], p["cell_format"], p["make"]) for p in got], [("cell", "18650", None), ("cell", "21700", None)])
+        got = self.added("10.000 single cell 18650 batteries")
+        self.assertEqual([p["cell_format"] for p in got], ["18650"])
+
+    def test_a_stated_cell_format_is_not_added_twice(self):
+        given = product(format="cell", cell_format="18650", quote="18650")
+        self.assertEqual(len(self.added("18650 cells", [given])), 1)
+
+    def test_an_ah_minimum_rides_on_every_product(self):
+        got = self.added("we need at least 200ah", [product(chemistry="LFP", format="cell", quote="we need")])
+        self.assertEqual([p["min_ah"] for p in got], [200.0])
+        self.assertEqual(self.p.min_ah_text(200.0), "min 200 Ah")
+
+    def test_a_quantity_is_kept_for_a_single_product(self):
+        got = self.added("start from 8,000 units", [product(make="Tesla", quote="start")])
+        self.assertEqual((got[0]["quantity"], got[0]["quantity_unit"]), (8000.0, "units"))
+
+    def test_a_quantity_is_not_guessed_for_several_products_or_from_a_model_number(self):
+        got = self.added("start from 8,000 units of Tesla and Leaf")
+        self.assertTrue(all(p["quantity"] is None for p in got))
+        self.assertTrue(all(p["quantity"] is None for p in self.added("Tesla Model 3 packs")))
+
+    def test_the_model_answer_wins_over_the_text_quantity(self):
+        got = self.added("start from 8,000 units", [product(make="Tesla", quantity=500.0, quantity_unit="packs", quote="x")])
+        self.assertEqual(got[0]["quantity"], 500.0)
+
+    def test_stated_text_counts_as_information_on_a_broad_line(self):
+        line = {"level": "broad", "kwh_min": None, "kwh_max": None, "model": None, "raw_product": None}
+        self.assertFalse(self.p.adds_information(line, product()))
+        self.assertTrue(self.p.adds_information(line, {**product(), "text_stated": True}))
+        self.assertTrue(self.p.adds_information(line, {**product(), "min_ah": 200.0}))
+
+
+@unittest.skipUnless(DSN, "needs BULK_TRADES_TEST_DATABASE_URL")
+class TextKeysDatabase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import psycopg2
+        import psycopg2.extras
+        cls.p = load("parse_interest_text")
+        cls.conn = psycopg2.connect(DSN)
+        cls.conn.autocommit = False
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.conn.rollback()
+        cls.conn.close()
+
+    def lines(self, text):
+        import psycopg2.extras
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            out = []
+            for prod in self.p.augment_products(text, []):
+                out += self.p.key_lines(cur, prod)
+        self.conn.rollback()
+        return out
+
+    def test_cells_with_no_make_get_a_cell_format_scoped_key(self):
+        self.assertEqual([line["key"] for line in self.lines("Salvaged 18650/21700 cells")],
+                         ["broad:18650-any-cells", "broad:21700-any-cells"])
+        self.assertEqual([line["key"] for line in self.lines("10.000 single cell 18650 batteries")], ["broad:18650-any-cells"])
+
+    def test_models_and_makes_get_model_and_make_keys(self):
+        keys = {line["key"] for line in self.lines("Tesla, Leaf, Bolt-class")}
+        self.assertIn("model:nissan-leaf", keys)
+        self.assertTrue(any(k.startswith("broad:tesla") for k in keys), keys)
+
+    def test_the_ah_minimum_stays_on_raw_product(self):
+        import psycopg2.extras
+        prod = {**self.p.augment_products("LFP cells, we need at least 200ah", [product(chemistry="LFP", format="cell", quote="LFP cells")])[0]}
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            [line] = self.p.key_lines(cur, prod)
+        self.conn.rollback()
+        self.assertEqual(line["raw_product"], "min 200 Ah")

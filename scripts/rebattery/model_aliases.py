@@ -151,6 +151,95 @@ def text_models(text, makes=()):
     return found
 
 
+# Words a buyer text uses for what it does not want or sells; a make or model after one of them in the same clause is not asked for.
+_REFUSAL = re.compile(r"\b(?:no|not|never|dont|don t|doesn t|avoid|except|excluding|without|sell|sells|selling|offer|offers|supply|supplies|supplier)\b")
+_AMBIGUOUS_MAKES = {"smart", "mini", "seat", "lucid", "genesis"}  # common words: a make only when a model says so
+# Model names so particular to one battery source that a text naming them alone asks for them (the SQL list needs a digit or a make).
+BARE_MODELS = ("leaf", "volt")
+_MAKE_DISPLAY = {}
+for _m in _DATA["models"]:
+    _MAKE_DISPLAY.setdefault(make_fold(_m["make"]), _m["make"])
+CELL_FORMATS = ("18650", "21700")
+
+
+def _clause_before(text, alias):
+    """The words before each mention of `alias` in its own clause (a mention per item); [] when the text has none."""
+    pattern = r"(?<![a-z0-9])" + r"[^a-z0-9]+".join(re.escape(w) for w in alias.split()) + r"(?![a-z0-9])"
+    low = unaccent(text)
+    out = []
+    for hit in re.finditer(pattern, low):
+        start = max(low.rfind(c, 0, hit.start()) for c in ".;!?\n")
+        out.append(_spaced(low[start + 1:hit.start()]))
+    return out
+
+
+def _asked(text, alias):
+    """True when some mention of the alias is not behind a refusal word of its own clause."""
+    return any(not _REFUSAL.search(before) for before in _clause_before(text, alias))
+
+
+def text_makes(text):
+    """Vehicle makes a text names (display names), unless every mention sits behind a refusal word."""
+    words = " " + _spaced(text) + " "
+    found = []
+    for fold_name, display in _MAKE_DISPLAY.items():
+        if fold_name in _AMBIGUOUS_MAKES:
+            continue
+        aliases = {_spaced(display), fold_name} | {k for k, v in MAKE_ALIASES.items() if v == fold_name}
+        for alias in aliases:
+            if f" {alias} " in words and _asked(text, alias):
+                found.append(display)
+                break
+    return found
+
+
+def text_stated_models(text, makes=()):
+    """text_models plus the bare model names a battery text asks for on their own (Leaf, Volt), refusals left out."""
+    hits = {row["slug"]: row for row in text_models(text, makes)}
+    words = " " + _spaced(text) + " "
+    for own, display, alias, slug, name, _alone in TEXT_ROWS:
+        if slug in BARE_MODELS and alias in BARE_MODELS and slug not in hits and f" {alias} " in words:
+            hits[slug] = {"make": display, "model": name, "slug": slug}
+    return [row for row in hits.values()
+            if any(_asked(text, alias) for _o, _d, alias, slug, _n, _a in TEXT_ROWS if slug == row["slug"]
+                   and f" {alias} " in " " + _spaced(text) + " ")]
+
+
+def text_cell_formats(text):
+    """Cell formats (18650, 21700) a text names, in the order it names them."""
+    return list(dict.fromkeys(re.findall(r"(?<![0-9])(18650|21700)(?![0-9])", str(text or ""))))
+
+
+def text_min_ah(text):
+    """The Ah minimum a text states (\"at least 200ah\", \"min 100 Ah\", \"200Ah+\"), or None."""
+    number = r"(\d+(?:[.,]\d+)?)\s*-?\s*ah\b"
+    for pattern in (rf"(?:at least|minimum(?: of)?|min\.?|no less than|not less than|from|over|above|>=|≥)\s*{number}",
+                    rf"{number}\s*(?:\+|or more|or above|or higher|minimum|min\b|and (?:up|above|over))"):
+        match = re.search(pattern, str(text or ""), re.I)
+        if match:
+            return float(match.group(1).replace(",", "."))
+    return None
+
+
+_QTY_UNITS = r"(units?|pcs|pieces?|packs?|modules?|cells?|batteries|systems?|vehicles?|containers?)"
+
+
+def text_quantity(text):
+    """(quantity, unit) a text states after a start-from word (\"start from 8,000 units\"), or None. A bare number
+    next to a noun (Model 3 packs) is not a quantity, and a cell format code is never one."""
+    match = re.search(r"(?:start(?:ing)?\s+from|starting\s+at|at least|minimum(?: of)?|min\.?|around|about|approx\.?|up to|need|needs)\s+"
+                      rf"(\d{{1,3}}(?:[.,]\d{{3}})+|\d+)\s*(?:x\s*)?{_QTY_UNITS}\b", str(text or ""), re.I)
+    if not match:
+        return None
+    digits = match.group(1)
+    value = float(re.sub(r"[.,](?=\d{3}\b)", "", digits).replace(",", "."))
+    if str(int(value)) in CELL_FORMATS or value <= 0:
+        return None
+    unit = match.group(2).lower()
+    unit = {"pcs": "units", "piece": "units", "pieces": "units", "unit": "units"}.get(unit, unit if unit.endswith("s") else unit + "s")
+    return value, unit
+
+
 def sql_text_models():
     """The migration text for buyer_interest_text_models(), generated from the same list."""
     values = ",\n    ".join(
