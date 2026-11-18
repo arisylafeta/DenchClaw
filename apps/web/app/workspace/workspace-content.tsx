@@ -1,5 +1,6 @@
 "use client";
 
+import { botConfig, botName } from "@/lib/hermes-bots";
 import { Suspense, useEffect, useState, useCallback, useRef, useMemo, useReducer, type ReactNode } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { WorkspaceSidebar } from "../components/workspace/workspace-sidebar";
@@ -2948,7 +2949,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
                   nativeConversationKey={nativeKey}
                   headerBadge={groupRow ? <GroupBadge row={groupRow} /> : undefined}
                   ref={(handle) => setMainChatPanelRef(tab.id, handle)}
-                  sessionTitle={nativeRow?.title || tab.title}
+                  sessionTitle={nativeRow?.profile && botConfig(nativeRow.profile).mode === "single" ? botName(nativeRow.profile) : nativeRow?.title || tab.title}
                   initialSessionId={isGateway ? undefined : (tab.sessionKey ? undefined : tab.sessionId ?? undefined)}
                   onActiveSessionChange={isGateway || tab.sessionKey ? undefined : (id) => handleChatTabSessionChange(tab.id, id)}
                   onSessionsChange={nativeKey ? () => void hermesChats.reload() : isGateway ? undefined : refreshSessions}
