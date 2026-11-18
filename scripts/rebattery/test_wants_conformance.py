@@ -39,6 +39,14 @@ class R1(unittest.TestCase):
         demand = {"id": "d1", "status": "open", "summary": "Tesla packs", "spec": {"makes": ["Tesla", "BYD"], "chemistries": ["LFP"]}}
         self.assertEqual(wc.r1(ctx([line("a", demand_id="d1", make="BYD", chemistry="LFP")], [demand])), [])
 
+    def test_cell_format_in_the_key_is_not_a_made_up_pairing(self):
+        demand = {"id": "d1", "status": "open", "summary": "Retired cells, chemistry is flexible", "spec": {
+            "chemistries": ["LFP", "NMC"], "formats": ["Cells", "Modules"], "cell_formats": ["Prismatic", "Pouch"]}}
+        keyed = line("a", demand_id="d1", chemistry="NMC", format="cell", product_key="broad:prismatic-nmc-cells")
+        plain = line("b", demand_id="d1", chemistry="NMC", format="cell", product_key="broad:nmc-cells")
+        self.assertEqual(wc.r1(ctx([keyed], [demand])), [])
+        self.assertEqual(len(wc.r1(ctx([plain], [demand]))), 1)
+
     def test_one_clause_listing_every_value_traces_all(self):
         demand = {"id": "d1", "status": "open", "summary": "Tesla or BYD LFP or NMC packs",
                   "spec": {"makes": ["Tesla", "BYD"], "chemistries": ["LFP", "NMC"]}}
@@ -75,6 +83,13 @@ class R2(unittest.TestCase):
         offer = {"id": "o1", "bulk_listing_id": "b1", "company_id": "c1", "stage": "declined"}
         self.assertEqual(wc.r2(ctx([self.declined(source_refs=["crm:b1"])], [demand], [offer])), [])
 
+    def test_said_line_only_from_a_request_closed_as_a_reply(self):
+        said = lambda: line("s", kind="interest", demand_id="d1", make="Tesla", format="pack")
+        reply = {"id": "d1", "status": "closed", "closed_reason": "offer_reply", "summary": "", "spec": {}}
+        expired = {"id": "d1", "status": "closed", "closed_reason": "expired", "summary": "", "spec": {}}
+        self.assertEqual(wc.r2(ctx([said()], [reply])), [])
+        self.assertEqual(len(wc.r2(ctx([said()], [expired]))), 1)
+
 
 class R3(unittest.TestCase):
     def test_non_canonical_slug(self):
@@ -84,6 +99,15 @@ class R3(unittest.TestCase):
 
     def test_broad_and_part_keys_are_ignored(self):
         self.assertEqual(wc.r3(ctx([line("a", product_key="part:ABC1", model="Whatever")])), [])
+
+    def test_ev_prefixed_and_plus_models_are_non_canonical_keys(self):
+        for make, model, key in (("Kia", "e-Niro", "model:kia-eniro-64kwh"), ("Nissan", "Leaf e+", "model:nissan-leafe-62kwh"),
+                                 ("Citroen", "e-Berlingo", "model:citroen-eberlingo-50kwh")):
+            self.assertEqual(len(wc.r3(ctx([line("a", product_key=key, make=make, model=model)]))), 1, key)
+
+    def test_smart_car_of_psa_keeps_its_name(self):
+        ok = line("a", product_key="model:psa-smartcar300-44kwh", make="PSA", model="Smart Car 300")
+        self.assertEqual(wc.r3(ctx([ok])), [])
 
 
 class R4(unittest.TestCase):
@@ -101,6 +125,23 @@ class R4(unittest.TestCase):
         model = line("b", demand_id="d2", make="Tesla", format="pack", product_key="model:tesla-model3", product_key_level="model")
         self.assertEqual(wc.r4(ctx([broad, model])), [])
 
+    def dossier_pair(self):
+        broad = line("bi_dossier_a", make="Tesla", format="pack", product_key="broad:tesla-any-packs")
+        model = line("bi_dossier_b", make="Tesla", format="pack", product_key="model:tesla-model3", product_key_level="model")
+        return [broad, model]
+
+    def test_dossier_broad_line_that_a_product_states_itself_is_not_redundant(self):
+        products = [{"make": "Tesla", "format": "packs", "status": "asked"}, {"make": "Tesla", "model": "Model 3", "format": "packs"}]
+        self.assertEqual(wc.r4(ctx(self.dossier_pair(), products=products)), [])
+
+    def test_dossier_broad_line_without_a_product_is_still_redundant(self):
+        products = [{"make": "Tesla", "model": "Model 3", "format": "packs"}]
+        self.assertEqual([v["line_id"] for v in wc.r4(ctx(self.dossier_pair(), products=products))], ["bi_dossier_a"])
+
+    def test_declined_product_does_not_back_an_interest_line(self):
+        products = [{"make": "Tesla", "format": "packs", "status": "declined"}, {"make": "Tesla", "model": "Model 3", "format": "packs"}]
+        self.assertEqual([v["line_id"] for v in wc.r4(ctx(self.dossier_pair(), products=products))], ["bi_dossier_a"])
+
 
 class R5(unittest.TestCase):
     def test_vehicle_make_with_systems(self):
@@ -108,6 +149,10 @@ class R5(unittest.TestCase):
                  line("b", make="Nissan", format="pack", product_key="broad:nissan-any-packs"),
                  line("c", make="Fluence", format="system", product_key="broad:fluence-any-systems")]
         self.assertEqual([v["line_id"] for v in wc.r5(ctx(lines))], ["a"])
+
+    def test_tesla_storage_products_are_systems_by_nature(self):
+        mega = line("m", make="Tesla", format="system", product_key="model:tesla-megapack", product_key_level="model", model="Megapack")
+        self.assertEqual(wc.r5(ctx([mega])), [])
 
 
 class R6(unittest.TestCase):
@@ -149,6 +194,27 @@ class R6(unittest.TestCase):
         demand = {"id": "d1", "status": "open", "summary": "", "spec": {"cell_makers": ["CALB"]}}
         keyed = line("a", demand_id="d1", make="CALB", format="cell", product_key="broad:calb-any-cells")
         self.assertEqual(wc.r6(ctx([keyed], [demand])), [])
+
+    def test_pack_request_does_not_need_the_cell_format_in_a_line(self):
+        pack = {"id": "d1", "status": "open", "summary": "", "spec": {"formats": ["Packs"], "cell_formats": ["Prismatic"]}}
+        bare = line("a", demand_id="d1", format="pack", product_key="broad:any-packs")
+        self.assertEqual(wc.r6(ctx([bare], [pack])), [])
+        cells = {"id": "d1", "status": "open", "summary": "", "spec": {"formats": ["Cells"], "cell_formats": ["Prismatic"]}}
+        self.assertIn("cell format Prismatic", wc.r6(ctx([line("a", demand_id="d1", format="cell", product_key="broad:any-cells")], [cells]))[0]["why"])
+
+    def test_cell_model_names_its_cell_format_but_a_make_only_cell_product_does_not(self):
+        named = [{"make": "Panasonic", "model": "NCR2170M", "format": "cells", "cell_format": "21700"}]
+        self.assertEqual(wc.r6(ctx([line("bi_dossier_1", make="Panasonic", format="cell", product_key="model:panasonic-ncr2170m")], products=named)), [])
+        bare = [{"make": "Panasonic", "format": "cells", "cell_format": "21700"}]
+        out = wc.r6(ctx([line("bi_dossier_1", make="Panasonic", format="cell", product_key="broad:panasonic-any-cells")], products=bare))
+        self.assertIn("cell format 21700", out[0]["why"])
+
+    def test_make_only_product_kwh_is_carried_by_a_range_of_its_make_only(self):
+        products = [{"make": "MG", "format": "packs", "kwh": [44.5]}]
+        inside = line("bi_dossier_1", make="MG", format="pack", product_key="broad:mg-any-packs", kwh_min=40, kwh_max=75)
+        outside = line("bi_dossier_1", make="MG", format="pack", product_key="broad:mg-any-packs", kwh_min=72.6, kwh_max=72.6)
+        self.assertEqual(wc.r6(ctx([inside], products=products)), [])
+        self.assertIn("kWh 44.5", wc.r6(ctx([outside], products=products))[0]["why"])
 
 
 class R7(unittest.TestCase):
@@ -251,6 +317,13 @@ class R8(unittest.TestCase):
         ok = line("a", demand_id="d1", make="Tesla", model="Model 3", product_key="model:tesla-model3-75kwh", product_key_level="model")
         self.assertEqual(wc.r8(ctx([ok], [self.FELLTEN])), [])
 
+    def test_part_line_of_a_request_that_names_a_model_is_not_widening(self):
+        demand = {"id": "d1", "company_id": "c1", "status": "open", "summary": "Kia EV6 77.4 kWh pack, part 37501-CV050", "spec": {"makes": ["Hyundai or Kia"]}}
+        part = line("a", demand_id="d1", make="Kia", product_key="part:37501CV050", product_key_level="part")
+        self.assertEqual(wc.r8(ctx([part], [demand])), [])
+        broad = line("b", demand_id="d1", make="Kia", product_key="broad:hyundai-or-kia-any-packs")
+        self.assertIn("model (ev6)", wc.r8(ctx([broad], [demand]))[0]["why"])
+
     def test_dossier_line_dropping_the_product_make_is_widening(self):
         products = [{"make": "Tesla", "chemistry": "NMC", "format": "packs"}]
         wide = line("bi_dossier_1", chemistry="NMC", format="pack", product_key="broad:nmc-packs")
@@ -265,6 +338,14 @@ class R9(unittest.TestCase):
         out = wc.r9(ctx([], [elg]))
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["key"], "no line")
+
+    def test_model_the_sync_removed_on_purpose_is_not_missed(self):
+        demand = {"id": "d2", "company_id": "c1", "status": "open", "summary": "Tesla Model 3 and Model Y packs", "spec": {"makes": ["Tesla"]}}
+        keep = line("a", demand_id="d2", make="Tesla", model="Model 3", product_key="model:tesla-model3", product_key_level="model")
+        base = ctx([keep], [demand])
+        self.assertIn("model modely", wc.r9(base)[0]["why"])
+        base["suppressed_by_demand"] = {"d2": ["model:tesla-modely"]}
+        self.assertEqual(wc.r9(base), [])
 
     def test_closed_request_needs_no_line(self):
         closed = {"id": "d2", "company_id": "c1", "status": "closed", "closed_reason": "expired", "summary": "x", "spec": {}}

@@ -359,6 +359,8 @@ def _dossier_states_line(line, products):
     names no model or part states a broad line)."""
     key_fold = fold(line.get("product_key") or "")
     for p in products or []:
+        if (str(p.get("status") or "") == "declined") != (line.get("kind") == "declined"):
+            continue  # a declined product states a declined line only
         if bool(p.get("make")) != bool(line.get("make")) or (p.get("make") and not (make_folds(p["make"]) & make_folds(line["make"]))):
             continue
         if str(p.get("chemistry") or "").upper() != str(line.get("chemistry") or "").upper() and not (as_list(p.get("chemistry")) and str(line.get("chemistry") or "").upper() in {str(c).upper() for c in as_list(p.get("chemistry"))}):
@@ -499,12 +501,21 @@ def r6(ctx):
             items = [("part number", "text", v) for v in as_list(product.get("part_number"))]
             if "cell" in {norm_format(f) for f in as_list(product.get("format"))} and not (product.get("part_number") or product.get("model")):
                 items += [("cell format", "text", v) for v in as_list(product.get("cell_format"))]  # a cell model or part names its cell
-            if product.get("model") or product.get("part_number"):  # a make or platform product has no model key to hold a kWh
-                items += [("kWh", "kwh", num(v)) for v in as_list(product.get("kwh")) + as_list(product.get("kwh_min")) + as_list(product.get("kwh_max"))]
+            kwhs = [num(v) for v in as_list(product.get("kwh")) + as_list(product.get("kwh_min")) + as_list(product.get("kwh_max"))]
+            items += [("kWh", "kwh", v) for v in kwhs]
+            # A make or platform product has no model key to hold a kWh; a line of its make that spans the kWh in
+            # kwh_min..kwh_max carries it. A kWh outside every such range is still lost.
+            product_numbers = set(numbers)
+            for v in kwhs:
+                for other in everything:
+                    lo, hi = num(other.get("kwh_min")), num(other.get("kwh_max"))
+                    same_make = not other.get("make") or not product.get("make") or make_folds(other["make"]) & make_folds(product["make"])
+                    if v is not None and lo is not None and hi is not None and lo <= v <= hi and same_make:
+                        product_numbers.add(v)
             maker = product.get("make")
             if maker and fold(maker) in {fold(n) for n in buyer_dossier.CELL_MAKERS + buyer_dossier.EXTRA_CELL_MAKERS}:
                 items.append(("cell maker", "text", maker))
-            lost = _lost(blob, numbers, [i for i in items if i[2] is not None], stated_blob)
+            lost = _lost(blob, product_numbers, [i for i in items if i[2] is not None], stated_blob)
             if lost:
                 label = " ".join(str(product.get(k)) for k in ("make", "model") if product.get(k)) or "product"
                 found.append(_violation(ctx, "R6", lines[0], f"dossier product {label} states {'; '.join(lost)} but no dossier line carries it", f"dossier of {company_id}", key=f"dossier product {label}"))
@@ -704,6 +715,8 @@ def _dropped(line, makes=(), chemistries=(), formats=(), models=(), exempt_chem_
     line_make = make_folds(line.get("make")) if line.get("make") else set()
     # A model the source states is dropped when the line is of that model's make (or states no make) and carries no stated model.
     stated = [(own, slug) for own, slug in models if not line_make or own in line_make]
+    if str(line.get("product_key") or "").startswith("part:"):
+        stated = []  # a part number names one product of the model itself
     if stated and not any(_line_has_model(line, slug) for _, slug in stated):
         out.append("model (" + "/".join(sorted({slug for _, slug in stated})) + ")")
     return out

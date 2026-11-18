@@ -75,6 +75,8 @@ def _normal_pass(raw, make, drop_years):
     own = " ".join(re.sub(r"[^a-z0-9]+", " ", unaccent(make)).split()) if make else ""
     brands = sorted({own, *BRAND_WORDS} - {""}, key=len, reverse=True)
     for brand in brands:
+        if brand == "smart" and own and own not in ("smart", "mercedes", "mercedes benz"):
+            continue  # "Smart Car 300" of PSA is a platform name, not the smart brand
         spaced = " ".join(re.sub(r"[^a-z0-9]+", " ", brand).split())
         if text.startswith(spaced + " "):
             text = text[len(spaced) + 1:]
