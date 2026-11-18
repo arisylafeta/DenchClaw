@@ -38,10 +38,28 @@ def gmail_html(body_html, signature_html=''):
     return f'<div dir="ltr">{body}{sig}</div>'
 
 
+def reply_to_override(db, value, author):
+    """A per-message Reply-To: a rebattery.io address whose base (without +tag) is an active Gmail-synced identity,
+    so replies land in a mailbox we read. Returns the normalised address, or None when it is the identity default."""
+    if not value:
+        return None
+    address = value.strip().lower()
+    local, _, domain = address.rpartition('@')
+    if not local or domain != 'rebattery.io' or not re.fullmatch(r'[a-z0-9._-]+(\+[a-z0-9._-]+)?', local):
+        raise Refused('invalid_reply_to', reply_to=value)
+    base = local.split('+', 1)[0] + '@' + domain
+    with dict_cursor(db) as cur:
+        cur.execute('select 1 from mail_identity where active and gmail_account is not null and lower(address)=%s', (base,))
+        if not cur.fetchone():
+            raise Refused('reply_to_mailbox_unknown', reply_to=value)
+    return None if address == (author.get('reply_to') or author['address']).lower() else address
+
+
 def prepare(db, identity_key, recipients, purpose='personal', template=None, variables=None,
             subject=None, body=None, html=None, thread=None, campaign=None, verification=None, transport=None, message_id=None,
-            oneoff_blocks=None, allow_multiple_cta=False, cc=None, cc_thread=False, sign=False):
+            oneoff_blocks=None, allow_multiple_cta=False, cc=None, cc_thread=False, sign=False, reply_to=None):
     author, transport = policy.identity(db,identity_key,purpose,transport)
+    reply_to = reply_to_override(db, reply_to, author)
     variables = variables or {}
     generated = None
     if sign and (template or oneoff_blocks is not None):
@@ -84,6 +102,8 @@ def prepare(db, identity_key, recipients, purpose='personal', template=None, var
            'body_html':(gmail_html(rendered['html'], (author.get('signature_html') or '') if signs else '') if not template and generated is None else rendered['html']),'thread_id':thread,'campaign_id':campaign,
            'personalization':{'variables':variables,'verification':verification or {},
                               'identity_snapshot':{key:author.get(key) for key in _SNAPSHOT_KEYS}},'links':[]}
+    if reply_to:
+        row['personalization']['reply_to'] = reply_to
     if generated is not None:
         row['personalization']['oneoff'] = {'warnings': generated['warnings'], 'variables_used': generated['variables_used']}
     if template and 'source_body_html' in (tpl.get('meta') or {}):
@@ -149,7 +169,7 @@ def create(args):
         row, author = prepare(db,args.identity,args.to.split(','),args.purpose,args.template,json.loads(args.vars),args.subject,args.body,args.html,args.thread,args.campaign,json.loads(args.verification),args.transport,args.id,
                               oneoff_blocks=blocks, allow_multiple_cta=getattr(args, 'allow_multiple_cta', False),
                               cc=args.cc.split(',') if getattr(args,'cc',None) else None, cc_thread=getattr(args,'cc_thread',False),
-                              sign=getattr(args,'sign',False))
+                              sign=getattr(args,'sign',False), reply_to=getattr(args,'reply_to',None))
         exclusions = []
         for email in [*row['to_emails'],*row['cc_emails']]:
             try:
@@ -310,6 +330,7 @@ def content_flags(parser):
     parser.add_argument('--body')
     parser.add_argument('--html')
     parser.add_argument('--verification',default='{}',help='JSON address to ZeroBounce result mapping; only valid results are eligible')
+    parser.add_argument('--reply-to',help='Reply-To for this draft or campaign: a rebattery.io address, +tag allowed (supply+dismantlers@rebattery.io); its base must be a Gmail-synced identity')
 
 
 def register(subparsers):

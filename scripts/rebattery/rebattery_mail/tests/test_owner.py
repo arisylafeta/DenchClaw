@@ -205,3 +205,15 @@ def test_one_failing_owner_does_not_block_the_queue(monkeypatch):
     with psycopg2.connect(DSN) as db, db.cursor() as cur:
         cur.execute("select state, attempts from mail_agent_event where message_id='m1'")
         assert cur.fetchone() == ('failed', 5)
+
+
+def test_plus_tag_in_raw_headers_routes_even_when_sync_strips_it(monkeypatch):
+    owner.rules(Namespace(action='add', kind='tag', value='dismantlers', profile='dismantlercampaigns', session='dc-main', priority=100, note=None, apply=True))
+    created = datetime.now(timezone.utc) - timedelta(minutes=10)
+    with psycopg2.connect(DSN) as db, db.cursor() as cur:
+        cur.execute('''insert into mail_message (id, direction, transport, state, thread_id, subject, from_email, to_emails, identity_key, labels, sent_at, created_at, personalization)
+                       values ('m1','inbound','gmail','received','t1','Re: packs','yard@example.test',%s,'supply','{}',%s,%s,%s)''',
+                    (['supply@rebattery.io'], created, created, json.dumps({'provider_headers': {'to': 'ReBattery <supply+dismantlers@rebattery.io>'}})))
+    with psycopg2.connect(DSN) as db, db.cursor(cursor_factory=__import__('psycopg2.extras').extras.RealDictCursor) as cur:
+        cur.execute("select * from mail_message where id='m1'")
+        assert owner.route(cur, cur.fetchone())[:3] == ('dismantlercampaigns', 'dc-main', 'rule tag=dismantlers')

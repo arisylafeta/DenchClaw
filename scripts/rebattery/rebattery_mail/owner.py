@@ -178,6 +178,16 @@ def automated(message):
     return None
 
 
+def header_addresses(message):
+    """Raw To/CC/Delivered-To addresses from the stored provider headers. The Gmail sync stores to_emails without
+    +tags, so a tag is only visible here."""
+    headers = ((message.get('personalization') or {}).get('provider_headers') or {})
+    found = []
+    for key in ('to', 'cc', 'delivered-to', 'x-original-to'):
+        found += re.findall(r'[\w.+-]+@[\w.-]+', str(headers.get(key) or ''))
+    return found
+
+
 def plus_tags(addresses):
     tags = []
     for address in addresses or []:
@@ -194,7 +204,8 @@ def route(cur, message):
         if owner:
             return owner['profile'], owner['session_id'], 'thread owner', None
     sender = (message.get('from_email') or '').lower()
-    candidates = [('tag', t) for t in plus_tags(list(message.get('to_emails') or []) + list(message.get('cc_emails') or []))]
+    tags = plus_tags(list(message.get('to_emails') or []) + list(message.get('cc_emails') or []) + header_addresses(message))
+    candidates = [('tag', t) for t in dict.fromkeys(tags)]
     candidates += [('sender', sender), ('person', message.get('from_person_id') or message.get('person_id')),
                    ('company', message.get('company_id')), ('domain', sender.rpartition('@')[2]),
                    ('mailbox', message.get('identity_key'))]
@@ -335,7 +346,7 @@ def deliver(profile, session_id, text, log_path):
 
 
 MESSAGE_COLUMNS = ('m.id, m.thread_id, m.subject, m.from_email, m.from_person_id, m.person_id, m.company_id, m.identity_key, '
-                   'm.to_emails, m.cc_emails, m.labels, m.sent_at, m.created_at')
+                   'm.to_emails, m.cc_emails, m.labels, m.sent_at, m.created_at, m.personalization')
 
 
 def dispatch(args):

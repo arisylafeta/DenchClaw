@@ -1208,3 +1208,36 @@ def test_reb562_postmark_refuses_attachments():
     message={'purpose':'transactional','transport':'postmark-transactional','personalization':{'attachments':['/tmp/x.pdf']}}
     with pytest.raises(Refused,match='attachments_require_gmail_transport'):
         PostmarkSendDriver(lambda *a,**k: pytest.fail('provider must not be called')).preflight(identity,message)
+
+
+def test_reply_to_override_is_validated_digest_bound_and_reaches_the_driver(env):
+    email=env+'0@example.test'
+    verification={email:{'status':'valid','sub_status':'role_based'}}
+    with connection() as db:
+        with db.cursor() as cur:
+            cur.execute("select address from mail_identity where key='alex'")
+            base=cur.fetchone()[0]
+        tagged=base.replace('@','+dismantlers@')
+        plain,_=draft.prepare(db,'alex',[email],subject='Synthetic',body='Hello',verification=verification,message_id=env+'plain')
+        row,_=draft.prepare(db,'alex',[email],subject='Synthetic',body='Hello',verification=verification,message_id=env+'plain',reply_to=tagged.upper())
+        assert row['personalization']['reply_to']==tagged and 'reply_to' not in plain['personalization']
+        assert digest([row])!=digest([plain])
+        same,_=draft.prepare(db,'alex',[email],subject='Synthetic',body='Hello',verification=verification,message_id=env+'plain',reply_to=base)
+        assert 'reply_to' not in same['personalization']  # the identity default is not an override
+        for bad,rule in (('someone@example.test','invalid_reply_to'),('nobody+x@rebattery.io','reply_to_mailbox_unknown')):
+            with pytest.raises(Refused) as exc:
+                draft.prepare(db,'alex',[email],subject='Synthetic',body='Hello',verification=verification,reply_to=bad)
+            assert exc.value.rule==rule
+    seen={}
+    class Recording(Fake):
+        def preflight(self,identity,message):
+            seen['reply_to']=identity.get('reply_to')
+            return self.suppressions
+    row['state']='draft'
+    with connection() as db:
+        draft.insert(db,row)
+    with connection() as db, dict_cursor(db) as cur:
+        cur.execute('select * from mail_message where id=%s',(row['id'],))
+        message=cur.fetchone()
+    author=send.preflight(message,Recording())
+    assert seen['reply_to']==tagged and author['reply_to']==tagged

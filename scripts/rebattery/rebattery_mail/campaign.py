@@ -76,7 +76,7 @@ def campaign_policy(config,author):
     promotional = supply or config.get('type') in ('intro','newsletter','marketing','promotion')
     if promotional and config['purpose']!='marketing':
         raise Refused('campaign_purpose_mismatch','Promotional campaign types require marketing purpose')
-    if supply and (author['address']!='supply@rebattery.io' or (author.get('reply_to') or author['address'])!='supply@rebattery.io'):
+    if supply and (author['address']!='supply@rebattery.io' or (config.get('reply_to') or author.get('reply_to') or author['address']).lower()!='supply@rebattery.io'):
         raise Refused('supply_update_identity_required')
     cap = config.get('pilot_cap')
     if cap is not None and cap<1:
@@ -130,7 +130,7 @@ def freeze(args, driver=None):
                 if person[column] is None or not str(person[column]).strip():
                     raise Refused('missing_variable',variable=key,person_id=person['id'])
                 variables[key] = person[column]
-            row,_ = prepare(db,config['identity'],[email],config['purpose'],config['template'],variables,config['subject'],config['body'],config['html'],campaign=args.target,verification=config['verification'],transport=transport,message_id=hashlib.sha256((args.target+'\0'+person['id']).encode()).hexdigest()[:32])
+            row,_ = prepare(db,config['identity'],[email],config['purpose'],config['template'],variables,config['subject'],config['body'],config['html'],campaign=args.target,verification=config['verification'],transport=transport,message_id=hashlib.sha256((args.target+'\0'+person['id']).encode()).hexdigest()[:32],reply_to=config.get('reply_to'))
             row.update(person_id=person['id'],company_id=person['company_id'],state='frozen',listing_id=config.get('listing_id'),auction_url=config.get('auction_url'))
             row['personalization']['campaign_cap'] = config.get('pilot_cap')
             validate_links(row,config['links'],config.get('auction_url'))

@@ -10,6 +10,7 @@ def digest(rows):
     values = [{key:row.get(key) for key in FIELDS} | ({'attachments':[{'filename':a['filename'],'sha256':a['sha256']} for a in row['personalization']['attachments']]} if row.get('personalization',{}).get('attachments') and row.get('direction')=='outbound' else {}) | {
         'identity_snapshot':row.get('personalization',{}).get('identity_snapshot'),
         'campaign_cap':row.get('personalization',{}).get('campaign_cap'),
+        **({'reply_to':row['personalization']['reply_to']} if row.get('personalization',{}).get('reply_to') else {}),
         'links':sorted(row.get('links',[]),key=lambda link:(link['cta_key'],link['destination_url'],link.get('listing_id') or ''))} for row in rows]
     return hashlib.sha256(json.dumps(sorted(values,key=lambda r:r['id']),sort_keys=True,separators=(',',':'),default=str).encode()).hexdigest()
 
