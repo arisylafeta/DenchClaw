@@ -63,14 +63,15 @@ def stale_media(cur, account, ids):
 
 
 def purge_media(cur, rows):
-    """Delete encrypted objects, then drop the ref from the event. A failure leaves the ref for the next run."""
+    """Delete encrypted objects, then drop the ref from every event that names them.
+    A failure leaves the ref for the next run."""
     purged = 0
-    for row in rows:
+    for ref in {row['ref'] for row in rows}:
         try:
-            media_store.delete(row['ref'])
+            media_store.delete(ref)
         except media_store.StoreError:
             continue
-        cur.execute("update whatsapp_event set payload=jsonb_set(payload,'{media,ref}','null') where id=%s", (row['id'],))
+        cur.execute("update whatsapp_event set payload=jsonb_set(payload,'{media,ref}','null') where payload->'media'->>'ref'=%s", (ref,))
         purged += 1
     return purged
 
@@ -109,7 +110,6 @@ def retain(path, account, apply=False):
                 'raw': [{'file': f.name, 'start': s, 'finish': e, 'sha256': h} for f, s, e, h in raw]}) + '\n')
             handle.flush()
             os.fsync(handle.fileno())
-        result['media_purged'] = purge_media(cur, media)
         cur.execute('''update whatsapp_message set body=null,attachment=null,
           metadata=jsonb_build_object('content_redacted',true,'retention_erased',true)
           where id=any(%s)''', (ids,))
@@ -118,4 +118,7 @@ def retain(path, account, apply=False):
         cur.execute("update whatsapp_event set payload='{}'::jsonb where account_id=%s and kind='quarantine' and captured_at < %s", (account, cutoff))
         for file, start, finish, digest in raw:
             erase_line(file, start, finish, digest)
-        return result
+    # Delete objects only after the database change committed, so a rollback never leaves refs to missing files.
+    with connection() as db, cursor(db) as cur:
+        result['media_purged'] = purge_media(cur, media)
+    return result

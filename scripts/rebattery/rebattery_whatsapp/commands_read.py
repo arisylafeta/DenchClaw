@@ -59,15 +59,17 @@ def attachment_get(db, args, store=media_store):
     out = Path(args.out).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     name = safe_name(attachment.get('filename'), f"{row['provider_message_id']}{mimetypes.guess_extension((attachment.get('mime') or '').split(';')[0]) or ''}")
-    target = out / name
-    counter = 1
-    while target.exists():
-        target = out / f'{Path(name).stem}-{counter}{Path(name).suffix}'
-        counter += 1
-    try:
-        result = store.get(attachment['ref'], str(target), attachment.get('sha256'))
-    except media_store.StoreError as exc:
-        raise ProviderError('attachment_download_failed', exc.code) from exc
+    for counter in range(100):
+        target = out / (name if not counter else f'{Path(name).stem}-{counter}{Path(name).suffix}')
+        try:
+            result = store.get(attachment['ref'], str(target), attachment.get('sha256'))
+            break
+        except media_store.StoreError as exc:
+            if exc.code == 'output_exists':
+                continue
+            raise ProviderError('attachment_download_failed', exc.code) from exc
+    else:
+        raise ProviderError('attachment_download_failed', 'output_exists')
     return {'path': result['path'], 'size': result['size'], 'sha256': result['sha256'], 'mime': attachment.get('mime'),
             'type': attachment.get('type'), 'source_ref': f"whatsapp:message:{row['id']}"}
 

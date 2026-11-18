@@ -41,7 +41,11 @@ class FakeStore:
         data = self.objects[key]
         if hashlib.sha256(data).hexdigest() != (sha256 or key[-64:]):
             raise media_store.StoreError('sha256_mismatch')
-        with open(out, 'xb') as handle:
+        try:
+            handle = open(out, 'xb')
+        except FileExistsError as exc:
+            raise media_store.StoreError('output_exists') from exc
+        with handle:
             handle.write(data)
         return {'path': out, 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
 
@@ -95,7 +99,9 @@ def test_media_for_view_once_or_revoked_messages_is_never_attached(db, tmp_path)
     apply(tmp_path, db)
     row = message(db)
     assert row['attachment'] is None and row['metadata']['content_redacted'] is True
-    assert not any(((r.get('payload') or {}).get('media') or {}).get('ref') for r in rows(db, 'whatsapp_event') if r['kind'] == 'media')
+    # The ref is kept only so retention can delete the object; it is never exposed on the message.
+    with db, cursor(db) as cur:
+        assert [r['ref'] for r in stale_media(cur, ACCOUNT, [])] == [REF]
 
 
 def test_revoked_message_drops_stored_ref_from_the_message_and_flags_the_object_for_purge(db, tmp_path):

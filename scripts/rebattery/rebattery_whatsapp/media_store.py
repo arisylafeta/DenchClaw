@@ -25,7 +25,7 @@ import sys
 
 DEFAULT_REMOTE = 'rebattery-hel1:rebattery-hermes-storage-hel1-20260719/static/encrypted'
 SECRET_CLI = '/root/.hermes/scripts/hermes-secret'
-TIMEOUT = 600
+TIMEOUT = 240  # per rclone call; capture's store timeout allows six of them
 
 
 class StoreError(Exception):
@@ -61,7 +61,10 @@ def _secret(name):
 
 
 def _obscure(rclone, value):
-    result = subprocess.run([rclone, 'obscure', '-'], input=value + '\n', capture_output=True, text=True, timeout=60)
+    try:
+        result = subprocess.run([rclone, 'obscure', '-'], input=value + '\n', capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise StoreError('crypt_obscure_failed') from exc
     if result.returncode or not result.stdout.strip():
         raise StoreError('crypt_obscure_failed')
     return result.stdout.strip()
@@ -141,7 +144,10 @@ def get(key, out, sha256=None, env=None):
     digest = hashlib.sha256(result.stdout).hexdigest()
     if digest != (sha256 or key[-64:]):
         raise StoreError('sha256_mismatch')
-    fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError as exc:
+        raise StoreError('output_exists') from exc
     with os.fdopen(fd, 'wb') as handle:
         handle.write(result.stdout)
     return {'path': str(out), 'size': len(result.stdout), 'sha256': digest}
@@ -180,6 +186,9 @@ def main(argv=None):
         return 0
     except StoreError as exc:
         print(json.dumps({'error': exc.code}))
+        return 1
+    except Exception:  # never a traceback or provider detail: the capture service parses one JSON line
+        print(json.dumps({'error': 'store_failed'}))
         return 1
 
 

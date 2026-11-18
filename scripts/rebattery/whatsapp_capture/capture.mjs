@@ -19,7 +19,7 @@ import pino from 'pino';
 import qrcodeTerminal from 'qrcode-terminal';
 import QRCode from 'qrcode';
 import { toRecord, updateRecord, aliasRecord, membershipRecord, mediaRecord, captureSocketOptions } from './record.mjs';
-import { createMediaPipeline, pythonStore } from './media.mjs';
+import { collectLimited, createMediaPipeline, pythonStore } from './media.mjs';
 
 const EXIT_UNPAIRED = 3;
 const args = process.argv.slice(2);
@@ -86,13 +86,13 @@ function append(records) {
     console.error('capture append failed:', err.code ?? 'APPEND_FAILED');
     process.exit(1);
   }
-  setStatus({ captured: status.captured + kept.length, lastMessageAt: new Date().toISOString() });
+  setStatus({ captured: status.captured + kept.filter(r => r.kind !== 'media').length, lastMessageAt: new Date().toISOString() });
 }
 // Media download (approved 18 Nov 2026, changes the earlier no-download rule). Files go to private
 // encrypted storage through rebattery_whatsapp/media_store.py; failures are recorded and retried, never fatal.
 const media = PAIR ? null : createMediaPipeline({
   dir: path.join(STATE, 'media-queue'),
-  download: msg => downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: sock.updateMediaMessage }),
+  download: async msg => collectLimited(await downloadMediaMessage(msg, 'stream', {}, { logger, reuploadRequest: sock.updateMediaMessage })),
   store: pythonStore({ script: fileURLToPath(new URL('../rebattery_whatsapp/media_store.py', import.meta.url)) }),
   serialize: msg => JSON.stringify(msg, BufferJSON.replacer),
   deserialize: text => JSON.parse(text, BufferJSON.reviver),
@@ -102,6 +102,12 @@ const media = PAIR ? null : createMediaPipeline({
   },
   log: (what, code) => console.error(what, code),
 });
+
+// Edits and revokes arriving outside messages.upsert: a deleted message must never be downloaded or kept.
+function appendMutations(records) {
+  for (const r of records) if (r?.kind === 'revoke') media?.cancel(r.chatId, r.targetId, r.account);
+  append(records);
+}
 
 function capture(messages, origin) {
   const records = [];
@@ -152,10 +158,10 @@ async function start() {
   });
   // The initial history push only reaches the first connection after linking, so pairing captures too.
   sock.ev.on('messaging-history.set', ({ messages }) => capture(messages, 'history'));
-  sock.ev.on('messages.update', updates => append(updates.map(u => updateRecord(u, options('live', 'messages.update')))));
+  sock.ev.on('messages.update', updates => appendMutations(updates.map(u => updateRecord(u, options('live', 'messages.update')))));
   sock.ev.on('messages.delete', event => {
     // A chat-wide clear has no per-message source provenance. Never invent targets.
-    if (event.keys) append(event.keys.map(key => updateRecord({ key, update: { message: null, messageStubType: 1 } }, options('live', 'messages.delete'))));
+    if (event.keys) appendMutations(event.keys.map(key => updateRecord({ key, update: { message: null, messageStubType: 1 } }, options('live', 'messages.delete'))));
   });
   sock.ev.on('lid-mapping.update', mapping => append([aliasRecord(mapping, options('live', 'lid-mapping.update'))]));
   sock.ev.on('group-participants.update', event => append([membershipRecord(event, options('live', 'group-participants.update'))]));

@@ -68,7 +68,9 @@ def sanitised(record):
     if flags.get('viewOnce') or (expires and instant(expires) <= datetime.now(timezone.utc)):
         value['body'] = None
         value['attachment'] = None
-        value['media'] = None
+        # Keep only the storage ref of an already stored file so retention can still delete the object.
+        media = value.get('media') or {}
+        value['media'] = {'status': media['status'], 'ref': media['ref']} if media.get('ref') else None
         value['contentRedacted'] = True
     return value
 

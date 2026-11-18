@@ -46,13 +46,13 @@ test('media record maps outcome onto the message with ref and hash, never keys o
   assert.notEqual(failed.eventId, m.eventId);
 });
 
-function harness({ download, put, delays = [10, 20], concurrency = 2 }) {
+function harness({ download, put, remove, delays = [10, 20], concurrency = 2, downloadTimeoutMs }) {
   const dir = mkdtempSync(path.join(tmpdir(), 'wa-media-'));
   const records = [];
   let clock = 1_000_000;
   const pipeline = createMediaPipeline({
-    dir, download, concurrency, delays, now: () => clock,
-    store: { put: async (r, buf) => put(r, buf) },
+    dir, download, concurrency, delays, now: () => clock, ...(downloadTimeoutMs ? { downloadTimeoutMs } : {}),
+    store: { put: async (r, buf) => put(r, buf), ...(remove ? { remove } : {}) },
     record: (r, result) => records.push({ id: r.messageId, ...result }),
   });
   return { pipeline, records, dir, tick: ms => { clock += ms; }, files: () => readdirSync(dir).filter(n => n.endsWith('.json')), cleanup: () => rmSync(dir, { recursive: true, force: true }) };
@@ -149,4 +149,50 @@ test('error codes carry no provider detail', () => {
   assert.equal(errorCode(Object.assign(new Error('secret url'), { status: 404 })), 'media_expired');
   assert.equal(errorCode(Object.assign(new Error('x'), { output: { statusCode: 503 } })), 'http_503');
   assert.equal(errorCode(new Error('https://mmg.whatsapp.net/secret')), 'download_failed');
+});
+
+test('a revoke while the download is in flight discards the file and stores nothing', async () => {
+  let release;
+  const h = harness({ download: () => new Promise(resolve => { release = () => resolve(data); }), put: async () => { throw new Error('must not store'); } });
+  const r = toRecord(doc(), opts);
+  h.pipeline.submit(doc(), r);
+  await settle();
+  h.pipeline.cancel(r.chatId, r.messageId, r.account);
+  release();
+  await settle();
+  assert.deepEqual(h.records, []);
+  assert.deepEqual(h.files(), []);
+  h.pipeline.submit(doc(), r); // a redelivery of a revoked message is ignored
+  await settle();
+  assert.deepEqual(h.files(), []);
+  h.cleanup();
+});
+
+test('a revoke while uploading removes the object that was just written', async () => {
+  let finish; const removed = [];
+  const h = harness({ download: async () => data, put: () => new Promise(resolve => { finish = () => resolve({ ref: 'REF' }); }), remove: async (r, ref) => { removed.push(ref); } });
+  const r = toRecord(doc(), opts);
+  h.pipeline.submit(doc(), r);
+  await settle();
+  h.pipeline.cancel(r.chatId, r.messageId, r.account);
+  finish();
+  await settle();
+  assert.deepEqual(removed, ['REF']);
+  assert.deepEqual(h.records, []);
+  assert.deepEqual(h.files(), []);
+  h.cleanup();
+});
+
+test('a hung download times out, is recorded and does not block other messages', async () => {
+  const h = harness({ downloadTimeoutMs: 30, concurrency: 1,
+    download: msg => msg.key.id === 'HUNG' ? new Promise(() => {}) : Promise.resolve(data), put: async () => ({ ref: 'REF' }) });
+  h.pipeline.submit(doc({}, 'HUNG'), toRecord(doc({}, 'HUNG'), opts));
+  h.pipeline.submit(doc({}, 'OK'), toRecord(doc({}, 'OK'), opts));
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const byId = Object.fromEntries(h.records.map(r => [r.id, r]));
+  assert.equal(byId.HUNG.status, 'failed');
+  assert.equal(byId.HUNG.error, 'download_timeout');
+  assert.ok(byId.HUNG.retryAt);
+  assert.equal(byId.OK.status, 'stored');
+  h.cleanup();
 });
