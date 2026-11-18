@@ -1,0 +1,2212 @@
+{
+ "version": 1,
+ "note": "Canonical model slugs shared by the lot side (productKeyFor) and buyer lines (SQL buyer_interest_model_slug, Python). Normalise the model text (lower case, accents folded, kWh/kW/Ah figures, bracketed asides, years, battery/pack/module words removed, punctuation to single spaces, leading make dropped, trailing trim words long/range/standard/awd/rwd/lr/sr/dual/motor/performance/premium/se dropped). A text that lists models (comma, semicolon or colon) has no model. With a slash the whole text must equal an alias; otherwise it equals an alias or starts with one followed by a space, longest alias first, and an alias that belongs to the line's own make wins. A bare short alias (digits, one or two characters) only applies to its own make. Unknown models keep the folded text. Regenerate the SQL twin with scripts/rebattery/model_aliases.py --sql.",
+ "models": [
+  {
+   "make": "Tesla",
+   "slug": "models",
+   "name": "Model S",
+   "aliases": [
+    "model s"
+   ]
+  },
+  {
+   "make": "Tesla",
+   "slug": "model3",
+   "name": "Model 3",
+   "aliases": [
+    "model 3",
+    "model three"
+   ]
+  },
+  {
+   "make": "Tesla",
+   "slug": "modelx",
+   "name": "Model X",
+   "aliases": [
+    "model x"
+   ]
+  },
+  {
+   "make": "Tesla",
+   "slug": "modely",
+   "name": "Model Y",
+   "aliases": [
+    "model y"
+   ]
+  },
+  {
+   "make": "Tesla",
+   "slug": "powerwall",
+   "name": "Powerwall",
+   "aliases": [
+    "powerwall",
+    "powerwall 2",
+    "powerwall 3"
+   ]
+  },
+  {
+   "make": "Tesla",
+   "slug": "megapack",
+   "name": "Megapack",
+   "aliases": [
+    "megapack",
+    "megapack 2"
+   ]
+  },
+  {
+   "make": "Tesla",
+   "slug": "powerpack",
+   "name": "Powerpack",
+   "aliases": [
+    "powerpack"
+   ]
+  },
+  {
+   "make": "Tesla",
+   "slug": "cybertruck",
+   "name": "Cybertruck",
+   "aliases": [
+    "cybertruck"
+   ]
+  },
+  {
+   "make": "Nissan",
+   "slug": "leaf",
+   "name": "Leaf",
+   "aliases": [
+    "leaf",
+    "leaf gen1",
+    "leaf gen2",
+    "leaf ze0",
+    "leaf ze1",
+    "leaf zeo",
+    "nissan leaf"
+   ]
+  },
+  {
+   "make": "Nissan",
+   "slug": "nv200",
+   "name": "NV200",
+   "aliases": [
+    "e nv200",
+    "envy200",
+    "nv 200",
+    "nv200"
+   ]
+  },
+  {
+   "make": "Nissan",
+   "slug": "ariya",
+   "name": "Ariya",
+   "aliases": [
+    "ariya",
+    "ariya fe0"
+   ]
+  },
+  {
+   "make": "Nissan",
+   "slug": "qashqai",
+   "name": "Qashqai",
+   "aliases": [
+    "qashqai"
+   ]
+  },
+  {
+   "make": "Nissan",
+   "slug": "juke",
+   "name": "Juke",
+   "aliases": [
+    "juke"
+   ]
+  },
+  {
+   "make": "Nissan",
+   "slug": "townstar",
+   "name": "Townstar",
+   "aliases": [
+    "townstar"
+   ]
+  },
+  {
+   "make": "Hyundai",
+   "slug": "kona",
+   "name": "Kona",
+   "aliases": [
+    "kona",
+    "kona 39 kwh",
+    "kona 64 kwh",
+    "kona electric",
+    "kona electric 64 kwh",
+    "kona electric os",
+    "kona ev",
+    "kona hybrid"
+   ]
+  },
+  {
+   "make": "Hyundai",
+   "slug": "ioniq",
+   "name": "Ioniq",
+   "aliases": [
+    "ioniq",
+    "ioniq ae",
+    "ioniq electric",
+    "ioniq hybrid",
+    "ioniq phev",
+    "ioniq premium",
+    "ioniq premium se bev"
+   ]
+  },
+  {
+   "make": "Hyundai",
+   "slug": "ioniq5",
+   "name": "Ioniq 5",
+   "aliases": [
+    "ioniq 5",
+    "ioniq 5 long range",
+    "ioniq 5 n",
+    "ioniq 5 ne",
+    "ioniq 5 standard range",
+    "ioniq5"
+   ]
+  },
+  {
+   "make": "Hyundai",
+   "slug": "ioniq6",
+   "name": "Ioniq 6",
+   "aliases": [
+    "ioniq 6",
+    "ioniq6"
+   ]
+  },
+  {
+   "make": "Hyundai",
+   "slug": "tucson",
+   "name": "Tucson",
+   "aliases": [
+    "tucson"
+   ]
+  },
+  {
+   "make": "Hyundai",
+   "slug": "i20",
+   "name": "i20",
+   "aliases": [
+    "i20"
+   ]
+  },
+  {
+   "make": "Hyundai",
+   "slug": "i30",
+   "name": "i30",
+   "aliases": [
+    "i30"
+   ]
+  },
+  {
+   "make": "Hyundai",
+   "slug": "bayon",
+   "name": "Bayon",
+   "aliases": [
+    "bayon"
+   ]
+  },
+  {
+   "make": "Hyundai",
+   "slug": "santafe",
+   "name": "Santa Fe",
+   "aliases": [
+    "santa fe"
+   ]
+  },
+  {
+   "make": "Hyundai",
+   "slug": "genesis",
+   "name": "Genesis",
+   "aliases": [
+    "genesis"
+   ]
+  },
+  {
+   "make": "Kia",
+   "slug": "niro",
+   "name": "Niro",
+   "aliases": [
+    "e niro",
+    "niro",
+    "niro 2",
+    "niro de",
+    "niro electric",
+    "niro ev",
+    "niro hybrid",
+    "niro ii",
+    "niro mk1",
+    "niro mk2",
+    "niro phev",
+    "niro sg2"
+   ]
+  },
+  {
+   "make": "Kia",
+   "slug": "ev6",
+   "name": "EV6",
+   "aliases": [
+    "ev6",
+    "ev6 cv",
+    "ev6 gt",
+    "ev6 long range",
+    "ev6 standard range"
+   ]
+  },
+  {
+   "make": "Kia",
+   "slug": "ev9",
+   "name": "EV9",
+   "aliases": [
+    "ev9",
+    "ev9 long range"
+   ]
+  },
+  {
+   "make": "Kia",
+   "slug": "ev3",
+   "name": "EV3",
+   "aliases": [
+    "ev3",
+    "ev3 long range",
+    "ev3 standard range"
+   ]
+  },
+  {
+   "make": "Kia",
+   "slug": "ev4",
+   "name": "EV4",
+   "aliases": [
+    "ev4"
+   ]
+  },
+  {
+   "make": "Kia",
+   "slug": "soul",
+   "name": "Soul",
+   "aliases": [
+    "e soul",
+    "kia soul",
+    "soul",
+    "soul ev"
+   ]
+  },
+  {
+   "make": "Kia",
+   "slug": "sportage",
+   "name": "Sportage",
+   "aliases": [
+    "sportage",
+    "sportage nq5"
+   ]
+  },
+  {
+   "make": "Kia",
+   "slug": "optima",
+   "name": "Optima",
+   "aliases": [
+    "optima"
+   ]
+  },
+  {
+   "make": "Kia",
+   "slug": "ceed",
+   "name": "Ceed",
+   "aliases": [
+    "ceed",
+    "ceed ceed sw",
+    "ceed sw"
+   ]
+  },
+  {
+   "make": "Kia",
+   "slug": "xceed",
+   "name": "Xceed",
+   "aliases": [
+    "xceed"
+   ]
+  },
+  {
+   "make": "Kia",
+   "slug": "stonic",
+   "name": "Stonic",
+   "aliases": [
+    "stonic"
+   ]
+  },
+  {
+   "make": "Kia",
+   "slug": "sorento",
+   "name": "Sorento",
+   "aliases": [
+    "sorento"
+   ]
+  },
+  {
+   "make": "Kia",
+   "slug": "rio",
+   "name": "Rio",
+   "aliases": [
+    "rio"
+   ]
+  },
+  {
+   "make": "Renault",
+   "slug": "zoe",
+   "name": "Zoe",
+   "aliases": [
+    "zoe",
+    "zoe 2",
+    "zoe bfm",
+    "zoe e tech",
+    "zoe r110",
+    "zoe r135",
+    "zoe r90",
+    "zoe z e",
+    "zoe ze"
+   ]
+  },
+  {
+   "make": "Renault",
+   "slug": "kangoo",
+   "name": "Kangoo",
+   "aliases": [
+    "kangoo",
+    "kangoo e tech",
+    "kangoo express",
+    "kangoo gen1",
+    "kangoo ii",
+    "kangoo ze"
+   ]
+  },
+  {
+   "make": "Renault",
+   "slug": "megane",
+   "name": "Megane",
+   "aliases": [
+    "megane",
+    "megane break",
+    "megane e tech"
+   ]
+  },
+  {
+   "make": "Renault",
+   "slug": "captur",
+   "name": "Captur",
+   "aliases": [
+    "captur",
+    "captur e tech plug in"
+   ]
+  },
+  {
+   "make": "Renault",
+   "slug": "clio",
+   "name": "Clio",
+   "aliases": [
+    "clio",
+    "clio e tech"
+   ]
+  },
+  {
+   "make": "Renault",
+   "slug": "arkana",
+   "name": "Arkana",
+   "aliases": [
+    "arkana"
+   ]
+  },
+  {
+   "make": "Renault",
+   "slug": "austral",
+   "name": "Austral",
+   "aliases": [
+    "austral"
+   ]
+  },
+  {
+   "make": "Renault",
+   "slug": "twingo",
+   "name": "Twingo",
+   "aliases": [
+    "twingo",
+    "twingo ze"
+   ]
+  },
+  {
+   "make": "Renault",
+   "slug": "master",
+   "name": "Master",
+   "aliases": [
+    "master",
+    "master ze"
+   ]
+  },
+  {
+   "make": "Renault",
+   "slug": "ze",
+   "name": "ZE",
+   "aliases": [
+    "ze"
+   ]
+  },
+  {
+   "make": "Volkswagen",
+   "slug": "id3",
+   "name": "ID.3",
+   "aliases": [
+    "id 3",
+    "id 3 e11",
+    "id3"
+   ]
+  },
+  {
+   "make": "Volkswagen",
+   "slug": "id4",
+   "name": "ID.4",
+   "aliases": [
+    "id 4",
+    "id4"
+   ]
+  },
+  {
+   "make": "Volkswagen",
+   "slug": "id5",
+   "name": "ID.5",
+   "aliases": [
+    "id 5",
+    "id5"
+   ]
+  },
+  {
+   "make": "Volkswagen",
+   "slug": "id7",
+   "name": "ID.7",
+   "aliases": [
+    "id 7",
+    "id 7 tourer",
+    "id7"
+   ]
+  },
+  {
+   "make": "Volkswagen",
+   "slug": "idbuzz",
+   "name": "ID. Buzz",
+   "aliases": [
+    "id buzz",
+    "idbuzz"
+   ]
+  },
+  {
+   "make": "Volkswagen",
+   "slug": "egolf",
+   "name": "e-Golf",
+   "aliases": [
+    "e golf",
+    "e golf vii",
+    "egolf",
+    "golf e golf vii"
+   ]
+  },
+  {
+   "make": "Volkswagen",
+   "slug": "golf",
+   "name": "Golf",
+   "aliases": [
+    "golf",
+    "golf gte",
+    "golf vii",
+    "golf viii"
+   ]
+  },
+  {
+   "make": "Volkswagen",
+   "slug": "eup",
+   "name": "e-Up",
+   "aliases": [
+    "e up",
+    "up",
+    "up e up"
+   ]
+  },
+  {
+   "make": "Volkswagen",
+   "slug": "passat",
+   "name": "Passat",
+   "aliases": [
+    "passat",
+    "passat gte"
+   ]
+  },
+  {
+   "make": "Volkswagen",
+   "slug": "tiguan",
+   "name": "Tiguan",
+   "aliases": [
+    "tiguan",
+    "tiguan ehybrid"
+   ]
+  },
+  {
+   "make": "Volkswagen",
+   "slug": "tayron",
+   "name": "Tayron",
+   "aliases": [
+    "tayron"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "i3",
+   "name": "i3",
+   "aliases": [
+    "i3",
+    "i3 120ah",
+    "i3 94ah",
+    "i3 i01",
+    "i3s"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "i4",
+   "name": "i4",
+   "aliases": [
+    "i4",
+    "i4 g26"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "ix",
+   "name": "iX",
+   "aliases": [
+    "ix",
+    "ix xdrive"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "ix1",
+   "name": "iX1",
+   "aliases": [
+    "ix1",
+    "x1 ix1 u11"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "x1",
+   "name": "X1",
+   "aliases": [
+    "x1",
+    "x1 f48",
+    "x1 u11"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "x3",
+   "name": "X3",
+   "aliases": [
+    "x3",
+    "x3 g01"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "x5",
+   "name": "X5",
+   "aliases": [
+    "x5",
+    "x5 g05",
+    "x5 g05 f95",
+    "x5 xdrive45e"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "225xe",
+   "name": "225xe",
+   "aliases": [
+    "225xe"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "330e",
+   "name": "330e",
+   "aliases": [
+    "330e"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "530e",
+   "name": "530e",
+   "aliases": [
+    "530e"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "740e",
+   "name": "740e",
+   "aliases": [
+    "740e"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "2series",
+   "name": "2 Series",
+   "aliases": [
+    "2 f45 active tourer",
+    "2 series",
+    "2 u06 active tourer"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "3series",
+   "name": "3 Series",
+   "aliases": [
+    "3 serie",
+    "3 series"
+   ]
+  },
+  {
+   "make": "BMW",
+   "slug": "5series",
+   "name": "5 Series",
+   "aliases": [
+    "5 serie",
+    "5 series"
+   ]
+  },
+  {
+   "make": "Audi",
+   "slug": "etron",
+   "name": "e-tron",
+   "aliases": [
+    "e tron",
+    "e tron 55 quattro",
+    "e tron s ge 2019",
+    "e tron sportback",
+    "e tron sportback gea",
+    "etron"
+   ]
+  },
+  {
+   "make": "Audi",
+   "slug": "q4etron",
+   "name": "Q4 e-tron",
+   "aliases": [
+    "q4",
+    "q4 e tron",
+    "q4 e tron fz",
+    "q4 etron"
+   ]
+  },
+  {
+   "make": "Audi",
+   "slug": "q8etron",
+   "name": "Q8 e-tron",
+   "aliases": [
+    "q8 4m",
+    "q8 e tron",
+    "q8 e tron sportback"
+   ]
+  },
+  {
+   "make": "Audi",
+   "slug": "q5",
+   "name": "Q5",
+   "aliases": [
+    "q5",
+    "q5 fy"
+   ]
+  },
+  {
+   "make": "Audi",
+   "slug": "q7",
+   "name": "Q7",
+   "aliases": [
+    "q7"
+   ]
+  },
+  {
+   "make": "Audi",
+   "slug": "a3",
+   "name": "A3",
+   "aliases": [
+    "a3",
+    "a3 s3 8v"
+   ]
+  },
+  {
+   "make": "Audi",
+   "slug": "a6",
+   "name": "A6",
+   "aliases": [
+    "a6",
+    "a6 c8 avant 4a5"
+   ]
+  },
+  {
+   "make": "Audi",
+   "slug": "etrongt",
+   "name": "e-tron GT",
+   "aliases": [
+    "e tron gt"
+   ]
+  },
+  {
+   "make": "Peugeot",
+   "slug": "208",
+   "name": "208",
+   "aliases": [
+    "208",
+    "208 e 208",
+    "208 ii ub up uw uj",
+    "208 mk2",
+    "208 peugeot 208",
+    "e 208"
+   ]
+  },
+  {
+   "make": "Peugeot",
+   "slug": "2008",
+   "name": "2008",
+   "aliases": [
+    "2008"
+   ]
+  },
+  {
+   "make": "Peugeot",
+   "slug": "308",
+   "name": "308",
+   "aliases": [
+    "308"
+   ]
+  },
+  {
+   "make": "Peugeot",
+   "slug": "508",
+   "name": "508",
+   "aliases": [
+    "508"
+   ]
+  },
+  {
+   "make": "Peugeot",
+   "slug": "3008",
+   "name": "3008",
+   "aliases": [
+    "3008"
+   ]
+  },
+  {
+   "make": "Peugeot",
+   "slug": "5008",
+   "name": "5008",
+   "aliases": [
+    "5008"
+   ]
+  },
+  {
+   "make": "Peugeot",
+   "slug": "partner",
+   "name": "Partner",
+   "aliases": [
+    "e partner",
+    "partner",
+    "partner furgon"
+   ]
+  },
+  {
+   "make": "Peugeot",
+   "slug": "expert",
+   "name": "Expert",
+   "aliases": [
+    "e expert",
+    "expert",
+    "expert furgon"
+   ]
+  },
+  {
+   "make": "Peugeot",
+   "slug": "rifter",
+   "name": "Rifter",
+   "aliases": [
+    "rifter"
+   ]
+  },
+  {
+   "make": "Peugeot",
+   "slug": "boxer",
+   "name": "Boxer",
+   "aliases": [
+    "boxer"
+   ]
+  },
+  {
+   "make": "Opel",
+   "slug": "corsa",
+   "name": "Corsa",
+   "aliases": [
+    "corsa",
+    "corsa e",
+    "corsa f",
+    "corsa f corsa e"
+   ]
+  },
+  {
+   "make": "Opel",
+   "slug": "mokka",
+   "name": "Mokka",
+   "aliases": [
+    "mokka",
+    "mokka e"
+   ]
+  },
+  {
+   "make": "Opel",
+   "slug": "vivaro",
+   "name": "Vivaro",
+   "aliases": [
+    "vivaro",
+    "vivaro c",
+    "vivaro e"
+   ]
+  },
+  {
+   "make": "Opel",
+   "slug": "ampera",
+   "name": "Ampera",
+   "aliases": [
+    "ampera",
+    "ampera e"
+   ]
+  },
+  {
+   "make": "Opel",
+   "slug": "astra",
+   "name": "Astra",
+   "aliases": [
+    "astra"
+   ]
+  },
+  {
+   "make": "Opel",
+   "slug": "zafira",
+   "name": "Zafira",
+   "aliases": [
+    "zafira"
+   ]
+  },
+  {
+   "make": "Opel",
+   "slug": "combo",
+   "name": "Combo",
+   "aliases": [
+    "combo",
+    "combo e",
+    "combo life"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "eqc",
+   "name": "EQC",
+   "aliases": [
+    "eqc",
+    "eqc 400",
+    "eqc 400 amg line premium 4matic",
+    "eqc n293"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "eqa",
+   "name": "EQA",
+   "aliases": [
+    "eqa",
+    "eqa h243"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "eqb",
+   "name": "EQB",
+   "aliases": [
+    "eqb",
+    "eqb x243"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "eqe",
+   "name": "EQE",
+   "aliases": [
+    "eqe",
+    "eqe v295"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "eqs",
+   "name": "EQS",
+   "aliases": [
+    "eqs"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "eqv",
+   "name": "EQV",
+   "aliases": [
+    "eqv"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "sprinter",
+   "name": "Sprinter",
+   "aliases": [
+    "sprinter",
+    "sprinter 3 5 t van",
+    "sprinter 3 5 t van 907 910"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "cclass",
+   "name": "C-Class",
+   "aliases": [
+    "c class",
+    "c class w206",
+    "c klasse"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "aclass",
+   "name": "A-Class",
+   "aliases": [
+    "a class",
+    "a class w177"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "bclass",
+   "name": "B-Class",
+   "aliases": [
+    "b 180 200 w246 w242",
+    "b class"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "cla",
+   "name": "CLA",
+   "aliases": [
+    "cla",
+    "cla class",
+    "cla class c118 x118"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "gle",
+   "name": "GLE",
+   "aliases": [
+    "gle",
+    "gle class",
+    "gle class w167 v167 c167",
+    "gle w167"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "glc",
+   "name": "GLC",
+   "aliases": [
+    "glc",
+    "glc class",
+    "glc class x253 c253",
+    "glc class x254"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "gla",
+   "name": "GLA",
+   "aliases": [
+    "gla",
+    "gla class h247"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "eclass",
+   "name": "E-Class",
+   "aliases": [
+    "e class",
+    "e class w213"
+   ]
+  },
+  {
+   "make": "Mercedes-Benz",
+   "slug": "eq",
+   "name": "EQ",
+   "aliases": [
+    "eq"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "prius",
+   "name": "Prius",
+   "aliases": [
+    "prius",
+    "prius 50",
+    "prius hybrid",
+    "prius w3",
+    "prius zvw30",
+    "prius zvw50"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "prius",
+   "name": "Prius+",
+   "aliases": [
+    "prius",
+    "prius 7",
+    "prius plus",
+    "prius zvw40"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "yaris",
+   "name": "Yaris",
+   "aliases": [
+    "yaris",
+    "yaris hybrid",
+    "yaris p21",
+    "yaris xp21"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "yariscross",
+   "name": "Yaris Cross",
+   "aliases": [
+    "yaris cross",
+    "yaris cross mxp",
+    "yaris cross suv",
+    "yaris cross xp21"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "corolla",
+   "name": "Corolla",
+   "aliases": [
+    "corolla",
+    "corolla hybrid"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "corollacross",
+   "name": "Corolla Cross",
+   "aliases": [
+    "corolla cross",
+    "corolla cross xg10"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "chr",
+   "name": "C-HR",
+   "aliases": [
+    "c hr",
+    "chr"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "rav4",
+   "name": "RAV4",
+   "aliases": [
+    "rav 4",
+    "rav 4 prime",
+    "rav4",
+    "rav4 plug in",
+    "rav4 plug in prime",
+    "rav4 xa50"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "proace",
+   "name": "Proace",
+   "aliases": [
+    "proace",
+    "proace city",
+    "proace city verso mpv bky",
+    "proace electric",
+    "proace ii",
+    "proace verso"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "bz4x",
+   "name": "bZ4X",
+   "aliases": [
+    "bz4x",
+    "bz4x ea10"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "auris",
+   "name": "Auris",
+   "aliases": [
+    "auris"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "camry",
+   "name": "Camry",
+   "aliases": [
+    "camry"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "aygo",
+   "name": "Aygo",
+   "aliases": [
+    "aygo"
+   ]
+  },
+  {
+   "make": "Toyota",
+   "slug": "swace",
+   "name": "Swace",
+   "aliases": [
+    "swace"
+   ]
+  },
+  {
+   "make": "Volvo",
+   "slug": "xc40",
+   "name": "XC40",
+   "aliases": [
+    "xc40",
+    "xc40 536",
+    "xc40 recharge",
+    "xc40 recharge 18"
+   ]
+  },
+  {
+   "make": "Volvo",
+   "slug": "xc60",
+   "name": "XC60",
+   "aliases": [
+    "xc60",
+    "xc60 18"
+   ]
+  },
+  {
+   "make": "Volvo",
+   "slug": "xc90",
+   "name": "XC90",
+   "aliases": [
+    "xc90"
+   ]
+  },
+  {
+   "make": "Volvo",
+   "slug": "v60",
+   "name": "V60",
+   "aliases": [
+    "v60",
+    "v60 18",
+    "v60 19",
+    "v60 2014 18"
+   ]
+  },
+  {
+   "make": "Volvo",
+   "slug": "v90",
+   "name": "V90",
+   "aliases": [
+    "v90",
+    "v90 cc",
+    "v90 v90 cc s90"
+   ]
+  },
+  {
+   "make": "Volvo",
+   "slug": "s90",
+   "name": "S90",
+   "aliases": [
+    "s90"
+   ]
+  },
+  {
+   "make": "Volvo",
+   "slug": "ex30",
+   "name": "EX30",
+   "aliases": [
+    "ex30",
+    "ex30 2024"
+   ]
+  },
+  {
+   "make": "Volvo",
+   "slug": "ex90",
+   "name": "EX90",
+   "aliases": [
+    "ex90"
+   ]
+  },
+  {
+   "make": "Volvo",
+   "slug": "c40",
+   "name": "C40",
+   "aliases": [
+    "c40",
+    "c40 recharge",
+    "c40 recharge 21"
+   ]
+  },
+  {
+   "make": "Polestar",
+   "slug": "2",
+   "name": "2",
+   "aliases": [
+    "2",
+    "polestar 2",
+    "polestar 2 2020",
+    "polestar2"
+   ]
+  },
+  {
+   "make": "Polestar",
+   "slug": "3",
+   "name": "3",
+   "aliases": [
+    "3",
+    "polestar 3"
+   ]
+  },
+  {
+   "make": "Polestar",
+   "slug": "4",
+   "name": "4",
+   "aliases": [
+    "4",
+    "polestar 4"
+   ]
+  },
+  {
+   "make": "Ford",
+   "slug": "mustangmache",
+   "name": "Mustang Mach-E",
+   "aliases": [
+    "mach e",
+    "mache",
+    "mustang mach e"
+   ]
+  },
+  {
+   "make": "Ford",
+   "slug": "kuga",
+   "name": "Kuga",
+   "aliases": [
+    "kuga",
+    "kuga fhev",
+    "kuga kuga phev fhev",
+    "kuga phev"
+   ]
+  },
+  {
+   "make": "Ford",
+   "slug": "puma",
+   "name": "Puma",
+   "aliases": [
+    "puma",
+    "puma j2k cf7",
+    "puma mhev"
+   ]
+  },
+  {
+   "make": "Ford",
+   "slug": "focus",
+   "name": "Focus",
+   "aliases": [
+    "focus"
+   ]
+  },
+  {
+   "make": "Ford",
+   "slug": "fiesta",
+   "name": "Fiesta",
+   "aliases": [
+    "fiesta"
+   ]
+  },
+  {
+   "make": "Ford",
+   "slug": "mondeo",
+   "name": "Mondeo",
+   "aliases": [
+    "mondeo"
+   ]
+  },
+  {
+   "make": "Ford",
+   "slug": "explorer",
+   "name": "Explorer",
+   "aliases": [
+    "explorer"
+   ]
+  },
+  {
+   "make": "Ford",
+   "slug": "transitcustom",
+   "name": "Transit Custom",
+   "aliases": [
+    "e transit custom",
+    "transit custom"
+   ]
+  },
+  {
+   "make": "Ford",
+   "slug": "etransit",
+   "name": "E-Transit",
+   "aliases": [
+    "e transit"
+   ]
+  },
+  {
+   "make": "Porsche",
+   "slug": "taycan",
+   "name": "Taycan",
+   "aliases": [
+    "taycan",
+    "taycan 4s",
+    "taycan turbo"
+   ]
+  },
+  {
+   "make": "Porsche",
+   "slug": "cayenne",
+   "name": "Cayenne",
+   "aliases": [
+    "cayenne",
+    "cayenne e hybrid"
+   ]
+  },
+  {
+   "make": "Porsche",
+   "slug": "panamera",
+   "name": "Panamera",
+   "aliases": [
+    "panamera",
+    "panamera 971"
+   ]
+  },
+  {
+   "make": "Porsche",
+   "slug": "macan",
+   "name": "Macan",
+   "aliases": [
+    "macan"
+   ]
+  },
+  {
+   "make": "MG",
+   "slug": "mg4",
+   "name": "4",
+   "aliases": [
+    "4",
+    "4 eh32",
+    "mg 4",
+    "mg4"
+   ]
+  },
+  {
+   "make": "MG",
+   "slug": "mg5",
+   "name": "5",
+   "aliases": [
+    "5",
+    "mg 5",
+    "mg5"
+   ]
+  },
+  {
+   "make": "MG",
+   "slug": "mg3",
+   "name": "3",
+   "aliases": [
+    "3",
+    "mg 3",
+    "mg3"
+   ]
+  },
+  {
+   "make": "MG",
+   "slug": "zsev",
+   "name": "ZS EV",
+   "aliases": [
+    "mg zs ev",
+    "zs",
+    "zs ev",
+    "zs hybrid"
+   ]
+  },
+  {
+   "make": "MG",
+   "slug": "hs",
+   "name": "HS",
+   "aliases": [
+    "ehs",
+    "hs",
+    "hs ehs",
+    "hs ehs as23",
+    "mg hs"
+   ]
+  },
+  {
+   "make": "MG",
+   "slug": "marvelr",
+   "name": "Marvel R",
+   "aliases": [
+    "marvel r"
+   ]
+  },
+  {
+   "make": "Mazda",
+   "slug": "mx30",
+   "name": "MX-30",
+   "aliases": [
+    "mx 30"
+   ]
+  },
+  {
+   "make": "Mazda",
+   "slug": "cx30",
+   "name": "CX-30",
+   "aliases": [
+    "cx 30",
+    "cx 30 dm"
+   ]
+  },
+  {
+   "make": "Mazda",
+   "slug": "cx5",
+   "name": "CX-5",
+   "aliases": [
+    "cx 5",
+    "cx 5 kf"
+   ]
+  },
+  {
+   "make": "Mazda",
+   "slug": "cx60",
+   "name": "CX-60",
+   "aliases": [
+    "cx 60",
+    "cx 60 kh"
+   ]
+  },
+  {
+   "make": "Mazda",
+   "slug": "3",
+   "name": "3",
+   "aliases": [
+    "3",
+    "mazda 3",
+    "mazda3"
+   ]
+  },
+  {
+   "make": "Mazda",
+   "slug": "2",
+   "name": "2",
+   "aliases": [
+    "2",
+    "2 kb hybrid",
+    "mazda 2",
+    "mazda2"
+   ]
+  },
+  {
+   "make": "Honda",
+   "slug": "jazz",
+   "name": "Jazz",
+   "aliases": [
+    "jazz",
+    "jazz v gr"
+   ]
+  },
+  {
+   "make": "Honda",
+   "slug": "hondae",
+   "name": "Honda e",
+   "aliases": [
+    "e",
+    "honda e"
+   ]
+  },
+  {
+   "make": "Honda",
+   "slug": "crv",
+   "name": "CR-V",
+   "aliases": [
+    "cr v",
+    "crv"
+   ]
+  },
+  {
+   "make": "Honda",
+   "slug": "hrv",
+   "name": "HR-V",
+   "aliases": [
+    "hr v",
+    "hrv"
+   ]
+  },
+  {
+   "make": "Honda",
+   "slug": "insight",
+   "name": "Insight",
+   "aliases": [
+    "insight"
+   ]
+  },
+  {
+   "make": "Honda",
+   "slug": "civic",
+   "name": "Civic",
+   "aliases": [
+    "civic"
+   ]
+  },
+  {
+   "make": "Honda",
+   "slug": "eny1",
+   "name": "e:Ny1",
+   "aliases": [
+    "e ny1"
+   ]
+  },
+  {
+   "make": "Mitsubishi",
+   "slug": "outlander",
+   "name": "Outlander",
+   "aliases": [
+    "outlander",
+    "outlander 2013 21",
+    "outlander iii gg w gf w zj",
+    "outlander phev",
+    "mits outlander"
+   ]
+  },
+  {
+   "make": "Mitsubishi",
+   "slug": "eclipsecross",
+   "name": "Eclipse Cross",
+   "aliases": [
+    "eclipse cross"
+   ]
+  },
+  {
+   "make": "Mitsubishi",
+   "slug": "imiev",
+   "name": "i-MiEV",
+   "aliases": [
+    "i miev",
+    "imiev"
+   ]
+  },
+  {
+   "make": "Cupra",
+   "slug": "born",
+   "name": "Born",
+   "aliases": [
+    "born"
+   ]
+  },
+  {
+   "make": "Cupra",
+   "slug": "formentor",
+   "name": "Formentor",
+   "aliases": [
+    "formentor"
+   ]
+  },
+  {
+   "make": "Cupra",
+   "slug": "leon",
+   "name": "Leon",
+   "aliases": [
+    "leon"
+   ]
+  },
+  {
+   "make": "Skoda",
+   "slug": "enyaq",
+   "name": "Enyaq",
+   "aliases": [
+    "enyaq",
+    "enyaq iv",
+    "enyaq iv 60",
+    "enyaq iv 80"
+   ]
+  },
+  {
+   "make": "Skoda",
+   "slug": "octavia",
+   "name": "Octavia",
+   "aliases": [
+    "octavia"
+   ]
+  },
+  {
+   "make": "Skoda",
+   "slug": "superb",
+   "name": "Superb",
+   "aliases": [
+    "superb",
+    "superb iv"
+   ]
+  },
+  {
+   "make": "Skoda",
+   "slug": "kodiaq",
+   "name": "Kodiaq",
+   "aliases": [
+    "kodiaq"
+   ]
+  },
+  {
+   "make": "Skoda",
+   "slug": "elroq",
+   "name": "Elroq",
+   "aliases": [
+    "elroq"
+   ]
+  },
+  {
+   "make": "Seat",
+   "slug": "mii",
+   "name": "Mii",
+   "aliases": [
+    "mii",
+    "mii electric"
+   ]
+  },
+  {
+   "make": "Seat",
+   "slug": "leon",
+   "name": "Leon",
+   "aliases": [
+    "leon"
+   ]
+  },
+  {
+   "make": "Citroen",
+   "slug": "c4",
+   "name": "C4",
+   "aliases": [
+    "c4",
+    "c4 e c4",
+    "c4 e c4 c4x e c4x",
+    "e c4"
+   ]
+  },
+  {
+   "make": "Citroen",
+   "slug": "c3",
+   "name": "C3",
+   "aliases": [
+    "c3",
+    "c3 aircross"
+   ]
+  },
+  {
+   "make": "Citroen",
+   "slug": "berlingo",
+   "name": "Berlingo",
+   "aliases": [
+    "berlingo",
+    "berlingo van",
+    "e berlingo"
+   ]
+  },
+  {
+   "make": "Citroen",
+   "slug": "jumpy",
+   "name": "Jumpy",
+   "aliases": [
+    "e jumpy",
+    "jumpy"
+   ]
+  },
+  {
+   "make": "Citroen",
+   "slug": "ami",
+   "name": "Ami",
+   "aliases": [
+    "ami"
+   ]
+  },
+  {
+   "make": "Fiat",
+   "slug": "500e",
+   "name": "500e",
+   "aliases": [
+    "500 e",
+    "500e",
+    "500e low range",
+    "fiat 500e"
+   ]
+  },
+  {
+   "make": "Fiat",
+   "slug": "500",
+   "name": "500",
+   "aliases": [
+    "500"
+   ]
+  },
+  {
+   "make": "Fiat",
+   "slug": "ducato",
+   "name": "Ducato",
+   "aliases": [
+    "ducato",
+    "e ducato"
+   ]
+  },
+  {
+   "make": "Fiat",
+   "slug": "doblo",
+   "name": "Doblo",
+   "aliases": [
+    "doblo",
+    "e doblo"
+   ]
+  },
+  {
+   "make": "Fiat",
+   "slug": "panda",
+   "name": "Panda",
+   "aliases": [
+    "panda"
+   ]
+  },
+  {
+   "make": "Jeep",
+   "slug": "avenger",
+   "name": "Avenger",
+   "aliases": [
+    "avenger",
+    "avenger 1 generation"
+   ]
+  },
+  {
+   "make": "Jeep",
+   "slug": "renegade",
+   "name": "Renegade",
+   "aliases": [
+    "renegade"
+   ]
+  },
+  {
+   "make": "Jeep",
+   "slug": "compass",
+   "name": "Compass",
+   "aliases": [
+    "compass"
+   ]
+  },
+  {
+   "make": "Jaguar",
+   "slug": "ipace",
+   "name": "I-Pace",
+   "aliases": [
+    "i pace",
+    "ipace"
+   ]
+  },
+  {
+   "make": "Land Rover",
+   "slug": "rangeroversport",
+   "name": "Range Rover Sport",
+   "aliases": [
+    "range rover sport"
+   ]
+  },
+  {
+   "make": "Land Rover",
+   "slug": "defender",
+   "name": "Defender",
+   "aliases": [
+    "defender"
+   ]
+  },
+  {
+   "make": "Land Rover",
+   "slug": "evoque",
+   "name": "Evoque",
+   "aliases": [
+    "evoque"
+   ]
+  },
+  {
+   "make": "Lexus",
+   "slug": "nx",
+   "name": "NX",
+   "aliases": [
+    "nx",
+    "nx 350h",
+    "nx 350h 450h"
+   ]
+  },
+  {
+   "make": "Lexus",
+   "slug": "rx",
+   "name": "RX",
+   "aliases": [
+    "rx",
+    "rx series"
+   ]
+  },
+  {
+   "make": "Lexus",
+   "slug": "ux",
+   "name": "UX",
+   "aliases": [
+    "ux"
+   ]
+  },
+  {
+   "make": "Lexus",
+   "slug": "ct",
+   "name": "CT",
+   "aliases": [
+    "ct",
+    "ct 200h",
+    "ct zwa10"
+   ]
+  },
+  {
+   "make": "Suzuki",
+   "slug": "swace",
+   "name": "Swace",
+   "aliases": [
+    "swace"
+   ]
+  },
+  {
+   "make": "Suzuki",
+   "slug": "across",
+   "name": "Across",
+   "aliases": [
+    "across"
+   ]
+  },
+  {
+   "make": "Suzuki",
+   "slug": "vitara",
+   "name": "Vitara",
+   "aliases": [
+    "vitara"
+   ]
+  },
+  {
+   "make": "Suzuki",
+   "slug": "swift",
+   "name": "Swift",
+   "aliases": [
+    "swift"
+   ]
+  },
+  {
+   "make": "Suzuki",
+   "slug": "ignis",
+   "name": "Ignis",
+   "aliases": [
+    "ignis"
+   ]
+  },
+  {
+   "make": "Suzuki",
+   "slug": "scross",
+   "name": "S-Cross",
+   "aliases": [
+    "s cross",
+    "sx4 s cross"
+   ]
+  },
+  {
+   "make": "BYD",
+   "slug": "seal",
+   "name": "Seal",
+   "aliases": [
+    "seal",
+    "seal u"
+   ]
+  },
+  {
+   "make": "BYD",
+   "slug": "han",
+   "name": "Han",
+   "aliases": [
+    "han"
+   ]
+  },
+  {
+   "make": "BYD",
+   "slug": "tang",
+   "name": "Tang",
+   "aliases": [
+    "tang"
+   ]
+  },
+  {
+   "make": "BYD",
+   "slug": "atto3",
+   "name": "Atto 3",
+   "aliases": [
+    "atto 3",
+    "atto3"
+   ]
+  },
+  {
+   "make": "BYD",
+   "slug": "dolphin",
+   "name": "Dolphin",
+   "aliases": [
+    "dolphin"
+   ]
+  },
+  {
+   "make": "BYD",
+   "slug": "t3",
+   "name": "T3",
+   "aliases": [
+    "t3"
+   ]
+  },
+  {
+   "make": "Maxus",
+   "slug": "edeliver3",
+   "name": "e-Deliver 3",
+   "aliases": [
+    "deliver 3",
+    "e deliver 3",
+    "e deliver3 ev30"
+   ]
+  },
+  {
+   "make": "Maxus",
+   "slug": "edeliver9",
+   "name": "e-Deliver 9",
+   "aliases": [
+    "deliver 9",
+    "e deliver 9"
+   ]
+  },
+  {
+   "make": "Maxus",
+   "slug": "ev80",
+   "name": "EV80",
+   "aliases": [
+    "ev80"
+   ]
+  },
+  {
+   "make": "Smart",
+   "slug": "eqfortwo",
+   "name": "EQ Fortwo",
+   "aliases": [
+    "eq forfour",
+    "eq fortwo"
+   ]
+  },
+  {
+   "make": "Genesis",
+   "slug": "gv60",
+   "name": "GV60",
+   "aliases": [
+    "gv60"
+   ]
+  },
+  {
+   "make": "Genesis",
+   "slug": "gv70",
+   "name": "GV70",
+   "aliases": [
+    "electrified gv70",
+    "gv70"
+   ]
+  },
+  {
+   "make": "Genesis",
+   "slug": "g80",
+   "name": "G80",
+   "aliases": [
+    "g80"
+   ]
+  },
+  {
+   "make": "Rivian",
+   "slug": "r1t",
+   "name": "R1T",
+   "aliases": [
+    "r1t"
+   ]
+  },
+  {
+   "make": "Rivian",
+   "slug": "r1s",
+   "name": "R1S",
+   "aliases": [
+    "r1s"
+   ]
+  },
+  {
+   "make": "Xpeng",
+   "slug": "p7",
+   "name": "P7",
+   "aliases": [
+    "p7",
+    "xpeng p7"
+   ]
+  },
+  {
+   "make": "Xpeng",
+   "slug": "g9",
+   "name": "G9",
+   "aliases": [
+    "g9"
+   ]
+  },
+  {
+   "make": "Xpeng",
+   "slug": "g6",
+   "name": "G6",
+   "aliases": [
+    "g6"
+   ]
+  },
+  {
+   "make": "Lynk & Co",
+   "slug": "01",
+   "name": "01",
+   "aliases": [
+    "01",
+    "1",
+    "lynk o co 01"
+   ]
+  },
+  {
+   "make": "DS",
+   "slug": "ds3crossback",
+   "name": "DS3 Crossback",
+   "aliases": [
+    "ds3",
+    "ds3 crossback",
+    "3 crossback"
+   ]
+  },
+  {
+   "make": "DS",
+   "slug": "ds7",
+   "name": "DS7",
+   "aliases": [
+    "ds7",
+    "ds7 crossback"
+   ]
+  },
+  {
+   "make": "Dacia",
+   "slug": "spring",
+   "name": "Spring",
+   "aliases": [
+    "spring"
+   ]
+  },
+  {
+   "make": "Subaru",
+   "slug": "forester",
+   "name": "Forester",
+   "aliases": [
+    "forester"
+   ]
+  },
+  {
+   "make": "Subaru",
+   "slug": "solterra",
+   "name": "Solterra",
+   "aliases": [
+    "solterra"
+   ]
+  },
+  {
+   "make": "Chevrolet",
+   "slug": "volt",
+   "name": "Volt",
+   "aliases": [
+    "volt",
+    "chevrolet volt",
+    "chevy volt"
+   ]
+  },
+  {
+   "make": "Chevrolet",
+   "slug": "boltev",
+   "name": "Bolt EV",
+   "aliases": [
+    "bolt ev",
+    "bolt euv",
+    "chevrolet bolt",
+    "chevy bolt",
+    "bolt"
+   ]
+  },
+  {
+   "make": "Proterra",
+   "slug": "onyxstratah415",
+   "name": "Onyx Strata H4-15",
+   "aliases": [
+    "onyx strata h4 15"
+   ]
+  }
+ ],
+ "makeAliases": {
+  "vw": "volkswagen",
+  "vauxhall": "opel",
+  "mercedes": "mercedesbenz",
+  "mb": "mercedesbenz",
+  "psa": "peugeot"
+ }
+}

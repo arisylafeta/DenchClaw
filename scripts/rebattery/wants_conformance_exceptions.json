@@ -1,0 +1,26 @@
+[
+  {
+    "company_id": "806385da-6080-433d-b6a7-0e1c1a15452a",
+    "product_key": "part:37501GI351",
+    "kind": "declined",
+    "reason": "R1: the old declined line took the part number of the company's 77.4 kWh Ioniq 5 product; the dossier's declined item (58-72.6 kWh Ioniq 5 packs) states no part number"
+  },
+  {
+    "company_id": "lead_0308638c-ec56-4a3c-9c2c-2e0029ee06a7",
+    "product_key": "broad:toyota-or-lexus-any-batteries",
+    "kind": "inferred",
+    "reason": "R4: the research line only repeated the company's own request (ask) and saved search on the same or a more specific key"
+  },
+  {
+    "company_id": "lead_1bd8aaeb-ba59-4b69-853f-1f1385c17362",
+    "product_key": "broad:hyundai-or-kia-any-batteries",
+    "kind": "inferred",
+    "reason": "R4: the research line only repeated the company's own request (ask) and saved search on the same or a more specific key"
+  },
+  {
+    "company_id": "lead_7b12124d-6bc4-46bb-8cb6-aa983fb607ff",
+    "product_key": "broad:renault-any-batteries",
+    "kind": "inferred",
+    "reason": "R4: the research line only repeated the company's own request (ask) and saved search on the same or a more specific key"
+  }
+]
