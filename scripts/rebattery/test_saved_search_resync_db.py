@@ -44,6 +44,7 @@ def test_resync_replaces_old_keys_and_merges_duplicates(tmp_path):
         cur.execute(old, ("o4", "rs-co", "model:toyota-corollacross", "2026-07-01", "2026-10-04", ["saved_search:sourcing_request:r1"], "sourcing_request:r1"))
         cur.execute(old, ("o2", "rs-co2", "model:tesla-modely", "2026-09-05", "2026-10-03", ["saved_search:s-y1"], "s-y1"))
         cur.execute(old, ("o3", "rs-co2", "model:tesla-modely", "2026-08-01", "2026-10-09", ["saved_search:s-y2"], "s-y2"))
+        cur.execute("update buyer_interest set raw_product = 'stale' where company_id in ('rs-co', 'rs-co2')")
     searches = [
         search("s-cross", "rs.a@example.net", "Corolla Cross G9510-16021", manufacturer=["Toyota"], location_country=["GB"]),
         search("s-sdi", "rs.a@example.net", "Samsung sdi modules"),
@@ -66,7 +67,8 @@ def test_resync_replaces_old_keys_and_merges_duplicates(tmp_path):
         assert len(shared) == 1 and shared[0][2] == "2026-07-01" and "saved_search:s-cross" in shared[0][4]
         assert any(r[0] == "s-sdi" for r in cross)  # Samsung SDI modules line exists
         cur.execute("select raw_product from buyer_interest where company_id = 'rs-co' and 'saved_search:s-cross' = any(source_refs)")
-        assert any("Located in: United Kingdom" in (r[0] or "") for r in cur.fetchall())
+        raws = [r[0] or "" for r in cur.fetchall()]
+        assert any("Located in: United Kingdom" in r for r in raws) and not any("stale" in r for r in raws)  # re-sync refreshes raw_product
         cur.execute("select raw_product from buyer_interest where saved_search_id = 's-sdi'")
         assert any("Samsung SDI" in (r[0] or "") for r in cur.fetchall())
         y = lines(cur, "rs-co2")

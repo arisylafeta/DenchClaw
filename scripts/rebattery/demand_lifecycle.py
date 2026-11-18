@@ -352,6 +352,7 @@ def upsert_interest(cur, *, company_id, kind, facts, first_seen, last_seen, pers
                    "last_seen = greatest(buyer_interest.last_seen, excluded.last_seen), person_id = coalesce(excluded.person_id, buyer_interest.person_id), "
                    "expires_on = greatest(buyer_interest.expires_on, excluded.expires_on), "
                    if mastered else
+                   "raw_product = coalesce(excluded.raw_product, buyer_interest.raw_product), "
                    "last_seen = greatest(buyer_interest.last_seen, excluded.last_seen), person_id = coalesce(excluded.person_id, buyer_interest.person_id), "
                    "expires_on = coalesce(excluded.expires_on, buyer_interest.expires_on), ")
         cur.execute(f"""insert into buyer_interest (id, company_id, person_id, kind, ownership, product_key, product_key_level,
