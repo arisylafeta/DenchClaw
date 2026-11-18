@@ -60,7 +60,7 @@ describe("productKeyFor", () => {
     expect(productKeyLevel("model:kia-ev3")).toBe("model");
     // A reviewed pack family matches a model alone, so the parser never takes that key without a stated kWh; the
     // model-level key is still in the chain for it to take.
-    expect(broaderKeysFor({ make: "Vauxhall", model: "Corsa-e", format: "packs" })).toContain("model:vauxhall-corsae");
+    expect(broaderKeysFor({ make: "Vauxhall", model: "Corsa-e", format: "packs" })).toContain("model:vauxhall-corsa");
     // A lot of that model, at any size, counts as the model-level key as well as its own.
     expect(broaderKeysFor({ make: "Kia", model: "Kia EV3 81.4 kWh pack", kwh: 81.4, format: "pack", chemistry: "NMC" }))
       .toEqual(["model:kia-ev3", "broad:kia-nmc-packs", "broad:nmc-packs"]);
@@ -92,7 +92,7 @@ describe("productKeyFor", () => {
   it("rolls a specific key up to every broader key it counts as", () => {
     const keys = broaderKeysFor({ make: "Vauxhall", model: "Corsa-e", chemistry: "NMC", format: "packs", kwh: 50 });
     expect(keys).toEqual([
-      "pack:stellantis-ecmp-50kwh", "model:vauxhall-corsae-50kwh", "model:vauxhall-corsae", "broad:vauxhall-nmc-packs", "broad:nmc-packs",
+      "pack:stellantis-ecmp-50kwh", "model:vauxhall-corsa-50kwh", "model:vauxhall-corsa", "broad:vauxhall-nmc-packs", "broad:nmc-packs",
     ]);
     const part = broaderKeysFor({ partNumbers: ["37501-Q4052"], make: "Kia", model: "Niro", kwh: 64.8, chemistry: "NMC", format: "packs" });
     expect(part[0]).toBe("part:37501Q4052");
@@ -144,7 +144,7 @@ describe("productKeyFor", () => {
     });
     expect(stated).toBe(2);
     expect(facts.map(productKeyFor)).toEqual(["broad:stellantis-any-packs", "broad:toyota-or-lexus-any-packs"]);
-    expect(facts.every((fact) => fact.chemistryPreference === "NMC / LFP")).toBe(true);
+    expect(facts.every((fact) => fact.chemistryPreference === "LFP / NMC")).toBe(true);
     expect(facts.every((fact) => fact.chemistry === null)).toBe(true);
     // One make with several chemistries is a pairing the source states: it stays one line per chemistry.
     expect(expandProductFacts({ makes: ["Stellantis"], chemistries: ["NMC", "LFP"], formats: ["Packs"] }).facts.map(productKeyFor))
@@ -193,7 +193,7 @@ describe("productKeyFor", () => {
 
   it("keys a model by the canonical slug of the alias list", () => {
     expect(productKeyFor({ make: "Hyundai", model: "Kona Electric", kwh: 64 })).toBe("model:hyundai-kona-64kwh");
-    expect(productKeyFor({ make: "Kia", model: "e-Niro", kwh: 64 })).toBe("model:kia-niro-64kwh");
+    expect(productKeyFor({ make: "Kia", model: "e-Niro", kwh: 39 })).toBe("model:kia-niro-39kwh");
     expect(productKeyFor({ make: "Nissan", model: "Leaf e+", kwh: 62 })).toBe("model:nissan-leaf-62kwh");
     expect(productKeyFor({ make: "Citroen", model: "e-Berlingo", kwh: 50 })).toBe("model:citroen-berlingo-50kwh");
     expect(productKeyFor({ make: "Hyundai", model: "Kona Electric" })).toBe("model:hyundai-kona");
