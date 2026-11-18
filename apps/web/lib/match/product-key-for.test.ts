@@ -5,6 +5,7 @@ import {
   isProseModel,
   kwhKeyText,
   makeKey,
+  modelAliasSlug,
   packFamilyFor,
   productFactsFromKey,
   productKeyFor,
@@ -137,17 +138,17 @@ describe("productKeyFor", () => {
     expect(two.map(productKeyFor)).toEqual(["pack:stellantis-ecmp-50kwh", "broad:lfp-modules"]);
   });
 
-  it("fans every stated make and chemistry out instead of keeping only the first", () => {
+  it("fans every stated make out, and keeps the chemistries of several makes as a preference instead of crossing them", () => {
     const { facts, stated } = expandProductFacts({
       makes: ["Toyota or Lexus", "Stellantis"], chemistries: ["NMC", "LFP"], formats: ["Packs"], kwhMin: 50, kwhMax: 60,
     });
-    expect(stated).toBe(4);
-    expect(facts.map(productKeyFor)).toEqual([
-      "broad:stellantis-lfp-packs",
-      "broad:stellantis-nmc-packs",
-      "broad:toyota-or-lexus-lfp-packs",
-      "broad:toyota-or-lexus-nmc-packs",
-    ]);
+    expect(stated).toBe(2);
+    expect(facts.map(productKeyFor)).toEqual(["broad:stellantis-any-packs", "broad:toyota-or-lexus-any-packs"]);
+    expect(facts.every((fact) => fact.chemistryPreference === "NMC / LFP")).toBe(true);
+    expect(facts.every((fact) => fact.chemistry === null)).toBe(true);
+    // One make with several chemistries is a pairing the source states: it stays one line per chemistry.
+    expect(expandProductFacts({ makes: ["Stellantis"], chemistries: ["NMC", "LFP"], formats: ["Packs"] }).facts.map(productKeyFor))
+      .toEqual(["broad:stellantis-lfp-packs", "broad:stellantis-nmc-packs"]);
   });
 
   it("splits a compound make into one want per make, never one slugged phrase", () => {
@@ -184,11 +185,21 @@ describe("productKeyFor", () => {
 
   it("caps the fan-out and reports how many combinations the source stated", () => {
     const makes = ["Toyota", "Stellantis", "Hyundai", "Kia", "BMW"];
-    const chemistries = ["NMC", "LFP", "NCA"];
-    const { facts, stated } = expandProductFacts({ makes, chemistries, formats: ["Packs"] });
+    const { facts, stated } = expandProductFacts({ makes, formats: ["Packs", "Modules", "Cells"] });
     expect(stated).toBe(15);
     expect(facts).toHaveLength(12);
     expect(new Set(facts.map(productKeyFor)).size).toBe(12);
+  });
+
+  it("keys a model by the canonical slug of the alias list", () => {
+    expect(productKeyFor({ make: "Hyundai", model: "Kona Electric", kwh: 64 })).toBe("model:hyundai-kona-64kwh");
+    expect(productKeyFor({ make: "Kia", model: "e-Niro", kwh: 64 })).toBe("model:kia-niro-64kwh");
+    expect(productKeyFor({ make: "Nissan", model: "Leaf e+", kwh: 62 })).toBe("model:nissan-leaf-62kwh");
+    expect(productKeyFor({ make: "Citroen", model: "e-Berlingo", kwh: 50 })).toBe("model:citroen-berlingo-50kwh");
+    expect(productKeyFor({ make: "Hyundai", model: "Kona Electric" })).toBe("model:hyundai-kona");
+    // A model the list does not know keeps its folded text.
+    expect(productKeyFor({ make: "Foo", model: "Bar Thing", kwh: 50 })).toBe("model:foo-barthing-50kwh");
+    expect(modelAliasSlug("Hyundai", "Kona / Niro")).toBeNull();
   });
 
   it("reports the level of a key from its prefix", () => {

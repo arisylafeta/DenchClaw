@@ -27,6 +27,7 @@ import {
   normalModel,
   partKey,
 } from "@/lib/commercial-stock";
+import { MODEL_ALIAS_ROWS, MODEL_MAKE_ALIASES } from "./model-aliases.generated";
 import { PACK_FAMILIES, type PackFamily } from "./pack-families";
 
 export type ProductFacts = {
@@ -52,6 +53,8 @@ export type ProductFacts = {
   /** A cell's form factor (18650, 21700, pouch, ...); only a cell key uses it. */
   cellFormat?: string | null;
   cellFormats?: (string | null | undefined)[] | null;
+  /** Chemistries a source listed beside several makes without pairing them (kept as a preference, never crossed). */
+  chemistryPreference?: string | null;
 };
 
 export type ProductKeyLevel = "part" | "pack" | "model" | "cell" | "broad";
@@ -247,10 +250,88 @@ function graphPack(facts: ProductFacts): string | null {
   return id ? `pack:${id}` : null;
 }
 
+const ALIAS_BRAND_WORDS = [
+  "volkswagen", "vw", "audi", "mini", "skoda", "cupra", "porsche", "bmw", "mercedes benz", "mercedes", "tesla", "stellantis", "nissan",
+  "renault", "dacia", "peugeot", "citroen", "opel", "vauxhall", "fiat", "jeep", "ford", "hyundai", "kia", "genesis", "toyota", "lexus",
+  "honda", "mazda", "mitsubishi", "suzuki", "subaru", "volvo", "polestar", "jaguar", "land rover", "mg", "byd", "lotus", "lucid", "rivian",
+  "nio", "xpeng", "zeekr", "leapmotor", "maxus", "smart", "seat",
+];
+const ALIAS_VARIANT_WORDS = new Set(["long", "range", "standard", "awd", "rwd", "fwd", "4wd", "2wd", "lr", "sr", "dual", "motor", "performance", "premium", "se"]);
+
+function plainWords(value: string | null | undefined): string {
+  return deaccentText(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function deaccentText(value: string): string {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+}
+
+/** Make fold with the alias list's make aliases (vw is volkswagen). Mirrors buyer_interest_alias_make_fold() in SQL. */
+function aliasMakeFold(value: string | null | undefined): string {
+  const folded = fold(value ?? null);
+  return MODEL_MAKE_ALIASES[folded] ?? folded;
+}
+
+/**
+ * The model text as the alias list reads it: figures, asides, years, battery words and a leading make removed, trailing trim
+ * words dropped. Mirrors buyer_interest_model_norm() in SQL (migration 121) and normal_tokens() in model_aliases.py.
+ */
+export function modelNormText(make: string | null | undefined, raw: string | null | undefined): string | null {
+  const own = plainWords(make);
+  const brands = [...new Set([own, ...ALIAS_BRAND_WORDS])].filter(Boolean).toSorted((a, b) => b.length - a.length || a.localeCompare(b));
+  for (const dropYears of [true, false]) {
+    let text = deaccentText(raw ?? "").toLowerCase()
+      .replace(/\b\d+(?:\.\d+)?\s*(?:kwh|kw|ps|hp|bhp|ah)\b/g, " ")
+      .replace(/\([^)]*\)|\[[^\]]*\]/g, " ");
+    if (dropYears) {text = text.replace(/\b(?:19|20)\d{2}\b/g, " ");}
+    text = text.replace(/\b(?:battery|batteries|packs?|modules?|hv|high voltage)\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
+    for (const brand of brands) {
+      if (brand === "smart" && own && !["smart", "mercedes", "mercedes benz"].includes(own)) {continue;}
+      if (text.startsWith(`${brand} `)) {
+        text = text.slice(brand.length + 1);
+        break;
+      }
+    }
+    const tokens = text.split(" ").filter(Boolean);
+    while (tokens.length > 1 && ALIAS_VARIANT_WORDS.has(tokens[tokens.length - 1])) {tokens.pop();}
+    if (tokens.length) {return tokens.join(" ");}
+  }
+  return null;
+}
+
+/**
+ * The canonical slug of a model text under a make when the alias list names it (Kona Electric is kona, e-Niro is niro), else
+ * null. A text listing models names none; with a slash the whole text must equal an alias. Mirrors
+ * buyer_interest_model_alias_slug() in SQL.
+ */
+export function modelAliasSlug(make: string | null | undefined, raw: string | null | undefined): string | null {
+  if (!(raw ?? "").trim() || /[,;:]/.test(raw ?? "")) {return null;}
+  const norm = modelNormText(make, raw);
+  if (!norm) {return null;}
+  const own = aliasMakeFold(make) || null;
+  const exactOnly = (raw ?? "").includes("/");
+  let best: { rank: [boolean, number]; slug: string } | null = null;
+  for (const [aliasOwn, , alias, , slug, , isGlobal] of MODEL_ALIAS_ROWS) {
+    if (!(norm === alias || (!exactOnly && norm.startsWith(`${alias} `)))) {continue;}
+    const mine = own !== null && aliasOwn === own;
+    if (!(mine || isGlobal)) {continue;}
+    if (!best || (mine && !best.rank[0]) || (mine === best.rank[0] && alias.length > best.rank[1])) {
+      best = { rank: [mine, alias.length], slug };
+    }
+  }
+  return best?.slug ?? null;
+}
+
+/** The model segment of a key: the canonical slug, else the folded text. Mirrors buyer_interest_model_key() in SQL. */
+function modelSegment(make: string | null | undefined, text: string | null | undefined): string | null {
+  return modelAliasSlug(make, text) ?? fold(text ?? null);
+}
+
 function modelKey(facts: ProductFacts): string | null {
   const make = makeKey(facts.make ?? null);
   if (isProseModel(facts.model ?? null)) {return null;}
-  const model = fold(normalModel(facts.make ?? null, modelKeyText(facts.model ?? null)) ?? modelKeyText(facts.model ?? null));
+  const model = modelAliasSlug(facts.make, modelKeyText(facts.model ?? null))
+    ?? fold(normalModel(facts.make ?? null, modelKeyText(facts.model ?? null)) ?? modelKeyText(facts.model ?? null));
   const kwh = kwhKeyText(singleKwh(facts));
   return make && model && kwh ? `model:${make}-${model}-${kwh}kwh` : null;
 }
@@ -275,7 +356,7 @@ function modelWideKey(facts: ProductFacts): string | null {
   const make = makeKey(facts.make ?? null);
   const text = modelWideText(facts.make, facts.model);
   if (!make || !text || isProseModel(text)) {return null;}
-  const model = fold(text);
+  const model = modelSegment(facts.make, text);
   return model ? `model:${make}-${model}` : null;
 }
 
@@ -332,7 +413,11 @@ function statedValues(values: (string | null | undefined)[] | null | undefined, 
  */
 export function expandProductFacts(facts: ProductFacts, limit = PRODUCT_FACT_COMBINATIONS): { facts: ProductFacts[]; stated: number } {
   const makes = statedValues(splitMakes(statedValues(facts.makes, facts.make ?? null)), null);
-  const chemistries = statedValues(facts.chemistries, facts.chemistry ?? null);
+  let chemistries = statedValues(facts.chemistries, facts.chemistry ?? null);
+  // Two or more makes with two or more chemistries are not paired by the source: no cross product (migration 121).
+  const statedChemistries = chemistries.filter((value): value is string => Boolean(value));
+  const chemistryPreference = makes.filter(Boolean).length >= 2 && statedChemistries.length >= 2 ? statedChemistries.join(" / ") : null;
+  if (chemistryPreference) {chemistries = [null];}
   const formats = statedValues(facts.formats, facts.format ?? null);
   const cellFormats = statedCellFormats(facts);
   const expanded: ProductFacts[] = [];
@@ -349,6 +434,7 @@ export function expandProductFacts(facts: ProductFacts, limit = PRODUCT_FACT_COM
             chemistry,
             format,
             cellFormat,
+            ...(chemistryPreference ? { chemistryPreference } : {}),
             makes: make ? [make] : [],
             chemistries: chemistry ? [chemistry] : [],
             formats: format ? [format] : [],
