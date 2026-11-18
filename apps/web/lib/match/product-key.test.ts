@@ -282,3 +282,20 @@ describe("coverage of real-shaped field text", () => {
     expect(parts).toBeGreaterThanOrEqual(4);
   });
 });
+
+describe("cell format on the lot", () => {
+  it("reads the cell format from the cell_format field, the format, the model or the title", () => {
+    expect(key({ format: "Cells", cell_format: "21700" }).lines[0].cellFormat).toBe("21700");
+    expect(key({ format: "Cylindrical 18650" }).lines[0].cellFormat).toBe("18650");
+    expect(key({ format: "Cells", model: "LG pouch cell" }).lines[0].cellFormat).toBe("pouch");
+    expect(key({ format: "Cells", capacity: "100 Ah prismatic cell" }).lines[0].cellFormat).toBe("prismatic");
+    expect(buildProductKey({ fields: fields({ format: "Cells" }), title: "Cylindrical cells, 4680" }).lines[0].cellFormat).toBe("4680");
+    expect(key({ format: "Cells", model: "Panasonic NCR2170" }).lines[0].cellFormat).toBe("21700");
+    expect(key({ format: "Cells", cell_format: "cylindrical" }).lines[0].cellFormat).toBe("cylindrical");
+  });
+
+  it("leaves it unknown when none is stated, and null for packs", () => {
+    expect(key({ format: "Cells", capacity: "5,220 mAh x 3.6 V" }).lines[0].cellFormat).toBeNull();
+    expect(key({ format: "Packs", capacity: "44.5 kWh per pack", cell_format: "pouch" }).lines[0].cellFormat).toBeNull();
+  });
+});

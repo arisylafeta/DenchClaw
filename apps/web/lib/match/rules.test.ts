@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildProductKey } from "./product-key";
 import {
   filteredPastAsks, isLead, lineEvidence, priceKey, productTier, rankA1, rankBuyers, ruleOut,
-  sizeFit, supplyFactsFromKey, type BuyerFacts, type BuyerLine, type SupplyFacts,
+  cellFormatFits, sizeFit, supplyFactsFromKey, type BuyerFacts, type BuyerLine, type SupplyFacts,
 } from "./rules";
 
 // The cases below are the ones pinned by scripts/rebattery/match_replay/test_match_replay.py, so the
@@ -617,5 +617,79 @@ describe("buyer interest lines as evidence", () => {
       ]);
       expect(rankA1(lot, buyers, AS_OF_LIVE).map((row) => row.companyId)).toEqual(["c", "b", "a"]);
     });
+  });
+});
+
+describe("cell format", () => {
+  const AS_OF_CF = "2026-11-15";
+  const lotOf = (values: Record<string, string>) => {
+    const key = buildProductKey({
+      fields: Object.entries({ format: "Cells", chemistry: "NMC", capacity: "5 Ah per cell", ...values })
+        .map(([field_key, value]) => ({ field_key, value, status: "confirmed" })),
+      title: "Cells lot",
+    });
+    return { key, supplies: supplyFactsFromKey(key) };
+  };
+  const ask = (productKey: string, overrides: Partial<BuyerLine> = {}): BuyerLine => ({
+    kind: "ask", productKey, make: null, model: null, format: "cell", chemistry: null, kwhMin: null, kwhMax: null,
+    firstSeen: "2026-10-01", lastSeen: "2026-10-01", expiresOn: null, ...overrides,
+  });
+  const wants = (lines: BuyerLine[], overrides: Partial<BuyerFacts> = {}) =>
+    buyer({ id: "w", name: "Wants", profile: {}, lines, ...overrides });
+  const fits = (lot: SupplyFacts, b: BuyerFacts) => lineEvidence(lot, b, AS_OF_CF).best !== null;
+
+  it("fits a cell format only to a lot of that format, with cylindrical covering the round sizes", () => {
+    expect(cellFormatFits("21700", "cylindrical")).toBe(true);
+    expect(cellFormatFits("cylindrical", "4680")).toBe(true);
+    expect(cellFormatFits("21700", "18650")).toBe(false);
+    expect(cellFormatFits("cylindrical", "pouch")).toBe(false);
+    expect(cellFormatFits("21700", null)).toBe(true);
+  });
+
+  it("ELG asks for 18650 or 21700 cells: pouch and prismatic lots no longer look like a match", () => {
+    const elg = wants([ask("broad:18650-any-cells"), ask("broad:21700-any-cells")]);
+    expect(fits(lotOf({ cell_format: "21700" }).supplies[0], elg)).toBe(true);
+    expect(fits(lotOf({ cell_format: "18650" }).supplies[0], elg)).toBe(true);
+    expect(fits(lotOf({ cell_format: "cylindrical" }).supplies[0], elg)).toBe(true);
+    expect(fits(lotOf({ cell_format: "pouch" }).supplies[0], elg)).toBe(false);
+    expect(fits(lotOf({ cell_format: "prismatic" }).supplies[0], elg)).toBe(false);
+    // A line with no cell format still fits every cell lot.
+    expect(fits(lotOf({ cell_format: "pouch" }).supplies[0], wants([ask("broad:nmc-cells")]))).toBe(true);
+  });
+
+  it("a lot that does not state its cell format still fits, with a check naming what they need", () => {
+    const { key, supplies } = lotOf({});
+    const elg = wants([ask("broad:21700-any-cells")]);
+    expect(fits(supplies[0], elg)).toBe(true);
+    const ranked = rankBuyers(supplies, [elg], { asOf: AS_OF_CF, key }).ranked;
+    expect(ranked[0].checks).toContain("Cell format not stated; they need 21700");
+    const known = lotOf({ cell_format: "21700" });
+    expect(rankBuyers(known.supplies, [elg], { asOf: AS_OF_CF, key: known.key }).ranked[0].checks.join("|")).not.toContain("Cell format not stated");
+  });
+
+  it("Revoxa takes prismatic only: rules_out.cell_formats pouch rules a pouch lot out, prismatic and unknown stay in", () => {
+    const revoxa = wants([], { dossier: { frontmatter: {
+      products: [{ format: "cells", chemistry: "LFP", cell_format: "prismatic", status: "asked" }],
+      rules_out: { cell_formats: [{ value: "pouch", seen: "2026-10-01", src: "gmail_msg_test" }] },
+    } } });
+    const pouch = lotOf({ chemistry: "LFP", cell_format: "pouch" });
+    expect(ruleOut(pouch.supplies[0], revoxa)).toMatchObject({ code: "cell_format", text: "No pouch cells", seen: "2026-10-01", src: "gmail_msg_test" });
+    expect(rankBuyers(pouch.supplies, [revoxa], { asOf: AS_OF_CF, key: pouch.key }).ruledOut[0]).toMatchObject({ code: "cell_format", text: "No pouch cells" });
+    const prismatic = lotOf({ chemistry: "LFP", cell_format: "prismatic" });
+    expect(ruleOut(prismatic.supplies[0], revoxa)).toBeNull();
+    const unknown = lotOf({ chemistry: "LFP" });
+    expect(ruleOut(unknown.supplies[0], revoxa)).toBeNull();
+    expect(rankBuyers(unknown.supplies, [revoxa], { asOf: AS_OF_CF, key: unknown.key }).ranked[0].checks).toContain("Cell format not stated; they need prismatic");
+  });
+
+  it("Exigo takes cylindrical NMC only: a round NMC lot fits, a pouch or prismatic lot does not", () => {
+    const exigo = wants([ask("broad:cylindrical-nmc-cells", { chemistry: "NMC" })]);
+    expect(fits(lotOf({ cell_format: "21700" }).supplies[0], exigo)).toBe(true);
+    expect(fits(lotOf({ cell_format: "cylindrical" }).supplies[0], exigo)).toBe(true);
+    expect(fits(lotOf({ cell_format: "pouch" }).supplies[0], exigo)).toBe(false);
+    expect(fits(lotOf({ cell_format: "prismatic" }).supplies[0], exigo)).toBe(false);
+    expect(fits(lotOf({ chemistry: "LFP", cell_format: "21700" }).supplies[0], exigo)).toBe(false);
+    const ruledCylindrical = wants([], { dossier: { frontmatter: { rules_out: { cell_formats: ["cylindrical"] } } } });
+    expect(ruleOut(lotOf({ cell_format: "21700" }).supplies[0], ruledCylindrical)?.code).toBe("cell_format");
   });
 });
