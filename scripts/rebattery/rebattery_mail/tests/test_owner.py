@@ -205,20 +205,3 @@ def test_one_failing_owner_does_not_block_the_queue(monkeypatch):
     with psycopg2.connect(DSN) as db, db.cursor() as cur:
         cur.execute("select state, attempts from mail_agent_event where message_id='m1'")
         assert cur.fetchone() == ('failed', 5)
-
-
-def test_dismantler_rule_routes_mail_from_anyone_at_a_dismantler(monkeypatch):
-    with psycopg2.connect(DSN) as db, db.cursor() as cur:
-        # Synthetic CRM rows, kept between runs (deleting people touches frozen legacy tables in a schema copy).
-        cur.execute("insert into crm_companies (id, name) values ('dm-co','Yard'), ('other-co','Buyer') on conflict do nothing")
-        cur.execute("insert into crm_people (id, company_id, email) values ('dm-p','dm-co','pat@yard.example'), ('other-p','other-co','kim@buyer.example') on conflict do nothing")
-        cur.execute("insert into crm_dismantlers (company_id) values ('dm-co') on conflict do nothing")
-    owner.rules(Namespace(action='add', kind='dismantler', value='any', profile='dismantlercampaigns', session='dc-main', priority=100, note=None, apply=True))
-    owner.rules(Namespace(action='add', kind='mailbox', value='supply', profile='sorcerer', session=None, priority=100, note=None, apply=True))
-    inbound('m1', 't1', 'PAT@yard.example')      # email match, no person id on the message
-    inbound('m2', 't2', 'kim@buyer.example')     # not a dismantler: mailbox rule
-    with psycopg2.connect(DSN) as db, db.cursor(cursor_factory=__import__('psycopg2.extras').extras.RealDictCursor) as cur:
-        cur.execute("select * from mail_message where id='m1'")
-        assert owner.route(cur, cur.fetchone())[:3] == ('dismantlercampaigns', 'dc-main', 'rule dismantler=any')
-        cur.execute("select * from mail_message where id='m2'")
-        assert owner.route(cur, cur.fetchone())[0] == 'sorcerer'

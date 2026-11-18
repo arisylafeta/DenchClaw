@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from .core import Refused, UsageError, connection, dict_cursor
 
 PROFILE_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
-KINDS = ('tag', 'sender', 'person', 'company', 'dismantler', 'domain', 'mailbox')
+KINDS = ('tag', 'sender', 'person', 'company', 'domain', 'mailbox')
 OWN_DOMAIN = 'rebattery.io'
 API_BASE = os.environ.get('HERMES_API_BASE', 'http://127.0.0.1:8642')
 ENV_FILE = '/root/.hermes/.env'
@@ -187,27 +187,6 @@ def plus_tags(addresses):
     return tags
 
 
-def sender_company(cur, person_id, sender):
-    """The CRM company of the sender: by CRM person id, else by an exact email match on one company."""
-    if person_id:
-        cur.execute('select company_id from crm_people where id=%s', (person_id,))
-        row = cur.fetchone()
-        if row and row['company_id']:
-            return row['company_id']
-    if sender and not sender.endswith('@' + OWN_DOMAIN):
-        cur.execute('select distinct company_id from crm_people where lower(email)=%s and company_id is not null', (sender,))
-        rows = cur.fetchall()
-        if len(rows) == 1:
-            return rows[0]['company_id']
-    return None
-
-
-def is_dismantler(cur, company_id):
-    """A rule of kind 'dismantler' (value 'any') matches mail from anyone at a company in crm_dismantlers."""
-    cur.execute('select 1 from crm_dismantlers where company_id=%s', (company_id,))
-    return cur.fetchone() is not None
-
-
 def route(cur, message):
     """Who should own this inbound message's thread, and why. Returns (profile, session_id, why, rule_id) or None."""
     if message.get('thread_id'):
@@ -215,12 +194,10 @@ def route(cur, message):
         if owner:
             return owner['profile'], owner['session_id'], 'thread owner', None
     sender = (message.get('from_email') or '').lower()
-    person = message.get('from_person_id') or message.get('person_id')
-    company = message.get('company_id') or sender_company(cur, person, sender)
     candidates = [('tag', t) for t in plus_tags(list(message.get('to_emails') or []) + list(message.get('cc_emails') or []))]
-    candidates += [('sender', sender), ('person', person), ('company', company),
-                   ('dismantler', 'any' if company and is_dismantler(cur, company) else None),
-                   ('domain', sender.rpartition('@')[2]), ('mailbox', message.get('identity_key'))]
+    candidates += [('sender', sender), ('person', message.get('from_person_id') or message.get('person_id')),
+                   ('company', message.get('company_id')), ('domain', sender.rpartition('@')[2]),
+                   ('mailbox', message.get('identity_key'))]
     for kind, value in candidates:
         if not value:
             continue
