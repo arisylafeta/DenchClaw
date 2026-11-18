@@ -58,7 +58,7 @@ export const TOP_LEVEL_KEYS = [
 ];
 const PRODUCT_KEYS = [
   "part_number", "platform", "make", "model", "format", "chemistry", "kwh", "kwh_min", "kwh_max",
-  "module_series", "cell_format", "status", "reason", "seen", "src",
+  "module_series", "cell_format", "status", "reason", "seen", "src", "one_off",
 ];
 const PRICE_KEYS = ["eur_per_kwh", "eur_per_unit", "currency_original", "basis", "incoterm", "seen", "src"];
 const RULES_OUT_KEYS = ["chemistries", "formats", "damaged", "bess_systems", "other", "part_numbers"];
@@ -501,6 +501,9 @@ export function validateDossier(frontmatter: unknown): string[] {
       }
       if ("reason" in product && typeof product.reason !== "string") {
         errors.push(`${where}.reason: must be text`);
+      }
+      if ("one_off" in product && typeof product.one_off !== "boolean") {
+        errors.push(`${where}.one_off: must be true or false`);
       }
       if (!product.status) {
         errors.push(`${where}.status: required (one of ${PRODUCT_STATUSES.join(", ")})`);

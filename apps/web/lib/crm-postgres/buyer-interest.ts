@@ -21,7 +21,7 @@ export const KIND_LABEL: Record<string, string> = {
 };
 
 /** How long a mastered want stays current without being seen again (plan section 1). */
-const DEFAULT_EXPIRY_DAYS: Record<MasteredKind, number> = { standing: 90, interest: 180, inferred: 180 };
+const DEFAULT_EXPIRY_DAYS: Record<MasteredKind, number> = { standing: 365, interest: 180, inferred: 180 };
 
 const QUANTITY_UNITS = ["packs", "modules", "cells", "systems", "kWh", "MWh", "tonnes"];
 const CURRENCIES = ["EUR", "USD", "GBP"];

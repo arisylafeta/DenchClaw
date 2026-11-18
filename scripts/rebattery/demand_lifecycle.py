@@ -177,7 +177,7 @@ def _record_saved_search(cur, row):
 
 
 INTEREST_KINDS = ('standing', 'interest', 'inferred')
-INTEREST_EXPIRY_DAYS = {'standing': 90, 'interest': 180, 'inferred': 180}
+INTEREST_EXPIRY_DAYS = {'standing': 365, 'interest': 180, 'inferred': 180}
 # One source may hold this many lines; a longer list is truncated and recorded, never dropped silently.
 INTEREST_FACT_COMBINATIONS = 12
 

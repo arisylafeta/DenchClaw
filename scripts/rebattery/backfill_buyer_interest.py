@@ -54,6 +54,8 @@ DEFAULT_DSN = "host=/var/run/postgresql dbname=denchclaw"
 PROFILE_REASONS = ("research_profile", "moved_to_profile")
 # Dossier product status -> the line kind it becomes. `asked` is a want the buyer stated to us, not a live ask:
 # asks are synced demand rows and must not be invented here.
+STANDING_DAYS = 365  # a Regular Want lasts a year from its latest evidence
+ONE_OFF_ASK_DAYS = 90  # a one-off shortlist is an ask, not a Regular Want
 DOSSIER_KINDS = {
     "asked": ("standing", "mastered"),
     "said_interested": ("interest", "mastered"),
@@ -548,16 +550,23 @@ def _already_says(cur, company_id, key, kind):
     return cur.fetchone() is not None
 
 
-def _write_line(cur, company_id, kind, ownership, keyed, seen, refs, reason=None):
-    """One mastered line per product and make; a synced line per purchase or decline, keyed by its source."""
+def _write_line(cur, company_id, kind, ownership, keyed, seen, refs, reason=None, last_verified=None):
+    """One mastered line per product and make; a synced line per purchase or decline, keyed by its source.
+
+    A standing line expires a year after the latest of: the date it was last said (seen), the latest date the buyer
+    bought the same product from us (a bought line of the same company and product key), and the dossier's
+    last_verified. A synced `ask` (a one-off shortlist) expires 90 days after its seen date."""
     if ownership == "mastered":
         cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key,
                          product_key_level, make, model, raw_product, format, chemistry, kwh_min, kwh_max,
                          first_seen, last_seen, quantity_basis, source_refs, expires_on)
                        values (%s, %s, %s, 'mastered', %s, %s, %s, %s, %s, %s, %s, %s, %s,
                          coalesce(%s::date, current_date), coalesce(%s::date, current_date), 'not_stated',
-                         %s::text[], coalesce(%s::date, current_date) + case when %s = 'standing'
-                           then 90 else 180 end)
+                         %s::text[], greatest(coalesce(%s::date, current_date),
+                           case when %s = 'standing' then (select max(b.last_seen) from buyer_interest b
+                             where b.company_id = %s and b.product_key = %s and b.kind = 'bought') end,
+                           case when %s = 'standing' then %s::date end)
+                           + case when %s = 'standing' then %s else 180 end)
                        on conflict (company_id, product_key, kind) where ownership = 'mastered'
                        do update set first_seen = least(buyer_interest.first_seen, excluded.first_seen),
                          last_seen = greatest(buyer_interest.last_seen, excluded.last_seen),
@@ -570,23 +579,25 @@ def _write_line(cur, company_id, kind, ownership, keyed, seen, refs, reason=None
                     (_dossier_line_id(company_id, kind, keyed["key"]), company_id, kind,
                      keyed["key"], keyed["level"], keyed["make"], keyed["model"], keyed["raw_product"],
                      keyed["format"], keyed["chemistry"], keyed["kwh_min"], keyed["kwh_max"], seen, seen, refs,
-                     seen, kind))
+                     seen, kind, company_id, keyed["key"], kind, last_verified, kind, STANDING_DAYS))
     else:
         cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key,
                          product_key_level, make, model, raw_product, format, chemistry, kwh_min, kwh_max,
-                         first_seen, last_seen, quantity_basis, source_refs, decline_reason)
+                         first_seen, last_seen, quantity_basis, source_refs, decline_reason, expires_on)
                        values (%s, %s, %s, 'synced', %s, %s, %s, %s, %s, %s, %s, %s, %s,
                          coalesce(%s::date, current_date), coalesce(%s::date, current_date), 'not_stated',
-                         %s::text[], %s)
+                         %s::text[], %s, case when %s = 'ask'
+                           then coalesce(%s::date, current_date) + %s end)
                        on conflict (id) do update set last_seen = greatest(buyer_interest.last_seen,
                          excluded.last_seen), decline_reason = excluded.decline_reason,
+                         expires_on = greatest(buyer_interest.expires_on, excluded.expires_on),
                          source_refs = (select array_agg(distinct ref order by ref)
                            from unnest(buyer_interest.source_refs || excluded.source_refs) ref),
                          updated_at = now()""",
                     (_dossier_line_id(company_id, kind, keyed["key"]), company_id, kind,
                      keyed["key"], keyed["level"], keyed["make"], keyed["model"], keyed["raw_product"],
                      keyed["format"], keyed["chemistry"], keyed["kwh_min"], keyed["kwh_max"], seen, seen, refs,
-                     reason))
+                     reason, kind, seen, ONE_OFF_ASK_DAYS))
 
 
 ARCHIVE_TABLE = "buyer_interest_removed_20261115"
@@ -614,7 +625,11 @@ def sync_dossier_rows(cur, companies):
             products = [products]
         last_verified = frontmatter.get("last_verified")
         removed += _remove_dossier_lines(cur, company["id"])
-        for index, product in enumerate(products):
+        last_verified = str(last_verified)[:10] if last_verified else None
+        # Purchases first, so a Regular Want's expiry sees a purchase the same dossier states.
+        order = sorted(enumerate(products), key=lambda item: 0 if isinstance(item[1], dict) and str(
+            item[1].get("status") or "").strip().lower() == "bought" else 1)
+        for index, product in order:
             if not isinstance(product, dict):
                 skipped += 1
                 continue
@@ -623,6 +638,8 @@ def sync_dossier_rows(cur, companies):
                 skipped += 1  # no status: nothing to own the fact with
                 continue
             kind, ownership = mapping
+            if kind == "standing" and product.get("one_off") is True:
+                kind, ownership = "ask", "synced"  # a single request or shortlist is not a Regular Want
             cur.execute("savepoint bi_row")
             try:
                 _clear_notes(cur, f"{company['id']}:{index}")
@@ -659,7 +676,7 @@ def sync_dossier_rows(cur, companies):
                     if kind in ("bought", "declined") and _already_says(cur, company["id"], keyed["key"], kind):
                         from_source += 1
                         continue
-                    _write_line(cur, company["id"], kind, ownership, keyed, seen, refs, reason)
+                    _write_line(cur, company["id"], kind, ownership, keyed, seen, refs, reason, last_verified)
                     written += 1
                 cur.execute("release savepoint bi_row")
             except Exception as exc:  # noqa: BLE001

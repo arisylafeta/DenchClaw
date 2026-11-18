@@ -70,7 +70,7 @@ TOP_LEVEL_KEYS = [
 ]
 PRODUCT_KEYS = [
     "part_number", "platform", "make", "model", "format", "chemistry", "kwh", "kwh_min", "kwh_max",
-    "module_series", "cell_format", "status", "reason", "seen", "src",
+    "module_series", "cell_format", "status", "reason", "seen", "src", "one_off",
 ]
 PRICE_KEYS = ["eur_per_kwh", "eur_per_unit", "currency_original", "basis", "incoterm", "seen", "src"]
 RULES_OUT_KEYS = ["chemistries", "formats", "damaged", "bess_systems", "other", "part_numbers"]
@@ -363,6 +363,8 @@ def validate(frontmatter):
             errors.append(f"{where}.{key}: unknown key (allowed: {', '.join(PRODUCT_KEYS)})")
         if "reason" in product and not isinstance(product["reason"], str):
             errors.append(f"{where}.reason: must be text")
+        if "one_off" in product and not isinstance(product["one_off"], bool):
+            errors.append(f"{where}.one_off: must be true or false")
         if not product.get("status"):
             errors.append(f"{where}.status: required (one of {', '.join(PRODUCT_STATUSES)})")
         _check_enum(errors, f"{where}.status", product.get("status"), PRODUCT_STATUSES, "status")
