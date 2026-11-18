@@ -71,6 +71,8 @@ import {
   selectActiveContentTab,
   selectActivePath,
   ensureChatPresent,
+  deactivateMarkdownTab,
+  isMarkdownPath,
   loadTabsState,
   mergeOpenTabs,
   saveTabsState,
@@ -719,7 +721,8 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
     const restored = scaffold && !loaded.chatTabs.some((tab) => tab.id === scaffold.id)
       ? { ...loaded, chatTabs: [...loaded.chatTabs, scaffold], activeChatId: parseUrlState(searchParams).chat || dirtyChatDrafts.current.has(scaffold.id) ? scaffold.id : loaded.activeChatId ?? scaffold.id }
       : accountVerifiedLate ? mergeOpenTabs(loaded, tabsStateRef.current) : loaded;
-    dispatch({ type: "replace", state: ensureChatPresent(restored) });
+    // A reload opens on the chat, never on a restored markdown document.
+    dispatch({ type: "replace", state: ensureChatPresent(deactivateMarkdownTab(restored)) });
     setChatRuntimeSnapshots({});
   }, [accountId, workspaceName]);
 
@@ -2043,7 +2046,9 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
     if (treeLoading) {return;}
     if (accountId === undefined || tabScope.current.account !== accountId || tabScope.current.workspace !== (workspaceName || null)) return;
 
-    const urlState = parseUrlState(searchParams);
+    const parsedUrlState = parseUrlState(searchParams);
+    // Reloading on a markdown document opens the chat, not the artifact viewer.
+    const urlState = isMarkdownPath(parsedUrlState.path) ? { ...parsedUrlState, path: null } : parsedUrlState;
     // A chat-only link needs no tree to resolve, so an empty tree must not block it.
     const chatOnly = !!urlState.chat && !urlState.path && !urlState.crm && !urlState.entry;
     if (tree.length === 0 && !chatOnly && urlState.path !== "campaign"

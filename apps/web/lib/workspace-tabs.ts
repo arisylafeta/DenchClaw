@@ -1309,3 +1309,14 @@ export function workspaceTabsReducer(
       return action.state;
   }
 }
+
+export function isMarkdownPath(path: string | null | undefined): boolean {
+  return !!path && /\.mdx?$/i.test(path.split(/[?#]/)[0]);
+}
+
+/** Keeps the tab but makes the chat the visible surface when the active content tab is a markdown document. */
+export function deactivateMarkdownTab(state: WorkspaceTabsState): WorkspaceTabsState {
+  const active = state.contentTabs.find((tab) => tab.id === state.activeContentId);
+  if (!active || !isMarkdownPath(active.path)) return state;
+  return { ...state, activeContentId: null };
+}

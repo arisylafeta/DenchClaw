@@ -721,3 +721,16 @@ describe("bulk trades listing tabs", () => {
   });
 });
 
+
+describe("deactivateMarkdownTab", () => {
+  it("makes the chat visible when the active content tab is markdown, keeping the tab", async () => {
+    const { deactivateMarkdownTab } = await import("./workspace-tabs");
+    const tab = { id: "notes/a.md", path: "notes/a.md", title: "a", kind: "file" } as never;
+    const state = { ...EMPTY_TABS_STATE, contentTabs: [tab], activeContentId: "notes/a.md" };
+    const next = deactivateMarkdownTab(state);
+    expect(next.activeContentId).toBeNull();
+    expect(next.contentTabs).toHaveLength(1);
+    const crm = { ...state, contentTabs: [{ ...(tab as object), id: "x", path: "~crm/x", kind: "file" } as never], activeContentId: "x" };
+    expect(deactivateMarkdownTab(crm)).toBe(crm);
+  });
+});

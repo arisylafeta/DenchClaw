@@ -29,6 +29,7 @@ const looks: Record<string, BlobLook> = {
   sorcerer: { shape: "triangle", color: "violet" },
   vangrid: { shape: "squircle", color: "ambre" },
   penny: { shape: "nuage", color: "rose" },
+  auctions: { shape: "hexagone", color: "turquoise" },
 };
 
 function hash(name: string): number {
