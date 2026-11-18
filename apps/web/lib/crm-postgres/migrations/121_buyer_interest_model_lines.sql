@@ -651,9 +651,15 @@ begin
   return found;
 end $$;
 
--- The model segment of a key: the canonical slug, else the folded text (what 120 wrote).
+-- The model segment of a key: the canonical slug, else the folded text without a leading make (what the TypeScript
+-- normalModel() drops: the make as written, its canonical name, or Mercedes-Benz with a space).
 create or replace function buyer_interest_model_key(p_make text, p_text text) returns text language sql stable as $$
-  select coalesce(buyer_interest_model_alias_slug(p_make, p_text), buyer_interest_fold(p_text))
+  select coalesce(buyer_interest_model_alias_slug(p_make, p_text), buyer_interest_fold(
+    coalesce((select substr(p_text, length(prefix) + 2)
+                from unnest(array[lower(btrim(coalesce(p_make, ''))), lower(btrim(coalesce(buyer_interest_make(p_make), ''))),
+                  replace(lower(btrim(coalesce(buyer_interest_make(p_make), ''))), '-', ' ')]) prefix
+               where prefix <> '' and lower(p_text) like prefix || ' %' and btrim(substr(p_text, length(prefix) + 2)) <> ''
+               order by length(prefix) desc limit 1), p_text)))
 $$;
 
 -- What the source said that its key cannot hold: a prose model, a part number that is a product name, and a chemistry
@@ -670,15 +676,23 @@ create or replace function buyer_interest_raw_product(facts jsonb) returns text 
 $$;
 
 -- ---------------------------------------------------------------------------------------------- models a text names
--- Models a free text names, longest alias first, each text span used once: one row per model and per kWh figure of a
--- slash list ("Renault Zoe 22/41/52kWh" is three rows; no kWh is one row with a null). An alias counts when its make is
--- named (in the text or in p_makes) or when it carries a digit and one model owns it (model 3, ev6).
--- Mirrors text_models() of model_aliases.py.
+-- Models a free text names, longest alias first, each text span used once: one row per model and per kWh figure that
+-- belongs to it (no kWh is one row with a null). A model owns the kWh groups after it, up to the next model
+-- ("Zoe 22 kWh, Leaf 40 kWh" is Zoe 22 and Leaf 40); a model with none inherits the group of the model right after it
+-- ("Kona, Niro 39 kWh" is both 39); a single model also takes a group written before it ("40 kWh Leaf"). A group lists
+-- values: "22/41/52kWh", "22 or 41 kWh". An alias counts when its make is named (in the text or in p_makes) or when it
+-- carries a digit and one model owns it (model 3, ev6). Mirrors text_models() of model_aliases.py, which has no kWh.
 create or replace function buyer_interest_text_models(p_text text, p_makes text[] default '{}')
 returns table (own text, make_display text, slug text, name text, kwh numeric) language plpgsql stable as $$
 declare
-  kwh_found text[] := regexp_match(coalesce(p_text, ''), '([0-9]+(?:\.[0-9]+)?(?:\s*/\s*[0-9]+(?:\.[0-9]+)?)*)\s*kwh', 'i');
-  kwhs numeric[] := '{}';
+  -- A kWh group: values joined by / , & or and, the last one followed by kWh. Earlier values have two or three digits
+  -- (so "Model 3, 75 kWh" is Model 3 and 75).
+  kwh_re constant text := '(?:(?:[0-9]{2,3}(?:\.[0-9]+)?|[0-9]\.[0-9]+)(?:\s*kwh)?\s*(?:/|,|&|\yor\y|\yand\y)\s*)*[0-9]+(?:\.[0-9]+)?\s*kwh';
+  text_ text := regexp_replace(coalesce(p_text, ''), '[(\[]([^)\]]*[0-9]\s*kwh[^)\]]*)[)\]]', ' \1 ', 'gi');
+  grp text[];
+  grp_vals jsonb[] := '{}';
+  grp_pos int[] := '{}';
+  g int;
   words text;
   hints text[] := '{}';
   word text;
@@ -686,12 +700,29 @@ declare
   r record;
   pos int;
   seen text[] := '{}';
+  f_own text[] := '{}'; f_disp text[] := '{}'; f_slug text[] := '{}'; f_name text[] := '{}'; f_pos int[] := '{}'; f_len int[] := '{}';
+  n int;
+  ord int[];
+  k int;
+  idx int;
+  next_pos int;
+  mine jsonb[];
+  assigned jsonb[];
+  between_ text;
+  v text;
 begin
-  if kwh_found is not null then
-    select coalesce(array_agg(distinct v::numeric order by v::numeric), '{}') into kwhs
-    from unnest(regexp_split_to_array(kwh_found[1], '\s*/\s*')) v where v ~ '^[0-9]+(\.[0-9]+)?$';
-  end if;
-  words := regexp_replace(coalesce(p_text, ''), '[0-9]+(?:\.[0-9]+)?(?:\s*/\s*[0-9]+(?:\.[0-9]+)?)*\s*kwh', ' ', 'gi');
+  -- Each kWh group becomes one placeholder word, so its place among the models is known.
+  for grp in select regexp_matches(text_, '(' || kwh_re || ')', 'gi') loop
+    grp_vals := grp_vals || coalesce((select jsonb_agg(distinct x::numeric) from unnest(regexp_split_to_array(
+      regexp_replace(lower(grp[1]), '\s*kwh|\s+', '', 'g'), '/|,|&|or|and')) x where x ~ '^[0-9]+(\.[0-9]+)?$'), '[]'::jsonb);
+  end loop;
+  g := 0;
+  words := text_;
+  loop
+    exit when g >= cardinality(grp_vals);
+    g := g + 1;
+    words := regexp_replace(words, kwh_re, ' zkwh' || g || 'z ', 'i');
+  end loop;
   words := regexp_replace(words, '\([^)]*\)|\[[^\]]*\]', ' ', 'g');
   words := ' ' || btrim(regexp_replace(buyer_interest_unaccent(words), '[^a-z0-9]+', ' ', 'g')) || ' ';
   foreach word in array string_to_array(btrim(words), ' ') loop
@@ -700,6 +731,7 @@ begin
   foreach word in array coalesce(p_makes, '{}') loop
     foreach piece in array regexp_split_to_array(coalesce(word, ''), '\s*(,|/|&|\yand\y|\yor\y)\s*', 'i') loop
       hints := hints || buyer_interest_alias_make_fold(piece);
+      if buyer_interest_make(piece) = 'vw-group' then hints := hints || array['volkswagen', 'audi', 'skoda', 'seat', 'cupra', 'porsche']; end if;
     end loop;
   end loop;
   for r in select * from buyer_interest_model_alias a order by length(a.alias_spaced) desc, a.ord loop
@@ -709,12 +741,47 @@ begin
     words := overlay(words placing repeat(' ', length(r.alias_spaced)) from pos + 1 for length(r.alias_spaced));
     if (r.own || '/' || r.slug) = any(seen) then continue; end if;
     seen := seen || (r.own || '/' || r.slug);
-    own := r.own; make_display := r.make_display; slug := r.slug; name := r.name;
-    if cardinality(kwhs) = 0 then
+    f_own := f_own || r.own; f_disp := f_disp || r.make_display; f_slug := f_slug || r.slug; f_name := f_name || r.name;
+    f_pos := f_pos || (pos + 1); f_len := f_len || length(r.alias_spaced);
+  end loop;
+
+  n := cardinality(f_pos);
+  if n = 0 then return; end if;
+  for g in 1..cardinality(grp_vals) loop
+    grp_pos := grp_pos || position(' zkwh' || g || 'z ' in words);
+  end loop;
+  ord := array(select i from generate_subscripts(f_pos, 1) i order by f_pos[i]);
+  assigned := array_fill('[]'::jsonb, array[n]);
+  for k in reverse n..1 loop
+    idx := ord[k];
+    next_pos := case when k < n then f_pos[ord[k + 1]] else length(words) + 2 end;
+    mine := '{}';
+    for g in 1..cardinality(grp_vals) loop
+      if grp_pos[g] >= f_pos[idx] + f_len[idx] and grp_pos[g] < next_pos then mine := mine || grp_vals[g]; end if;
+    end loop;
+    if cardinality(mine) = 0 and k < n then
+      between_ := substr(words, f_pos[idx] + f_len[idx], next_pos - f_pos[idx] - f_len[idx]);
+      if between_ ~ '^\s*((and|or)\s*)?$' then assigned[idx] := assigned[ord[k + 1]]; end if;
+    end if;
+    if cardinality(mine) = 0 and k = 1 and n = 1 then
+      for g in 1..cardinality(grp_vals) loop mine := mine || grp_vals[g]; end loop;
+    end if;
+    if cardinality(mine) > 0 then
+      assigned[idx] := (select jsonb_agg(distinct x::numeric) from unnest(mine) m, jsonb_array_elements_text(m) x);
+    end if;
+  end loop;
+
+  for k in 1..n loop
+    idx := ord[k];
+    own := f_own[idx]; make_display := f_disp[idx]; slug := f_slug[idx]; name := f_name[idx];
+    if jsonb_array_length(assigned[idx]) = 0 then
       kwh := null;
       return next;
     else
-      foreach kwh in array kwhs loop return next; end loop;
+      for v in select x from jsonb_array_elements_text(assigned[idx]) x order by x::numeric loop
+        kwh := v::numeric;
+        return next;
+      end loop;
     end if;
   end loop;
 end $$;
@@ -845,10 +912,14 @@ begin
     -- Makes the request names without any model keep their make-level set.
     select count(distinct e->>'own' || '/' || (e->>'slug')) into model_entities from unnest(entities) e;
     foreach mk in array array_remove(makes, null) loop
+      -- "VW Group" is covered by a model of any make of the group.
       select exists (select 1 from unnest(entities) e, regexp_split_to_table(mk, '\s+or\s+', 'i') piece
-                      where e->>'own' = buyer_interest_alias_make_fold(piece)) into covered;
+                      where e->>'own' = buyer_interest_alias_make_fold(piece)
+                         or (buyer_interest_make(piece) = 'vw-group'
+                             and e->>'own' in ('volkswagen', 'audi', 'skoda', 'seat', 'cupra', 'porsche'))) into covered;
       if not covered then
-        entities := entities || jsonb_build_object('makes', jsonb_build_array(mk), 'make', mk);
+        -- A make-level set states no model: the request's model list text must not ride along as its model.
+        entities := entities || jsonb_build_object('makes', jsonb_build_array(mk), 'make', mk, 'no_model', true);
       end if;
     end loop;
     -- A model line per kWh still counts as the one model it is.
@@ -879,10 +950,10 @@ begin
     total := total + 1;
     continue when total > cap;
     sets := sets || (buyer_interest_facts(
-      p_spec || (ent - 'own' - 'slug') || jsonb_build_object(
+      case when ent ? 'no_model' then p_spec - 'model' - 'models' else p_spec end || (ent - 'own' - 'slug' - 'no_model') || jsonb_build_object(
         'chemistries', case when c is null then '[]'::jsonb else jsonb_build_array(c) end, 'chemistry', c,
         'formats', case when f is null then '[]'::jsonb else jsonb_build_array(f) end, 'format', f),
-      p_context, p_fields)
+      case when ent ? 'no_model' then p_context - 'model' else p_context end, p_fields - case when ent ? 'no_model' then 'model' else '' end)
       || case when cf is null then '{}'::jsonb else jsonb_build_object('cell_format', cf) end
       || case when preference is null then '{}'::jsonb else jsonb_build_object('chemistry_preference', preference) end);
   end loop;
@@ -900,8 +971,11 @@ declare
   row_ crm_bulk_listings%rowtype;
   fact_sets jsonb[];
   product_sets jsonb[];
+  set_keys text[];
   stated_total int;
   facts jsonb;
+  set_key text;
+  i int;
   keys text[] := '{}';
   line_kind text;
   line_reason text;
@@ -984,7 +1058,8 @@ begin
 
   -- p_models: a request that names several models writes a line per model (and per kWh); see buyer_interest_fact_sets.
   -- A row that states no product at all is not a want: it is not written, only recorded for a person to fix.
-  select coalesce(array_agg(fact), '{}') into product_sets from unnest(fact_sets) fact
+  select coalesce(array_agg(fact), '{}'), coalesce(array_agg(buyer_interest_product_key(fact)), '{}')
+    into product_sets, set_keys from unnest(fact_sets) fact
    where buyer_interest_states_product(fact);
   delete from buyer_interest_sync_errors where operation = 'no_product_facts' and source_id = row_.id;
   if cardinality(product_sets) = 0 then
@@ -998,15 +1073,16 @@ begin
 
   -- The key set this row states now. Anything else on this source is stale: an old chemistry, a dropped make,
   -- or an outcome the row has since superseded.
-  select coalesce(array_agg(distinct buyer_interest_product_key(fact)), '{}') into keys
-  from unnest(product_sets) fact;
+  select coalesce(array_agg(distinct k), '{}') into keys from unnest(set_keys) k;
 
   delete from buyer_interest
   where demand_id = row_.id and not (kind = line_kind and product_key = any(keys));
 
-  foreach facts in array product_sets loop
+  for i in 1..cardinality(product_sets) loop
+    facts := product_sets[i];
+    set_key := set_keys[i];
     if exists (select 1 from buyer_interest_suppressed s where s.company_id = row_.company_id and s.kind = line_kind
-        and s.product_key = buyer_interest_product_key(facts)) then
+        and s.product_key = set_key) then
       continue;  -- removed in a cleanup: a re-sync does not bring the line back
     end if;
     if said then
@@ -1014,7 +1090,7 @@ begin
         make, model, raw_product, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit,
         quantity_basis, price, price_currency, price_unit, price_basis, source_refs, expires_on, demand_id)
       values ('bi_' || replace(gen_random_uuid()::text, '-', ''), row_.company_id, row_.person_id, 'interest', 'mastered',
-        buyer_interest_product_key(facts), buyer_interest_key_level(buyer_interest_product_key(facts)),
+        set_key, buyer_interest_key_level(set_key),
         facts->>'make', facts->>'model', buyer_interest_raw_product(facts),
         buyer_interest_format(facts->>'format'),
         buyer_interest_chemistry(facts->>'chemistry'), buyer_interest_number(facts->'kwh_min'),
@@ -1036,7 +1112,7 @@ begin
       quantity_basis, price, price_currency, price_unit, price_basis, source_refs, expires_on, demand_id,
       decline_reason)
     values ('bi_' || replace(gen_random_uuid()::text, '-', ''), row_.company_id, row_.person_id, line_kind, 'synced',
-      buyer_interest_product_key(facts), buyer_interest_key_level(buyer_interest_product_key(facts)),
+      set_key, buyer_interest_key_level(set_key),
       facts->>'make', facts->>'model', buyer_interest_raw_product(facts),
       buyer_interest_format(facts->>'format'),
       buyer_interest_chemistry(facts->>'chemistry'), buyer_interest_number(facts->'kwh_min'),

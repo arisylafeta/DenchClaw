@@ -137,6 +137,8 @@ def text_models(text, makes=()):
     hints = {make_fold(w) for w in words.split()}
     for value in makes or ():
         hints |= {make_fold(piece) for piece in re.split(r"\s*(?:,|/|&|\band\b)\s*", str(value)) if piece.strip()}
+        if re.sub(r"[^a-z]", "", unaccent(str(value))) in ("vwgroup", "volkswagengroup"):
+            hints |= {"volkswagen", "audi", "skoda", "seat", "cupra", "porsche"}  # a make group names its makes
     found, seen = [], set()
     for own, display, alias, slug, name, alone in sorted(TEXT_ROWS, key=lambda row: -len(row[2])):
         if (own in hints or alone) and f" {alias} " in words and (own, slug) not in seen:

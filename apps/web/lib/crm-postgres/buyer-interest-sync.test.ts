@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { partKey } from "@/lib/commercial-stock";
-import { broaderKeysFor, productKeyFor } from "@/lib/match/product-key-for";
+import { broaderKeysFor, productKeyFor, productKeysFor } from "@/lib/match/product-key-for";
 
 // Runs only against a disposable database: scripts/rebattery/crm-test-db.sh up prints the URL.
 const TEST_URL = process.env.BULK_TRADES_TEST_DATABASE_URL;
@@ -634,18 +634,15 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     it("turns a list request into one line per named model, keyed by the canonical slug", async () => {
       const did = id("m121_list");
       await listing(did, "demand", id("buyer1"), { intent: "request", makes: ["Kia", "Hyundai"], formats: ["Packs"], models: ["e-Niro", "Kona Electric"] });
-      const keys = await keysOf(did);
-      expect(keys.some((key) => key.startsWith("model:kia-niro"))).toBe(true);
-      expect(keys.some((key) => key.startsWith("model:hyundai-kona"))).toBe(true);
-      expect(keys.every((key) => key.startsWith("model:"))).toBe(true);
+      expect(await keysOf(did)).toEqual(["model:hyundai-kona", "model:kia-niro"]);
     });
 
     it("does not cross several makes with several chemistries, and keeps one make with one chemistry paired", async () => {
       const multi = id("m121_multi");
       await listing(multi, "demand", id("buyer2"), { intent: "request", makes: ["Toyota", "Stellantis"], chemistries: ["NMC", "LFP"], formats: ["Packs"] });
       const rows = await lines("demand_id = $1", [multi]);
-      expect(rows).toHaveLength(2);
-      expect(rows.every((row) => row.chemistry === null && !/nmc|lfp/.test(row.product_key))).toBe(true);
+      expect(rows.map((row) => row.product_key)).toEqual(["broad:stellantis-any-packs", "broad:toyota-any-packs"]);
+      expect(rows.every((row) => row.chemistry === null)).toBe(true);
       const single = id("m121_single");
       await listing(single, "demand", id("buyer2"), { intent: "request", makes: ["Toyota"], chemistries: ["NMC"], formats: ["Packs"] });
       expect(await keysOf(single)).toEqual(["broad:toyota-nmc-packs"]);
@@ -655,11 +652,12 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       const did = id("m121_supp");
       await listing(did, "demand", id("buyer3"), { intent: "request", makes: ["Kia"], formats: ["Packs"], models: ["e-Niro"] });
       const [row] = await lines("demand_id = $1 and kind = 'ask'", [did]);
+      expect(row.product_key).toBe("model:kia-niro");
       await pg.queryPg(`insert into buyer_interest_suppressed (company_id, kind, product_key, source_ref, reason) values ($1, 'ask', $2, 'crm:x', 'test')`,
         [id("buyer3"), row.product_key]);
       await pg.queryPg(`delete from buyer_interest where demand_id = $1`, [did]);
       await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [did]);
-      expect(await keysOf(did)).not.toContain(row.product_key);
+      expect(await keysOf(did)).toEqual([]);
     });
 
     it("writes no model line when a list request closes as no_longer_needed", async () => {
@@ -667,6 +665,92 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       await listing(did, "demand", id("buyer4"), { intent: "request", makes: ["Kia"], formats: ["Packs"], models: ["e-Niro", "Soul"] },
         { status: "closed", reason: "no_longer_needed" });
       expect(await keysOf(did)).toEqual([]);
+    });
+
+    it("keeps a Said line per model when a list request closes as not_a_fit (117)", async () => {
+      const did = id("m121_said");
+      await listing(did, "demand", id("buyer4"), { intent: "request", makes: ["Kia"], formats: ["Packs"], models: ["e-Niro", "Soul"] },
+        { status: "closed", reason: "not_a_fit", observedOn: "2026-11-01" });
+      const rows = await lines("demand_id = $1", [did]);
+      expect(rows.map((row) => `${row.kind}/${row.ownership}/${row.product_key}`)).toEqual(
+        ["interest/mastered/model:kia-niro", "interest/mastered/model:kia-soul"]);
+      expect(rows.every((row) => row.expires_on === "2027-04-30")).toBe(true);
+    });
+
+    it("pairs each model with its own kWh in one text", async () => {
+      const did = id("m121_kwh_pair");
+      await listing(did, "demand", id("buyer1"), { intent: "request", formats: ["Packs"], models: ["Renault Zoe 22 kWh, Nissan Leaf 40 kWh"] });
+      expect(await keysOf(did)).toEqual(["model:nissan-leaf-40kwh", "model:renault-zoe-22kwh"]);
+    });
+
+    it("reads every value of an 'or' list and of a slash list of kWh", async () => {
+      const or = id("m121_kwh_or");
+      await listing(or, "demand", id("buyer1"), { intent: "request", formats: ["Packs"], models: ["Renault Zoe 22 or 41 kWh"] });
+      expect(await keysOf(or)).toEqual(["model:renault-zoe-22kwh", "model:renault-zoe-41kwh"]);
+      const slash = id("m121_kwh_slash");
+      await listing(slash, "demand", id("buyer1"), { intent: "request", formats: ["Packs"], model: "Renault Zoe 22/41/52kWh" });
+      expect(await keysOf(slash)).toEqual(["model:renault-zoe-22kwh", "model:renault-zoe-41kwh", "model:renault-zoe-52kwh"]);
+    });
+
+    it("gives a shared kWh to a model list that states it once", async () => {
+      const [shared] = await pg.queryPg<{ keys: string[] }>(
+        `select array_agg(k order by k) as keys from buyer_interest_fact_sets($1::jsonb, '{}', '{}', 12, null, true) fs,
+           unnest(fs.facts) f, buyer_interest_product_key(f) k`,
+        [JSON.stringify({ makes: ["Hyundai", "Kia"], models: ["Kona, Niro 39 kWh"], formats: ["Packs"] })]);
+      expect(shared.keys).toEqual(["model:hyundai-kona-39kwh", "model:kia-niro-39kwh"]);
+    });
+
+    it("gives the make a request names without a model its own line, and never the list text as a model", async () => {
+      const did = id("m121_uncovered");
+      await listing(did, "demand", id("buyer1"), { intent: "request", makes: ["Hyundai", "Toyota"], model: "Kona, Niro", formats: ["Packs"] });
+      const rows = await lines("demand_id = $1", [did]);
+      expect(rows.map((row) => row.product_key)).toEqual(["broad:toyota-any-packs", "model:hyundai-kona"]);
+      const toyota = rows.find((row) => row.product_key === "broad:toyota-any-packs");
+      expect(toyota?.model).toBeNull();
+      const [raw] = await pg.queryPg<{ raw_product: string | null }>(
+        `select raw_product from buyer_interest where demand_id = $1 and product_key = 'broad:toyota-any-packs'`, [did]);
+      expect(raw.raw_product).toBeNull();
+    });
+
+    it("writes no make-level line for 'VW Group' when VW models are named", async () => {
+      const did = id("m121_vwgroup");
+      await listing(did, "demand", id("buyer1"), { intent: "request", makes: ["VW Group"], models: ["ID.3", "Golf"], formats: ["Packs"] });
+      expect(await keysOf(did)).toEqual(["model:volkswagen-golf", "model:volkswagen-id3"]);
+    });
+
+    it("records a request that states more lines than the cap, and keeps the first 60", async () => {
+      const did = id("m121_cap");
+      const values = Array.from({ length: 22 }, (_, i) => 20 + i).join("/");
+      await listing(did, "demand", id("buyer1"), { intent: "request", model: `Renault Zoe ${values}kWh`, formats: ["Packs", "Modules", "Cells"] });
+      expect((await lines("demand_id = $1", [did])).length).toBeGreaterThan(0);
+      const errors = await pg.queryPg<{ message: string }>(
+        `select message from buyer_interest_sync_errors where source_id = $1 and operation = 'truncated'`, [did]);
+      expect(errors.map((row) => row.message)).toEqual(["kept 60 of 66 stated combinations"]);
+    });
+  });
+
+  describe("product keys: SQL and TypeScript write the same key (migration 121)", () => {
+    // [make, model, kwh]: every text goes through buyer_interest_product_key and productKeyFor.
+    const texts: [string | undefined, string, number | undefined][] = [
+      ["Kia", "e-Niro", undefined], ["Kia", "e-Niro 64 kWh", undefined], ["Kia", "Niro EV", 64], ["Hyundai", "Kona Electric", undefined],
+      ["Hyundai", "Kona Electric", 64], ["VW", "Volkswagen Foo 40", 40], ["Mercedes", "Mercedes-Benz Foo 40", 40], ["Kia", "Kia Foo", 40], ["Nissan", "Leaf e+ 62kWh", 62], ["Nissan", "Leaf", 40], ["Renault", "Zoe R135", undefined],
+      ["VW", "e-Golf", undefined], ["Volkswagen", "ID.3 Pro Performance", 58], ["VW", "Volkswagen ID.4", 77], ["Mercedes", "EQS 450+", undefined],
+      ["Mercedes-Benz", "Mercedes EQC", 80], ["Vauxhall", "Corsa-e", undefined], ["Opel", "Corsa e", 50], ["PSA", "Peugeot e-208", undefined],
+      ["Peugeot", "2008", undefined], ["Citroën", "ë-C4", 50], ["Škoda", "Enyaq iV 80", undefined], ["Tesla", "Model 3 Long Range", 75],
+      ["Tesla", "Model Y (2021) battery pack", undefined], ["BMW", "i3 120Ah", undefined], ["Fiat", "500e Standard", 24], ["Ford", "Mustang Mach-E AWD", undefined],
+      ["Hyundai", "Ioniq 5 / Ioniq 6", 77], ["Toyota", "Unknown Thing 9", undefined], ["Kia", "Soul EV 2019", 64], ["Mini", "Mini Cooper SE", 32],
+    ];
+
+    it("gives identical keys for every text", async () => {
+      const mismatches: string[] = [];
+      for (const [make, model, kwh] of texts) {
+        const [row] = await pg.queryPg<{ key: string }>(`select buyer_interest_product_key($1::jsonb) as key`,
+          [JSON.stringify({ make, model, ...(kwh === undefined ? {} : { kwh }) })]);
+        // The pack: family level is TypeScript-only (SQL stops at the model), so compare the first non-pack key.
+        const ts = productKeysFor({ make, model, ...(kwh === undefined ? {} : { kwh }) }).find((entry) => entry.level !== "pack")?.key;
+        if (row.key !== ts) {mismatches.push(`${make} | ${model} | ${kwh}: sql ${row.key} ts ${ts}`);}
+      }
+      expect(mismatches).toEqual([]);
     });
   });
 
