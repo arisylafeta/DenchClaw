@@ -71,12 +71,13 @@ begin
     order by 1 nulls first, 2 nulls first, 3 nulls first, 4 nulls first
     limit greatest(p_limit, 1)
   loop
-    sets := sets || buyer_interest_facts(
+    sets := sets || (buyer_interest_facts(
       p_spec || jsonb_build_object(
         'makes', case when m is null then '[]'::jsonb else jsonb_build_array(m) end, 'make', m,
         'chemistries', case when c is null then '[]'::jsonb else jsonb_build_array(c) end, 'chemistry', c,
         'formats', case when f is null then '[]'::jsonb else jsonb_build_array(f) end, 'format', f),
-      p_context, p_fields) || case when cf is null then '{}'::jsonb else jsonb_build_object('cell_format', cf) end;
+      p_context, p_fields)
+      || case when cf is null then '{}'::jsonb else jsonb_build_object('cell_format', cf) end);
   end loop;
   stated_total := cardinality(makes) * cardinality(chemists) * cardinality(formats) * cardinality(cformats);
   facts := sets;

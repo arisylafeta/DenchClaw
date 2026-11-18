@@ -52,7 +52,7 @@ PRODUCT_STATUSES = ["bought", "asked", "said_interested", "declined"]
 ACTIVE_STATUSES = ["bought", "asked", "said_interested"]
 # What they want now, as opposed to what they once bought: the kWh range prefers these.
 ASK_STATUSES = ["asked", "said_interested"]
-CELL_FORMATS = ["18650", "21700", "prismatic", "pouch", "Cylindrical"]
+CELL_FORMATS = ["18650", "21700", "26650", "32700", "4680", "prismatic", "pouch", "Cylindrical"]
 CADENCES = ["one_off", "repeat", "standing"]
 COLLECTS = ["own_haulier", "needs_delivery", "either"]
 DECISION_SPEEDS = ["fast", "normal", "slow"]
@@ -73,7 +73,7 @@ PRODUCT_KEYS = [
     "module_series", "cell_format", "status", "reason", "seen", "src", "one_off",
 ]
 PRICE_KEYS = ["eur_per_kwh", "eur_per_unit", "currency_original", "basis", "incoterm", "seen", "src"]
-RULES_OUT_KEYS = ["chemistries", "formats", "damaged", "bess_systems", "other", "part_numbers"]
+RULES_OUT_KEYS = ["chemistries", "formats", "cell_formats", "damaged", "bess_systems", "other", "part_numbers"]
 ALERT_KEYS = ["label", "filters", "status", "seen", "src"]
 TIMING_KEYS = ["max_lead_days", "notes"]
 # A list entry is a plain value, or a mapping that dates the evidence for it.
@@ -338,6 +338,7 @@ def validate(frontmatter):
         _check_entry_list(errors, "rules_out.chemistries", rules_out.get("chemistries"), CHEMISTRIES,
                           "chemistry")
         _check_entry_list(errors, "rules_out.formats", rules_out.get("formats"), FORMATS, "format")
+        _check_entry_list(errors, "rules_out.cell_formats", rules_out.get("cell_formats"), CELL_FORMATS, "cell format")
         for key in ("damaged", "bess_systems"):
             value = rules_out.get(key)
             if value is not None and not isinstance(value, bool):

@@ -255,6 +255,17 @@ class ValidateTests(unittest.TestCase):
         )
         self.assertEqual(bd.validate(frontmatter), [])
 
+    def test_rules_out_cell_formats_and_product_cell_format_validate(self):
+        ok = parse_valid(rules_out={"cell_formats": ["pouch", {"value": "4680", "seen": "2026-05-01"}]})
+        self.assertEqual(bd.validate(ok), [])
+        bad = bd.validate(parse_valid(rules_out={"cell_formats": ["square"]}))
+        self.assertTrue(any(e.startswith("rules_out.cell_formats[0]") for e in bad), bad)
+        products = [{"format": "Cells", "chemistry": "LFP", "cell_format": "prismatic", "status": "asked"},
+                    {"format": "Cells", "chemistry": "NMC", "cell_format": "26650", "status": "asked"}]
+        self.assertEqual(bd.validate(parse_valid(products=products)), [])
+        products[0]["cell_format"] = "square"
+        self.assertTrue(any("cell_format" in e for e in bd.validate(parse_valid(products=products))))
+
     def test_dated_entry_errors_are_reported(self):
         errors = bd.validate(parse_valid(
             rules_out={"chemistries": [{"value": "LTO", "seen": "01/05/2026", "note": "x"}, {"value": ""}]},
