@@ -217,3 +217,12 @@ def test_plus_tag_in_raw_headers_routes_even_when_sync_strips_it(monkeypatch):
     with psycopg2.connect(DSN) as db, db.cursor(cursor_factory=__import__('psycopg2.extras').extras.RealDictCursor) as cur:
         cur.execute("select * from mail_message where id='m1'")
         assert owner.route(cur, cur.fetchone())[:3] == ('dismantlercampaigns', 'dc-main', 'rule tag=dismantlers')
+
+
+def test_header_addresses_tolerate_missing_headers_and_dedupe_tags():
+    assert owner.header_addresses({'personalization': None}) == []
+    assert owner.header_addresses({}) == []
+    message = {'to_emails': ['supply+dismantlers@rebattery.io'],
+               'personalization': {'provider_headers': {'to': '"Supply" <supply+dismantlers@rebattery.io>', 'cc': None}}}
+    tags = owner.plus_tags(message['to_emails'] + owner.header_addresses(message))
+    assert list(dict.fromkeys(tags)) == ['dismantlers']

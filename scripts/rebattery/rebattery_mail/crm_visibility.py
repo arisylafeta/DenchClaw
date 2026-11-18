@@ -88,7 +88,8 @@ def reply_matches(incoming, outgoing, owner_id, account):
     if not incoming.get('from_email') or normalize_email(incoming['from_email']) not in counterparties:
         return False
     snapshot = outgoing.get('personalization',{}).get('identity_snapshot',{})
-    reply_addresses = {normalize_email(account),normalize_email(outgoing.get('from_email')),normalize_email(snapshot.get('reply_to'))}
+    reply_addresses = {normalize_email(account),normalize_email(outgoing.get('from_email')),normalize_email(snapshot.get('reply_to')),
+                       normalize_email(outgoing.get('personalization',{}).get('reply_to'))}
     incoming_recipients = {normalize_email(email) for field in ('to_emails','cc_emails') for email in incoming.get(field,[])}
     if not (incoming_recipients - {None}) & (reply_addresses - {None}):
         return False

@@ -66,7 +66,8 @@ def manage(args,driver=None):
         if not original.get('rfc_message_id') and not original.get('gmail_message_id'):
             raise Refused('reply_anchor_missing','Synchronise the originating sent message before drafting a follow-up')
         recipients = original['to_emails'] if original['direction']=='outbound' else [original['from_email']]
-        row,_ = prepare(db,author['key'],recipients,original['purpose'],args.template,json.loads(args.vars),args.subject or original['subject'],args.body,args.html,original['thread_id'],verification=original['personalization'].get('verification',{}),transport=transport)
+        row,_ = prepare(db,author['key'],recipients,original['purpose'],args.template,json.loads(args.vars),args.subject or original['subject'],args.body,args.html,original['thread_id'],verification=original['personalization'].get('verification',{}),transport=transport,
+                        reply_to=original['personalization'].get('reply_to'))
         row['personalization']['followup_source_message_id'] = original['id']
         if not row.get('in_reply_to'):
             row['in_reply_to'] = original['rfc_message_id']

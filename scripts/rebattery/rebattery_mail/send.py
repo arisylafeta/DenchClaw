@@ -112,9 +112,12 @@ def refresh_replies(message,author,driver=None):
         fresh = not thread_id and not origin
         reply_to = author.get('reply_to') or author['address']
         local, _, domain = reply_to.lower().rpartition('@')
-        reply_base = local.split('+', 1)[0] + '@' + domain  # supply+tag@ is delivered to supply@
-        cur.execute('select distinct gmail_account from mail_identity where active and gmail_account is not null and lower(address)=lower(%s)',(reply_base,))
+        reply_base = local.split('+', 1)[0] + '@' + domain if domain == 'rebattery.io' else reply_to.lower()
+        cur.execute('select distinct gmail_account from mail_identity where active and gmail_account is not null and lower(address)=lower(%s)',(reply_to,))
         accounts = {row['gmail_account'] for row in cur.fetchall()}
+        if not accounts and reply_base != reply_to.lower():  # supply+tag@ is delivered to supply@
+            cur.execute('select distinct gmail_account from mail_identity where active and gmail_account is not null and lower(address)=lower(%s)',(reply_base,))
+            accounts = {row['gmail_account'] for row in cur.fetchall()}
         account = next(iter(accounts)) if len(accounts)==1 else None
         if not account and reply_base==author['address'].lower():
             account = author.get('gmail_account') or (source['owner_email'] if source else None)

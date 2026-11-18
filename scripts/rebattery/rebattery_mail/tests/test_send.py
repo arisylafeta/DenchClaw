@@ -1241,3 +1241,19 @@ def test_reply_to_override_is_validated_digest_bound_and_reaches_the_driver(env)
         message=cur.fetchone()
     author=send.preflight(message,Recording())
     assert seen['reply_to']==tagged and author['reply_to']==tagged
+
+
+def test_refresh_replies_finds_the_mailbox_of_a_tagged_reply_to(env):
+    with connection() as db, dict_cursor(db) as cur:
+        cur.execute("select * from mail_identity where key='alex'")
+        author=dict(cur.fetchone())
+    tagged=author['address'].replace('@','+dismantlers@')
+    calls=[]
+    class Hook:
+        def refresh_replies(self,identity,message):
+            calls.append(identity['reply_to'])
+    message={'id':env+'none','thread_id':env+'missing-thread','personalization':{}}
+    send.refresh_replies(message,{**author,'reply_to':tagged},Hook())
+    assert calls==[tagged]
+    with pytest.raises(Refused):
+        send.refresh_replies(message,{**author,'reply_to':'nobody+x@rebattery.io'},Hook())

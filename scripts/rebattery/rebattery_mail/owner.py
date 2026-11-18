@@ -181,11 +181,10 @@ def automated(message):
 def header_addresses(message):
     """Raw To/CC/Delivered-To addresses from the stored provider headers. The Gmail sync stores to_emails without
     +tags, so a tag is only visible here."""
+    from .crm_visibility import parse_email_addresses
     headers = ((message.get('personalization') or {}).get('provider_headers') or {})
-    found = []
-    for key in ('to', 'cc', 'delivered-to', 'x-original-to'):
-        found += re.findall(r'[\w.+-]+@[\w.-]+', str(headers.get(key) or ''))
-    return found
+    return [email for key in ('to', 'cc', 'delivered-to', 'x-original-to')
+            for _, email in parse_email_addresses(str(headers.get(key) or ''))]
 
 
 def plus_tags(addresses):

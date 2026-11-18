@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 from .core import connection, dict_cursor, Refused
-from .draft import prepare, insert, content_flags
+from .draft import prepare, insert, content_flags, reply_to_override
 from .digest import digest
 from . import policy
 from .drivers import resolve_driver
@@ -76,7 +76,7 @@ def campaign_policy(config,author):
     promotional = supply or config.get('type') in ('intro','newsletter','marketing','promotion')
     if promotional and config['purpose']!='marketing':
         raise Refused('campaign_purpose_mismatch','Promotional campaign types require marketing purpose')
-    if supply and (author['address']!='supply@rebattery.io' or (config.get('reply_to') or author.get('reply_to') or author['address']).lower()!='supply@rebattery.io'):
+    if supply and (author['address']!='supply@rebattery.io' or ((config.get('reply_to') or '').strip() or author.get('reply_to') or author['address']).lower()!='supply@rebattery.io'):
         raise Refused('supply_update_identity_required')
     cap = config.get('pilot_cap')
     if cap is not None and cap<1:
@@ -96,6 +96,7 @@ def create(args):
     with connection(read_only=not args.apply) as db:
         author, transport = policy.identity(db,args.identity,args.purpose,args.transport)
         campaign_policy(config,author)
+        reply_to_override(db,config.get('reply_to'),author)  # refuse a bad --reply-to now, not at freeze
         if args.apply:
             with db.cursor() as cur:
                 cur.execute("""insert into campaigns(id,campaign_name,purpose,identity_key,template_name,mail_state,notes,type)
