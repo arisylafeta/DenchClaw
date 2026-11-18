@@ -338,6 +338,26 @@ class R8(unittest.TestCase):
         self.assertEqual([v["line_id"] for v in wc.r8(ctx([wide, ok], products=products))], ["bi_dossier_1"])
 
 
+class R8ByDesign(unittest.TestCase):
+    def test_two_makes_and_two_chemistries_keep_chemistry_as_a_preference(self):
+        demand = {"id": "d1", "status": "open", "summary": "Tesla or BYD packs", "spec": {"makes": ["Tesla", "BYD"], "chemistries": ["NMC", "LFP"]}}
+        ok = line("a", demand_id="d1", make="BYD", product_key="broad:byd-any-batteries")
+        self.assertEqual(wc.r8(ctx([ok], [demand])), [])
+
+    def test_one_make_and_two_chemistries_still_flags_a_dropped_chemistry(self):
+        demand = {"id": "d1", "status": "open", "summary": "BYD packs", "spec": {"makes": ["BYD"], "chemistries": ["NMC", "LFP"]}}
+        out = wc.r8(ctx([line("a", demand_id="d1", make="BYD", product_key="broad:byd-any-batteries")], [demand]))
+        self.assertEqual(len(out), 1)
+        self.assertIn("chemistry", out[0]["why"])
+
+    def test_plain_model_line_beside_kwh_model_lines_is_by_design(self):
+        demand = {"id": "d1", "status": "open", "summary": "Hyundai Kona 39 and 64 kWh NMC packs", "spec": {"makes": ["Hyundai"], "chemistries": ["NMC"], "formats": ["Packs"]}}
+        kwh = line("k", demand_id="d1", make="Hyundai", model="Kona", chemistry="NMC", format="pack", product_key="model:hyundai-kona-64kwh")
+        plain = line("p", demand_id="d1", make="Hyundai", model="Kona", product_key="model:hyundai-kona")
+        self.assertEqual(wc.r8(ctx([kwh, plain], [demand])), [])
+        self.assertEqual(len(wc.r8(ctx([plain], [demand]))), 1)
+
+
 class R8OwnLines(unittest.TestCase):
     BOX = {"makes": ["Nissan"], "formats": ["Packs"], "chemistries": ["NMC"]}
 
@@ -375,6 +395,12 @@ class R9(unittest.TestCase):
         out = wc.r9(ctx([], [elg]))
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["key"], "no line")
+
+    def test_target_price_is_not_missing_when_a_line_carries_price_max(self):
+        demand = {"id": "d2", "company_id": "c1", "status": "open", "summary": "Tesla packs", "spec": {"makes": ["Tesla"], "target_price_per_pack": 900}}
+        keep = line("a", demand_id="d2", make="Tesla", price_max=1200)
+        self.assertEqual(wc.r9(ctx([keep], [demand])), [])
+        self.assertEqual(len(wc.r9(ctx([line("b", demand_id="d2", make="Tesla")], [demand]))), 1)
 
     def test_model_the_sync_removed_on_purpose_is_not_missed(self):
         demand = {"id": "d2", "company_id": "c1", "status": "open", "summary": "Tesla Model 3 and Model Y packs", "spec": {"makes": ["Tesla"]}}

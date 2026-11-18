@@ -722,13 +722,13 @@ def _line_has_model(line, slug):
     return slug in _line_model_slugs(line) or bool(tail and re.search(rf"(?:^|-){re.escape(slug)}(?:-|$)", tail))
 
 
-def _dropped(line, makes=(), chemistries=(), formats=(), models=(), exempt_chem_format=False):
+def _dropped(line, makes=(), chemistries=(), formats=(), models=(), exempt_chem_format=False, exempt_chemistry=False):
     """What the line leaves out of a product that states makes, chemistries, formats or models (a list = alternatives)."""
     out = []
     make_set = {f for m in makes for f in make_folds(m)}
     if make_set and not _line_make_ok(line, make_set):
         out.append(f"make ({'/'.join(map(str, makes))})" + (f", line says {line['make']}" if line.get("make") else ""))
-    if chemistries and not exempt_chem_format and str(line.get("chemistry") or "").upper() not in {str(c).upper() for c in chemistries}:
+    if chemistries and not exempt_chem_format and not exempt_chemistry and str(line.get("chemistry") or "").upper() not in {str(c).upper() for c in chemistries}:
         out.append(f"chemistry ({'/'.join(map(str, chemistries))})" + (f", line says {line['chemistry']}" if line.get("chemistry") else ""))
     if formats and not exempt_chem_format and norm_format(line.get("format")) not in {norm_format(f) for f in formats}:
         out.append(f"format ({'/'.join(map(str, formats))})" + (f", line says {line['format']}" if line.get("format") else ""))
@@ -750,14 +750,32 @@ def _demand_models(demand):
     return _model_hits(texts, makes)
 
 
+KWH_MODEL_KEY = re.compile(r"^(model:.+)-\d+(?:\.\d+)?kwh$")
+
+
+def _plain_model_with_kwh_siblings(line, siblings):
+    """A plain model line (model:make-model) written beside kWh model lines of the same request is by design."""
+    key = str(line.get("product_key") or "")
+    return key.startswith("model:") and not KWH_MODEL_KEY.match(key) and any(
+        (m := KWH_MODEL_KEY.match(str(other.get("product_key") or ""))) and m.group(1) == key for other in siblings)
+
+
 def r8(ctx):
     found = []
+    by_demand = collections.defaultdict(list)
+    for line in ctx["lines"]:
+        if line.get("demand_id"):
+            by_demand[line["demand_id"]].append(line)
     for line in ctx["lines"]:
         company = ctx["companies"].get(line.get("company_id")) or {}
         if line.get("demand_id") and line["demand_id"] in ctx["demands"]:
             demand = ctx["demands"][line["demand_id"]]
             spec = demand.get("spec") or {}
-            drops = _dropped(line, as_list(spec.get("makes")), as_list(spec.get("chemistries")), as_list(spec.get("formats")), _demand_models(demand))
+            makes, chemistries, models = as_list(spec.get("makes")), as_list(spec.get("chemistries")), _demand_models(demand)
+            # Migration 121: a request of 2+ makes or models and 2+ chemistries keeps chemistry as a preference, not a line key.
+            multi = (len(makes) >= 2 or len(models) >= 2) and len(chemistries) >= 2
+            drops = _dropped(line, makes, chemistries, as_list(spec.get("formats")), models, exempt_chemistry=multi,
+                             exempt_chem_format=_plain_model_with_kwh_siblings(line, by_demand[line["demand_id"]]))
             if drops:
                 found.append(_violation(ctx, "R8", line, f"line is broader than the request: dropped {'; '.join(drops)}", f"demand {demand['id']}"))
         elif _is_profile_line(line) and _is_box_checked(line):
@@ -895,6 +913,8 @@ def r9(ctx):
             missing.append(f"quantity {volume:g} {spec.get('volume_unit') or ''}".strip())
         for field in ("max_price", "target_price_per_pack"):
             value = num(spec.get(field))
+            if field == "target_price_per_pack" and any(num(line.get("price_max")) is not None for line in lines):
+                continue  # a line carrying price_max holds the request's price range; a target price is not a defect
             if value is not None and not any(value in (num(line.get("price")), num(line.get("price_max"))) for line in lines):
                 missing.append(f"price {field} {value:g}")
         if missing:
