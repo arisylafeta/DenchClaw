@@ -274,16 +274,13 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     expect((await lines("demand_id = $1", [id("d11")])).map((row) => row.product_key)).toEqual(["broad:nmc-packs"]);
   });
 
-  it("fans every stated make and chemistry out into its own line", async () => {
+  it("fans every stated make out, keeps one make's chemistries paired, and does not cross several makes with several chemistries", async () => {
     await listing(id("d12"), "demand", id("buyer1"), {
       intent: "request", makes: ["Toyota or Lexus", "Stellantis"], chemistries: ["NMC", "LFP"], formats: ["Packs"],
     });
     const rows = await lines("demand_id = $1", [id("d12")]);
-    expect(rows.map((row) => row.product_key)).toEqual([
-      "broad:stellantis-lfp-packs", "broad:stellantis-nmc-packs",
-      "broad:toyota-or-lexus-lfp-packs", "broad:toyota-or-lexus-nmc-packs",
-    ]);
-    expect(rows.map((row) => row.chemistry)).toEqual(["LFP", "NMC", "LFP", "NMC"]);
+    expect(rows.map((row) => row.product_key)).toEqual(["broad:stellantis-any-packs", "broad:toyota-or-lexus-any-packs"]);
+    expect(rows.map((row) => row.chemistry)).toEqual([null, null]);
 
     // Dropping a make drops its lines, keeping the other make's.
     await pg.queryPg(`update crm_bulk_listings set spec = jsonb_set(spec, '{makes}', '["Stellantis"]'::jsonb) where id = $1`,
@@ -294,14 +291,14 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
 
   it("caps a very broad ask at 12 lines and records the truncation", async () => {
     await listing(id("d13"), "demand", id("buyer4"), {
-      intent: "request", makes: ["Toyota", "Stellantis", "Hyundai", "Kia"],
-      chemistries: ["NMC", "LFP", "NCA", "LTO"], formats: ["Packs"],
+      intent: "request", makes: ["Toyota", "Stellantis", "Hyundai", "Kia", "Ford", "Fiat", "Audi", "BMW", "Mini", "Renault", "Dacia", "Volvo", "Skoda"],
+      chemistries: ["NMC"], formats: ["Packs"],
     });
     expect(await lines("demand_id = $1", [id("d13")])).toHaveLength(12);
     const [error] = await pg.queryPg<{ operation: string; message: string }>(
       `select operation, message from buyer_interest_sync_errors where source_id = $1 and operation = 'truncated'`,
       [id("d13")]);
-    expect(error.message).toContain("12 of 16");
+    expect(error.message).toContain("12 of 13");
   });
 
   it("moves a synced line to the company the source now names", async () => {
@@ -628,6 +625,48 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       expect(await lines("offer_id = $1", [id("rule_supp_off")])).toEqual([]);
       await pg.queryPg(`update crm_bulk_offers set stage = 'declined' where id = $1`, [id("rule_supp_off")]);
       expect((await lines("offer_id = $1", [id("rule_supp_off")])).map((row) => row.kind)).toEqual(["declined"]);
+    });
+  });
+
+  describe("model lines and chemistry pairing (migration 121)", () => {
+    const keysOf = async (did: string) => (await lines("demand_id = $1", [did])).map((row) => row.product_key);
+
+    it("turns a list request into one line per named model, keyed by the canonical slug", async () => {
+      const did = id("m121_list");
+      await listing(did, "demand", id("buyer1"), { intent: "request", makes: ["Kia", "Hyundai"], formats: ["Packs"], models: ["e-Niro", "Kona Electric"] });
+      const keys = await keysOf(did);
+      expect(keys.some((key) => key.startsWith("model:kia-niro"))).toBe(true);
+      expect(keys.some((key) => key.startsWith("model:hyundai-kona"))).toBe(true);
+      expect(keys.every((key) => key.startsWith("model:"))).toBe(true);
+    });
+
+    it("does not cross several makes with several chemistries, and keeps one make with one chemistry paired", async () => {
+      const multi = id("m121_multi");
+      await listing(multi, "demand", id("buyer2"), { intent: "request", makes: ["Toyota", "Stellantis"], chemistries: ["NMC", "LFP"], formats: ["Packs"] });
+      const rows = await lines("demand_id = $1", [multi]);
+      expect(rows).toHaveLength(2);
+      expect(rows.every((row) => row.chemistry === null && !/nmc|lfp/.test(row.product_key))).toBe(true);
+      const single = id("m121_single");
+      await listing(single, "demand", id("buyer2"), { intent: "request", makes: ["Toyota"], chemistries: ["NMC"], formats: ["Packs"] });
+      expect(await keysOf(single)).toEqual(["broad:toyota-nmc-packs"]);
+    });
+
+    it("does not re-create a suppressed model line on re-sync", async () => {
+      const did = id("m121_supp");
+      await listing(did, "demand", id("buyer3"), { intent: "request", makes: ["Kia"], formats: ["Packs"], models: ["e-Niro"] });
+      const [row] = await lines("demand_id = $1 and kind = 'ask'", [did]);
+      await pg.queryPg(`insert into buyer_interest_suppressed (company_id, kind, product_key, source_ref, reason) values ($1, 'ask', $2, 'crm:x', 'test')`,
+        [id("buyer3"), row.product_key]);
+      await pg.queryPg(`delete from buyer_interest where demand_id = $1`, [did]);
+      await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [did]);
+      expect(await keysOf(did)).not.toContain(row.product_key);
+    });
+
+    it("writes no model line when a list request closes as no_longer_needed", async () => {
+      const did = id("m121_closed");
+      await listing(did, "demand", id("buyer4"), { intent: "request", makes: ["Kia"], formats: ["Packs"], models: ["e-Niro", "Soul"] },
+        { status: "closed", reason: "no_longer_needed" });
+      expect(await keysOf(did)).toEqual([]);
     });
   });
 
