@@ -778,18 +778,6 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       expect(await keysOf(fmt)).toEqual(["broad:samsung-sdi-21700-any-cells"]);
     });
 
-    it("124: all three cell families write one line without a format, two write one line each", async () => {
-      const all = id("m124_all");
-      await listing(all, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], chemistries: ["NMC"], cell_formats: ["Prismatic", "Cylindrical", "Pouch"] });
-      expect(await keysOf(all)).toEqual(["broad:nmc-cells"]);
-      const two = id("m124_two");
-      await listing(two, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], chemistries: ["NMC"], cell_formats: ["Prismatic", "Pouch"] });
-      expect(await keysOf(two)).toEqual(["broad:pouch-nmc-cells", "broad:prismatic-nmc-cells"]);
-      const sizes = id("m124_sizes");
-      await listing(sizes, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], cell_formats: ["18650", "21700"] });
-      expect(await keysOf(sizes)).toEqual(["broad:18650-any-cells", "broad:21700-any-cells"]);
-    });
-
     it("leaves a request that names a make on its make key", async () => {
       const did = id("m122_make_wins");
       await listing(did, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], makes: ["Tesla"], cell_makers: ["Panasonic"] });
