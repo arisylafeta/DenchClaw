@@ -505,5 +505,53 @@ class Report(unittest.TestCase):
         self.assertEqual(records, wc.finding_records(wc.check(ctx(lines))))
 
 
+class R11(unittest.TestCase):
+    def demand(self, formats, summary="NMC cells, any dimensions"):
+        return {"id": "d1", "status": "open", "summary": summary,
+                "spec": {"formats": ["Cells"], "chemistries": ["NMC"], "cell_formats": formats}}
+
+    def cell(self, id, key):
+        return line(id, demand_id="d1", chemistry="NMC", format="cell", product_key=key)
+
+    def test_all_three_families_flag_a_line_that_carries_one(self):
+        d = self.demand(["Prismatic", "Cylindrical", "Pouch"])
+        flagged = wc.r11(ctx([self.cell("a", "broad:prismatic-nmc-cells")], [d]))
+        self.assertEqual([v["line_id"] for v in flagged], ["a"])
+        self.assertEqual(wc.r11(ctx([self.cell("a", "broad:nmc-cells")], [d])), [])
+
+    def test_two_formats_need_one_line_each(self):
+        d = self.demand(["Prismatic", "Pouch"], "NMC prismatic or pouch cells")
+        both = [self.cell("a", "broad:prismatic-nmc-cells"), self.cell("b", "broad:pouch-nmc-cells")]
+        self.assertEqual(wc.r11(ctx(both, [d])), [])
+        self.assertEqual([v["line_id"] for v in wc.r11(ctx(both[:1], [d]))], ["a"])
+
+    def test_two_sizes_with_a_line_each_pass_and_one_format_alone_passes(self):
+        d = self.demand(["18650", "21700"], "Cells 18650 and 21700")
+        self.assertEqual(wc.r11(ctx([self.cell("a", "broad:18650-nmc-cells"), self.cell("b", "broad:21700-nmc-cells")], [d])), [])
+        single = self.demand(["Pouch"], "Pouch cells")
+        self.assertEqual(wc.r11(ctx([self.cell("a", "broad:pouch-nmc-cells")], [single])), [])
+
+
+class R12(unittest.TestCase):
+    products = [{"make": "Connected Energy", "format": "packs", "note": "Wants 30+ kWh second-life packs"}]
+
+    def test_exact_size_for_a_stated_minimum_is_flagged(self):
+        a = line("a", kind="interest", kwh_min=30, kwh_max=30, product_key="broad:any-packs")
+        self.assertEqual([v["line_id"] for v in wc.r12(ctx([a], products=self.products))], ["a"])
+
+    def test_range_model_bought_and_exact_source_are_exempt(self):
+        ranged = line("a", kind="standing", kwh_min=30, kwh_max=None, product_key="broad:any-packs")
+        bought = line("b", kind="bought", kwh_min=30, kwh_max=30, product_key="broad:any-packs")
+        model = line("c", kind="interest", kwh_min=30, kwh_max=30, product_key="model:nissan-leaf-30kwh")
+        exact = line("d", kind="ask", kwh_min=30, kwh_max=30, product_key="broad:any-packs")
+        self.assertEqual(wc.r12(ctx([ranged, bought, model], products=self.products)), [])
+        self.assertEqual(wc.r12(ctx([exact], products=[{"note": "30 kWh packs"}])), [])
+
+    def test_demand_text_at_least(self):
+        d = {"id": "d1", "status": "open", "summary": "Packs at least 40 kWh", "spec": {}}
+        a = line("a", demand_id="d1", kwh_min=40, kwh_max=40, product_key="broad:any-packs")
+        self.assertEqual(len(wc.r12(ctx([a], [d]))), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

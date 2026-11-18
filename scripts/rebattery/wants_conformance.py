@@ -34,6 +34,13 @@ Key shapes of the current sync (migrations 119/120): a cell format and a cell ma
 cells inside a pack, module or system is a property, not a key dimension, so no pack/module/system line has to carry it.
 A line from a dossier is judged against the dossier's products as well as the requests.
   R10 two saved-search lines of one company with the same product_key (report only).
+  R11 narrower than source: a line whose key carries one cell format while its request states several. The request
+      lists all three families (prismatic, cylindrical, pouch): no line may carry a format (broad:nmc-cells). It lists
+      2+ short of all three: its lines together must carry every stated format (one line each); a line is flagged when
+      they do not.
+  R12 exact size written for a stated minimum: an ask/standing/interest line with no model (broad key) whose
+      kwh_min = kwh_max while its source text says '+', minimum, at least or from next to that number. Bought and
+      declined lines are exempt.
 
 The rule functions take plain dicts (see `check`), so they need no database. `main` reads one database in a
 read-only session and writes nothing to it.
@@ -65,6 +72,8 @@ RULES = {
     "R8": "Line broader than its source (widening)",
     "R9": "Open request not fully covered by its lines",
     "R10": "Same product key in two saved searches of one company (report only)",
+    "R11": "Line carries one cell format while its source states several (narrower than source)",
+    "R12": "Exact kWh written for a stated minimum",
 }
 EXAMPLES_PER_RULE = 20
 LEVEL_RANK = {"broad": 0, "model": 1, "cell": 1, "pack": 1, "part": 2}
@@ -991,9 +1000,100 @@ def r10(ctx):
                 found.append(_violation(ctx, "R10", item, f"same product_key as {items[0]['id']} from another saved search; lines: {ids}"))
     return found
 
+# ---------------------------------------------------------------------------------------------- R11
+
+def _key_cell_format(line):
+    """The cell format token a broad cell key carries, or None."""
+    key = str(line.get("product_key") or "")
+    if not key_has_cell_format(line):
+        return None
+    return next((t for t in CELL_FORMAT_TOKENS if f"-{t}-" in f"-{key[6:]}"), None)
+
+
+def _format_family(token):
+    return token if token in ("prismatic", "pouch") else "cylindrical"  # every size token is a cylindrical cell
+
+
+def r11(ctx):
+    found = []
+    by_demand = collections.defaultdict(list)
+    for line in ctx["lines"]:
+        if line.get("demand_id"):
+            by_demand[line["demand_id"]].append(line)
+    for demand_id, demand in sorted(ctx["demands"].items()):
+        spec = demand.get("spec") or {}
+        if demand.get("status") not in OPEN_STATUSES or not _states_cells(spec):
+            continue
+        stated = _cell_formats_stated(demand)
+        if len(set(stated)) < 2:
+            continue
+        families = {_format_family(t) for t in stated}
+        everything = families >= {"prismatic", "cylindrical", "pouch"}
+        lines = by_demand.get(demand_id) or []
+        carried = {_key_cell_format(line) for line in lines} - {None}
+        for line in lines:
+            token = _key_cell_format(line)
+            if token is None:
+                continue
+            if everything:
+                why = f"line carries cell format {token}; the request lists prismatic, cylindrical and pouch, so the key has no format"
+            elif gone := sorted(t for t in set(stated) if t not in carried
+                                and not (t == "cylindrical" and carried & set(CELL_FORMAT_NUMBERS))):
+                why = f"line carries cell format {token}; the request states {', '.join(sorted(set(stated)))} and no line carries {', '.join(gone)}"
+            else:
+                continue
+            found.append(_violation(ctx, "R11", line, why, f"demand {demand_id}"))
+    return found
+
+
+# ---------------------------------------------------------------------------------------------- R12
+
+MINIMUM_WORDS = r"(?:minimum|min\.?|at least|from|over|more than|>=|\u2265)"
+EXACT_KINDS = ("ask", "standing", "interest")
+
+
+def _minimum_stated(text, number):
+    n = re.escape(f"{number:g}")
+    plain = rf"(?<![\d.]){n}(?:\.0+)?(?![\d])"
+    return re.search(rf"{plain}\s*\+|{plain}\s*(?:kwh)?\s*(?:minimum|min\b|or more|and above|or above)|{MINIMUM_WORDS}\s*(?:of\s*)?{plain}",
+                     text, re.IGNORECASE) is not None
+
+
+def _flat_strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _flat_strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _flat_strings(item)
+
+
+def _line_source_text(ctx, line):
+    if line.get("demand_id") and line["demand_id"] in ctx["demands"]:
+        demand = ctx["demands"][line["demand_id"]]
+        return " \n ".join(_flat_strings([demand.get("summary"), demand.get("spec"), demand.get("note"), demand.get("source_quote")]))
+    products = (ctx["companies"].get(line.get("company_id")) or {}).get("dossier_products") or []
+    return " \n ".join(_flat_strings([line.get("raw_product"), line.get("stated"), products]))
+
+
+def r12(ctx):
+    found = []
+    for line in ctx["lines"]:
+        lo, hi = num(line.get("kwh_min")), num(line.get("kwh_max"))
+        if line.get("kind") not in EXACT_KINDS or lo is None or lo != hi:
+            continue
+        if not str(line.get("product_key") or "").startswith("broad:"):
+            continue  # a model line states the model's own size
+        if _minimum_stated(_line_source_text(ctx, line), lo):
+            found.append(_violation(ctx, "R12", line, f"kWh {lo:g} is written as an exact size; the source states it as a minimum ({lo:g}+, minimum, at least or from)"))
+    return found
+
+
 # ---------------------------------------------------------------------------------------------- run and report
 
-RULE_FUNCTIONS = {"R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5, "R6": r6, "R7": r7, "R8": r8, "R9": r9, "R10": r10}
+RULE_FUNCTIONS = {"R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5, "R6": r6, "R7": r7, "R8": r8, "R9": r9, "R10": r10, "R11": r11, "R12": r12}
 
 
 def check(ctx):
