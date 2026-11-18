@@ -624,8 +624,7 @@ for (const [group, words] of Object.entries({
   "BMW or Mini": ["bmw", "mini"],
   "Mercedes-Benz": ["mercedes", "mercedes-benz", "mercedes benz", "smart"],
   "Stellantis": ["stellantis", "psa", "peugeot", "citroen", "citroën", "opel", "vauxhall",
-    "fiat", "jeep", "ds", "alfa romeo", "alfa", "abarth", "lancia", "fpt",
-    "fpt industrial"],
+    "fiat", "jeep", "ds", "alfa romeo", "alfa", "abarth", "lancia"],
   "Ford": ["ford"],
   "GM": ["gm", "general motors", "chevrolet", "cadillac", "gmc", "buick", "opel gm"],
   "BYD": ["byd", "findreams"],
@@ -666,8 +665,8 @@ for (const [maker, words] of Object.entries({
  * (vehicle make groups, cell makers) named by one product `make` string.
  *
  * Product makes are sometimes lists ("MG, Stellantis, Tesla") or compound ("Stellantis / FPT /
- * Kokam"), so each token is mapped on its own. FPT and PSA belong to the Stellantis group in the
- * dossiers' own wording. Unrecognised tokens map to nothing rather than inventing a group.
+ * Kokam"), so each token is mapped on its own. PSA belongs to the Stellantis group. FPT and Iveco map to no make group (FPT Industrial is
+ * Iveco Group, not Stellantis). Unrecognised tokens map to nothing rather than inventing a group.
  */
 function makeGroups(make: unknown): { groups: string[]; cells: string[] } {
   const groups: string[] = [];

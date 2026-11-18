@@ -391,6 +391,16 @@ class MappingTests(unittest.TestCase):
         self.assertEqual(profile["makes"], ["Tesla", "Stellantis", "MG or SAIC"])
         self.assertEqual(profile["cell_makers"], ["Kokam"])
 
+    def test_fpt_and_iveco_are_not_stellantis(self):
+        frontmatter = parse_valid(products=[
+            {"make": "FPT Industrial", "format": "packs", "status": "bought"},
+            {"make": "Iveco", "format": "packs", "status": "asked"},
+            {"make": "PSA", "format": "packs", "status": "asked"},
+        ])
+        self.assertEqual(bd.to_buyer_profile(frontmatter)["makes"], ["Stellantis"])
+        frontmatter = parse_valid(products=[{"make": "FPT", "format": "packs", "status": "bought"}])
+        self.assertEqual(bd.to_buyer_profile(frontmatter)["makes"], [])
+
     def test_unmapped_maker_is_not_guessed(self):
         frontmatter = parse_valid(products=[
             {"make": "Proterra", "format": "packs", "chemistry": "NMC", "status": "bought"},
