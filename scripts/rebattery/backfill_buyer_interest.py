@@ -462,13 +462,18 @@ def product_facts(product):
             base[key] = product[key].strip()
     if isinstance(product.get("format"), str) and product["format"].strip():
         base["format"] = product["format"].strip()
+    if isinstance(product.get("cell_format"), str) and product["cell_format"].strip():
+        base["cell_format"] = product["cell_format"].strip()  # the key reads it for a cell product (21700, prismatic)
     kwh = product.get("kwh")
     if isinstance(kwh, list) and kwh:
-        values = [value for value in kwh if isinstance(value, (int, float))]
+        values = sorted({value for value in kwh if isinstance(value, (int, float)) and not isinstance(value, bool)})
         if len(values) == 1:
             base["kwh"] = values[0]
         elif len(values) >= 2:
-            base["kwh_min"], base["kwh_max"] = min(values), max(values)
+            if isinstance(product.get("model"), str) and product["model"].strip():
+                # A model key carries its kWh, so each capacity is its own line.
+                return [fact for value in values for fact in product_facts({**product, "kwh": [value]})]
+            base["kwh_min"], base["kwh_max"] = values[0], values[-1]  # a broad key has no kWh segment: one line with the range
     elif isinstance(kwh, (int, float)):
         base["kwh"] = kwh
     elif product.get("kwh_min") is not None or product.get("kwh_max") is not None:
@@ -618,6 +623,7 @@ def _remove_dossier_lines(cur, company_id):
 def sync_dossier_rows(cur, companies):
     """One mastered line per dossier product and per make it states; the frontmatter itself is left as it is."""
     written, skipped, from_source, no_facts, truncated, errors, superseded, removed = 0, 0, 0, 0, 0, 0, 0, 0
+    said_dropped = 0
     for company in companies:
         frontmatter, _body = buyer_dossier.parse(company.get("buyer_dossier") or "")
         products = frontmatter.get("products") or []
@@ -692,7 +698,16 @@ def sync_dossier_rows(cur, companies):
                                          and d.kind = 'declined' and d.product_key = w.product_key
                                          and d.last_seen >= w.last_seen)""", (company["id"],))
         superseded += cur.rowcount
-    return {"companies": len(companies), "written": written, "skipped": skipped, "superseded_by_decline": superseded, "removed_before_rewrite": removed,
+        # A Said (interest) line is not kept when a live Regular (standing), ask or bought line of the same company covers
+        # the same product_key exactly. This company's previous bi_dossier_ Said lines were removed above.
+        cur.execute("""delete from buyer_interest w
+                        where w.company_id = %s and w.id like 'bi_dossier_%%' and w.kind = 'interest'
+                          and exists (select 1 from buyer_interest b
+                                       where b.company_id = w.company_id and b.product_key = w.product_key and b.id <> w.id
+                                         and b.kind in ('standing', 'ask', 'bought')
+                                         and (b.expires_on is null or b.expires_on >= current_date))""", (company["id"],))
+        said_dropped += cur.rowcount
+    return {"companies": len(companies), "written": written, "skipped": skipped, "superseded_by_decline": superseded, "said_dropped": said_dropped, "removed_before_rewrite": removed,
             "already_from_source": from_source, "no_facts": no_facts, "truncated": truncated, "errors": errors}
 
 

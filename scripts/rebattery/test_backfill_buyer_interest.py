@@ -651,6 +651,57 @@ The story, unchanged by this step.
         self.convert()
         return {line["product_key"]: line for line in self.lines(self.dossier_company)}
 
+    def test_a_cell_format_and_a_chemistry_stated_by_the_product_reach_the_key(self):
+        lines = self.dossier_products('''  - make: Panasonic
+    format: cells
+    cell_format: "21700"
+    chemistry: NMC
+    status: "asked"
+    seen: "2026-10-07"
+  - make: Exigo
+    format: cells
+    cell_format: prismatic
+    status: "asked"
+    seen: "2026-10-07"
+  - make: "Connected Energy"
+    format: packs
+    chemistry: Sodium-ion
+    status: "asked"
+    seen: "2026-10-07"''')
+        self.assertEqual(sorted(lines), ["broad:connected-energy-sodium-ion-packs", "broad:exigo-prismatic-any-cells",
+                                         "broad:panasonic-21700-nmc-cells"])
+
+    def test_a_kwh_list_gives_one_model_line_per_capacity_and_one_ranged_broad_line(self):
+        lines = self.dossier_products('''  - make: Volkswagen
+    model: ID.3
+    format: packs
+    kwh: [58, 77]
+    status: "asked"
+    seen: "2026-10-07"
+  - make: "Volkswagen Group"
+    format: packs
+    kwh: [55, 63, 82]
+    status: "asked"
+    seen: "2026-10-07"''')
+        self.assertEqual(sorted(lines), ["broad:vw-group-any-packs", "model:volkswagen-id3-58kwh", "model:volkswagen-id3-77kwh"])
+        self.assertEqual((float(lines["broad:vw-group-any-packs"]["kwh_min"]), float(lines["broad:vw-group-any-packs"]["kwh_max"])), (55, 82))
+
+    def test_a_said_line_is_dropped_when_a_live_asked_line_has_the_same_key_on_every_load_path(self):
+        lines = self.dossier_products('''  - make: BMW
+    format: packs
+    status: "asked"
+    seen: "2026-10-07"
+  - make: BMW
+    format: packs
+    status: "said_interested"
+    seen: "2026-10-07"
+  - make: Volvo
+    format: packs
+    status: "said_interested"
+    seen: "2026-10-07"''')
+        self.assertEqual({key: line["kind"] for key, line in lines.items()},
+                         {"broad:bmw-any-packs": "standing", "broad:volvo-any-packs": "interest"})
+
     def test_a_model_list_splits_into_one_line_per_model_and_keeps_the_wording(self):
         lines = self.dossier_products('''  - make: "VW Group"
     model: "82 kWh: ID.4, Q4 e-tron, Enyaq, ID.7, Elroq"
