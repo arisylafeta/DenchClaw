@@ -334,6 +334,18 @@ def upsert_interest(cur, *, company_id, kind, facts, first_seen, last_seen, pers
         values = keyed if isinstance(keyed, dict) else dict(zip(
             ('key', 'level', 'make', 'model', 'format', 'chemistry', 'kwh_min', 'kwh_max'), keyed))
         mastered = kind in INTEREST_KINDS
+        if kind == 'saved_search' and saved_search_id and expires_on is None:
+            # One open line per company and product: a second search or request for the same product refreshes the
+            # line already there (its own line first, else the oldest, a real search before a sourcing request).
+            cur.execute("""select saved_search_id from buyer_interest where kind = 'saved_search' and company_id = %s
+                             and product_key = %s and saved_search_id is not null
+                             and (saved_search_id = %s or expires_on is null)
+                           order by saved_search_id = %s desc, saved_search_id like 'sourcing\\_request:%%' asc,
+                                    first_seen, created_at limit 1""",
+                        (company_id, values['key'], saved_search_id, saved_search_id))
+            found = cur.fetchone()
+            if found:
+                saved_search_id = found['saved_search_id'] if isinstance(found, dict) else found[0]
         conflict = ("on conflict (company_id, product_key, kind) where ownership = 'mastered'"
                     if mastered else "on conflict (kind, saved_search_id, product_key) where saved_search_id is not null")
         refresh = ("raw_product = coalesce(excluded.raw_product, buyer_interest.raw_product), "

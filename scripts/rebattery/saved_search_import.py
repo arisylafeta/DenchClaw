@@ -557,7 +557,7 @@ def resync(cur, search_rows, today, apply):
 
     A search's old lines whose key is no longer produced are deleted; the produced lines are upserted. Two saved_search
     lines of one company with the same product_key become one (earliest first_seen, latest last_seen, union of
-    source_refs, the first line's saved_search_id). Returns (report lines, lost searches). With apply, every touched row
+    source_refs, the line of a real search, else the earliest, keeps its saved_search_id). Returns (report lines, lost searches). With apply, every touched row
     is archived first. The caller owns the transaction.
     """
     cur.execute("set local lock_timeout = '3s'")
@@ -583,17 +583,22 @@ def resync(cur, search_rows, today, apply):
             continue
         current.append(sid)
         row["company_id"] = company
-        archive([line["id"] for line in old])
+        # Any saved_search line of the company can be shared by this search, so all of them are archived first.
+        cur.execute("select id from buyer_interest where kind = 'saved_search' and company_id = %s", (company,))
+        archive([line["id"] for line in cur.fetchall()])
         cur.execute("select min(first_seen) as first from buyer_interest where kind = 'saved_search' and saved_search_id = %s", (sid,))
         first_seen = cur.fetchone()["first"]
         survey.upsert_saved_search_interest(cur, row, today=today)
         if first_seen:  # a replaced key keeps when the search was first seen, not the confirmation date
             cur.execute("update buyer_interest set first_seen = least(first_seen, %s) "
-                        "where kind = 'saved_search' and saved_search_id = %s and updated_at = now()", (first_seen, sid))
-        cur.execute("select id, product_key, updated_at = now() as fresh from buyer_interest where kind = 'saved_search' "
-                    "and saved_search_id = %s", (sid,))  # now() is the transaction start: only lines written here match
+                        "where kind = 'saved_search' and (saved_search_id = %s or %s = any(source_refs)) and updated_at = now()",
+                        (first_seen, sid, f"saved_search:{sid}"))
+        # now() is the transaction start: only lines written here match. A line shared with another search or request
+        # sits under that one's saved_search_id and carries this search's ref.
+        cur.execute("select id, product_key, saved_search_id = %s as own, updated_at = now() as fresh from buyer_interest "
+                    "where kind = 'saved_search' and (saved_search_id = %s or %s = any(source_refs))", (sid, sid, f"saved_search:{sid}"))
         after = cur.fetchall()
-        stale = [line["id"] for line in after if not line["fresh"]]
+        stale = [line["id"] for line in after if line["own"] and not line["fresh"]]
         if stale:
             cur.execute("delete from buyer_interest where id = any(%s::text[])", (stale,))
         new = sorted(line["product_key"] for line in after if line["fresh"])
@@ -603,12 +608,14 @@ def resync(cur, search_rows, today, apply):
             f"search {sid[:8]}: {[line['product_key'] for line in old] or 'no lines'} -> {new or 'no lines'}")
 
     merged = {}
-    cur.execute("""select company_id, product_key from buyer_interest where kind = 'saved_search' and saved_search_id = any(%s::text[])
-                   group by 1, 2 having count(*) > 1""", (current,))
+    # Lines of current searches and of sourcing requests (the import also writes those as saved_search lines).
+    scope = "kind = 'saved_search' and (saved_search_id = any(%s::text[]) or saved_search_id like 'sourcing\\_request:%%')"
+    cur.execute(f"select company_id, product_key from buyer_interest where {scope} group by 1, 2 having count(*) > 1", (current,))
     for dup in cur.fetchall():
         cur.execute("""select id, saved_search_id, first_seen, last_seen, expires_on, source_refs from buyer_interest
-                       where kind = 'saved_search' and company_id = %s and product_key = %s and saved_search_id = any(%s::text[])
-                       order by first_seen, created_at, saved_search_id""", (dup["company_id"], dup["product_key"], current))
+                       where {scope} and company_id = %s and product_key = %s
+                       order by saved_search_id like 'sourcing\\_request:%%', first_seen, created_at, saved_search_id""".replace("{scope}", scope),
+                    (current, dup["company_id"], dup["product_key"]))
         lines = cur.fetchall()
         keep, others = lines[0], lines[1:]
         archive([line["id"] for line in lines])
