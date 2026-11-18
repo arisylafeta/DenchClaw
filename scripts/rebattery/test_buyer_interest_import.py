@@ -88,7 +88,7 @@ class InterestLines(unittest.TestCase):
         self.assertEqual(line["product_key_level"], "broad")
         self.assertEqual(str(line["first_seen"]), "2026-11-04")
         self.assertEqual(str(line["last_seen"]), "2026-11-04")
-        self.assertEqual(str(line["expires_on"]), "2027-02-02")   # standing: first seen + 90 days
+        self.assertEqual(str(line["expires_on"]), "2027-11-04")   # standing: latest evidence + 365 days
         self.assertEqual(line["source_refs"], [f"formbricks:{self.tag}"])
         # The legacy profile still gets written; the line is an addition, not a move.
         with self.cursor() as cur:

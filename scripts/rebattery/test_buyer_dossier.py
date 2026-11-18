@@ -202,6 +202,13 @@ class ValidateTests(unittest.TestCase):
         self.assertTrue(any(e.startswith("products[0].reason") for e in errors), errors)
         self.assertNotIn("min_pack_voltage", bd.to_buyer_profile(parse_valid()))
 
+    def test_one_off_is_a_boolean_on_a_product(self):
+        fm = parse_valid()
+        fm["products"][0]["one_off"] = True
+        self.assertEqual(bd.validate(fm), [])
+        fm["products"][0]["one_off"] = "yes"
+        self.assertTrue(any(e.startswith("products[0].one_off") for e in bd.validate(fm)))
+
     def test_model_with_kwh_brackets_or_list_warns_but_validates(self):
         fm = parse_valid()
         fm["products"][0]["model"] = "Zoe 52 kWh (ZE50)"

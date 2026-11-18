@@ -232,6 +232,14 @@ describe("dossier validation", () => {
     expect(errors.some((error) => error.startsWith("source_countries[1]:"))).toBe(false);
   });
 
+  it("accepts one_off on a product and requires it to be true or false", () => {
+    const check = (value: string) =>
+      validateDossier(parseDossier(
+        `---\ncompany_id: x\nproducts:\n  - {make: BMW, format: packs, status: asked, one_off: ${value}}\n---\n`).frontmatter);
+    expect(check("true").some((error) => error.includes("one_off"))).toBe(false);
+    expect(check("yes please").some((error) => error.startsWith("products[0].one_off"))).toBe(true);
+  });
+
   it("requires company_id and keeps it text", () => {
     expect(validateDossier(parseDossier("---\ncompany: no id\n---\n").frontmatter)).toContain(
       "company_id: required (the company the dossier belongs to)",

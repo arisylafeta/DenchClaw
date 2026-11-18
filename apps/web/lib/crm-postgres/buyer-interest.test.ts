@@ -39,7 +39,7 @@ describe.skipIf(!TEST_URL)("buyer interest wants api", () => {
       kind: "standing", ownership: "mastered", product_key: "broad:lfp-packs", product_key_level: "broad",
       chemistry: "LFP", format: "pack", quantity: 12, quantity_unit: "packs", quantity_basis: "stated",
       price: 95, price_currency: "EUR", price_unit: "kWh", price_basis: "target",
-      first_seen: TODAY, last_seen: TODAY, expires_on: "2027-02-10", expired: false,
+      first_seen: TODAY, last_seen: TODAY, expires_on: "2027-11-12", expired: false,
     });
     expect(line.label).toBe("packs, LFP");
   });

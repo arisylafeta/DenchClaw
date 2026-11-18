@@ -470,6 +470,47 @@ The story, unchanged by this step.
         self.assertEqual(str(line["first_seen"]), "2026-09-23")
         self.assertEqual(str(line["last_seen"]), "2026-09-23")
 
+    def _dossier(self, products, last_verified="2026-11-04"):
+        return (f'---\ncompany_id: "{self.dossier_company}"\ncompany: "Dossier Test Buyer"\nbuyer_type: "trader"\n'
+                f'last_verified: "{last_verified}"\nproducts:\n{products}---\nBody.\n')
+
+    def _expiry(self, kind, key):
+        [line] = [l for l in self.lines(self.dossier_company, kind) if l["product_key"] == key]
+        return line
+
+    def test_a_regular_want_lasts_a_year_from_the_latest_of_said_bought_and_checked(self):
+        # said 2026-01-10, dossier checked 2026-11-04: checked is latest.
+        self.write_dossier(markdown=self._dossier(
+            '  - make: "BMW"\n    format: "packs"\n    status: "asked"\n    seen: "2026-01-10"\n'))
+        self.convert()
+        self.assertEqual(str(self._expiry("standing", "broad:bmw-any-packs")["expires_on"]), "2027-11-04")
+        # said latest: seen after the check date.
+        self.write_dossier(markdown=self._dossier(
+            '  - make: "BMW"\n    format: "packs"\n    status: "asked"\n    seen: "2026-11-10"\n'))
+        self.convert()
+        self.assertEqual(str(self._expiry("standing", "broad:bmw-any-packs")["expires_on"]), "2027-11-10")
+
+    def test_a_later_purchase_of_the_same_product_extends_a_regular_want(self):
+        self.write_dossier(markdown=self._dossier(
+            '  - make: "BMW"\n    format: "packs"\n    status: "asked"\n    seen: "2026-01-10"\n'
+            '  - make: "BMW"\n    format: "packs"\n    status: "bought"\n    seen: "2026-12-20"\n'
+            '  - make: "Volvo"\n    format: "packs"\n    status: "asked"\n    seen: "2026-01-10"\n'))
+        self.convert()  # the purchase is listed after the want; it still counts
+        self.assertEqual(str(self._expiry("standing", "broad:bmw-any-packs")["expires_on"]), "2027-12-20")
+        self.assertEqual(str(self._expiry("standing", "broad:volvo-any-packs")["expires_on"]), "2027-11-04")
+
+    def test_a_one_off_shortlist_is_an_ask_that_lasts_90_days(self):
+        self.write_dossier(markdown=self._dossier(
+            '  - make: "BMW"\n    format: "packs"\n    status: "asked"\n    one_off: true\n    seen: "2026-10-01"\n'
+            '    src: "gmail_msg_x"\n'))
+        self.convert()
+        self.assertEqual(self.lines(self.dossier_company, "standing"), [])
+        line = self._expiry("ask", "broad:bmw-any-packs")
+        self.assertEqual(line["ownership"], "synced")
+        self.assertIsNone(line["demand_id"])
+        self.assertEqual(line["source_refs"], ["gmail_msg_x"])
+        self.assertEqual(str(line["expires_on"]), "2026-12-30")
+
     def test_the_dossier_text_is_not_rewritten(self):
         markdown = self.write_dossier()
         self.convert()
