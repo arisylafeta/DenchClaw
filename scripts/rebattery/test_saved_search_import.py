@@ -34,7 +34,7 @@ class SavedSearchImportTest(unittest.TestCase):
         self.assertEqual(row["wants"], "Tesla · Kokam · NMC · 80%+ health")
         self.assertEqual(row["spec"], {
             "chemistries": ["NMC"], "formats": ["Packs", "Modules"], "conditions": ["New or surplus"],
-            "makes": ["Tesla"], "min_soh": 80, "kwh_min": 30,
+            "makes": ["Tesla"], "min_soh": 80, "kwh_min": 30, "source_countries": ["DE"],
         })
         self.assertEqual(row["source_id"], "saved_search:8d0f6c1e-0000-4000-8000-000000000001")
         self.assertEqual(row["source_label"], "Saved search")
@@ -80,6 +80,38 @@ class SavedSearchImportTest(unittest.TestCase):
         self.assertEqual(model(q="Chevrolet Bolt EV"), {"make": "Chevrolet", "model": "Bolt EV"})
         self.assertEqual(saved.map_saved_search(search(filters={"q": "EV3", "manufacturer": ["Kia"]}))["interest_model"], {"make": "Kia", "model": "EV3"})
         self.assertEqual(saved.map_saved_search(search(filters={"q": "EV3", "manufacturer": ["Kia"]}))["spec"], {"makes": ["Hyundai or Kia"]})
+
+    def test_text_names_a_cell_maker_and_format_the_filters_do_not(self):
+        # hidalgoalan: Samsung SDI modules, typed as text with no manufacturer filter
+        row = saved.map_saved_search(search(filters={"q": "Samsung sdi modules"}))
+        self.assertEqual(row["spec"], {"cell_makers": ["Samsung SDI"], "formats": ["Modules"]})
+        self.assertIsNone(row["interest_model"])
+        self.assertEqual(row["raw_product"], "Cell maker: Samsung SDI")
+        # the same maker in the manufacturer filter lands in the same list
+        self.assertEqual(saved.map_saved_search(search(filters={"manufacturer": "Samsung SDI"}))["spec"], {"cell_makers": ["Samsung SDI"]})
+        # a format filter wins over a word in the text
+        self.assertEqual(saved.map_saved_search(search(filters={"q": "samsung sdi modules", "format": ["pack"]}))["spec"]["formats"], ["Packs"])
+
+    def test_the_location_filter_is_kept_on_the_row_and_in_the_buy_box(self):
+        # Slmails: a GB-only alert
+        row = saved.map_saved_search(search(filters={"q": "Samsung sdi", "location_country": "GB"}))
+        self.assertEqual(row["spec"]["source_countries"], ["GB"])
+        self.assertEqual(row["location"], "United Kingdom")
+        self.assertEqual(row["raw_product"], "Cell maker: Samsung SDI; Located in: United Kingdom")
+        self.assertIn("Located in: United Kingdom", row["note"])
+
+    def test_part_numbers_in_the_text_are_kept_and_the_full_model_name_stays(self):
+        # easy4ulatsia: Corolla Cross with OEM part numbers in the text
+        filters = {"q": "Toyota Corolla Cross G9510-16021 G9510-16022", "manufacturer": ["Toyota"]}
+        self.assertEqual(saved.search_model(filters), {"make": "Toyota", "model": "Corolla Cross"})
+        row = saved.map_saved_search(search(filters=filters))
+        self.assertEqual(row["spec"]["part_numbers"], ["G9510-16021", "G9510-16022"])
+        self.assertEqual(row["interest_model"], {"make": "Toyota", "model": "Corolla Cross"})
+        # Corolla Cross is its own model, never Corolla
+        self.assertEqual(saved.search_model({"q": "Corolla Cross"}), {"make": "Toyota", "model": "Corolla Cross"})
+        self.assertEqual(saved.search_model({"q": "corolla"}), {"make": "Toyota", "model": "Corolla"})
+        # a model, a size or a year range in the text is not a part number
+        self.assertEqual(saved.search_terms({"q": "BMW 225xe 7.6kwh 2015-2022 ioniq5"})[0], [])
 
     def test_marks_unsubscribed_searches_for_skipping(self):
         self.assertTrue(saved.map_saved_search(search(status="unsubscribed"))["unsubscribed"])

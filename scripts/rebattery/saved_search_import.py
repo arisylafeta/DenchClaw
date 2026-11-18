@@ -15,6 +15,7 @@ import argparse
 import datetime as dt
 import importlib.util
 import json
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -62,7 +63,7 @@ KNOWN_MODELS = {
     "Kia": ["EV3", "EV4", "EV5", "EV6", "EV9", "Niro", "e-Niro", "Soul"],
     "Hyundai": ["Kona", "Ioniq", "Ioniq 5", "Ioniq 6", "Ioniq 9"],
     "Renault": ["Zoe", "Twingo", "Megane", "Kangoo", "Twizy", "Fluence"],
-    "Toyota": ["Corolla", "Prius", "RAV4", "Yaris", "C-HR", "Mirai", "Auris"],
+    "Toyota": ["Corolla", "Corolla Cross", "Prius", "RAV4", "Yaris", "C-HR", "Mirai", "Auris"],
     "Tesla": ["Model S", "Model X", "Model 3", "Model Y"],
     "Nissan": ["Leaf"],
     "Volkswagen": ["ID.3", "ID.4", "ID.5", "e-Golf", "e-Up"],
@@ -87,6 +88,50 @@ def _fold(text):
     return "".join(ch for ch in str(text or "").lower() if ch.isalnum())
 
 
+PART_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9./_#-]*[A-Za-z0-9]")
+UNIT_TOKEN = re.compile(r"^\d+(\.\d+)?(kwh|kw|ah|wh|v|%)$", re.IGNORECASE)
+GENERIC_WORDS = {"battery", "batteries", "pack", "packs", "module", "modules", "cell", "cells", "hv", "for"}
+SEARCH_FORMATS = {"pack": "Packs", "packs": "Packs", "module": "Modules", "modules": "Modules", "cell": "Cells", "cells": "Cells"}
+
+
+def part_number_like(token):
+    """An OEM-style code in search text (`G9510-16021`, `37501AO050`): six or more characters, letters and three or
+    more digits. A model (`225xe`, `ioniq5`), a size (`78kwh`) or a year range is not one."""
+    if UNIT_TOKEN.match(token):
+        return False
+    folded = _fold(token)
+    return (len(folded) >= 6 and sum(ch.isdigit() for ch in folded) >= 3 and any(ch.isalpha() for ch in folded)
+            and len(token) <= 20)
+
+
+def search_terms(filters):
+    """What a search's text states beyond a model name: ({part numbers}, {cell makers}, {formats}, remaining words).
+
+    The remaining words are the text without those parts, so \"Corolla Cross G9510-16021\" still names its model and
+    \"Samsung sdi modules\" names no model at all. Order of the stated values is kept.
+    """
+    text = str(filters.get("q") or "")
+    parts = [token for token in PART_TOKEN.findall(text) if part_number_like(token)]
+    for token in parts:
+        text = text.replace(token, " ")
+    cell_makers = []
+    for name in sorted(CELL_MAKERS, key=len, reverse=True):
+        pattern = r"(?<![A-Za-z0-9])" + r"[\s-]+".join(re.escape(word) for word in name.split()) + r"(?![A-Za-z0-9])"
+        if re.search(pattern, text, re.IGNORECASE):
+            if CELL_MAKERS[name] not in cell_makers:
+                cell_makers.append(CELL_MAKERS[name])
+            text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
+    formats = []
+    words = []
+    for word in text.split():
+        key = word.strip(",.;:").lower()
+        if key in SEARCH_FORMATS and SEARCH_FORMATS[key] not in formats:
+            formats.append(SEARCH_FORMATS[key])
+        if key not in GENERIC_WORDS:
+            words.append(word)
+    return list(dict.fromkeys(parts)), cell_makers, formats, " ".join(words)
+
+
 def search_model(filters):
     """{make, model} when the search text names a known vehicle model, else None. Never guesses a make or a kWh.
 
@@ -94,7 +139,7 @@ def search_model(filters):
     (\"Hyundai kona\"), or a model only one listed maker owns (\"zoe\"). Extra words (\"polestar 2 78 kwh front wheel drive\")
     are not a model name, so they stay a note.
     """
-    query = _fold(filters.get("q"))
+    query = _fold(search_terms(filters)[3])
     if not query:
         return None
     named = {MANUFACTURER_NAMES.get(str(n).strip().lower(), str(n).strip()).lower() for n in as_list(filters.get("manufacturer"))}
@@ -169,6 +214,20 @@ def filter_spec(filters):
     if filters.get("kwh_max") is not None:
         spec["kwh_max"] = filters["kwh_max"]
 
+    # The search text can state what the filters do not: a cell maker ("Samsung sdi"), a format ("modules") and part
+    # numbers ("G9510-16021"). They go in the spec beside the filters, so the buy box and the Said line keep them.
+    parts, text_cell_makers, text_formats, _words = search_terms(filters)
+    for name in text_cell_makers:
+        survey.add(spec, "cell_makers", name)
+    if not as_list(filters.get("format")):
+        for name in text_formats:
+            survey.add(spec, "formats", name)
+    for part in parts:
+        survey.add(spec, "part_numbers", part)
+    codes = [str(code).strip().upper() for code in as_list(filters.get("location_country")) if str(code or "").strip()]
+    for code in codes:
+        survey.add(spec, "source_countries", code)  # where the goods are; never `origins`, which is the battery's use
+
     if filters.get("q"):
         notes.append(f"Searched for: {filters['q']}")
     if brands:
@@ -194,12 +253,23 @@ def filter_spec(filters):
     return spec, notes
 
 
+def stated_detail(spec):
+    """What a Said line holds beyond its product key: the cell maker and the country the listings must be in."""
+    detail = []
+    if spec.get("cell_makers"):
+        detail.append(f"Cell maker: {', '.join(spec['cell_makers'])}")
+    if spec.get("source_countries"):
+        detail.append(f"Located in: {', '.join(country_name(code) for code in spec['source_countries'])}")
+    return "; ".join(detail) or None
+
+
 def map_saved_search(search):
     """One platform saved search as a demand row, or None when it should not be imported."""
     email = (search.get("email") or "").strip().lower()
     if not email or survey.internal(email) or not search.get("confirmed_at"):
         return None
-    spec, notes = filter_spec(search.get("filters") or {})
+    filters = search.get("filters") or {}
+    spec, notes = filter_spec(filters)
     cadence = "daily" if search.get("frequency") == "daily" else "weekly"
     notes.append(f"Saved search on rebattery.io, alerts {cadence}.")
 
@@ -207,7 +277,9 @@ def map_saved_search(search):
     return {
         "interest_model": search_model(search.get("filters") or {}),
         "kind": "standing", "basis": "stated", "email": email, "contact": None,
-        "wants": search.get("label") or "Any battery listing", "quantity": None, "location": None,
+        "wants": search.get("label") or "Any battery listing", "quantity": None,
+        "location": ", ".join(country_name(code) for code in spec.get("source_countries", [])) or None,
+        "raw_product": stated_detail(spec),
         "spec": spec, "note": "\n".join(notes), "observed_on": confirmed,
         "source_kind": "import", "source_id": f"saved_search:{search['id']}", "source_label": "Saved search",
         "unsubscribed_on": str(search.get("unsubscribed_at") or "")[:10] or None,
