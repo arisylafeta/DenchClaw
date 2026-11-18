@@ -539,3 +539,7 @@ export const MODEL_ALIAS_ROWS: readonly ModelAliasRow[] = [
 ];
 
 export const MODEL_MAKE_ALIASES: Readonly<Record<string, string>> = {"vw": "volkswagen", "vauxhall": "opel", "mercedes": "mercedesbenz", "mb": "mercedesbenz", "psa": "peugeot"};
+
+export const MODEL_BRAND_WORDS: readonly string[] = ["volkswagen", "vw", "audi", "mini", "skoda", "cupra", "porsche", "bmw", "mercedes benz", "mercedes", "tesla", "stellantis", "nissan", "renault", "dacia", "peugeot", "citroen", "opel", "vauxhall", "fiat", "jeep", "ford", "hyundai", "kia", "genesis", "toyota", "lexus", "honda", "mazda", "mitsubishi", "suzuki", "subaru", "volvo", "polestar", "jaguar", "land rover", "mg", "byd", "lotus", "lucid", "rivian", "nio", "xpeng", "zeekr", "leapmotor", "maxus", "smart", "seat"];
+
+export const MODEL_VARIANT_WORDS: readonly string[] = ["long", "range", "standard", "awd", "rwd", "fwd", "4wd", "2wd", "lr", "sr", "dual", "motor", "performance", "premium", "se"];

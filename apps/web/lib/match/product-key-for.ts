@@ -27,7 +27,7 @@ import {
   normalModel,
   partKey,
 } from "@/lib/commercial-stock";
-import { MODEL_ALIAS_ROWS, MODEL_MAKE_ALIASES } from "./model-aliases.generated";
+import { MODEL_ALIAS_ROWS, MODEL_BRAND_WORDS, MODEL_MAKE_ALIASES, MODEL_VARIANT_WORDS } from "./model-aliases.generated";
 import { PACK_FAMILIES, type PackFamily } from "./pack-families";
 
 export type ProductFacts = {
@@ -250,13 +250,7 @@ function graphPack(facts: ProductFacts): string | null {
   return id ? `pack:${id}` : null;
 }
 
-const ALIAS_BRAND_WORDS = [
-  "volkswagen", "vw", "audi", "mini", "skoda", "cupra", "porsche", "bmw", "mercedes benz", "mercedes", "tesla", "stellantis", "nissan",
-  "renault", "dacia", "peugeot", "citroen", "opel", "vauxhall", "fiat", "jeep", "ford", "hyundai", "kia", "genesis", "toyota", "lexus",
-  "honda", "mazda", "mitsubishi", "suzuki", "subaru", "volvo", "polestar", "jaguar", "land rover", "mg", "byd", "lotus", "lucid", "rivian",
-  "nio", "xpeng", "zeekr", "leapmotor", "maxus", "smart", "seat",
-];
-const ALIAS_VARIANT_WORDS = new Set(["long", "range", "standard", "awd", "rwd", "fwd", "4wd", "2wd", "lr", "sr", "dual", "motor", "performance", "premium", "se"]);
+const ALIAS_VARIANT_WORDS = new Set(MODEL_VARIANT_WORDS);
 
 function plainWords(value: string | null | undefined): string {
   return deaccentText(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -278,7 +272,7 @@ function aliasMakeFold(value: string | null | undefined): string {
  */
 export function modelNormText(make: string | null | undefined, raw: string | null | undefined): string | null {
   const own = plainWords(make);
-  const brands = [...new Set([own, ...ALIAS_BRAND_WORDS])].filter(Boolean).toSorted((a, b) => b.length - a.length || a.localeCompare(b));
+  const brands = [...new Set([own, ...MODEL_BRAND_WORDS])].filter(Boolean).toSorted((a, b) => b.length - a.length || a.localeCompare(b));
   for (const dropYears of [true, false]) {
     let text = deaccentText(raw ?? "").toLowerCase()
       .replace(/\b\d+(?:\.\d+)?\s*(?:kwh|kw|ps|hp|bhp|ah)\b/g, " ")

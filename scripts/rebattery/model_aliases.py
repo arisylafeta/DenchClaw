@@ -11,13 +11,8 @@ from pathlib import Path
 ALIASES_PATH = Path(__file__).resolve().parent / "model_aliases.json"
 _DATA = json.loads(ALIASES_PATH.read_text(encoding="utf-8"))
 MAKE_ALIASES = _DATA["makeAliases"]
-VARIANT_WORDS = ("long", "range", "standard", "awd", "rwd", "fwd", "4wd", "2wd", "lr", "sr", "dual", "motor",
-                 "performance", "premium", "se")
-BRAND_WORDS = ("volkswagen", "vw", "audi", "mini", "skoda", "cupra", "porsche", "bmw", "mercedes-benz", "mercedes", "tesla",
-               "stellantis", "nissan", "renault", "dacia", "peugeot", "citroen", "opel", "vauxhall", "fiat", "jeep", "ford",
-               "hyundai", "kia", "genesis", "toyota", "lexus", "honda", "mazda", "mitsubishi", "suzuki", "subaru", "volvo",
-               "polestar", "jaguar", "land rover", "mg", "byd", "lotus", "lucid", "rivian", "nio", "xpeng", "zeekr",
-               "leapmotor", "maxus", "smart", "seat")
+VARIANT_WORDS = tuple(_DATA["variantWords"])
+BRAND_WORDS = tuple(_DATA["brandWords"])
 _FROM = "àáâãäåāăąçćčďèéêëēėęěìíîïīįñńňòóôõöøōőťùúûüūůűýÿžźżšśł"
 _TO = "aaaaaaaaacccdeeeeeeeeiiiiiinnnooooooootuuuuuuuyyzzzssl"
 _TABLE = str.maketrans(_FROM, _TO)
@@ -264,6 +259,20 @@ def sql_inserts():
     return ",\n".join(lines)
 
 
+def sql_make_alias_whens():
+    """The `when` lines of buyer_interest_alias_make_fold in migration 121."""
+    return "\n".join(f"when {_sql_text(k)} then {_sql_text(v)}" for k, v in MAKE_ALIASES.items())
+
+
+def sql_brand_array():
+    """The brand words of buyer_interest_model_norm, as a SQL array body."""
+    return ", ".join(_sql_text(w) for w in BRAND_WORDS)
+
+
+def sql_variant_list():
+    return ", ".join(_sql_text(w) for w in VARIANT_WORDS)
+
+
 def ts_table():
     """The generated TypeScript twin (apps/web/lib/match/model-aliases.generated.ts)."""
     rows = ",\n".join("  " + json.dumps([own, display, alias, spaced, slug, name, g, alone], ensure_ascii=False)
@@ -272,7 +281,44 @@ def ts_table():
             "// [own make fold, display make, alias, spaced alias, slug, display name, global, names a model alone]\n"
             "export type ModelAliasRow = readonly [string, string, string, string, string, string, boolean, boolean];\n\n"
             f"export const MODEL_ALIAS_ROWS: readonly ModelAliasRow[] = [\n{rows},\n];\n\n"
-            f"export const MODEL_MAKE_ALIASES: Readonly<Record<string, string>> = {json.dumps(MAKE_ALIASES, ensure_ascii=False)};\n")
+            f"export const MODEL_MAKE_ALIASES: Readonly<Record<string, string>> = {json.dumps(MAKE_ALIASES, ensure_ascii=False)};\n\n"
+            f"export const MODEL_BRAND_WORDS: readonly string[] = {json.dumps(list(BRAND_WORDS), ensure_ascii=False)};\n\n"
+            f"export const MODEL_VARIANT_WORDS: readonly string[] = {json.dumps(list(VARIANT_WORDS), ensure_ascii=False)};\n")
+
+
+MIGRATION = Path(__file__).resolve().parents[2] / "apps/web/lib/crm-postgres/migrations/121_buyer_interest_model_lines.sql"
+TS_PATH = Path(__file__).resolve().parents[2] / "apps/web/lib/match/model-aliases.generated.ts"
+_BLOCKS = {
+    "ALIASES": sql_inserts,
+    "MAKE ALIASES": sql_make_alias_whens,
+    "BRAND WORDS": sql_brand_array,
+    "VARIANT WORDS": sql_variant_list,
+}
+
+
+def render_migration(text):
+    """The migration text with every generated block regenerated from the json."""
+    for name, make in _BLOCKS.items():
+        pattern = re.compile(rf"^([ \t]*)-- BEGIN GENERATED {name}\n(?:.*?\n)?[ \t]*-- END GENERATED {name}$", re.S | re.M)
+        if not pattern.search(text):
+            raise SystemExit(f"migration 121 has no GENERATED {name} block")
+
+        def block(match, make=make, name=name):
+            ind = match.group(1)
+            body = "\n".join(ind + line for line in make().split("\n"))
+            return f"{ind}-- BEGIN GENERATED {name}\n{body}\n{ind}-- END GENERATED {name}"
+        text = pattern.sub(block, text, count=1)
+    return text
+
+
+def drift():
+    """Names of the generated files that differ from what the json generates (empty when in sync)."""
+    out = []
+    if MIGRATION.read_text(encoding="utf-8") != render_migration(MIGRATION.read_text(encoding="utf-8")):
+        out.append(str(MIGRATION))
+    if TS_PATH.read_text(encoding="utf-8") != ts_table():
+        out.append(str(TS_PATH))
+    return out
 
 
 if __name__ == "__main__":
@@ -281,5 +327,12 @@ if __name__ == "__main__":
         print(sql_inserts())
     elif "--ts" in sys.argv:
         print(ts_table(), end="")
+    elif "--write" in sys.argv:
+        MIGRATION.write_text(render_migration(MIGRATION.read_text(encoding="utf-8")), encoding="utf-8")
+        TS_PATH.write_text(ts_table(), encoding="utf-8")
+    elif "--check" in sys.argv:
+        names = drift()
+        if names:
+            raise SystemExit("generated files drift from model_aliases.json: " + ", ".join(names))
     else:
-        raise SystemExit("usage: model_aliases.py --sql | --ts")
+        raise SystemExit("usage: model_aliases.py --sql | --ts | --write | --check")
