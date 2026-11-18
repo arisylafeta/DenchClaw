@@ -373,6 +373,23 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     expect(rows[0]).toMatchObject({ kind: "ask", expires_on: "2026-12-01" });
   });
 
+  it("keeps a NULL expiry NULL when a Said line merges into an existing mastered line", async () => {
+    const spec = { intent: "request", formats: ["Packs"], chemistries: ["LFP"] };
+    await pg.queryPg(`insert into crm_companies (id, name) values ($1, $1)`, [id("buyer17")]);
+    await listing(id("d17"), "demand", id("buyer17"), spec);
+    await pg.queryPg(`update crm_bulk_listings set status = 'closed', closed_reason = 'not_a_fit' where id = $1`, [id("d17")]);
+    const [first] = await lines("demand_id = $1", [id("d17")]);
+    expect(first).toMatchObject({ kind: "interest", ownership: "mastered" });
+    expect(first.expires_on).not.toBeNull();
+    await pg.queryPg(`update buyer_interest set expires_on = null where demand_id = $1`, [id("d17")]);
+
+    await listing(id("d18"), "demand", id("buyer17"), spec);
+    await pg.queryPg(`update crm_bulk_listings set status = 'closed', closed_reason = 'offer_reply' where id = $1`, [id("d18")]);
+    const merged = await lines("company_id = $1 and kind = 'interest'", [id("buyer17")]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].expires_on).toBeNull();
+  });
+
   it("never breaks the parent write when the sync fails, and logs the failure", async () => {
     // A table rename makes the sync fail exactly as a broken migration or bad data would.
     await pg.queryPg(`alter table buyer_interest rename to buyer_interest_paused_${run}`);

@@ -134,7 +134,8 @@ begin
         person_id = coalesce(excluded.person_id, buyer_interest.person_id),
         first_seen = least(buyer_interest.first_seen, excluded.first_seen),
         last_seen = greatest(buyer_interest.last_seen, excluded.last_seen),
-        expires_on = greatest(buyer_interest.expires_on, excluded.expires_on),
+        expires_on = case when buyer_interest.expires_on is null then null
+          else greatest(buyer_interest.expires_on, excluded.expires_on) end,
         source_refs = (select array_agg(distinct ref order by ref) from unnest(buyer_interest.source_refs || excluded.source_refs) ref),
         updated_at = now();
       continue;
