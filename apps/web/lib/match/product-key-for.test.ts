@@ -210,3 +210,32 @@ describe("productKeyFor", () => {
     expect(packFamilyFor({ make: "Kia", model: "EV6", kwh: 77.4 })?.id).toBe("hyundai-kia-egmp-77kwh");
   });
 });
+
+describe("cell format in the key", () => {
+  const cells = { format: "Cells" };
+  it("scopes a cell's broad key by its format, normalised", () => {
+    expect(productKeyFor({ ...cells, cellFormat: "21700 cells" })).toBe("broad:21700-any-cells");
+    expect(productKeyFor({ ...cells, cellFormat: "18650", chemistry: "NMC" })).toBe("broad:18650-nmc-cells");
+    expect(productKeyFor({ ...cells, cellFormat: "Pouch", chemistry: "NMC" })).toBe("broad:pouch-nmc-cells");
+    expect(productKeyFor({ ...cells, cellFormat: "prismatic", chemistry: "LFP" })).toBe("broad:prismatic-lfp-cells");
+    expect(productKeyFor({ ...cells, chemistry: "NMC" })).toBe("broad:nmc-cells");
+  });
+
+  it("keeps maker scoping and the cell:<maker>-<model> key", () => {
+    expect(productKeyFor({ ...cells, cellFormat: "21700", cellMaker: "Samsung SDI" })).toBe("broad:samsung-sdi-21700-any-cells");
+    expect(productKeyFor({ ...cells, cellFormat: "21700", cellMaker: "Samsung SDI", model: "50E" })).toBe("cell:samsung-sdi-50e");
+  });
+
+  it("rolls a cell format up to the format bucket, then the plain bucket; packs ignore it", () => {
+    expect(broaderKeysFor({ ...cells, cellFormat: "21700", chemistry: "NMC", make: "Samsung SDI" })).toEqual([
+      "broad:samsung-sdi-21700-nmc-cells", "broad:samsung-sdi-nmc-cells", "broad:21700-nmc-cells", "broad:nmc-cells",
+    ]);
+    expect(productKeyFor({ format: "Packs", cellFormat: "21700" })).toBe("broad:any-packs");
+  });
+
+  it("fans a request for two cell formats out to one fact set each", () => {
+    const { facts, stated } = expandProductFacts({ format: "cells", cellFormats: ["21700", "18650", "18650 cell"] });
+    expect(stated).toBe(2);
+    expect(facts.map(productKeyFor)).toEqual(["broad:18650-any-cells", "broad:21700-any-cells"]);
+  });
+});

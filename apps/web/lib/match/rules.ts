@@ -8,7 +8,7 @@
 // A missing fact never rules anyone out. A disputed fact (a `conflict` field in the product key) is treated as
 // missing, because a disputed figure must not decide who is ruled out.
 import type { KeyFormat, ProductKey, ProductLine } from "./product-key";
-import { broaderKeysFor, productKeyLevel, type ProductFacts } from "./product-key-for";
+import { broaderKeysFor, CELL_FORMATS, CYLINDRICAL_SIZES, normalCellFormat, productKeyLevel, type CellFormat, type ProductFacts } from "./product-key-for";
 
 export type SupplyFacts = {
   title?: string | null;
@@ -24,6 +24,8 @@ export type SupplyFacts = {
   kwhMax?: number | null;
   moduleSeries?: string | null;
   partNumber?: string | null;
+  /** A cell lot's form factor (18650, 21700, cylindrical, prismatic, pouch); null when the lot does not state one. */
+  cellFormat?: string | null;
   /** The cell model code of a cell lot (NCR2170M), never a vehicle model. */
   cellModel?: string | null;
   /** Pack nominal voltage in volts, when the listing states one. */
@@ -610,6 +612,11 @@ export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts, ignoreBuyBoxList
     if (chem && ruled.includes(chem)) {
       return { code: "chemistry", detail: `rules_out.chemistries includes ${chem}`, text: `No ${chem} cells`, ...ruleEntry(rules.chemistries, (value) => value.toUpperCase() === chem) };
     }
+    const lotCellFormat = isCellLot(supply) ? normalCellFormat(supply.cellFormat ?? null) : null;
+    const ruledCell = lotCellFormat ? ruleValues(rules.cell_formats).find((value) => normalCellFormat(value) && cellFormatFits(value, lotCellFormat)) : undefined;
+    if (ruledCell) {
+      return { code: "cell_format", detail: `rules_out.cell_formats includes ${ruledCell}`, text: `No ${ruledCell} cells`, ...ruleEntry(rules.cell_formats, (value) => value === ruledCell) };
+    }
     const ruledFormats = ruleValues(rules.formats).map((value) => value.toLowerCase());
     if (fmt && ruledFormats.includes(fmt)) {
       return { code: "format", detail: `rules_out.formats includes ${fmt}`, text: `No ${fmt}`, ...ruleEntry(rules.formats, (value) => value.toLowerCase() === fmt) };
@@ -791,9 +798,34 @@ function supplyProductFacts(supply: SupplyFacts): ProductFacts {
   return {
     partNumbers: supply.partNumber ? [supply.partNumber] : null,
     make: supply.make ?? null, model: supply.model ?? null,
-    format: supply.format ?? null, chemistry: supply.chemistry ?? null,
+    format: supply.format ?? null, chemistry: supply.chemistry ?? null, cellFormat: supply.cellFormat ?? null,
     kwh: supply.kwh ?? null, kwhMin: supply.kwhMin ?? null, kwhMax: supply.kwhMax ?? null,
   };
+}
+
+/** A stated cell format covers another when they are the same, or one is `cylindrical` and the other a round size. */
+export function cellFormatFits(wanted: string | null | undefined, lot: string | null | undefined): boolean {
+  const a = normalCellFormat(wanted);
+  const b = normalCellFormat(lot);
+  if (!a || !b || a === b) { return true; }
+  return (a === "cylindrical" && CYLINDRICAL_SIZES.includes(b)) || (b === "cylindrical" && CYLINDRICAL_SIZES.includes(a));
+}
+
+const isCellLot = (supply: SupplyFacts) => String(supply.format ?? "").toLowerCase().startsWith("cell");
+
+/** The cell formats a lot's keys are built for: its own and what it counts as; a lot that does not state one counts as any. */
+function lotCellFormats(supply: SupplyFacts): (CellFormat | null)[] {
+  if (!isCellLot(supply)) { return [null]; }
+  const own = normalCellFormat(supply.cellFormat ?? null);
+  if (!own) { return [null, ...CELL_FORMATS]; }
+  if (own === "cylindrical") { return [null, "cylindrical", ...CYLINDRICAL_SIZES]; }
+  return [null, own, ...(CYLINDRICAL_SIZES.includes(own) ? ["cylindrical" as const] : [])];
+}
+
+/** The cell format a broad key carries (`broad:samsung-sdi-21700-nmc-cells`), or null. */
+function keyCellFormat(key: string): CellFormat | null {
+  const match = /^broad:(?:.+-)?(18650|21700|26650|32700|4680|cylindrical|prismatic|pouch)-[a-z]+-cells$/.exec(key);
+  return match ? (match[1] as CellFormat) : null;
 }
 
 type LotKeys = { keys: Set<string>; plainBroad: Set<string> };
@@ -809,10 +841,12 @@ function lotKeys(supply: SupplyFacts): LotKeys {
     const facts = supplyProductFacts(supply);
     const keys = new Set<string>();
     const plainBroad = new Set<string>();
-    for (const variant of [facts, { ...facts, chemistry: null }, { ...facts, format: null }, { ...facts, chemistry: null, format: null }]) {
-      const chain = broaderKeysFor(variant);
-      for (const key of chain) { keys.add(key); }
-      plainBroad.add(chain[chain.length - 1]);
+    for (const cellFormat of lotCellFormats(supply)) {
+      for (const variant of [facts, { ...facts, chemistry: null }, { ...facts, format: null }, { ...facts, chemistry: null, format: null }]) {
+        const chain = broaderKeysFor({ ...variant, cellFormat });
+        for (const key of chain) { keys.add(key); }
+        plainBroad.add(chain[chain.length - 1]);
+      }
     }
     found = { keys, plainBroad };
     chainCache.set(supply, found);
@@ -923,6 +957,8 @@ function lineProduct(line: BuyerLine): string {
   const vehicle = [line.make, line.model].filter(Boolean).join(" ");
   if (vehicle) { parts.push(vehicle); }
   if (line.format) { parts.push(line.format.toLowerCase().replace(/s?$/, "s")); }
+  const cellFormat = keyCellFormat(line.productKey);
+  if (cellFormat && String(line.format ?? "").toLowerCase().startsWith("cell")) { parts.push(cellFormat); }
   if (line.chemistry) { parts.push(line.chemistry.toUpperCase()); }
   const lo = line.kwhMin ?? null;
   const hi = line.kwhMax ?? null;
@@ -1032,6 +1068,7 @@ export function supplyFactsFromKey(key: ProductKey, listing: { title?: string | 
     kwhMax: line.unknown.kwh ? null : line.kwhMax,
     moduleSeries: line.moduleSeries,
     partNumber: line.partNumber,
+    cellFormat: line.format === "Cells" ? line.cellFormat ?? null : null,
     cellModel: line.format === "Cells" ? line.model : null,
     voltageV: key.voltageV ?? null,
     units: line.units ?? (index === 0 ? key.units : null),
@@ -1088,6 +1125,24 @@ function priceBand(key: ProductKey, supply: SupplyFacts, buyer: BuyerFacts): str
     return key.sellerPrice ? "They state a price; the seller's price cannot be compared" : "No firm seller price, so no margin";
   }
   return null;
+}
+
+/** Cell formats the buyer's live lines and dossier products ask for, which a lot that does not state one cannot confirm. */
+function wantedCellFormats(supply: SupplyFacts, buyer: BuyerFacts, asOf: string): CellFormat[] {
+  if (!isCellLot(supply) || normalCellFormat(supply.cellFormat ?? null)) { return []; }
+  const wanted = new Set<CellFormat>();
+  const { keys } = lotKeys(supply);
+  for (const line of buyer.lines ?? []) {
+    if (line.kind === "declined" || line.kind === "inferred" || !lineLive(line, asOf) || !keys.has(line.productKey)) { continue; }
+    const cellFormat = keyCellFormat(line.productKey);
+    if (cellFormat) { wanted.add(cellFormat); }
+  }
+  for (const product of dossierProducts(buyer)) {
+    if (!String(product.format ?? "").toLowerCase().startsWith("cell")) { continue; }
+    const cellFormat = normalCellFormat(typeof product.cell_format === "string" ? product.cell_format : null);
+    if (cellFormat) { wanted.add(cellFormat); }
+  }
+  return [...wanted].toSorted((a, b) => a.localeCompare(b));
 }
 
 function checksFor(key: ProductKey, line: ProductLine, supply: SupplyFacts, buyer: BuyerFacts): string[] {
@@ -1190,6 +1245,8 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
     const lineLeads = !!evidence.best && (evidence.best.tier >= 2 || evidence.best.tier > todayTier);
     const fits = lineLeads ? lineFits(evidence, asOf, evidence.tier >= todayTier ? null : today) ?? today : today;
     const checks = line && options.key ? checksFor(options.key, line, supply, buyer) : checksFor(options.key ?? emptyKey(), emptyLine(), supply, buyer);
+    const unstated = wantedCellFormats(supply, buyer, asOf);
+    if (unstated.length) { checks.push(`Cell format not stated; they need ${unstated.join(" or ")}`); }
     const sizeNote = sizeFit(supply, buyer)?.note;
     if (sizeNote) { checks.push(sizeNote); }
     const override = buyBoxOverride(supplies[best.line], buyer, asOf);

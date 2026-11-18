@@ -49,6 +49,9 @@ export type ProductFacts = {
   makes?: (string | null | undefined)[] | null;
   chemistries?: (string | null | undefined)[] | null;
   formats?: (string | null | undefined)[] | null;
+  /** A cell's form factor (18650, 21700, pouch, ...); only a cell key uses it. */
+  cellFormat?: string | null;
+  cellFormats?: (string | null | undefined)[] | null;
 };
 
 export type ProductKeyLevel = "part" | "pack" | "model" | "cell" | "broad";
@@ -149,6 +152,29 @@ function formatOf(facts: ProductFacts): string | null {
   return null;
 }
 
+/** Cell form factors a key can carry. Mirrors buyer_interest_cell_format() in SQL. */
+export const CELL_FORMATS = ["18650", "21700", "26650", "32700", "4680", "cylindrical", "prismatic", "pouch"] as const;
+export type CellFormat = (typeof CELL_FORMATS)[number];
+/** The round formats a "cylindrical" cell can be. */
+export const CYLINDRICAL_SIZES: readonly CellFormat[] = ["18650", "21700", "26650", "32700", "4680"];
+
+export function normalCellFormat(value: string | null | undefined): CellFormat | null {
+  const text = (value ?? "").toLowerCase();
+  for (const size of ["18650", "21700", "26650", "32700", "4680"] as const) {
+    if (new RegExp(`(?:^|[^0-9])${size}(?:[^0-9]|$)`).test(text)) {return size;}
+  }
+  if (/(?:^|[^0-9])2170(?:[^0-9]|$)/.test(text)) {return "21700";}
+  if (/prismati/.test(text)) {return "prismatic";}
+  if (/pouch/.test(text)) {return "pouch";}
+  if (/cylind|round/.test(text)) {return "cylindrical";}
+  return null;
+}
+
+/** The cell format a key carries: only for a cell fact. */
+function cellFormatOf(facts: ProductFacts): CellFormat | null {
+  return formatOf(facts) === "cell" ? normalCellFormat(facts.cellFormat ?? null) : null;
+}
+
 function chemistryOf(facts: ProductFacts): string | null {
   return chemistryFamilies(facts.chemistry ?? null)[0] ?? null;
 }
@@ -221,10 +247,19 @@ function cellKey(facts: ProductFacts): string | null {
   return `cell:${maker}-${model}`;
 }
 
-function broadKey(facts: ProductFacts): string {
+function broadKey(facts: ProductFacts, withCellFormat = false): string {
   const chemistry = slug(chemistryOf(facts)) ?? "any";
   const format = formatOf(facts);
-  return `broad:${chemistry}-${format ? FORMAT_PLURAL[format] : "batteries"}`;
+  const cellFormat = withCellFormat ? cellFormatOf(facts) : null;
+  return `broad:${cellFormat ? `${cellFormat}-` : ""}${chemistry}-${format ? FORMAT_PLURAL[format] : "batteries"}`;
+}
+
+/** A cell format with a stated maker (the make, else the cell maker): broad:samsung-sdi-21700-nmc-cells. */
+function makerCellFormatBroadKey(facts: ProductFacts): string | null {
+  const cellFormat = cellFormatOf(facts);
+  const maker = makeKey(facts.make ?? null) ?? slug(facts.cellMaker ?? null);
+  if (!cellFormat || !maker) {return null;}
+  return `broad:${maker}-${cellFormat}-${slug(chemistryOf(facts)) ?? "any"}-cells`;
 }
 
 /** The broad bucket scoped to a stated make; null when no make is stated. */
@@ -259,26 +294,41 @@ export function expandProductFacts(facts: ProductFacts, limit = PRODUCT_FACT_COM
   const makes = statedValues(splitMakes(statedValues(facts.makes, facts.make ?? null)), null);
   const chemistries = statedValues(facts.chemistries, facts.chemistry ?? null);
   const formats = statedValues(facts.formats, facts.format ?? null);
+  const cellFormats = statedCellFormats(facts);
   const expanded: ProductFacts[] = [];
   for (const make of makes) {
     for (const chemistry of chemistries) {
       for (const format of formats) {
-        if (expanded.length >= Math.max(limit, 1)) {
-          return { facts: expanded, stated: makes.length * chemistries.length * formats.length };
+        for (const cellFormat of cellFormats) {
+          if (expanded.length >= Math.max(limit, 1)) {
+            return { facts: expanded, stated: makes.length * chemistries.length * formats.length * cellFormats.length };
+          }
+          expanded.push({
+            ...facts,
+            make,
+            chemistry,
+            format,
+            cellFormat,
+            makes: make ? [make] : [],
+            chemistries: chemistry ? [chemistry] : [],
+            formats: format ? [format] : [],
+            cellFormats: cellFormat ? [cellFormat] : [],
+          });
         }
-        expanded.push({
-          ...facts,
-          make,
-          chemistry,
-          format,
-          makes: make ? [make] : [],
-          chemistries: chemistry ? [chemistry] : [],
-          formats: format ? [format] : [],
-        });
       }
     }
   }
-  return { facts: expanded, stated: makes.length * chemistries.length * formats.length };
+  return { facts: expanded, stated: makes.length * chemistries.length * formats.length * cellFormats.length };
+}
+
+/** Distinct normalised cell formats a source states (null when none), in the order SQL orders them. */
+function statedCellFormats(facts: ProductFacts): (CellFormat | null)[] {
+  const found = new Set<CellFormat>();
+  for (const value of [...(facts.cellFormats ?? []), ...(facts.cellFormats?.length ? [] : [facts.cellFormat])]) {
+    const cellFormat = normalCellFormat(value);
+    if (cellFormat) {found.add(cellFormat);}
+  }
+  return found.size ? [...found].toSorted((a, b) => a.localeCompare(b)) : [null];
 }
 
 /**
@@ -308,7 +358,9 @@ export function productKeysFor(facts: ProductFacts): ProductKey[] {
   add(cellKey(facts), "cell");
   // The make-scoped bucket is the roll-up of every specific key, so a Tesla model pack still answers a buyer
   // who asked for "Tesla NMC packs", and the plain bucket stays the last, broadest key.
+  add(makerCellFormatBroadKey(facts), "broad");
   add(makeScopedBroadKey(facts), "broad");
+  add(broadKey(facts, true), "broad");
   add(broadKey(facts), "broad");
   return keys;
 }

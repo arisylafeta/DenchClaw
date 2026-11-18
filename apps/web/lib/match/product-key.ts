@@ -7,6 +7,7 @@
 // 5,220 mAh x 3.6 V. A field whose status is `conflict` shows both values and counts as unknown for rule-outs,
 // because a disputed figure must never rule a buyer out or order the list.
 import { CELL_MAKERS, EUR_PER, MAKE_WORDS, PLATFORMS } from "../demand-match";
+import { normalCellFormat, type CellFormat } from "./product-key-for";
 
 export type KeyFormat = "Cells" | "Modules" | "Packs" | "Systems";
 export type FieldStatus = "confirmed" | "unverified" | "conflict" | "missing" | string;
@@ -23,6 +24,8 @@ export type FieldFact = {
 
 export type ProductLine = {
   format: KeyFormat | null;
+  /** A cell line's form factor (18650, 21700, cylindrical, prismatic, pouch), read from the cell_format field, the format, model or title. Null when not stated or not a cell. */
+  cellFormat?: CellFormat | null;
   chemistry: string | null;
   /** Energy per unit in kWh. Null when a range is stated or the figure is unknown. */
   kwh: number | null;
@@ -541,6 +544,10 @@ export function buildProductKey(input: { fields: FieldFact[]; title?: string | n
   const formatField = formatText ? formatFrom(formatText) : null;
   const formatKnown = !!formatText && trusted(fieldStatus(fields, "format"));
   const format = formatField ?? formatFrom(`${capacityText} ${modelText} ${title}`);
+  const cellFormatOf = (lineFormat: KeyFormat | null): CellFormat | null => lineFormat === "Cells"
+    ? normalCellFormat(fieldValue(fields, "cell_format")) ?? normalCellFormat(formatText) ?? normalCellFormat(modelText)
+      ?? normalCellFormat(capacityText) ?? normalCellFormat(title)
+    : null;
 
   const parsed = figuresIn(capacityText);
   if (parsed.note) {
@@ -552,6 +559,7 @@ export function buildProductKey(input: { fields: FieldFact[]; title?: string | n
   const lines: ProductLine[] = figures.length
     ? figures.map((figure) => ({
       format: figure.format ?? format,
+      cellFormat: cellFormatOf(figure.format ?? format),
       chemistry: chemKnown ? chemistries[0] : null,
       kwh: figure.kwhMin != null ? null : figure.kwh,
       kwhMin: figure.kwhMin,
@@ -569,7 +577,7 @@ export function buildProductKey(input: { fields: FieldFact[]; title?: string | n
       basis: figure.basis,
     }))
     : [{
-      format, chemistry: chemKnown ? chemistries[0] : null, kwh: null, kwhMin: null, kwhMax: null, units: null,
+      format, cellFormat: cellFormatOf(format), chemistry: chemKnown ? chemistries[0] : null, kwh: null, kwhMin: null, kwhMax: null, units: null,
       partNumber, make: brand.make, makeGroup: brand.group, model: modelText || title || null, platform, moduleSeries: series,
       unknown: { kwh: true, format: !formatKnown, chemistry: !chemKnown }, basis: null,
     }];
