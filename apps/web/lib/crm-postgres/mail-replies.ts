@@ -6,6 +6,7 @@ export function campaignReplyAtSql(alias: string): string {
     (select min(reply.sent_at) from mail_message reply
       where reply.direction = 'inbound' and ${alias}.accepted_at is not null and reply.sent_at > ${alias}.accepted_at
         and lower(coalesce(reply.from_email, '')) not like '%@rebattery.io'
+        and not crm_mail_is_auto_reply(reply.subject, reply.body_text)
         and (lower(reply.from_email) = ${alias}.recipient_email or reply.from_person_id = ${alias}.person_id
           or exists (select 1 from crm_people fp where fp.id = reply.from_person_id
             and fp.company_id = coalesce(${alias}.company_id,

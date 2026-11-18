@@ -28,6 +28,7 @@ const COLUMNS = `
   (select to_char(min(m.sent_at) at time zone 'Europe/London', 'YYYY-MM-DD') from mail_message m
     where m.direction = 'inbound' and campaign.at is not null and m.sent_at > campaign.at
       and lower(coalesce(m.from_email, '')) not like '%@rebattery.io'
+      and not crm_mail_is_auto_reply(m.subject, m.body_text)
       and exists (select 1 from crm_people fp where fp.company_id = d.company_id
                    and (fp.id = m.from_person_id or lower(fp.email) = lower(m.from_email)))) as campaign_replied_on,
   d.updated_at`;
@@ -138,6 +139,7 @@ export async function getDismantlerDetail(id: string, viewerId: string): Promise
               (select min(m.sent_at) from mail_message m
                 where m.direction = 'inbound' and s.accepted_at is not null and m.sent_at > s.accepted_at
                   and lower(coalesce(m.from_email, '')) not like '%@rebattery.io'
+                  and not crm_mail_is_auto_reply(m.subject, m.body_text)
                   and exists (select 1 from crm_people fp where fp.company_id = $1
                                and (fp.id = m.from_person_id or lower(fp.email) = lower(m.from_email)))) as replied_at
          from mail_message s
