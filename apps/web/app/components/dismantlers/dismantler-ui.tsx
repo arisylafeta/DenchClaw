@@ -6,6 +6,7 @@ export const dismantlerUrl = (id: string, path = "") => `/api/dismantlers/${enco
 
 const STAGE_TAG: Record<Stage, React.CSSProperties> = {
   Found: { background: "var(--bt-divider)", color: "var(--bt-text-2)", borderColor: "var(--bt-grey-border)" },
+  Contacted: { background: "var(--bt-amber-bg)", color: "var(--bt-amber)", borderColor: "var(--bt-amber-border)" },
   Talking: { background: "var(--bt-blue-bg)", color: "var(--bt-blue)", borderColor: "var(--bt-blue-border)" },
   "Signed up": { background: "var(--bt-purple-bg)", color: "var(--bt-purple)", borderColor: "var(--bt-purple-border)" },
   Live: { background: "var(--bt-green)", color: "var(--bt-surface)", borderColor: "var(--bt-green)" },
@@ -15,6 +16,7 @@ const STAGE_TAG: Record<Stage, React.CSSProperties> = {
 /** Stage colour for dots and progress bars. */
 export const STAGE_DOT: Record<Stage, string> = {
   Found: "#8a8a8a",
+  Contacted: "#f59e0b",
   Talking: "#3b82f6",
   "Signed up": "#8b5cf6",
   Live: "#15803d",

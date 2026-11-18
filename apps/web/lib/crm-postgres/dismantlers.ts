@@ -295,7 +295,7 @@ export async function updateDismantler(id: string, patch: DismantlerPatch, userI
 }
 
 /**
- * Start outreach on a batch: each moves to Talking with a follow-up step.
+ * Start outreach on a batch: each moves to Contacted with a follow-up step.
  * Dismantlers already past Found keep their stage and only get the follow-up.
  */
 export async function startOutreach(
@@ -309,7 +309,7 @@ export async function startOutreach(
       await client.query("select 1 from crm_dismantlers where id = $1 for update", [id]);
       const before = await readOne(client, id);
       if (!before) throw new DismantlerError("A dismantler in this batch no longer exists. Refresh and try again.");
-      const stage: Stage = before.stage === "Found" || before.stage === "Parked" ? "Talking" : before.stage;
+      const stage: Stage = before.stage === "Found" || before.stage === "Parked" ? "Contacted" : before.stage;
       await applyPatch(client, before, { stage, ...followUp }, userId, "outreach");
       saved.push((await readOne(client, id))!);
     }

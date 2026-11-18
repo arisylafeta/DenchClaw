@@ -163,7 +163,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
   );
 }
 
-/** Moves a batch to Talking, with a follow-up date. */
+/** Moves a batch to Contacted, with a follow-up date. */
 export function OutreachDialog({ batch, today, onClose, onDone }: {
   batch: Dismantler[];
   today: string;
@@ -179,12 +179,12 @@ export function OutreachDialog({ batch, today, onClose, onDone }: {
   });
   return (
     <Modal title={`Start outreach to ${batch.length}`} onClose={onClose} onSubmit={form.submit}
-      footer={<button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>Move {batch.length} to Talking</button>}>
+      footer={<button type="submit" disabled={form.saving} className={darkButtonClass} style={darkButtonStyle}>Move {batch.length} to Contacted</button>}>
       <p className="text-sm">
         {batch.slice(0, 5).map((d) => d.name).join(", ")}{batch.length > 5 ? ` and ${batch.length - 5} more` : ""}
       </p>
       <p className="text-[13px]" style={{ color: "var(--bt-muted)" }}>
-        Send the first message yourself, then move them here. Each gets this follow-up, so no reply brings them back on the date.
+        Send the first message yourself, then move them here. They move to Talking when they reply. Each gets this follow-up, so no reply brings them back on the date.
       </p>
       <FormField label="Follow-up">{form.input("next_step", { required: true })}</FormField>
       <FormField label="Follow up on">{form.input("next_step_due", { type: "date", required: true })}</FormField>

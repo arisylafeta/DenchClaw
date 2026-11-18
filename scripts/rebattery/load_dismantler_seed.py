@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 import psycopg2
 import psycopg2.extras
 
-STAGES = {"Found", "Talking", "Signed up", "Live", "Parked"}
+STAGES = {"Found", "Contacted", "Talking", "Signed up", "Live", "Parked"}
 FIELDS = ["country", "ebay_username", "ebay_listings", "stage", "goal", "next_step",
           "next_step_due", "source", "notes"]
 

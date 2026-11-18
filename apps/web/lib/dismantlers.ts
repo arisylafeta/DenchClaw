@@ -1,17 +1,18 @@
 // Dismantlers: shared types, validation, list grouping and labels. Safe for client and server.
 import { dayMonth, daysBetween } from "./bulk-trades";
 
-export const STAGES = ["Found", "Talking", "Signed up", "Live", "Parked"] as const;
+export const STAGES = ["Found", "Contacted", "Talking", "Signed up", "Live", "Parked"] as const;
 /** The journey, in order. Parked sits beside it. */
-export const JOURNEY = ["Found", "Talking", "Signed up", "Live"] as const;
+export const JOURNEY = ["Found", "Contacted", "Talking", "Signed up", "Live"] as const;
 /** Stages worked from the list. Found is the backlog; Parked is out of play. */
-export const IN_PLAY = ["Talking", "Signed up", "Live"] as const;
+export const IN_PLAY = ["Contacted", "Talking", "Signed up", "Live"] as const;
 
 export type Stage = (typeof STAGES)[number];
 export type JourneyStage = (typeof JOURNEY)[number];
 
 export const STAGE_HINT: Record<Stage, string> = {
   Found: "not contacted yet",
+  Contacted: "emailed, no reply yet",
   Talking: "in touch with us",
   "Signed up": "has a ReBattery account",
   Live: "batteries listed on ReBattery",
@@ -20,7 +21,8 @@ export const STAGE_HINT: Record<Stage, string> = {
 
 /** What has to be true to move on from each stage. */
 export const TO_REACH_NEXT: Record<JourneyStage, string> = {
-  Found: "To reach Talking: send them a first message.",
+  Found: "To reach Contacted: send them a first message.",
+  Contacted: "To reach Talking: they reply. It moves by itself when an email comes back from the company.",
   Talking: "To reach Signed up: they make a ReBattery account. Once it is linked, they move by themselves.",
   "Signed up": "To reach Live: they list their first battery on ReBattery. They move by themselves when they do.",
   Live: "Live. Keep their stock coming, and check in if listings stop.",
@@ -89,7 +91,7 @@ const TEXT_FIELDS = ["park_reason", "next_step", "country", "ebay_username", "pl
 const DATE_FIELDS = ["revisit_on", "next_step_due"] as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const RANK: Record<Stage, number> = { Parked: -1, Found: 0, Talking: 1, "Signed up": 2, Live: 3 };
+const RANK: Record<Stage, number> = { Parked: -1, Found: 0, Contacted: 1, Talking: 2, "Signed up": 3, Live: 4 };
 
 /** What ReBattery proves: an account means Signed up, any listing ever means Live. */
 export function platformStage(platform: PlatformFacts | null): Stage | null {

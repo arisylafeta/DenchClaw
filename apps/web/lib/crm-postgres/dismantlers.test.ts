@@ -52,7 +52,7 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
     await expect(db.createDismantler({ name: `Twin Salvage ${s}`, patch: {} }, userId)).rejects.toThrow(/Several CRM companies/);
   });
 
-  it("shows a dismantler outreach email: Found to Talking with a follow-up, then the reply", async () => {
+  it("shows a dismantler outreach email: Found to Contacted with a follow-up, then the reply moves it to Talking", async () => {
     await pg.queryPg("insert into crm_companies (id, name, relationship_stage) values ($1, $2, 'New')", [`oc-${s}`, `Outreach Yard ${s}`]);
     await pg.queryPg("insert into crm_people (id, company_id, first_name, email) values ($1, $2, 'Pat', $3)",
       [`op-${s}`, `oc-${s}`, `pat-${s}@yard.example.test`]);
@@ -65,14 +65,15 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
     await pg.queryPg("update mail_message set state = 'accepted', accepted_at = now() - interval '1 hour' where id = $1", [`oc-${s}`]);
 
     const sent = await db.getDismantler(d.id);
-    expect(sent).toMatchObject({ stage: "Talking", next_step: "Follow up if no reply", next_step_person_id: `op-${s}`,
+    expect(sent).toMatchObject({ stage: "Contacted", next_step: "Follow up if no reply", next_step_person_id: `op-${s}`,
       campaign_emailed_on: today, campaign_replied_on: null });
-    expect((await events(d.id)).at(-1)).toMatchObject({ kind: "campaign_email", changes: { subject: "Your Kona packs", stage: ["Found", "Talking"] } });
+    expect((await events(d.id)).at(-1)).toMatchObject({ kind: "campaign_email", changes: { subject: "Your Kona packs", stage: ["Found", "Contacted"] } });
 
     await pg.queryPg(
       `insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, from_person_id, from_email, mailbox_owner_id)
        values ('inbound', 'gmail', 'received', true, $1, 'Re: Your Kona packs', now(), null, $2, $3::uuid)`, [`om-${s}`, `PAT-${s}@yard.example.test`, otherUserId]);
-    expect(await db.getDismantler(d.id)).toMatchObject({ campaign_replied_on: today });
+    expect(await db.getDismantler(d.id)).toMatchObject({ stage: "Talking", stage_since: today, campaign_replied_on: today });
+    expect((await events(d.id)).at(-1)).toMatchObject({ kind: "updated", changes: { stage: ["Contacted", "Talking"] } });
     const detail = await db.getDismantlerDetail(d.id, userId);
     expect(detail?.outreach).toEqual([expect.objectContaining({
       campaign: "Dismantler outreach test", subject: "Your Kona packs", text: "Hi Pat, could you price the 4 Kona packs?",
@@ -80,6 +81,30 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
     // Load after beforeAll selects the disposable DATABASE_URL, never at module import.
     const { mailCampaignCounts } = await import("./mail");
     expect((await mailCampaignCounts(`oc-${s}`))[0]).toMatchObject({ sent: 1, replied: 1 });
+  });
+
+  it("keeps a Contacted dismantler Contacted for our own mail, a stranger, or a reply with no campaign email before it", async () => {
+    await pg.queryPg("insert into crm_companies (id, name) values ($1, $2), ($3, $4)", [`ck-${s}`, `Quiet Yard ${s}`, `ck2-${s}`, `Never Emailed ${s}`]);
+    await pg.queryPg("insert into crm_people (id, company_id, first_name, email) values ($1, $2, 'Sam', $3), ($4, $5, 'Kim', $6)",
+      [`ckp-${s}`, `ck-${s}`, `sam-${s}@quiet.example.test`, `ckp2-${s}`, `ck2-${s}`, `kim-${s}@never.example.test`]);
+    const quiet = await db.createDismantler({ company_id: `ck-${s}`, patch: { stage: "Contacted" } }, userId);
+    const never = await db.createDismantler({ company_id: `ck2-${s}`, patch: { stage: "Contacted" } }, userId);
+    await pg.queryPg("insert into campaigns (id, campaign_name, type, source_system) values ($1, 'Quiet test', 'dismantler_outreach', 'dench-campaign')", [`ck-${s}`]);
+    await pg.queryPg(
+      `insert into mail_message (direction, transport, state, purpose, id, campaign_id, person_id, company_id, recipient_email, subject, body_text, accepted_at)
+       values ('outbound', 'gmail', 'accepted', 'marketing', $1, $1, $2, $3, $4, 'Packs', 'Hi Sam', now() - interval '2 hours')`,
+      [`ck-${s}`, `ckp-${s}`, `ck-${s}`, `sam-${s}@quiet.example.test`]);
+    const inbound = (id: string, from: string) => pg.queryPg(
+      `insert into mail_message (direction, transport, state, crm_visible, id, subject, sent_at, from_email, mailbox_owner_id)
+       values ('inbound', 'gmail', 'received', true, $1, 'Re: Packs', now(), $2, $3::uuid)`, [id, from, otherUserId]);
+    await inbound(`ckm1-${s}`, `someone-${s}@elsewhere.example.test`);
+    await inbound(`ckm2-${s}`, `alex@rebattery.io`);
+    await inbound(`ckm3-${s}`, `kim-${s}@never.example.test`);
+    expect(await db.getDismantler(quiet.id)).toMatchObject({ stage: "Contacted" });
+    expect(await db.getDismantler(never.id)).toMatchObject({ stage: "Contacted" });
+    await inbound(`ckm4-${s}`, `sam-${s}@quiet.example.test`);
+    expect(await db.getDismantler(quiet.id)).toMatchObject({ stage: "Talking" });
+    expect(await db.getDismantler(never.id)).toMatchObject({ stage: "Contacted" });
   });
 
   it("logs stage moves, parks with where it came from, and brings it back", async () => {
@@ -113,15 +138,15 @@ describe.skipIf(!TEST_URL)("dismantlers data", () => {
     expect(saved).toMatchObject({ next_step: "Intro call", next_step_person_name: "Pat Example" });
   });
 
-  it("starts outreach on a batch: Talking, with a follow-up", async () => {
+  it("starts outreach on a batch: Contacted, with a follow-up", async () => {
     const a = await db.createDismantler({ name: `Batch A ${s}`, patch: {} }, userId);
     const b = await db.createDismantler({ name: `Batch B ${s}`, patch: { stage: "Signed up" } }, userId);
     const saved = await db.startOutreach([a.id, b.id], { next_step: "Follow up if no reply", next_step_due: "2026-10-06" }, userId);
     expect(saved.map((d) => [d.stage, d.next_step_due])).toEqual([
-      ["Talking", "2026-10-06"],
+      ["Contacted", "2026-10-06"],
       ["Signed up", "2026-10-06"],
     ]);
-    expect((await events(a.id)).at(-1)).toMatchObject({ kind: "outreach", changes: { stage: ["Found", "Talking"] } });
+    expect((await events(a.id)).at(-1)).toMatchObject({ kind: "outreach", changes: { stage: ["Found", "Contacted"] } });
     await expect(db.startOutreach([a.id, "dm_missing"], { next_step: "x", next_step_due: "2026-10-06" }, userId)).rejects.toThrow(/no longer exists/);
   });
 

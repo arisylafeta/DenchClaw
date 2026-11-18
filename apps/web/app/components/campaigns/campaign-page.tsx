@@ -100,7 +100,7 @@ export function CampaignPage({ detail, onBack, onNavigatePerson, query = "" }: P
   );
 }
 
-/** Where the emailed dismantlers are now. Stages move on the Dismantlers page; a send moves Found to Talking. */
+/** Where the emailed dismantlers are now. Stages move on the Dismantlers page; a send moves Found to Contacted, a reply moves it to Talking. */
 function DismantlerFunnel({ funnel }: { funnel: NonNullable<MailCampaignDetail["dismantler_funnel"]> }) {
   const steps: Array<[string, number]> = [["Emailed", funnel.emailed], ["Replied", funnel.replied],
     ...JOURNEY.map((stage): [string, number] => [stage, funnel.stages[stage] ?? 0]), ["Parked", funnel.stages.Parked ?? 0]];

@@ -132,8 +132,8 @@ export function DetailSkeleton() {
     <main className="flex flex-1 flex-col gap-6 overflow-auto px-8 pb-8 pt-6" aria-busy="true">
       <LoadingText>Loading dismantler…</LoadingText>
       <div className="flex flex-col gap-3.5 rounded-xl border px-5 py-[18px]" style={surface}>
-        <div className="grid grid-cols-4 gap-2">
-          {[0, 1, 2, 3].map((index) => <div key={index} className="flex flex-col gap-1.5"><Bone w="100%" h={4} pill /><Bone w="60%" h={13} /></div>)}
+        <div className="grid grid-cols-5 gap-2">
+          {[0, 1, 2, 3, 4].map((index) => <div key={index} className="flex flex-col gap-1.5"><Bone w="100%" h={4} pill /><Bone w="60%" h={13} /></div>)}
         </div>
         <div className="flex items-center gap-3 border-t pt-3" style={{ borderColor: "var(--bt-divider)" }}><Bone w="55%" h={14} /><span className="flex-1" /><Bone w={120} h={32} /></div>
       </div>

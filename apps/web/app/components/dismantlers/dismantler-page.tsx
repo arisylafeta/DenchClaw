@@ -156,7 +156,7 @@ function Journey({ d, today, onMove }: { d: Dismantler; today: string; onMove: (
 
   return (
     <Card label="Journey" className="flex flex-col gap-3.5 px-5 py-[18px]">
-      <ol className="grid grid-cols-4 gap-2">
+      <ol className="grid grid-cols-5 gap-2">
         {JOURNEY.map((stage, position) => {
           const state = position < index ? "done" : position === index ? "now" : "todo";
           return (

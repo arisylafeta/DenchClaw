@@ -29,7 +29,8 @@ describe("dismantler rules", () => {
   it("validates patches: parking needs a reason, dates are checked, blanks clear, old fields are gone", () => {
     expect(parseDismantlerPatch({ stage: "Parked" })).toEqual({ error: "Say why it is parked." });
     expect(parseDismantlerPatch({ stage: "Parked", park_reason: " Not now " })).toEqual({ patch: { stage: "Parked", park_reason: "Not now" } });
-    expect(parseDismantlerPatch({ stage: "Contacted" })).toEqual({ error: "Unknown stage." });
+    expect(parseDismantlerPatch({ stage: "Waiting" })).toEqual({ error: "Unknown stage." });
+    expect(parseDismantlerPatch({ stage: "Contacted" })).toEqual({ patch: { stage: "Contacted" } });
     expect(parseDismantlerPatch({ next_step_due: "2026-02-30" })).toEqual({ error: "next_step_due must be a YYYY-MM-DD date." });
     expect(parseDismantlerPatch({ country: "", platform_account_id: "none" })).toEqual({ patch: { country: null, platform_account_id: "none" } });
     expect(parseDismantlerPatch({ route: "eBay" })).toEqual({ error: "Unknown field: route" });
@@ -79,7 +80,7 @@ describe("dismantler rules", () => {
     expect(dueLabel(D({ name: "b", next_step: "x", next_step_due: "2026-10-01" }), today)).toBe("Tomorrow");
     expect(dueLabel(D({ name: "c", next_step: "x" }), today)).toBe("No date");
     expect(dueLabel(D({ name: "d" }), today)).toBe("None");
-    expect([nextStage("Found"), nextStage("Talking"), nextStage("Live"), nextStage("Parked")]).toEqual(["Talking", "Signed up", null, null]);
+    expect([nextStage("Found"), nextStage("Contacted"), nextStage("Talking"), nextStage("Live"), nextStage("Parked")]).toEqual(["Contacted", "Talking", "Signed up", null, null]);
   });
 
   it("counts follow-ups in working days", () => {

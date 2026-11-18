@@ -7,7 +7,7 @@ import { badRequest, dismantlerWrite, guardDismantlers, readJson } from "@/lib/d
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** POST { ids, next_step?, next_step_due? }: moves a batch to Talking with a follow-up. */
+/** POST { ids, next_step?, next_step_due? }: moves a batch to Contacted with a follow-up. */
 export async function POST(req: Request) {
   const guard = await guardDismantlers();
   if ("response" in guard) return guard.response;

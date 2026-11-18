@@ -98,7 +98,7 @@ export function DismantlersView() {
   }
 
   const counts = Object.fromEntries(STAGES.map((stage) => [stage, dismantlers.filter((d) => d.stage === stage).length])) as Record<Stage, number>;
-  const inPlay = counts.Talking + counts["Signed up"] + counts.Live;
+  const inPlay = counts.Contacted + counts.Talking + counts["Signed up"] + counts.Live;
   const totals = summarise(dismantlers, today);
   const goalCells: Array<[string, string, string]> = [
     ["Q4 goal", `${totals.goalLive} of ${totals.goal}`, "goal dismantlers live"],

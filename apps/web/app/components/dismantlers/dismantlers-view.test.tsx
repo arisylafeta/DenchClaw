@@ -49,7 +49,7 @@ function mockFetch(calls: Call[]) {
       }));
     }
     if (url === "/api/dismantlers/outreach") {
-      return new Response(JSON.stringify({ dismantlers: DISMANTLERS.filter((d) => (body!.ids as string[]).includes(d.id)).map((d) => ({ ...d, stage: "Talking" })) }));
+      return new Response(JSON.stringify({ dismantlers: DISMANTLERS.filter((d) => (body!.ids as string[]).includes(d.id)).map((d) => ({ ...d, stage: "Contacted" })) }));
     }
     return new Response(JSON.stringify({ dismantlers: DISMANTLERS, owners: [], platform_error: null }));
   });
@@ -90,7 +90,7 @@ describe("DismantlersView", () => {
     await userEvent.click(within(backlog).getByLabelText("Select Baltic Parts"));
     expect(within(backlog).getByText("1 selected")).toBeInTheDocument();
     await userEvent.click(within(backlog).getByRole("button", { name: "Start outreach" }));
-    await userEvent.click(screen.getByRole("button", { name: "Move 1 to Talking" }));
+    await userEvent.click(screen.getByRole("button", { name: "Move 1 to Contacted" }));
 
     await waitFor(() => expect(calls.some((call) => call.url === "/api/dismantlers/outreach")).toBe(true));
     const sent = calls.find((call) => call.url === "/api/dismantlers/outreach")!.body!;

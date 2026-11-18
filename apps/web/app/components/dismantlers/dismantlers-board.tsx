@@ -17,7 +17,7 @@ import { DueChip } from "../bulk-trades/trade-chips";
 import { GoalTag, StageDot, metaLine } from "./dismantler-ui";
 
 const FOUND_SHOWN = 30;
-const ACTIVE: Stage[] = ["Talking", "Signed up", "Live"];
+const ACTIVE: Stage[] = ["Contacted", "Talking", "Signed up", "Live"];
 
 type Props = {
   dismantlers: Dismantler[];
@@ -28,6 +28,7 @@ type Props = {
 };
 
 const EMPTY: Partial<Record<Stage, string>> = {
+  Contacted: "Moves here by itself when a campaign email goes out.",
   "Signed up": "Moves here by itself when a dismantler's ReBattery account is found.",
   Live: "Moves here by itself when they list their first battery on ReBattery.",
 };
@@ -105,9 +106,9 @@ function FoundColumn({ dismantlers, onOpen, onMove, onShowList }: Omit<Props, "t
                   {d.ebay_listings != null && <span>{d.ebay_listings} battery listings on eBay</span>}
                   {d.next_step && <span>{d.next_step}</span>}
                   <div className="mt-0.5 flex gap-1.5">
-                    <button type="button" onClick={() => onMove(d, "Talking")} className="h-7 rounded-lg px-2.5 text-xs font-medium"
+                    <button type="button" onClick={() => onMove(d, "Contacted")} className="h-7 rounded-lg px-2.5 text-xs font-medium"
                       style={{ background: "var(--bt-badge)", color: "var(--bt-on-badge)" }}>
-                      Talking →
+                      Contacted →
                     </button>
                     <button type="button" onClick={() => onOpen(d)} className="h-7 rounded-lg border px-2.5 text-xs font-medium"
                       style={{ borderColor: "var(--bt-border)", color: "var(--bt-text)" }}>
