@@ -258,4 +258,12 @@ describe("cell format in the key", () => {
     expect(stated).toBe(2);
     expect(facts.map(productKeyFor)).toEqual(["broad:18650-any-cells", "broad:21700-any-cells"]);
   });
+
+  it("writes no cell format when a request lists all three families, one line per format for two", () => {
+    const all = expandProductFacts({ format: "cells", chemistry: "NMC", cellFormats: ["Prismatic", "Cylindrical", "Pouch"] });
+    expect(all.stated).toBe(1);
+    expect(all.facts.map(productKeyFor)).toEqual(["broad:nmc-cells"]);
+    const two = expandProductFacts({ format: "cells", chemistry: "NMC", cellFormats: ["Prismatic", "Pouch"] });
+    expect(two.facts.map(productKeyFor)).toEqual(["broad:pouch-nmc-cells", "broad:prismatic-nmc-cells"]);
+  });
 });

@@ -452,6 +452,8 @@ function statedCellFormats(facts: ProductFacts): (CellFormat | null)[] {
     const cellFormat = normalCellFormat(value);
     if (cellFormat) {found.add(cellFormat);}
   }
+  // All three families listed means "any dimensions": no cell format on the key (migration 124).
+  if (["prismatic", "cylindrical", "pouch"].every((family) => found.has(family as CellFormat))) {return [null];}
   return found.size ? [...found].toSorted((a, b) => a.localeCompare(b)) : [null];
 }
 
