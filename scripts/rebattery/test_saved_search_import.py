@@ -100,6 +100,12 @@ class SavedSearchImportTest(unittest.TestCase):
         self.assertEqual(row["raw_product"], "Cell maker: Samsung SDI; Located in: United Kingdom")
         self.assertIn("Located in: United Kingdom", row["note"])
 
+    def test_part_number_like_rejects_chemistry_cell_model_and_unit_tokens(self):
+        for token in ["NMC811", "NCR18650B", "LFP280Ah", "18650-2500mAh", "100kWh-pack"]:
+            self.assertFalse(saved.part_number_like(token), token)
+        for token in ["G9510-16021", "37501-GI300", "37501AO050"]:
+            self.assertTrue(saved.part_number_like(token), token)
+
     def test_part_numbers_in_the_text_are_kept_and_the_full_model_name_stays(self):
         # easy4ulatsia: Corolla Cross with OEM part numbers in the text
         filters = {"q": "Toyota Corolla Cross G9510-16021 G9510-16022", "manufacturer": ["Toyota"]}

@@ -94,14 +94,24 @@ GENERIC_WORDS = {"battery", "batteries", "pack", "packs", "module", "modules", "
 SEARCH_FORMATS = {"pack": "Packs", "packs": "Packs", "module": "Modules", "modules": "Modules", "cell": "Cells", "cells": "Cells"}
 
 
+CHEMISTRY_PREFIX = re.compile(r"^(nmc|nca|lfp|lmo|lto)", re.IGNORECASE)
+INNER_UNIT = re.compile(r"\d(mah|kwh|ah|wh|v)(?![a-z])", re.IGNORECASE)
+CELL_MODEL = re.compile(r"^[A-Za-z]{2,4}\d{4,5}[A-Za-z]{0,2}$")
+OEM_HYPHENATED = re.compile(r"^(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{3,}(-[A-Za-z0-9]{2,})+$")
+OEM_COMPACT = re.compile(r"^\d{5}[A-Za-z]{1,2}\d{2,4}$")
+
+
 def part_number_like(token):
-    """An OEM-style code in search text (`G9510-16021`, `37501AO050`): six or more characters, letters and three or
-    more digits. A model (`225xe`, `ioniq5`), a size (`78kwh`) or a year range is not one."""
-    if UNIT_TOKEN.match(token):
+    """An OEM-style code in search text (`G9510-16021`, `37501-GI300`, `37501AO050`): letters and digits, a hyphenated
+    segment or the compact five-digit OEM form. A chemistry (`NMC811`, `LFP280Ah`), a size with a unit (`18650-2500mAh`,
+    `100kWh-pack`), a cell model (`NCR18650B`), a model (`225xe`, `ioniq5`) or a year range is not one."""
+    if UNIT_TOKEN.match(token) or CHEMISTRY_PREFIX.match(token) or INNER_UNIT.search(token) or CELL_MODEL.match(token):
         return False
     folded = _fold(token)
-    return (len(folded) >= 6 and sum(ch.isdigit() for ch in folded) >= 3 and any(ch.isalpha() for ch in folded)
-            and len(token) <= 20)
+    if not (len(folded) >= 6 and sum(ch.isdigit() for ch in folded) >= 3 and any(ch.isalpha() for ch in folded)
+            and len(token) <= 20):
+        return False
+    return bool(OEM_HYPHENATED.match(token) or OEM_COMPACT.match(token))
 
 
 def search_terms(filters):
