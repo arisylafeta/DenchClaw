@@ -118,9 +118,25 @@ export function isProseModel(value: string | null | undefined): boolean {
   return /[(),;/:]/.test(text) || text.split(/\s+/).length >= 4 || /\b(?:19|20)\d{2}\b/.test(text);
 }
 
+/**
+ * A part number written inside the model text ("Toyota Proace SU001B5189"): a token with letters and digits, 8+ code
+ * characters, that is not a capacity ("1000kWh"). Mirrors buyer_interest_model_part_token() in SQL (migration 120).
+ */
+export function modelPartToken(value: string | null | undefined): string | null {
+  const tokens = (value ?? "").trim().split(/\s+/).filter((token) => token.length > 0 && partKey(token).length >= 8
+    && /[A-Za-z]/.test(token) && /[0-9]/.test(token) && !/(kwh|ah)$/i.test(token));
+  return tokens.toSorted()[0] ?? null;
+}
+
+/** The model text without a part number written in it. Mirrors buyer_interest_strip_model_part() in SQL. */
+function stripModelPart(value: string | null | undefined): string {
+  const part = modelPartToken(value);
+  return (value ?? "").trim().split(/\s+/).filter((token) => token !== part).join(" ");
+}
+
 /** The model without a capacity the facts already state: "Zoe 41 kWh" is the Zoe, keyed by its 41 kWh. */
 export function modelKeyText(value: string | null | undefined): string | null {
-  const text = (value ?? "").trim().replace(/\b\d+(?:\.\d+)?\s*kwh\b/gi, " ").replace(/\s+/g, " ").trim();
+  const text = stripModelPart(value).replace(/\b\d+(?:\.\d+)?\s*kwh\b/gi, " ").replace(/\s+/g, " ").trim();
   return text || null;
 }
 
@@ -132,7 +148,11 @@ export function kwhKeyText(value: number | null | undefined): string | null {
 
 function partList(facts: ProductFacts): string[] {
   const values = typeof facts.partNumbers === "string" ? [facts.partNumbers] : facts.partNumbers ?? [];
-  return values.map((part) => partKey(part)).filter((part) => part.length > 0);
+  const parts = values.map((part) => partKey(part)).filter((part) => part.length > 0);
+  if (parts.length) {return parts;}
+  // No stated part number: one written inside the model text is still the part ("Toyota Proace SU001B5189").
+  const inModel = facts.cellMaker ? "" : partKey(modelPartToken(facts.model ?? null));  // a cell model is not a part
+  return inModel ? [inModel] : [];
 }
 
 function singleKwh(facts: ProductFacts): number | null {
@@ -237,7 +257,7 @@ function modelKey(facts: ProductFacts): string | null {
 
 /** The model as a model-level key writes it: no kWh figure, no battery/pack/module word, no repeated make. Mirrors buyer_interest_model_wide_text() in SQL. */
 export function modelWideText(make: string | null | undefined, model: string | null | undefined): string | null {
-  const text = (model ?? "")
+  const text = stripModelPart(model)
     .replace(/\b\d+(?:\.\d+)?\s*kwh\b/gi, " ")
     .replace(/\b(?:hv\s+)?(?:battery|batteries|packs?|modules?)\b/gi, " ")
     .replace(/\s+/g, " ")

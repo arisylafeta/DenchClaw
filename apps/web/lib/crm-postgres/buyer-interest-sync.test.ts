@@ -73,6 +73,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
   afterAll(async () => {
     if (!pg) {return;}
     await pg.queryPg(`delete from buyer_interest where company_id like $1`, [`%_${run}`]);
+    await pg.queryPg(`delete from buyer_interest_suppressed where company_id like $1`, [`%_${run}`]);
     await pg.queryPg(`delete from buyer_interest_sync_errors where source_id like $1`, [`%_${run}`]);
     await pg.queryPg(`delete from crm_bulk_listings where id like $1`, [`%_${run}`]);
     await pg.queryPg(`delete from crm_companies where id like $1`, [`%_${run}`]);
@@ -110,7 +111,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     expect(after.every((row) => row.quantity === 6)).toBe(true);
   });
 
-  it("replaces the ask with bought or declined when the demand closes", async () => {
+  it("replaces the ask with bought when the demand closes, and with nothing when it ended without us", async () => {
     await listing(id("d3"), "demand", id("buyer2"), {
       intent: "request", formats: ["Packs"], chemistries: ["NMC"], volume: 2, volume_unit: "packs", needed_by: "2026-12-01",
     });
@@ -120,7 +121,8 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     const other = id("d4");
     await listing(other, "demand", id("buyer2"), { intent: "request", formats: ["Packs"], chemistries: ["NMC"] });
     await pg.queryPg(`update crm_bulk_listings set status = 'closed', closed_reason = 'bought_elsewhere' where id = $1`, [other]);
-    expect(await lines("demand_id = $1", [other])).toMatchObject([{ kind: "declined", decline_reason: "bought_elsewhere" }]);
+    // A request that ended without us is not a decline: it writes no Want.
+    expect(await lines("demand_id = $1", [other])).toEqual([]);
 
     // Reopening replaces the outcome with the ask again.
     await pg.queryPg(`update crm_bulk_listings set status = 'open', closed_reason = null where id = $1`, [other]);
@@ -216,7 +218,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     }, user.id);
     expect(await lines("demand_id = $1", [ask.id])).toMatchObject([{ kind: "ask", product_key: "broad:lfp-packs", quantity: 3 }]);
     await demand.closeDemand(ask.id, "bought_elsewhere");
-    expect(await lines("demand_id = $1", [ask.id])).toMatchObject([{ kind: "declined", decline_reason: "bought_elsewhere" }]);
+    expect(await lines("demand_id = $1", [ask.id])).toEqual([]);
   });
 
   it("records a buyer offer's paid and declined stages, replacing the earlier outcome", async () => {
@@ -537,6 +539,95 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
         expect(row.part, text).toBe(expected);
         expect(partKey(text) || null, `TS ${text}`).toBe(expected);
       }
+    });
+  });
+
+  describe("sync rules (migration 120)", () => {
+    const stateOf = (spec: Record<string, unknown>) => ({ intent: "request", formats: ["Packs"], chemistries: ["NMC"], ...spec });
+
+    it("writes no Want for no_longer_needed, keeps bought_from_us, a Said for not_a_fit and offer_reply, and the expired ask", async () => {
+      const results: Record<string, string[]> = {};
+      for (const reason of ["no_longer_needed", "bought_elsewhere", "bought_from_us", "not_a_fit", "offer_reply", "expired"]) {
+        const did = id(`rule_${reason}`);
+        await listing(did, "demand", id("buyer4"), stateOf({ makes: [`Make${reason.replace(/_/g, "")}`] }), { status: "closed", reason });
+        results[reason] = (await lines("demand_id = $1", [did])).map((row) => row.kind);
+      }
+      expect(results).toEqual({
+        no_longer_needed: [], bought_elsewhere: [], bought_from_us: ["bought"], not_a_fit: ["interest"], offer_reply: ["interest"], expired: ["ask"],
+      });
+    });
+
+    it("drops the ask's non-mastered line when the request closes without us, and re-sync keeps it gone", async () => {
+      const did = id("rule_close");
+      await listing(did, "demand", id("buyer4"), stateOf({ makes: ["Fiat"] }));
+      expect((await lines("demand_id = $1", [did])).map((row) => row.kind)).toEqual(["ask"]);
+      await pg.queryPg(`update crm_bulk_listings set status = 'closed', closed_reason = 'no_longer_needed' where id = $1`, [did]);
+      await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [did]);
+      expect(await lines("demand_id = $1", [did])).toEqual([]);
+    });
+
+    it("keys a model text that contains its part number as the part, never glued into a model key", async () => {
+      const facts = { make: "Toyota", model: "Toyota Proace SU001B5189", format: "pack" };
+      const [row] = await pg.queryPg<{ key: string; wide: string | null; keyed: string | null }>(
+        `select buyer_interest_product_key($1::jsonb) as key, buyer_interest_model_wide_text('Toyota', 'Toyota Proace SU001B5189') as wide,
+           buyer_interest_product_key($2::jsonb) as keyed`,
+        [JSON.stringify(facts), JSON.stringify({ ...facts, model: "Toyota Proace SU001B5189 50 kWh", kwh: 50, part_numbers: ["37501-Q4052"] })]);
+      expect(row.key).toBe("part:SU001B5189");
+      expect(row.wide).toBe("Proace");
+      expect(row.keyed).toBe("part:37501Q4052");
+      // Same facts, same answers in the TypeScript builder.
+      expect(productKeyFor({ make: "Toyota", model: "Toyota Proace SU001B5189", format: "pack" })).toBe("part:SU001B5189");
+      expect(broaderKeysFor({ make: "Toyota", model: "Toyota Proace SU001B5189", format: "pack" })).toContain("model:toyota-proace");
+      expect(productKeyFor({ make: "Toyota", model: "Proace SU001B5189", format: "pack", kwh: 50, partNumbers: ["37501-Q4052"] })).toBe("part:37501Q4052");
+    });
+
+    it("leaves ordinary model names and capacities alone, in SQL and TypeScript", async () => {
+      const cases: [Record<string, unknown>, string][] = [
+        [{ make: "Tesla", model: "Model 3", kwh: 60 }, "model:tesla-model3-60kwh"],
+        [{ cell_maker: "Samsung SDI", model: "INR21700-50E", format: "cell" }, "cell:samsung-sdi-inr21700-50e"],
+        [{ make: "Mercedes", model: "EQS450" }, "model:mercedes-benz-eqs450"],
+      ];
+      for (const [facts, expected] of cases) {
+        const [row] = await pg.queryPg<{ key: string }>(`select buyer_interest_product_key($1::jsonb) as key`, [JSON.stringify(facts)]);
+        expect(row.key).toBe(expected);
+        expect(productKeyFor({ ...facts, cellMaker: facts.cell_maker as string | undefined, partNumbers: undefined })).toBe(expected);
+      }
+    });
+
+    it("writes the part key for an offer whose listing model carries the part number (the live Proace shape)", async () => {
+      const lid = id("rule_proace");
+      await listing(lid, "supply", null, { trade_kind: "packs" }, { context: { listing_title: "40x Toyota Proace 50kWh Packs" } });
+      await pg.queryPg(`insert into crm_bulk_listing_fields (bulk_listing_id, field_key, value, status, visibility)
+        values ($1, 'model', 'Toyota Proace SU001B5189', 'unverified', 'teaser'), ($1, 'make', 'Toyota', 'unverified', 'teaser')`,
+        [lid]);
+      await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, name, stage) values ($1, $2, 'counterparty', $3, 'Offer Buyer', 'paid')`,
+        [id("rule_off"), lid, id("buyer4")]);
+      expect((await lines("offer_id = $1", [id("rule_off")])).map((row) => row.product_key)).toEqual(["part:SU001B5189"]);
+    });
+
+    it("never writes a suppressed line, from a request or from an offer, and writes the rest", async () => {
+      await pg.queryPg(`insert into buyer_interest_suppressed (company_id, kind, product_key, source_ref, reason)
+        values ($1, 'ask', 'broad:lfp-packs', 'crm:x', 'removed in cleanup test'), ($1, 'bought', 'broad:lfp-packs', 'crm:x', 'removed in cleanup test')`,
+        [id("buyer4")]);
+      const did = id("rule_supp");
+      await listing(did, "demand", id("buyer4"), stateOf({ chemistries: ["LFP"] }));
+      expect(await lines("demand_id = $1", [did])).toEqual([]);
+      // The same product for another company, and another kind of the same company, are not suppressed.
+      const other = id("rule_supp2");
+      await listing(other, "demand", id("buyer3"), stateOf({ chemistries: ["LFP"] }));
+      expect((await lines("demand_id = $1", [other])).map((row) => row.kind)).toEqual(["ask"]);
+      await pg.queryPg(`update crm_bulk_listings set status = 'closed', closed_reason = 'bought_from_us' where id = $1`, [did]);
+      expect(await lines("demand_id = $1", [did])).toEqual([]);
+      await pg.queryPg(`update crm_bulk_listings set status = 'closed', closed_reason = 'not_a_fit' where id = $1`, [did]);
+      expect((await lines("demand_id = $1", [did])).map((row) => row.kind)).toEqual(["interest"]);
+
+      const lid = id("rule_supp_sup");
+      await listing(lid, "supply", null, { chemistries: ["LFP"], formats: ["Packs"] });
+      await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, name, stage) values ($1, $2, 'counterparty', $3, 'Offer Buyer', 'paid')`,
+        [id("rule_supp_off"), lid, id("buyer4")]);
+      expect(await lines("offer_id = $1", [id("rule_supp_off")])).toEqual([]);
+      await pg.queryPg(`update crm_bulk_offers set stage = 'declined' where id = $1`, [id("rule_supp_off")]);
+      expect((await lines("offer_id = $1", [id("rule_supp_off")])).map((row) => row.kind)).toEqual(["declined"]);
     });
   });
 
