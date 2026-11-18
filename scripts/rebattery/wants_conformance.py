@@ -666,10 +666,17 @@ def _is_specific_key(line):
     return str(line.get("product_key") or "").startswith(("model:", "part:"))
 
 
+GROUP_BRANDS = {"vwgroup": {"audi", "skoda", "seat", "cupra", "porsche", "volkswagen", "bentley", "lamborghini"},
+                "volkswagen": {"audi", "skoda", "seat", "cupra", "porsche", "bentley", "lamborghini"},
+                "hyundai": {"genesis"}, "kia": set()}
+
+
 def _line_make_ok(line, allowed_folds):
     if not line.get("make"):
         return False
     folds = make_folds(line["make"])
+    # A buy box that lists a group covers the brands of that group.
+    allowed_folds = set(allowed_folds) | {member for g, members in GROUP_BRANDS.items() if g in allowed_folds for member in members}
     # "LG Chem" is the LG of a buy box, "Samsung" the Samsung SDI: one fold may be the other's front part.
     return any(a == b or (min(len(a), len(b)) >= 2 and (a.startswith(b) or b.startswith(a))) for a in folds for b in allowed_folds)
 

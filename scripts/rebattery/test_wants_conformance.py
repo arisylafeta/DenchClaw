@@ -296,6 +296,13 @@ class R8(unittest.TestCase):
         self.assertEqual([v["line_id"] for v in out], ["a"])
         self.assertIn("make", out[0]["why"])
 
+    def test_brand_of_a_listed_group_is_inside_the_buy_box(self):
+        box = {"makes": ["VW Group", "Hyundai or Kia"], "formats": ["Packs"]}
+        audi = line("a", kind="inferred", make="Audi", format="pack", product_key="model:audi-etron", product_key_level="model")
+        genesis = line("b", kind="inferred", make="Genesis", format="pack", product_key="part:37501CU050", product_key_level="part")
+        rivian = line("c", kind="inferred", make="Rivian", format="pack", product_key="model:rivian-r1t", product_key_level="model")
+        self.assertEqual([v["line_id"] for v in wc.r8(ctx([audi, genesis, rivian], profile=box))], ["c"])
+
     def test_buy_box_format_outside_the_list_but_model_key_is_fine(self):
         cell = line("a", kind="inferred", make="Tesla", format="cell", chemistry="NMC", product_key="broad:tesla-nmc-cells")
         model = line("b", kind="inferred", make="Tesla", format="cell", product_key="model:tesla-model3", product_key_level="model")
