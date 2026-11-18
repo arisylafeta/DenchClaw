@@ -235,6 +235,27 @@ class InterestLines(unittest.TestCase):
         [line] = [line for line in self.lines("saved_search") if line["saved_search_id"] == "zoe-0000-4000-8000-000000000001"]
         self.assertEqual((line["product_key"], float(line["kwh_min"]), float(line["kwh_max"])), ("model:renault-zoe", 51.5, 55.49))
 
+    def write_search(self, search_id, filters):
+        search = self.saved.map_saved_search(self.saved_search(id=search_id, filters=filters))
+        search["company_id"] = self.company
+        self.addCleanup(self.forget, search_id)
+        with self.cursor() as cur:
+            self.lifecycle.upsert_saved_search_interest(cur, search, today=dt.date(2026, 11, 12))
+        self.conn.commit()
+        return sorted((line["product_key"], line["make"], line["model"], line["raw_product"])
+                      for line in self.lines("saved_search") if line["saved_search_id"] == search_id)
+
+    def test_a_cell_maker_and_a_location_survive_on_the_line(self):
+        self.assertEqual(self.write_search("sdi-gb-0000-4000-8000-000000000001", {"q": "Samsung sdi modules", "location_country": "GB"}),
+                         [("broad:any-modules", None, None, "Cell maker: Samsung SDI; Located in: United Kingdom")])
+
+    def test_corolla_cross_with_part_numbers_keeps_its_model_and_a_line_per_part(self):
+        keys = self.write_search("cross-0000-4000-8000-000000000001",
+                                 {"q": "Corolla Cross G9510-16021 G9510-16022", "manufacturer": ["Toyota"]})
+        self.assertEqual([(key, make, model) for key, make, model, _detail in keys],
+                         [("model:toyota-corollacross", "Toyota", "Corolla Cross"),
+                          ("part:G951016021", "Toyota", "Corolla Cross"), ("part:G951016022", "Toyota", "Corolla Cross")])
+
     def test_a_line_that_cannot_be_written_does_not_abort_the_importer(self):
         # A negative price breaks a table check: the line is dropped, the importer's transaction survives.
         facts = {"formats": ["Packs"], "chemistries": ["LFP"]}

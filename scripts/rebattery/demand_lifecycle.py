@@ -220,6 +220,13 @@ def _make_values(spec):
     return split_makes(_stated_values(spec.get('makes'), spec.get('make'))) or [None]
 
 
+def stated_parts(spec, limit=6):
+    """The part numbers a spec states, in order, at most `limit`."""
+    values = (spec or {}).get('part_numbers') or []
+    values = values if isinstance(values, list) else [values]
+    return list(dict.fromkeys(str(value).strip() for value in values if str(value or '').strip()))[:limit]
+
+
 def interest_facts(spec):
     """One fact dict per stated make x chemistry x format, capped at INTEREST_FACT_COMBINATIONS.
 
@@ -242,6 +249,7 @@ def interest_facts(spec):
         'kwh': single('kwh', 'capacity_kwh'), 'kwh_min': spec.get('kwh_min') or spec.get('kwhMin'),
         'kwh_max': spec.get('kwh_max') or spec.get('kwhMax'), 'cell_maker': single('cell_makers', 'cell_maker'),
     }
+    parts = stated_parts(spec)
     facts = []
     for make in _make_values(spec):
         for chemistry in _stated_values(spec.get('chemistries'), spec.get('chemistry')):
@@ -249,7 +257,9 @@ def interest_facts(spec):
                 if len(facts) >= INTEREST_FACT_COMBINATIONS:
                     return facts
                 facts.append({**base, 'make': make, 'chemistry': chemistry, 'format': fmt})
-    return facts
+    # A part number is the most specific key a line can have: one line per stated part, beside the broader ones.
+    makes = _make_values(spec)
+    return facts + [{**base, 'make': makes[0] if len(makes) == 1 else None, 'part_numbers': [part]} for part in parts]
 
 
 def model_interest_facts(spec, model):
@@ -267,6 +277,12 @@ def model_interest_facts(spec, model):
             'format': formats[0] if len(formats) == 1 else None,
             'chemistry': chemistries[0] if len(chemistries) == 1 else None,
             'kwh_min': spec.get('kwh_min') or spec.get('kwhMin'), 'kwh_max': spec.get('kwh_max') or spec.get('kwhMax')}
+
+
+def model_interest_fact_list(spec, model):
+    """The model line, plus one line per part number the same search states (the part is the more specific key; the\n    make and model stay on it, so `Corolla Cross` never reads as `Corolla`)."""
+    base = model_interest_facts(spec, model)
+    return [base] + [{**base, 'part_numbers': [part]} for part in stated_parts(spec)]
 
 
 def interest_fact_total(spec):
@@ -294,7 +310,7 @@ def _record_truncation(cur, source_id, stated_total):
 
 def upsert_interest(cur, *, company_id, kind, facts, first_seen, last_seen, person_id=None, expires_on=None,
                     saved_search_id=None, quantity=None, quantity_unit=None, quantity_basis=None, price=None,
-                    price_currency=None, price_unit=None, price_basis=None, source_refs=(), decline_reason=None):
+                    price_currency=None, price_unit=None, price_basis=None, source_refs=(), decline_reason=None, raw_product=None):
     """Upserts one buyer_interest line and returns its id (None when it cannot or need not be written).
 
     Mastered kinds merge on (company, product key, kind); synced kinds merge on their source id. The product key
@@ -320,16 +336,17 @@ def upsert_interest(cur, *, company_id, kind, facts, first_seen, last_seen, pers
         mastered = kind in INTEREST_KINDS
         conflict = ("on conflict (company_id, product_key, kind) where ownership = 'mastered'"
                     if mastered else "on conflict (kind, saved_search_id, product_key) where saved_search_id is not null")
-        refresh = ("last_seen = greatest(buyer_interest.last_seen, excluded.last_seen), person_id = coalesce(excluded.person_id, buyer_interest.person_id), "
+        refresh = ("raw_product = coalesce(excluded.raw_product, buyer_interest.raw_product), "
+                   "last_seen = greatest(buyer_interest.last_seen, excluded.last_seen), person_id = coalesce(excluded.person_id, buyer_interest.person_id), "
                    "expires_on = greatest(buyer_interest.expires_on, excluded.expires_on), "
                    if mastered else
                    "last_seen = greatest(buyer_interest.last_seen, excluded.last_seen), person_id = coalesce(excluded.person_id, buyer_interest.person_id), "
                    "expires_on = coalesce(excluded.expires_on, buyer_interest.expires_on), ")
         cur.execute(f"""insert into buyer_interest (id, company_id, person_id, kind, ownership, product_key, product_key_level,
-                         make, model, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit,
+                         make, model, raw_product, format, chemistry, kwh_min, kwh_max, first_seen, last_seen, quantity, quantity_unit,
                          quantity_basis, price, price_currency, price_unit, price_basis, source_refs, expires_on,
                          saved_search_id, decline_reason)
-                       values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s::date, %s, %s, %s, %s, %s, %s, %s,
+                       values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s::date, %s, %s, %s, %s, %s, %s, %s,
                          %s::text[], %s::date, %s, %s)
                        {conflict} do update set {refresh}
                          source_refs = coalesce((select array_agg(distinct ref order by ref)
@@ -337,7 +354,7 @@ def upsert_interest(cur, *, company_id, kind, facts, first_seen, last_seen, pers
                          updated_at = now()
                        returning id""",
                     (f'bi_{uuid.uuid4().hex}', company_id, person_id, kind, 'mastered' if mastered else 'synced',
-                     values['key'], values['level'], values['make'], values['model'], values['format'], values['chemistry'],
+                     values['key'], values['level'], values['make'], values['model'], (raw_product or None), values['format'], values['chemistry'],
                      values['kwh_min'], values['kwh_max'], first_seen, last_seen, quantity, quantity_unit,
                      quantity_basis or ('not_stated' if quantity is None else 'stated'), price, price_currency, price_unit,
                      price_basis, list(source_refs or []), expires_on, saved_search_id, decline_reason))
@@ -388,11 +405,12 @@ def upsert_saved_search_interest(cur, row, unsubscribed=False, today=None):
     spec = row.get('spec') or {}
     named = row.get('interest_model')
     # A search for a known model is that model's line, not every pack of its maker's group.
-    fact_list = [model_interest_facts(spec, named)] if named else interest_facts(spec)
+    fact_list = model_interest_fact_list(spec, named) if named else interest_facts(spec)
     lines = [upsert_interest(cur, company_id=row.get('company_id'), kind='saved_search', facts=facts,
                              person_id=row.get('person_id'), first_seen=confirmed, last_seen=last_seen,
                              expires_on=last_seen if unsubscribed else None, saved_search_id=search_id,
-                             source_refs=[f'saved_search:{search_id}'] if search_id else [])
+                             source_refs=[f'saved_search:{search_id}'] if search_id else [],
+                             raw_product=row.get('raw_product'))
              for facts in fact_list]
     written = [line for line in lines if line]
     if named and written and search_id and row.get('company_id') and interest_table_ready(cur):
