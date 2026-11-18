@@ -736,7 +736,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       ["Hyundai", "Kona Electric", 64], ["VW", "Volkswagen Foo 40", 40], ["Mercedes", "Mercedes-Benz Foo 40", 40], ["Kia", "Kia Foo", 40], ["Nissan", "Leaf e+ 62kWh", 62], ["Nissan", "Leaf", 40], ["Renault", "Zoe R135", undefined],
       ["VW", "e-Golf", undefined], ["Volkswagen", "ID.3 Pro Performance", 58], ["VW", "Volkswagen ID.4", 77], ["Mercedes", "EQS 450+", undefined],
       ["Mercedes-Benz", "Mercedes EQC", 80], ["Vauxhall", "Corsa-e", undefined], ["Opel", "Corsa e", 50], ["PSA", "Peugeot e-208", undefined],
-      ["Peugeot", "2008", undefined], ["Citroën", "ë-C4", 50], ["Škoda", "Enyaq iV 80", undefined], ["Tesla", "Model 3 Long Range", 75],
+      ["Peugeot", "2008", undefined], ["Peugeot", "3008", 73], ["Toyota", "Unknown 2019", undefined], ["Citroën", "ë-C4", 50], ["Škoda", "Enyaq iV 80", undefined], ["Tesla", "Model 3 Long Range", 75],
       ["Tesla", "Model Y (2021) battery pack", undefined], ["BMW", "i3 120Ah", undefined], ["Fiat", "500e Standard", 24], ["Ford", "Mustang Mach-E AWD", undefined],
       ["Hyundai", "Ioniq 5 / Ioniq 6", 77], ["Toyota", "Unknown Thing 9", undefined], ["Kia", "Soul EV 2019", 64], ["Mini", "Mini Cooper SE", 32],
     ];
@@ -749,6 +749,79 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
         // The pack: family level is TypeScript-only (SQL stops at the model), so compare the first non-pack key.
         const ts = productKeysFor({ make, model, ...(kwh === undefined ? {} : { kwh }) }).find((entry) => entry.level !== "pack")?.key;
         if (row.key !== ts) {mismatches.push(`${make} | ${model} | ${kwh}: sql ${row.key} ts ${ts}`);}
+      }
+      expect(mismatches).toEqual([]);
+    });
+  });
+
+  describe("cell makers and unmade model lists (migration 122)", () => {
+    const keysOf = async (did: string) => (await lines("demand_id = $1", [did])).map((row) => row.product_key);
+
+    it("keeps the cell maker on a cell request that names no make", async () => {
+      const did = id("m122_maker");
+      await listing(did, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], cell_makers: ["Panasonic"], chemistries: ["NMC"] });
+      expect(await keysOf(did)).toEqual(["broad:panasonic-nmc-cells"]);
+      const mod = id("m122_maker_mod");
+      await listing(mod, "demand", id("buyer1"), { intent: "request", formats: ["Modules"], cell_makers: ["CATL"] });
+      expect(await keysOf(mod)).toEqual(["broad:catl-any-modules"]);
+      const sk = id("m122_maker_sk");
+      await listing(sk, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], cell_makers: ["SK On"] });
+      expect(await keysOf(sk)).toEqual(["broad:sk-on-any-cells"]);
+    });
+
+    it("writes one line per cell maker and format, and keeps a stated cell format", async () => {
+      const did = id("m122_makers");
+      await listing(did, "demand", id("buyer1"), { intent: "request", formats: ["Cells", "Modules"], cell_makers: ["CALB", "EVE"] });
+      expect(await keysOf(did)).toEqual(["broad:calb-any-cells", "broad:calb-any-modules", "broad:eve-any-cells", "broad:eve-any-modules"]);
+      const fmt = id("m122_makers_fmt");
+      await listing(fmt, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], cell_makers: ["Samsung SDI"], cell_formats: ["21700"] });
+      expect(await keysOf(fmt)).toEqual(["broad:samsung-sdi-21700-any-cells"]);
+    });
+
+    it("leaves a request that names a make on its make key", async () => {
+      const did = id("m122_make_wins");
+      await listing(did, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], makes: ["Tesla"], cell_makers: ["Panasonic"] });
+      expect(await keysOf(did)).toEqual(["broad:tesla-any-cells"]);
+    });
+
+    it("keeps the cell maker on an offer's line too", async () => {
+      const [row] = await pg.queryPg<{ keys: string[] }>(
+        `select array_agg(k order by k) as keys from buyer_interest_fact_sets($1::jsonb, '{}', '{}', 12) fs, unnest(fs.facts) f, buyer_interest_product_key(f) k`,
+        [JSON.stringify({ formats: ["Cells"], cell_makers: ["Panasonic"] })]);
+      expect(row.keys).toEqual(["broad:panasonic-any-cells"]);
+    });
+
+    it("resolves the make of each entry of a make-less model list", async () => {
+      const did = id("m122_models");
+      await listing(did, "demand", id("buyer1"), { intent: "request", formats: ["Packs"], chemistries: ["LFP", "NMC"],
+        models: ["2008", "Berlingo", "MG4", "Model 3", "Rifter", "Zoe"] });
+      const rows = await lines("demand_id = $1", [did]);
+      expect(rows.map((row) => `${row.make}/${row.model}`).toSorted()).toEqual([
+        "Citroen/Berlingo", "MG/4", "Peugeot/2008", "Peugeot/Rifter", "Renault/Zoe", "Tesla/Model 3"]);
+      expect(rows.map((row) => row.product_key).toSorted()).toEqual([
+        "model:citroen-berlingo", "model:mg-mg4", "model:peugeot-2008", "model:peugeot-rifter", "model:renault-zoe", "model:tesla-model3"]);
+    });
+
+    it("carries a capacity stated for one format on that format's line", async () => {
+      const did = id("m122_fmtkwh");
+      await listing(did, "demand", id("buyer1"), { intent: "request", formats: ["Packs", "Modules", "Cells"], chemistries: ["LFP"],
+        product_family: "LFP prismatic 100Ah cells / 50kWh packs" });
+      const rows = await pg.queryPg<{ product_key: string; kwh_min: string | null; kwh_max: string | null }>(
+        `select product_key, kwh_min, kwh_max from buyer_interest where demand_id = $1 order by product_key`, [did]);
+      expect(rows.map((row) => [row.product_key, row.kwh_min === null ? null : Number(row.kwh_min)])).toEqual([
+        ["broad:lfp-cells", null], ["broad:lfp-modules", null], ["broad:lfp-packs", 50]]);
+    });
+
+    it("gives SQL and TypeScript the same key for a cell maker", async () => {
+      const mismatches: string[] = [];
+      for (const facts of [
+        { format: "Cells", cell_maker: "Panasonic" }, { format: "Modules", cell_maker: "CATL", chemistry: "LFP" },
+        { format: "Cells", cell_maker: "SK On", cell_format: "21700" }, { format: "Cells", cell_maker: "Samsung SDI", model: "50E" },
+        { format: "Packs", make: "Tesla", cell_maker: "Panasonic" }, { cell_maker: "CALB" },
+      ]) {
+        const [row] = await pg.queryPg<{ key: string }>(`select buyer_interest_product_key($1::jsonb) as key`, [JSON.stringify(facts)]);
+        const ts = productKeyFor({ format: facts.format, make: facts.make, model: facts.model, chemistry: facts.chemistry, cellMaker: facts.cell_maker, cellFormat: facts.cell_format });
+        if (row.key !== ts) {mismatches.push(`${JSON.stringify(facts)}: sql ${row.key} ts ${ts}`);}
       }
       expect(mismatches).toEqual([]);
     });

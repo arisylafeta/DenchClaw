@@ -118,7 +118,7 @@ export function splitMakes(values: (string | null | undefined)[] | null | undefi
 export function isProseModel(value: string | null | undefined): boolean {
   const text = (value ?? "").trim();
   if (!text) {return false;}
-  return /[(),;/:]/.test(text) || text.split(/\s+/).length >= 4 || /\b(?:19|20)\d{2}\b/.test(text);
+  return /[(),;/:]/.test(text) || text.split(/\s+/).length >= 4 || (/\b(?:19|20)\d{2}\b/.test(text) && !/^\d{4}$/.test(text));
 }
 
 /**
@@ -369,12 +369,16 @@ function broadKey(facts: ProductFacts, withCellFormat = false): string {
   return `broad:${cellFormat ? `${cellFormat}-` : ""}${chemistry}-${format ? FORMAT_PLURAL[format] : "batteries"}`;
 }
 
-/** A cell format with a stated maker (the make, else the cell maker): broad:samsung-sdi-21700-nmc-cells. */
+/**
+ * A stated maker (the make, else the cell maker) with the optional cell format: broad:samsung-sdi-21700-nmc-cells,
+ * broad:calb-any-cells, broad:catl-any-modules. Mirrors the maker segment of buyer_interest_product_key() (migration 122).
+ */
 function makerCellFormatBroadKey(facts: ProductFacts): string | null {
   const cellFormat = cellFormatOf(facts);
   const maker = makeKey(facts.make ?? null) ?? slug(facts.cellMaker ?? null);
-  if (!cellFormat || !maker) {return null;}
-  return `broad:${maker}-${cellFormat}-${slug(chemistryOf(facts)) ?? "any"}-cells`;
+  if (!maker) {return null;}
+  const format = formatOf(facts);
+  return `broad:${maker}-${cellFormat ? `${cellFormat}-` : ""}${slug(chemistryOf(facts)) ?? "any"}-${format ? FORMAT_PLURAL[format] : "batteries"}`;
 }
 
 /** The broad bucket scoped to a stated make; null when no make is stated. */

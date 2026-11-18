@@ -237,6 +237,15 @@ describe("cell format in the key", () => {
     expect(productKeyFor({ ...cells, cellFormat: "21700", cellMaker: "Samsung SDI", model: "50E" })).toBe("cell:samsung-sdi-50e");
   });
 
+  it("keeps a stated cell maker on the broad key even without a cell format (migration 122)", () => {
+    expect(productKeyFor({ ...cells, cellMaker: "Panasonic" })).toBe("broad:panasonic-any-cells");
+    expect(productKeyFor({ ...cells, cellMaker: "CALB", chemistry: "LFP" })).toBe("broad:calb-lfp-cells");
+    expect(productKeyFor({ format: "Modules", cellMaker: "CATL" })).toBe("broad:catl-any-modules");
+    expect(productKeyFor({ format: "Cells", cellMaker: "SK On" })).toBe("broad:sk-on-any-cells");
+    expect(broaderKeysFor({ ...cells, cellMaker: "Panasonic", chemistry: "NMC" })).toEqual(["broad:panasonic-nmc-cells", "broad:nmc-cells"]);
+    expect(productKeyFor({ ...cells, make: "Tesla", cellMaker: "Panasonic" })).toBe("broad:tesla-any-cells");
+  });
+
   it("rolls a cell format up to the format bucket, then the plain bucket; packs ignore it", () => {
     expect(broaderKeysFor({ ...cells, cellFormat: "21700", chemistry: "NMC", make: "Samsung SDI" })).toEqual([
       "broad:samsung-sdi-21700-nmc-cells", "broad:samsung-sdi-nmc-cells", "broad:21700-nmc-cells", "broad:nmc-cells",
