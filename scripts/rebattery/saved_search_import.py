@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Imports saved searches into stated company profiles and sourcing requests as qualifying demand.
 
+--resync re-derives every current search's Wants and merges duplicate lines (once-off, archives first).
 Run without --apply to preview in a rolled-back transaction. --announce reports new requests only.
 A sourcing request becomes a Bulk Trades request only when bulk_request_gate passes it (at least 300 kWh or a EUR 20k
 budget, a purchase, a real buyer); every other request stays on the buyer's profile as interest. A request that gets
@@ -548,6 +549,88 @@ def flag_for_review(cur, row, request, reasons, measured, today):
     return listing_id
 
 
+ARCHIVE_TABLE = "buyer_interest_alert_resync_20261118"
+
+
+def resync(cur, search_rows, today, apply):
+    """Re-derive the Wants of every current saved search through the current code, then merge duplicates.
+
+    A search's old lines whose key is no longer produced are deleted; the produced lines are upserted. Two saved_search
+    lines of one company with the same product_key become one (earliest first_seen, latest last_seen, union of
+    source_refs, the first line's saved_search_id). Returns (report lines, lost searches). With apply, every touched row
+    is archived first. The caller owns the transaction.
+    """
+    cur.execute("set local lock_timeout = '3s'")
+    if apply:
+        cur.execute(f"create table if not exists {ARCHIVE_TABLE} (like buyer_interest)")
+        cur.execute(f"alter table {ARCHIVE_TABLE} add column if not exists archived_at timestamptz not null default now()")
+
+    def archive(ids):
+        if apply and ids:
+            cur.execute(f"insert into {ARCHIVE_TABLE} select b.*, now() from buyer_interest b where b.id = any(%s::text[]) "
+                        f"and not exists (select 1 from {ARCHIVE_TABLE} a where a.id = b.id)", (list(ids),))  # first state wins
+
+    changes, lost, current = {}, [], []
+    for row in search_rows:
+        if row.get("unsubscribed"):
+            continue
+        sid = row["source_id"].removeprefix("saved_search:")
+        cur.execute("select id, company_id, product_key from buyer_interest where kind = 'saved_search' and saved_search_id = %s "
+                    "order by product_key", (sid,))
+        old = cur.fetchall()
+        company = old[0]["company_id"] if old else existing_company_id(cur, row.get("email"))
+        if not company:
+            continue
+        current.append(sid)
+        row["company_id"] = company
+        archive([line["id"] for line in old])
+        cur.execute("select min(first_seen) as first from buyer_interest where kind = 'saved_search' and saved_search_id = %s", (sid,))
+        first_seen = cur.fetchone()["first"]
+        survey.upsert_saved_search_interest(cur, row, today=today)
+        if first_seen:  # a replaced key keeps when the search was first seen, not the confirmation date
+            cur.execute("update buyer_interest set first_seen = least(first_seen, %s) "
+                        "where kind = 'saved_search' and saved_search_id = %s and updated_at = now()", (first_seen, sid))
+        cur.execute("select id, product_key, updated_at = now() as fresh from buyer_interest where kind = 'saved_search' "
+                    "and saved_search_id = %s", (sid,))  # now() is the transaction start: only lines written here match
+        after = cur.fetchall()
+        stale = [line["id"] for line in after if not line["fresh"]]
+        if stale:
+            cur.execute("delete from buyer_interest where id = any(%s::text[])", (stale,))
+        new = sorted(line["product_key"] for line in after if line["fresh"])
+        if old and not new:
+            lost.append(f"{row['email']} | search {sid[:8]} | old keys {[l['product_key'] for l in old]} produce no Want")
+        changes.setdefault(company, []).append(
+            f"search {sid[:8]}: {[line['product_key'] for line in old] or 'no lines'} -> {new or 'no lines'}")
+
+    merged = {}
+    cur.execute("""select company_id, product_key from buyer_interest where kind = 'saved_search' and saved_search_id = any(%s::text[])
+                   group by 1, 2 having count(*) > 1""", (current,))
+    for dup in cur.fetchall():
+        cur.execute("""select id, saved_search_id, first_seen, last_seen, expires_on, source_refs from buyer_interest
+                       where kind = 'saved_search' and company_id = %s and product_key = %s and saved_search_id = any(%s::text[])
+                       order by first_seen, created_at, saved_search_id""", (dup["company_id"], dup["product_key"], current))
+        lines = cur.fetchall()
+        keep, others = lines[0], lines[1:]
+        archive([line["id"] for line in lines])
+        refs = sorted({ref for line in lines for ref in line["source_refs"]})
+        expires = None if any(line["expires_on"] is None for line in lines) else max(line["expires_on"] for line in lines)
+        cur.execute("delete from buyer_interest where id = any(%s::text[])", ([line["id"] for line in others],))
+        cur.execute("update buyer_interest set first_seen = %s, last_seen = %s, source_refs = %s::text[], expires_on = %s, "
+                    "updated_at = now() where id = %s",
+                    (min(line["first_seen"] for line in lines), max(line["last_seen"] for line in lines), refs, expires, keep["id"]))
+        merged.setdefault(dup["company_id"], []).append(
+            f"merged {len(lines)} lines of {dup['product_key']} into search {str(keep['saved_search_id'])[:8]}")
+
+    report = []
+    ids = list(set(changes) | set(merged))
+    cur.execute("select id, name from crm_companies where id = any(%s::text[])", (ids,))
+    names = {c["id"]: c["name"] for c in cur.fetchall()}
+    for company in sorted(ids, key=lambda c: (names.get(c) or "", c)):
+        report.append(f"{names.get(company) or '(no name)'} [{company}]")
+        report += [f"    {line}" for line in changes.get(company, []) + merged.get(company, [])]
+    return report, lost
+
+
 def main():
     import psycopg2
     import psycopg2.extras
@@ -557,6 +640,8 @@ def main():
     parser.add_argument("--requests-json", help="read sourcing requests from a JSON file instead of the platform")
     parser.add_argument("--platform-env", default=str(PLATFORM_ENV), help="env file with the platform URL and key")
     parser.add_argument("--apply", action="store_true", help="write; without it nothing is saved")
+    parser.add_argument("--resync", action="store_true",
+                        help="re-derive the Wants of every current saved search and merge duplicate lines (dry run unless --apply)")
     parser.add_argument("--quiet", action="store_true", help="print only the totals (for scheduled runs)")
     parser.add_argument("--announce", action="store_true",
                         help="print nothing but a Discord note per newly added request from the last day (Hermes posts it)")
@@ -575,6 +660,19 @@ def main():
     else:
         requests = fetch_sourcing_requests(args.platform_env)
     search_rows = [row for row in (map_saved_search(search) for search in searches) if row]
+    if args.resync:
+        conn = psycopg2.connect(args.dsn)
+        with conn, conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            report, lost = resync(cur, search_rows, dt.date.today(), args.apply)
+            if not args.apply:
+                conn.rollback()
+        conn.close()
+        print("\n".join(report))
+        print(f"LOST (old Wants with no replacement): {len(lost)}")
+        for line in lost:
+            print(f"    {line}")
+        print(f"{'applied' if args.apply else 'dry run, nothing saved'}: {len(report)} lines for {len(search_rows)} mapped saved searches")
+        return 0
     request_rows = [row for row in (map_sourcing_request(request) for request in requests) if row]
     requests_by_source = {f"sourcing_request:{request['id']}": request for request in requests}
     notes = []
