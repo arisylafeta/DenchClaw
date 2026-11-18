@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Read-only WhatsApp capture for the ReBattery business number (REB-355)",
   "scripts": {
-    "test": "node --test record.test.mjs"
+    "test": "node --test record.test.mjs media.test.mjs"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "7.0.0-rc13",

@@ -11,6 +11,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from . import media_store
 from .core import Refused, account_jid, connection, cursor, instant, lock_account
 from .ingest import read_lines
 
@@ -51,6 +52,29 @@ def erase_line(file, start, finish, digest):
         os.fsync(handle.fileno())
 
 
+def stale_media(cur, account, ids):
+    """Stored media objects whose message was revoked, expired, redacted or is being purged now."""
+    cur.execute('''select e.id, e.payload->'media'->>'ref' as ref from whatsapp_event e
+      join whatsapp_message m on m.id=e.message_id
+      where e.account_id=%s and e.kind='media' and e.payload->'media'->>'ref' is not null
+      and (m.id=any(%s) or m.deleted_at is not null or m.metadata->>'content_redacted'='true'
+        or (nullif(m.metadata->'flags'->>'expiresAt','')::timestamptz <= now()))''', (account, ids))
+    return cur.fetchall()
+
+
+def purge_media(cur, rows):
+    """Delete encrypted objects, then drop the ref from the event. A failure leaves the ref for the next run."""
+    purged = 0
+    for row in rows:
+        try:
+            media_store.delete(row['ref'])
+        except media_store.StoreError:
+            continue
+        cur.execute("update whatsapp_event set payload=jsonb_set(payload,'{media,ref}','null') where id=%s", (row['id'],))
+        purged += 1
+    return purged
+
+
 def retain(path, account, apply=False):
     account = account_jid(account)
     now = datetime.now(timezone.utc)
@@ -72,7 +96,8 @@ def retain(path, account, apply=False):
         ids = [row['id'] for row in cur.fetchall()]
         cur.execute("select count(*) as n from whatsapp_event where account_id=%s and kind='quarantine' and captured_at < %s and payload <> '{}'::jsonb", (account, cutoff))
         quarantine = cur.fetchone()['n']
-        result = {'apply': apply, 'raw_lines': len(raw), 'messages': len(ids), 'quarantine_events': quarantine}
+        media = stale_media(cur, account, ids)
+        result = {'apply': apply, 'raw_lines': len(raw), 'messages': len(ids), 'quarantine_events': quarantine, 'media_objects': len(media)}
         if not apply:
             db.rollback()
             return result
@@ -84,10 +109,12 @@ def retain(path, account, apply=False):
                 'raw': [{'file': f.name, 'start': s, 'finish': e, 'sha256': h} for f, s, e, h in raw]}) + '\n')
             handle.flush()
             os.fsync(handle.fileno())
+        result['media_purged'] = purge_media(cur, media)
         cur.execute('''update whatsapp_message set body=null,attachment=null,
           metadata=jsonb_build_object('content_redacted',true,'retention_erased',true)
           where id=any(%s)''', (ids,))
-        cur.execute("update whatsapp_event set payload='{}'::jsonb where message_id=any(%s)", (ids,))
+        # Media events keep their ref until the encrypted object is confirmed deleted.
+        cur.execute("update whatsapp_event set payload='{}'::jsonb where message_id=any(%s) and not (kind='media' and payload->'media'->>'ref' is not null)", (ids,))
         cur.execute("update whatsapp_event set payload='{}'::jsonb where account_id=%s and kind='quarantine' and captured_at < %s", (account, cutoff))
         for file, start, finish, digest in raw:
             erase_line(file, start, finish, digest)

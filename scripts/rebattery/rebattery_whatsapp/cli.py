@@ -8,7 +8,7 @@ import psycopg2
 from . import identity, read
 from .core import Refused, connection, cursor
 from .ingest import ingest
-from .commands_read import COMMANDS, dispatch_read_command, register_read_commands
+from .commands_read import COMMANDS, attachment_get, dispatch_read_command, register_attachment_command, register_read_commands
 from .screening import register_screen_command, screen
 
 from .retention import retain
@@ -22,6 +22,7 @@ def parser():
     ingest_parser.add_argument('--apply', action='store_true')
     commands.add_parser('status')
     register_read_commands(commands)
+    register_attachment_command(commands)
     register_screen_command(commands)
     retention = commands.add_parser('retention')
     retention.add_argument('--path', required=True)
@@ -52,6 +53,9 @@ def dispatch(args):
     if args.command == 'screen':
         with connection() as db:
             return screen(db, args.apply, args.limit)
+    if args.command == 'attachment':
+        with connection(read_only=True) as db:
+            return attachment_get(db, args)
     if args.command in COMMANDS:
         with connection(read_only=True) as db:
             return dispatch_read_command(args, db)

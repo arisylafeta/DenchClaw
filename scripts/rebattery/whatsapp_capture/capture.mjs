@@ -13,11 +13,13 @@
 import { appendFileSync, chmodSync, closeSync, mkdirSync, openSync, renameSync, writeFileSync, existsSync, statfsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import makeWASocket, { DisconnectReason, fetchLatestWaWebVersion, useMultiFileAuthState } from '@whiskeysockets/baileys';
+import { fileURLToPath } from 'node:url';
+import makeWASocket, { BufferJSON, DisconnectReason, downloadMediaMessage, fetchLatestWaWebVersion, useMultiFileAuthState } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import qrcodeTerminal from 'qrcode-terminal';
 import QRCode from 'qrcode';
-import { toRecord, updateRecord, aliasRecord, membershipRecord, captureSocketOptions } from './record.mjs';
+import { toRecord, updateRecord, aliasRecord, membershipRecord, mediaRecord, captureSocketOptions } from './record.mjs';
+import { createMediaPipeline, pythonStore } from './media.mjs';
 
 const EXIT_UNPAIRED = 3;
 const args = process.argv.slice(2);
@@ -86,17 +88,37 @@ function append(records) {
   }
   setStatus({ captured: status.captured + kept.length, lastMessageAt: new Date().toISOString() });
 }
+// Media download (approved 18 Nov 2026, changes the earlier no-download rule). Files go to private
+// encrypted storage through rebattery_whatsapp/media_store.py; failures are recorded and retried, never fatal.
+const media = PAIR ? null : createMediaPipeline({
+  dir: path.join(STATE, 'media-queue'),
+  download: msg => downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: sock.updateMediaMessage }),
+  store: pythonStore({ script: fileURLToPath(new URL('../rebattery_whatsapp/media_store.py', import.meta.url)) }),
+  serialize: msg => JSON.stringify(msg, BufferJSON.replacer),
+  deserialize: text => JSON.parse(text, BufferJSON.reviver),
+  record: (r, result) => {
+    append([mediaRecord(r, result, options(r.origin, 'media.download'))]);
+    setStatus({ media: media.stats() });
+  },
+  log: (what, code) => console.error(what, code),
+});
+
 function capture(messages, origin) {
   const records = [];
+  const submitted = [];
   for (const msg of messages || []) {
     const r = toRecord(msg, options(origin, origin === 'history' ? 'messaging-history.set' : 'messages.upsert'));
     if (!r) continue;
     records.push(r);
+    if (r.kind === 'message') submitted.push([msg, r]);
+    if (r.kind === 'revoke') media?.cancel(r.chatId, r.targetId, r.account);
     for (const [a, b] of [[r.chatId, r.chatAltId], [r.participant, r.participantAlt]]) {
       if (a && b) records.push(aliasRecord({ lid: a.endsWith('@lid') ? a : b, pn: a.endsWith('@lid') ? b : a }, options(origin, 'message.key')));
     }
   }
   append(records);
+  // Download only after the message line is safely appended.
+  for (const [msg, r] of submitted) media?.submit(msg, r);
 }
 
 async function start() {
@@ -152,6 +174,7 @@ async function start() {
         lastGap: status.gapSince ? { since: status.gapSince, until: now, catchUpVerified: false } : status.lastGap, gapSince: null });
       append([aliasRecord({ lid: sock.user?.lid, pn: sock.user?.id }, options('live', 'account.paired'))]);
       console.log('WhatsApp capture connected.');
+      media?.resume();
       if (PAIR) {
         console.log('Linked. Collecting the initial history push for 90s, then exiting; then start the service.');
         setTimeout(() => { setStatus({ state: 'paired' }); process.exit(0); }, 90000);

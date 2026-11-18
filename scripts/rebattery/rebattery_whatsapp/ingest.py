@@ -14,7 +14,9 @@ from psycopg2.extras import Json
 from . import identity
 from .core import Refused, account_jid, connection, cursor, instant, lock_account, stable_id
 
-KINDS = {'message', 'other', 'edit', 'revoke', 'reaction', 'membership', 'identity_alias'}
+KINDS = {'message', 'other', 'edit', 'revoke', 'reaction', 'membership', 'identity_alias', 'media'}
+# Attachment keys written by media observations (kind 'media'); message re-deliveries must not erase them.
+MEDIA_KEYS = ('ref', 'download_status', 'download_error', 'download_attempts', 'stored_at', 'retry_at')
 
 
 def validate(record):
@@ -32,7 +34,7 @@ def validate(record):
     for field in ('body', 'messageId', 'targetId', 'participant', 'participantAlt', 'chatAltId', 'quotedId'):
         if record.get(field) is not None and not isinstance(record[field], str):
             raise ValueError('invalid_field_type')
-    for field in ('flags', 'attachment', 'provenance'):
+    for field in ('flags', 'attachment', 'provenance', 'media'):
         if record.get(field) is not None and not isinstance(record[field], dict):
             raise ValueError('invalid_metadata')
     if (record.get('flags') or {}).get('expiresAt'):
@@ -66,8 +68,22 @@ def sanitised(record):
     if flags.get('viewOnce') or (expires and instant(expires) <= datetime.now(timezone.utc)):
         value['body'] = None
         value['attachment'] = None
+        value['media'] = None
         value['contentRedacted'] = True
     return value
+
+
+def media_fields(media):
+    """Map a media observation to the attachment keys stored in whatsapp_message.attachment."""
+    return {'ref': media.get('ref'), 'download_status': media.get('status'), 'download_error': media.get('error'),
+            'download_attempts': media.get('attempts'), 'stored_at': media.get('storedAt'), 'retry_at': media.get('retryAt')}
+
+
+def merge_media(existing, incoming):
+    """Keep a stored download over a later or replayed failure."""
+    if (existing or {}).get('download_status') == 'stored' and incoming.get('download_status') != 'stored':
+        return {k: existing.get(k) for k in MEDIA_KEYS}
+    return incoming
 
 
 def logical_key(record):
@@ -153,7 +169,7 @@ def project(cur, account, raw, provenance):
     existing = cur.fetchone()
     retention_erased = existing and existing['erased'] == 'true'
     if retention_erased:
-        record = {**record, 'body': None, 'attachment': None, 'contentRedacted': True}
+        record = {**record, 'body': None, 'attachment': None, 'media': None, 'contentRedacted': True}
     cur.execute('''insert into whatsapp_event(id,account_id,thread_id,message_id,kind,logical_key,envelope_id,target_provider_id,source_at,captured_at,payload,provenance)
       values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) on conflict(account_id,logical_key) do nothing returning id''',
       (stable_id(account, key), account, thread, message, kind, key, record.get('envelopeId') or
@@ -175,12 +191,29 @@ def project(cur, account, raw, provenance):
       values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) on conflict(account_id,thread_id,provider_message_id) do nothing''',
       (message, account, thread, target, sender, record.get('direction'), source_at, captured, 'provider' if source else 'capture', Json(metadata)))
     if kind in ('message', 'other'):
+        cur.execute('select attachment from whatsapp_message where id=%s', (message,))
+        prior = (cur.fetchone() or {}).get('attachment') or {}
+        attachment = record.get('attachment')
+        if attachment and prior.get('download_status'):
+            attachment = {**attachment, **{k: prior.get(k) for k in MEDIA_KEYS}}
+            if prior['download_status'] == 'stored':
+                metadata['content_not_downloaded'] = False
         cur.execute('''update whatsapp_message set original_seen=true,sender_identity_id=%s,direction=%s,occurred_at=%s,
           timestamp_source=%s,reply_to_provider_id=%s,metadata=metadata || %s::jsonb,
           body=case when edit_version=0 and deleted_at is null then %s else body end,
           attachment=case when edit_version=0 and deleted_at is null then %s else attachment end
           where id=%s''', (sender, record.get('direction'), source_at, 'provider' if source else 'capture',
-          record.get('quotedId'), Json(metadata), record.get('body'), Json(record.get('attachment')), message))
+          record.get('quotedId'), Json(metadata), record.get('body'), Json(attachment), message))
+    elif kind == 'media':
+        media = record.get('media')
+        if media and not record.get('contentRedacted'):
+            cur.execute('select attachment from whatsapp_message where id=%s and deleted_at is null', (message,))
+            row = cur.fetchone()
+            if row:
+                fields = merge_media(row['attachment'], media_fields(media))
+                cur.execute('''update whatsapp_message set attachment=coalesce(attachment,'{}'::jsonb) || %s::jsonb,
+                  metadata=metadata || %s::jsonb where id=%s''', (Json(fields),
+                  Json({'content_not_downloaded': fields.get('download_status') != 'stored'}), message))
     elif kind == 'edit':
         cur.execute('''update whatsapp_message set edit_version=edit_version+1,
           body=case when projection_order<%s and deleted_at is null then %s else body end,

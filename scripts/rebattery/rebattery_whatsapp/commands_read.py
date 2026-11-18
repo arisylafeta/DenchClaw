@@ -1,7 +1,10 @@
 """Bounded local PostgreSQL readers. No capture credentials or provider access."""
-from datetime import datetime
-from . import read
-from .core import cursor
+import mimetypes
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from . import media_store, read
+from .core import ProviderError, Refused, cursor, instant
 
 COMMANDS = {'search', 'message', 'thread', 'person', 'company', 'trade'}
 
@@ -18,6 +21,55 @@ def register_read_commands(commands):
         sub.add_argument('--since')
         sub.add_argument('--until')
         sub.add_argument('--direction', choices=('inbound', 'outbound'))
+
+
+def register_attachment_command(commands):
+    sub = commands.add_parser('attachment').add_subparsers(dest='action', required=True)
+    get = sub.add_parser('get')
+    get.add_argument('id', help='message id (canonical, or the provider message id when unambiguous)')
+    get.add_argument('--out', required=True, help='existing or new directory to write the file into')
+
+
+def safe_name(name, fallback):
+    name = re.sub(r'[^A-Za-z0-9._ -]', '_', Path(name or '').name).strip(' .')
+    return name[:120] or fallback
+
+
+def attachment_get(db, args, store=media_store):
+    """Fetch the decrypted file stored for a message. Never contacts WhatsApp."""
+    with cursor(db) as cur:
+        cur.execute('''select m.id,m.provider_message_id,m.deleted_at,m.attachment,m.metadata from whatsapp_message m
+          where m.id=%s or m.provider_message_id=%s limit 2''', (args.id, args.id))
+        rows = cur.fetchall()
+    if not rows:
+        raise Refused('message_not_found')
+    if len(rows) > 1:
+        raise Refused('message_ambiguous', 'Use the canonical message id')
+    row = rows[0]
+    flags = (row['metadata'] or {}).get('flags') or {}
+    expires = flags.get('expiresAt')
+    if (row['deleted_at'] or flags.get('viewOnce') or (row['metadata'] or {}).get('content_redacted')
+            or (expires and instant(expires) <= datetime.now(timezone.utc))):
+        raise Refused('attachment_unavailable', 'Message was deleted, expired, redacted or view-once')
+    attachment = row['attachment'] or {}
+    if not attachment:
+        raise Refused('no_attachment')
+    if attachment.get('download_status') != 'stored' or not attachment.get('ref'):
+        raise Refused('attachment_not_stored', attachment.get('download_status') or 'not downloaded')
+    out = Path(args.out).expanduser()
+    out.mkdir(parents=True, exist_ok=True)
+    name = safe_name(attachment.get('filename'), f"{row['provider_message_id']}{mimetypes.guess_extension((attachment.get('mime') or '').split(';')[0]) or ''}")
+    target = out / name
+    counter = 1
+    while target.exists():
+        target = out / f'{Path(name).stem}-{counter}{Path(name).suffix}'
+        counter += 1
+    try:
+        result = store.get(attachment['ref'], str(target), attachment.get('sha256'))
+    except media_store.StoreError as exc:
+        raise ProviderError('attachment_download_failed', exc.code) from exc
+    return {'path': result['path'], 'size': result['size'], 'sha256': result['sha256'], 'mime': attachment.get('mime'),
+            'type': attachment.get('type'), 'source_ref': f"whatsapp:message:{row['id']}"}
 
 
 def source_ref(row, kind):

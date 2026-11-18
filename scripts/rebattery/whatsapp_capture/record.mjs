@@ -1,4 +1,4 @@
-// Pure provider-to-JSONL mapping. No provider operations or media downloads.
+// Pure provider-to-JSONL mapping. No provider operations or media downloads (media.mjs downloads; this file only decides eligibility and maps outcomes).
 import { createHash } from 'node:crypto';
 const CAPTURED_JID = /@(s\.whatsapp\.net|lid|g\.us)$/;
 const MEDIA_TYPES = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage'];
@@ -120,4 +120,33 @@ export function membershipRecord(event, opts) {
     authorPn: event.authorPn ?? null,
     eventId: hash([opts.account, event.id, event.key?.id ?? null, event.action, event.participants,
       ...(event.key?.id ? [] : [opts.captureRunId, opts.sequence])]) };
+}
+
+// Media download policy (approved 18 Nov 2026): image, video, audio and document content of normal
+// messages is downloaded at capture time. Stickers, view-once, expired, edits and revokes never are.
+export const MEDIA_MAX_BYTES = 50 * 1024 * 1024;
+const DOWNLOADABLE = new Set(['image', 'video', 'audio', 'document']);
+export function mediaPlan(r, nowMs = Date.now()) {
+  if (!r || r.kind !== 'message' || !r.attachment || !DOWNLOADABLE.has(r.attachment.type)) return null;
+  if (r.flags?.viewOnce) return null;
+  if (r.flags?.expiresAt && Date.parse(r.flags.expiresAt) <= nowMs) return null;
+  if (!r.attachment.sha256) return { skip: 'no_sha256' };
+  if (r.attachment.size && r.attachment.size > MEDIA_MAX_BYTES) return { skip: 'too_large' };
+  return { download: true };
+}
+// One observation of a download outcome, appended after the message line (never rewrites it).
+// status: stored | failed | skipped. Carries the storage ref and hash only: no media keys or URLs.
+export function mediaRecord(r, result, opts) {
+  const key = { remoteJid: r.chatId, remoteJidAlt: r.chatAltId, id: r.messageId, participant: r.participant,
+    participantAlt: r.participantAlt, fromMe: r.direction === 'outbound' };
+  const rec = base(key, { ...opts, event: 'media.download' }, 'media');
+  const media = { status: result.status, ref: result.ref ?? null, sha256: r.attachment.sha256, size: result.size ?? r.attachment.size ?? null,
+    mime: r.attachment.mime, filename: r.attachment.filename, type: r.attachment.type,
+    error: result.error ?? null, attempts: result.attempts ?? null, retryAt: result.retryAt ?? null,
+    storedAt: result.status === 'stored' ? rec.capturedAt : null };
+  Object.assign(rec, { targetId: r.messageId, timestamp: r.timestamp, timestampSource: r.timestampSource, envelopeId: null,
+    flags: r.flags, media });
+  rec.provenance.sourceTimestamp = r.timestamp;
+  rec.eventId = hash([r.account, 'media', r.chatId, r.messageId, media.status, media.ref, media.error, media.attempts]);
+  return rec;
 }

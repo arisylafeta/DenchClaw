@@ -1,4 +1,4 @@
-# Read-only capture of the ReBattery WhatsApp business number (REB-355).
+# Capture (read-only apart from the approved media download, see whatsapp_capture/SCHEMA.md) of the ReBattery WhatsApp business number (REB-355).
 # Pair first, interactively: node capture.mjs --state /root/.rebattery/whatsapp-capture --pair
 # Set WorkingDirectory to the reviewed checkout before installation.
 [Unit]
