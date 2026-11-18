@@ -20,10 +20,14 @@ Reports every violation of ten rules, from the lines against the sources that pr
       row text, dossier products) no longer states, or a decline removed by R2, is listed as explained.
   R8  widening: a line broader than its source. Buy box (makes, cell_makers, chemistries, formats): the line carries no
       listed make, or a chemistry/format outside the list (model and part keys are exempt from chemistry/format).
-      Demand row or dossier product: the line drops a stated make, model, chemistry or format.
+      Demand row or dossier product: the line drops a stated make, model, chemistry or format. Only a line a research run
+      or a text parser wrote must sit inside the buy box; a line from the buyer's own request, alert, offer, dossier, mail
+      or chat may be broader than it.
   R9  open request (demand open/qualifying) with no line, or whose lines together miss a make, model, kWh, cell format,
       cell maker, quantity or price the row states in spec or summary. Lines are taken together, since a multi-make
       request cannot sit on one line. A make or model the sync deliberately removed (buyer_interest_suppressed) is not missed.
+      A recycler's scrap feedstock request (text says scrap, feedstock or recycling, states no product fact) writes no Want
+      by design and is exempt.
 
 Key shapes of the current sync (migrations 119/120): a cell format and a cell maker may sit in a broad key
 (broad:lg-cylindrical-nmc-cells, broad:21700-any-cells); that is not an invented combination. The cell format of the
@@ -681,6 +685,14 @@ def _line_make_ok(line, allowed_folds):
     return any(a == b or (min(len(a), len(b)) >= 2 and (a.startswith(b) or b.startswith(a))) for a in folds for b in allowed_folds)
 
 
+def _is_box_checked(line):
+    """Only a line a research run or a text parser wrote must sit inside the buy box. A line the buyer stated in their own
+    request, alert, offer, dossier, mail or chat may be broader than the box: the box is the narrower reading."""
+    refs = [str(ref) for ref in as_list(line.get("source_refs"))]
+    return (str(line.get("id") or "").startswith("bi_parse_") or line.get("kind") == "inferred"
+            or any(ref.startswith(("parse:", "crm:research")) for ref in refs))
+
+
 def _model_hits(text_values, make_hint_folds=()):
     """(owner make fold, slug) of every model the texts name. An alias counts when one model owns it or its make is hinted."""
     words = " ".join(_words(t) for t in text_values)
@@ -747,7 +759,7 @@ def r8(ctx):
             drops = _dropped(line, as_list(spec.get("makes")), as_list(spec.get("chemistries")), as_list(spec.get("formats")), _demand_models(demand))
             if drops:
                 found.append(_violation(ctx, "R8", line, f"line is broader than the request: dropped {'; '.join(drops)}", f"demand {demand['id']}"))
-        elif _is_profile_line(line):
+        elif _is_profile_line(line) and _is_box_checked(line):
             box = company.get("buyer_profile") or {}
             makes = [m for key in ("makes", "cell_makers") for m in as_list(box.get(key))]
             drops = _dropped(line, makes, as_list(box.get("chemistries")), as_list(box.get("formats")), exempt_chem_format=_is_specific_key(line))
@@ -820,6 +832,22 @@ def _cell_makers_stated(demand):
     return sorted(stated)
 
 
+_SCRAP_WORDS = re.compile(r"\b(?:scrap|feedstock|recycl\w*)\b", re.IGNORECASE)
+_CHEMISTRY_WORDS = re.compile(r"\b(?:lfp|nmc|nca|ncm|lto|lmo|nimh|lifepo4?)\b", re.IGNORECASE)
+_PRODUCT_SPEC_KEYS = ("makes", "make", "models", "model", "chemistries", "chemistry", "formats", "format", "part_numbers",
+                      "kwh", "kwh_min", "kwh_max", "pack_kwh", "capacity_kwh", "cell_formats", "cell_makers")
+
+
+def _is_scrap_feedstock(demand):
+    """A recycler's scrap feedstock request: the text says scrap, feedstock or recycling and states no product fact."""
+    spec = demand.get("spec") or {}
+    text = " ".join(str(t or "") for t in (demand.get("summary"), spec.get("product_family"), spec.get("intent_note")))
+    if not _SCRAP_WORDS.search(text) or any(as_list(spec.get(key)) for key in _PRODUCT_SPEC_KEYS):
+        return False
+    return not (model_aliases.text_makes(text) or model_aliases.text_models(text) or _CHEMISTRY_WORDS.search(text)
+                or KWH_FIGURE.search(text) or _cell_formats_stated(demand))
+
+
 def r9(ctx):
     found = []
     by_demand = collections.defaultdict(list)
@@ -836,6 +864,8 @@ def r9(ctx):
         removed = " ".join(fold(k) for k in ctx.get("suppressed_by_demand", {}).get(demand_id, []))
         if not lines and removed:
             continue  # every line of the request was removed on purpose (buyer_interest_suppressed)
+        if not lines and _is_scrap_feedstock(demand):
+            continue  # a recycler's scrap feedstock request names no product, so it writes no Want by design
         if not lines:
             found.append(_violation(ctx, "R9", stub, f"open request has no line: {str(demand.get('summary'))[:120]}", label, key="no line"))
             continue

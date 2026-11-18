@@ -338,6 +338,36 @@ class R8(unittest.TestCase):
         self.assertEqual([v["line_id"] for v in wc.r8(ctx([wide, ok], products=products))], ["bi_dossier_1"])
 
 
+class R8OwnLines(unittest.TestCase):
+    BOX = {"makes": ["Nissan"], "formats": ["Packs"], "chemistries": ["NMC"]}
+
+    def test_a_line_from_the_buyers_own_mail_may_be_broader_than_the_box(self):
+        own = line("a", kind="standing", ownership="mastered", format="module", product_key="broad:any-modules",
+                   source_refs=["email:gmail_msg_1:abc"])
+        self.assertEqual(wc.r8(ctx([own], profile=self.BOX)), [])
+
+    def test_research_and_parsed_lines_must_sit_inside_the_box(self):
+        research = line("a", kind="standing", ownership="mastered", format="module", product_key="broad:any-modules",
+                        source_refs=["crm:research:cee-2026-10:acme.com"])
+        parsed = line("bi_parse_b", kind="interest", ownership="mastered", format="module", product_key="broad:any-modules",
+                      source_refs=["crm:btd_1", "parse:live-20261115"])
+        self.assertEqual({v["line_id"] for v in wc.r8(ctx([research, parsed], profile=self.BOX))}, {"a", "bi_parse_b"})
+
+
+class R9Scrap(unittest.TestCase):
+    SCRAP = {"id": "d9", "company_id": "c1", "status": "open", "summary": "Scrap and end-of-life batteries as feedstock for his recycling plant",
+             "spec": {"volume": 150, "volume_unit": "tonnes", "max_price": 28, "product_family": "Scrap EV batteries for recycling"}}
+
+    def test_scrap_feedstock_request_with_no_product_needs_no_line(self):
+        self.assertEqual(wc.r9(ctx([], [self.SCRAP])), [])
+
+    def test_a_recycling_request_that_states_a_product_still_needs_its_line(self):
+        stated = {**self.SCRAP, "id": "d10", "spec": {**self.SCRAP["spec"], "makes": ["Tesla"]}}
+        self.assertEqual(wc.r9(ctx([], [stated]))[0]["key"], "no line")
+        lfp = {**self.SCRAP, "id": "d11", "summary": "Scrap LFP packs for recycling"}
+        self.assertEqual(wc.r9(ctx([], [lfp]))[0]["key"], "no line")
+
+
 class R9(unittest.TestCase):
     def test_no_line_for_an_open_request(self):
         elg = {"id": "d2", "company_id": "c1", "status": "open", "summary": "21700 18650",
