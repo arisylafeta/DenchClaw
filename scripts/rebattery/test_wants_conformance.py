@@ -400,6 +400,14 @@ class Report(unittest.TestCase):
         self.assertEqual(len(summary["examples"]["R5"]), 20)
         self.assertIn("| R5 | 30 |", wc.render_markdown(c, results))
 
+    def test_findings_records_list_every_hit_with_stable_keys(self):
+        lines = [line(f"a{i}", make="Nissan", format="system", product_key=f"broad:nissan-any-systems-{i}") for i in range(30)]
+        records = wc.finding_records(wc.check(ctx(lines)))
+        r5 = [r for r in records if r["rule"] == "R5"]
+        self.assertEqual(len(r5), 30)
+        self.assertEqual(len({r["key"] for r in r5}), 30)
+        self.assertEqual(records, wc.finding_records(wc.check(ctx(lines))))
+
 
 if __name__ == "__main__":
     unittest.main()

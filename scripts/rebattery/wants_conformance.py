@@ -38,6 +38,7 @@ read-only session and writes nothing to it.
 """
 import argparse
 import collections
+import hashlib
 import json
 import re
 import sys
@@ -913,6 +914,18 @@ def summarise(ctx, results, limit=EXAMPLES_PER_RULE):
             "r7_explained_examples": top_examples(ctx.get("r7_explained") or [], limit)}
 
 
+def finding_records(results):
+    """Every finding (not just examples) as a flat record with a stable key: rule, line id or source, short hash of the detail."""
+    records = []
+    for rule, items in results.items():
+        for v in items:
+            anchor = v.get("line_id") or v.get("source") or ""
+            digest = hashlib.sha1(str(v.get("why") or "").encode("utf-8")).hexdigest()[:8]
+            records.append({"key": f"{rule}|{anchor}|{digest}", "rule": rule, "company": v.get("company"),
+                            "line_id": v.get("line_id"), "source_id": v.get("source"), "message": v.get("why")})
+    return records
+
+
 def top_examples(items, limit=EXAMPLES_PER_RULE):
     """The companies with the most violations first, so the worst offenders show. limit 0 lists every hit."""
     per_company = collections.Counter(v["company_id"] for v in items)
@@ -991,6 +1004,7 @@ def main(argv=None):
     parser.add_argument("--dsn", required=True)
     parser.add_argument("--out", help="Markdown report path")
     parser.add_argument("--json", dest="json_out", help="JSON summary path")
+    parser.add_argument("--findings-jsonl", help="write every finding, one JSON object per line, with a stable key")
     parser.add_argument("--limit", type=int, default=EXAMPLES_PER_RULE,
                         help="hits listed per rule in the report and JSON (default 20, 0 = all)")
     parser.add_argument("--baseline-table", default="buyer_interest_pre_rebuild",
@@ -1012,6 +1026,10 @@ def main(argv=None):
         print(report)
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(summarise(ctx, results, args.limit), indent=2, default=str), encoding="utf-8")
+    if args.findings_jsonl:
+        Path(args.findings_jsonl).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.findings_jsonl).write_text(
+            "".join(json.dumps(r, ensure_ascii=False, default=str) + "\n" for r in finding_records(results)), encoding="utf-8")
     print(json.dumps({"lines": len(ctx["lines"]), "counts": {r: len(v) for r, v in results.items()}}))
 
 
