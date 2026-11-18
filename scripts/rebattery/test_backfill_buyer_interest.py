@@ -505,6 +505,15 @@ The story, unchanged by this step.
         self.assertEqual(str(self._expiry("standing", "broad:bmw-any-packs")["expires_on"]), "2027-12-20")
         self.assertEqual(str(self._expiry("standing", "broad:volvo-any-packs")["expires_on"]), "2027-11-04")
 
+    def test_two_products_with_one_resulting_key_merge_their_kwh_range_and_refs(self):
+        self.write_dossier(markdown=self._dossier(
+            '  - make: "MG"\n    format: "packs"\n    kwh: [72.6]\n    status: "said_interested"\n    seen: "2026-10-01"\n    src: "ref_a"\n'
+            '  - make: "MG"\n    format: "packs"\n    kwh: [44.5]\n    status: "said_interested"\n    seen: "2026-10-02"\n    src: "ref_b"\n'))
+        self.convert()
+        [line] = [l for l in self.lines(self.dossier_company, "interest") if "mg" in l["product_key"]]
+        self.assertEqual((float(line["kwh_min"]), float(line["kwh_max"])), (44.5, 72.6))
+        self.assertEqual(sorted(line["source_refs"]), ["ref_a", "ref_b"])
+
     def test_a_one_off_shortlist_is_an_ask_that_lasts_90_days(self):
         self.write_dossier(markdown=self._dossier(
             '  - make: "BMW"\n    format: "packs"\n    status: "asked"\n    one_off: true\n    seen: "2026-10-01"\n'

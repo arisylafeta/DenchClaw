@@ -171,7 +171,7 @@ class R6(unittest.TestCase):
 
     def test_dossier_product_detail_lost(self):
         products = [{"make": "Kokam", "part_number": "KCL255", "kwh": [0.2], "status": "asked"}]
-        bare = line("bi_dossier_1", make="Kokam", product_key="broad:kokam-any-cells")
+        bare = line("bi_dossier_1", make="Kokam", product_key="broad:kokam-any-cells", kwh_min=5, kwh_max=9)
         why = wc.r6(ctx([bare], products=products))[0]["why"]
         self.assertIn("part number KCL255", why)
         self.assertIn("kWh 0.2", why)
@@ -215,6 +215,22 @@ class R6(unittest.TestCase):
         outside = line("bi_dossier_1", make="MG", format="pack", product_key="broad:mg-any-packs", kwh_min=72.6, kwh_max=72.6)
         self.assertEqual(wc.r6(ctx([inside], products=products)), [])
         self.assertIn("kWh 44.5", wc.r6(ctx([outside], products=products))[0]["why"])
+
+
+class R6Broader(unittest.TestCase):
+    def test_an_open_ended_or_unbounded_broader_line_carries_a_dossier_kwh(self):
+        products = [{"make": "Volkswagen Group", "format": "packs", "kwh": [55, 63, 82]}]
+        ask = line("a", make="VW Group", product_key="broad:vw-group-any-packs", kwh_min=30)
+        self.assertEqual(wc.r6(ctx([ask, line("bi_dossier_1", make="VW Group", product_key="broad:vw-group-any-packs")], products=products)), [])
+        capped = line("b", make="VW Group", product_key="broad:vw-group-any-packs", kwh_min=30, kwh_max=60)
+        self.assertIn("kWh 82", wc.r6(ctx([capped, line("bi_dossier_1", make="VW Group", product_key="broad:vw-group-any-packs", kwh_min=70, kwh_max=70)], products=products))[0]["why"])
+
+    def test_an_expired_or_other_make_line_does_not_carry_it(self):
+        products = [{"make": "MG", "format": "packs", "kwh": [44.5]}]
+        dossier = line("bi_dossier_1", make="MG", product_key="broad:mg-any-packs", kwh_min=72.6, kwh_max=72.6)
+        expired = line("a", make="MG", product_key="broad:mg-any-packs", expires_on="2020-01-01")
+        other = line("b", make="BYD", product_key="broad:byd-any-packs")
+        self.assertIn("kWh 44.5", wc.r6(ctx([dossier, expired, other], products=products))[0]["why"])
 
 
 class R7(unittest.TestCase):
@@ -374,6 +390,15 @@ class R8OwnLines(unittest.TestCase):
         self.assertEqual({v["line_id"] for v in wc.r8(ctx([research, parsed], profile=self.BOX))}, {"a", "bi_parse_b"})
 
 
+class R8Group(unittest.TestCase):
+    def test_a_brand_of_a_named_make_group_is_not_broader(self):
+        demand = {"id": "d1", "company_id": "c1", "status": "open", "summary": "Stellantis packs", "spec": {"makes": ["Stellantis", "Tesla"]}}
+        citroen = line("a", demand_id="d1", make="Citroen", product_key="model:citroen-c3", product_key_level="model", model="C3")
+        self.assertEqual(wc.r8(ctx([citroen], [demand])), [])
+        bmw = line("b", demand_id="d1", make="BMW", product_key="broad:bmw-any-packs")
+        self.assertEqual(len(wc.r8(ctx([bmw], [demand]))), 1)
+
+
 class R9Scrap(unittest.TestCase):
     SCRAP = {"id": "d9", "company_id": "c1", "status": "open", "summary": "Scrap and end-of-life batteries as feedstock for his recycling plant",
              "spec": {"volume": 150, "volume_unit": "tonnes", "max_price": 28, "product_family": "Scrap EV batteries for recycling"}}
@@ -401,6 +426,21 @@ class R9(unittest.TestCase):
         keep = line("a", demand_id="d2", make="Tesla", price_max=1200)
         self.assertEqual(wc.r9(ctx([keep], [demand])), [])
         self.assertEqual(len(wc.r9(ctx([line("b", demand_id="d2", make="Tesla")], [demand]))), 1)
+
+    def test_target_price_is_not_missing_when_a_line_carries_the_ceiling_price(self):
+        demand = {"id": "d2", "company_id": "c1", "status": "open", "summary": "Tesla packs", "spec": {"makes": ["Tesla"], "max_price": 4000, "target_price_per_pack": 3000}}
+        self.assertEqual(wc.r9(ctx([line("a", demand_id="d2", make="Tesla", price=4000)], [demand])), [])
+
+    def test_a_range_only_in_product_family_is_report_only(self):
+        demand = {"id": "d2", "company_id": "c1", "status": "open", "summary": "Shortlist: Tesla Model 3 57kWh, MG4 51kWh",
+                  "spec": {"models": ["Model 3", "MG4"], "product_family": "Mixed EV packs 41-113kWh"}}
+        lines = [line("a", demand_id="d2", make="Tesla", model="Model 3", product_key="model:tesla-model3", product_key_level="model"),
+                 line("b", demand_id="d2", make="MG", model="MG4", product_key="model:mg-mg4", product_key_level="model")]
+        base = ctx(lines, [demand])
+        self.assertEqual([v for v in wc.r9(base) if "kWh" in v["why"]], [])
+        self.assertEqual(len(base["r9_report_only"]), 1)
+        lines[0]["kwh_min"] = 10  # a conflicting bound on a line: required again
+        self.assertIn("kWh", wc.r9(ctx(lines, [demand]))[0]["why"])
 
     def test_model_the_sync_removed_on_purpose_is_not_missed(self):
         demand = {"id": "d2", "company_id": "c1", "status": "open", "summary": "Tesla Model 3 and Model Y packs", "spec": {"makes": ["Tesla"]}}

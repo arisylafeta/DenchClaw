@@ -542,6 +542,11 @@ def _keyed(cur, facts):
     return cur.fetchone()
 
 
+def _widen(pick, left, right):
+    """min/max of two kWh bounds; an unstated bound (None) stays unbounded."""
+    return None if left is None or right is None else pick(left, right)
+
+
 def _dossier_line_id(company_id, kind, key):
     digest = hashlib.sha1(f"{company_id}|{kind}|{key}".encode("utf-8")).hexdigest()[:24]
     return f"bi_dossier_{digest}"
@@ -575,6 +580,10 @@ def _write_line(cur, company_id, kind, ownership, keyed, seen, refs, reason=None
                        on conflict (company_id, product_key, kind) where ownership = 'mastered'
                        do update set first_seen = least(buyer_interest.first_seen, excluded.first_seen),
                          last_seen = greatest(buyer_interest.last_seen, excluded.last_seen),
+                         kwh_min = case when buyer_interest.kwh_min is null or excluded.kwh_min is null then null
+                           else least(buyer_interest.kwh_min, excluded.kwh_min) end,
+                         kwh_max = case when buyer_interest.kwh_max is null or excluded.kwh_max is null then null
+                           else greatest(buyer_interest.kwh_max, excluded.kwh_max) end,
                          expires_on = greatest(buyer_interest.expires_on, excluded.expires_on),
                          model = coalesce(buyer_interest.model, excluded.model),
                          raw_product = coalesce(buyer_interest.raw_product, excluded.raw_product),
@@ -595,6 +604,10 @@ def _write_line(cur, company_id, kind, ownership, keyed, seen, refs, reason=None
                            then coalesce(%s::date, current_date) + %s end)
                        on conflict (id) do update set last_seen = greatest(buyer_interest.last_seen,
                          excluded.last_seen), decline_reason = excluded.decline_reason,
+                         kwh_min = case when buyer_interest.kwh_min is null or excluded.kwh_min is null then null
+                           else least(buyer_interest.kwh_min, excluded.kwh_min) end,
+                         kwh_max = case when buyer_interest.kwh_max is null or excluded.kwh_max is null then null
+                           else greatest(buyer_interest.kwh_max, excluded.kwh_max) end,
                          expires_on = greatest(buyer_interest.expires_on, excluded.expires_on),
                          source_refs = (select array_agg(distinct ref order by ref)
                            from unnest(buyer_interest.source_refs || excluded.source_refs) ref),
@@ -661,7 +674,14 @@ def sync_dossier_rows(cur, companies):
                             # The original wording stays on the line when cleaning changed the model.
                             keyed["raw_product"] = raw_model or keyed["raw_product"]
                             keyed_lines.append(keyed)
-                keyed_lines = list({keyed["key"]: keyed for keyed in keyed_lines}.values())
+                merged = {}
+                for keyed in keyed_lines:  # same key: one line, kWh range widened over all of them
+                    held = merged.get(keyed["key"])
+                    if held:
+                        keyed = {**keyed, "kwh_min": _widen(min, held["kwh_min"], keyed["kwh_min"]),
+                                 "kwh_max": _widen(max, held["kwh_max"], keyed["kwh_max"])}
+                    merged[keyed["key"]] = keyed
+                keyed_lines = list(merged.values())
                 stated += len(keyed_lines)
                 keyed_lines = keyed_lines[:FAN_OUT_CAP]
                 if not keyed_lines:

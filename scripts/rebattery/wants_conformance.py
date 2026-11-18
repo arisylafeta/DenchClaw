@@ -42,6 +42,7 @@ read-only session and writes nothing to it.
 """
 import argparse
 import collections
+import datetime
 import hashlib
 import json
 import re
@@ -467,6 +468,29 @@ def _states_cells(spec):
     return not formats or "cell" in formats
 
 
+def _unexpired(line):
+    expires = line.get("expires_on")
+    if not expires:
+        return True
+    try:
+        return datetime.date.fromisoformat(str(expires)[:10]) >= datetime.date.today()
+    except ValueError:
+        return True
+
+
+def _line_range_carries(line, product, value):
+    """An unexpired line of the same make (or none) with the same or a broader key carries a dossier kWh when its kWh range
+    contains it, or states no kWh bound at all (Colvert VW Group 55/63/82 under broad:vw-group-any-packs kwh_min 30)."""
+    if not _unexpired(line):
+        return False
+    if line.get("make") and product.get("make") and not (make_folds(line["make"]) & make_folds(product["make"])):
+        return False
+    if _is_specific_key(line) and not product.get("model"):
+        return False  # a model line is narrower than a make or platform product
+    lo, hi = num(line.get("kwh_min")), num(line.get("kwh_max"))
+    return (lo is None or lo <= value) and (hi is None or value <= hi)
+
+
 def r6(ctx):
     found = []
     by_demand = collections.defaultdict(list)
@@ -513,9 +537,7 @@ def r6(ctx):
             product_numbers = set(numbers)
             for v in kwhs:
                 for other in everything:
-                    lo, hi = num(other.get("kwh_min")), num(other.get("kwh_max"))
-                    same_make = not other.get("make") or not product.get("make") or make_folds(other["make"]) & make_folds(product["make"])
-                    if v is not None and lo is not None and hi is not None and lo <= v <= hi and same_make:
+                    if v is not None and _line_range_carries(other, product, v):
                         product_numbers.add(v)
             maker = product.get("make")
             if maker and fold(maker) in {fold(n) for n in buyer_dossier.CELL_MAKERS + buyer_dossier.EXTRA_CELL_MAKERS}:
@@ -673,7 +695,10 @@ def _is_specific_key(line):
 
 GROUP_BRANDS = {"vwgroup": {"audi", "skoda", "seat", "cupra", "porsche", "volkswagen", "bentley", "lamborghini"},
                 "volkswagen": {"audi", "skoda", "seat", "cupra", "porsche", "bentley", "lamborghini"},
-                "hyundai": {"genesis"}, "kia": set()}
+                "hyundai": {"genesis"}, "kia": set(),
+                "stellantis": {"citroen", "peugeot", "opel", "vauxhall", "fiat", "ds", "jeep", "alfaromeo", "chrysler",
+                               "dodge", "abarth", "lancia", "maserati"},
+                "renault": {"dacia", "alpine"}}
 
 
 def _line_make_ok(line, allowed_folds):
@@ -828,6 +853,23 @@ def _kwh_stated(demand):
     return sorted(figures)
 
 
+FAMILY_RANGE = re.compile(r"(?<![\w.])(\d{1,3}(?:\.\d+)?)\s?-\s?(\d{1,3}(?:\.\d+)?)\s?kwh\b", re.IGNORECASE)
+
+
+def _family_range(demand, lines):
+    """(lo, hi) of a kWh range a mixed-model request states only in product_family, when no line states a bound that
+    conflicts with it; else None."""
+    spec = demand.get("spec") or {}
+    if any(num(spec.get(k)) for k in ("kwh", "kwh_min", "kwh_max", "pack_kwh")) or len(as_list(spec.get("models"))) < 2:
+        return None
+    match = FAMILY_RANGE.search(str(spec.get("product_family") or ""))
+    if not match:
+        return None
+    lo, hi = float(match.group(1)), float(match.group(2))
+    bounds = [b for line in lines for b in (num(line.get("kwh_min")), num(line.get("kwh_max"))) if b is not None]
+    return (lo, hi) if all(lo <= b <= hi for b in bounds) else None
+
+
 def _line_has_kwh(line, value):
     lo, hi = num(line.get("kwh_min")), num(line.get("kwh_max"))
     near = lambda a, b: a is not None and abs(a - b) < 1e-9
@@ -896,9 +938,18 @@ def r9(ctx):
         for own, slug in sorted(_demand_models(demand)):
             if not any(_line_has_model(line, slug) for line in lines) and fold(slug) not in removed:
                 missing.append(f"model {slug}")
+        family = _family_range(demand, lines)
+        unbound = []
         for value in _kwh_stated(demand):
             if not any(_line_has_kwh(line, value) for line in lines):
-                missing.append(f"kWh {value:g}")
+                if family and family[0] <= value <= family[1]:
+                    unbound.append(f"kWh {value:g}")  # the range is a family description, not a per-line bound
+                else:
+                    missing.append(f"kWh {value:g}")
+        if unbound:
+            ctx.setdefault("r9_report_only", []).append(_violation(
+                ctx, "R9", lines[0], f"request kWh range {family[0]:g}-{family[1]:g} stated only in product_family; not on lines: {'; '.join(unbound)}", label,
+                key=f"{len(lines)} line(s): {lines[0]['product_key']}"))
         blob = " ".join(line_blob(line, True) for line in lines)
         for value in (_cell_formats_stated(demand) if _states_cells(spec) else []):
             cylindrical = value == "cylindrical" and any(n in blob for n in CELL_FORMAT_NUMBERS)
@@ -913,8 +964,9 @@ def r9(ctx):
             missing.append(f"quantity {volume:g} {spec.get('volume_unit') or ''}".strip())
         for field in ("max_price", "target_price_per_pack"):
             value = num(spec.get(field))
-            if field == "target_price_per_pack" and any(num(line.get("price_max")) is not None for line in lines):
-                continue  # a line carrying price_max holds the request's price range; a target price is not a defect
+            if field == "target_price_per_pack" and any(
+                    num(line.get(key)) is not None for line in lines for key in ("price_max", "price")):
+                continue  # a line carrying the price (the ceiling) or price_max holds the request's price; a target price below it is not a defect
             if value is not None and not any(value in (num(line.get("price")), num(line.get("price_max"))) for line in lines):
                 missing.append(f"price {field} {value:g}")
         if missing:
@@ -960,6 +1012,7 @@ def summarise(ctx, results, limit=EXAMPLES_PER_RULE):
             "companies": {rule: len({v["company_id"] for v in items}) for rule, items in results.items()},
             "by_source": {rule: dict(collections.Counter(source_kind(v["source"]) for v in items)) for rule, items in results.items()},
             "examples": {rule: top_examples(items, limit) for rule, items in results.items()},
+            "r9_report_only": len(ctx.get("r9_report_only") or []),
             "r7_explained": len(ctx.get("r7_explained") or []),
             "r7_explained_examples": top_examples(ctx.get("r7_explained") or [], limit)}
 
