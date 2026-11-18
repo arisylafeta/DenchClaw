@@ -546,7 +546,7 @@ export function buildProductKey(input: { fields: FieldFact[]; title?: string | n
   const format = formatField ?? formatFrom(`${capacityText} ${modelText} ${title}`);
   const cellFormatOf = (lineFormat: KeyFormat | null): CellFormat | null => lineFormat === "Cells"
     ? normalCellFormat(fieldValue(fields, "cell_format")) ?? normalCellFormat(formatText) ?? normalCellFormat(modelText)
-      ?? normalCellFormat(capacityText) ?? normalCellFormat(title)
+      ?? normalCellFormat(capacityText, true) ?? normalCellFormat(title, true)
     : null;
 
   const parsed = figuresIn(capacityText);

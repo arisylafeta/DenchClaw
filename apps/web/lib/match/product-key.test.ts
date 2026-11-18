@@ -284,6 +284,15 @@ describe("coverage of real-shaped field text", () => {
 });
 
 describe("cell format on the lot", () => {
+  it("does not read a cell format from loose lot text", () => {
+    const fmt = (title: string) => buildProductKey({ fields: fields({ format: "Cells" }), title }).lines[0].cellFormat;
+    expect(fmt("LFP cells, around 3.2V")).toBeNull();
+    expect(fmt("4680 pcs of 18650 cells")).toBe("18650");
+    expect(fmt("21700, replaces 18650")).toBeNull();
+    expect(fmt("32700 units")).toBeNull();
+    expect(fmt("21700 cells")).toBe("21700");
+  });
+
   it("reads the cell format from the cell_format field, the format, the model or the title", () => {
     expect(key({ format: "Cells", cell_format: "21700" }).lines[0].cellFormat).toBe("21700");
     expect(key({ format: "Cylindrical 18650" }).lines[0].cellFormat).toBe("18650");

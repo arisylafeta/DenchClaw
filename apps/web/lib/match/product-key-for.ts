@@ -158,15 +158,35 @@ export type CellFormat = (typeof CELL_FORMATS)[number];
 /** The round formats a "cylindrical" cell can be. */
 export const CYLINDRICAL_SIZES: readonly CellFormat[] = ["18650", "21700", "26650", "32700", "4680"];
 
-export function normalCellFormat(value: string | null | undefined): CellFormat | null {
+const SIZE_TOKEN = /(?<![0-9])(18650|21700|2170|26650|32700|4680)(?![0-9])/g;
+const QUANTITY_AFTER = /^\s*(?:pcs?\b|pieces?\b|units?\b|x\b|qty\b|off\b)/;
+const QUANTITY_BEFORE = /(?:\bqty|\bx|\bquantity)[\s:]*$/;
+const CELL_AFTER = /^[\s,:;-]*(?:li-?ion\s+|lithium\s+)?cells?\b/;
+const CELL_BEFORE = /\bcells?[\s,:;(-]*$/;
+
+/**
+ * A cell form factor from a structured value (cell_format, format, model) or, with `inText`, from free text
+ * (title, capacity): there a size counts only next to the word cell/cells ("21700 cells"). A number followed by
+ * pcs/units/x/qty is a count, not a size, and two different sizes make the format unknown. Mirrors
+ * buyer_interest_cell_format() in SQL.
+ */
+export function normalCellFormat(value: string | null | undefined, inText = false): CellFormat | null {
   const text = (value ?? "").toLowerCase();
-  for (const size of ["18650", "21700", "26650", "32700", "4680"] as const) {
-    if (new RegExp(`(?:^|[^0-9])${size}(?:[^0-9]|$)`).test(text)) {return size;}
+  const sizes = new Set<CellFormat>();
+  for (const match of text.matchAll(SIZE_TOKEN)) {
+    const before = text.slice(0, match.index);
+    const after = text.slice(match.index + match[0].length);
+    if (QUANTITY_AFTER.test(after) || QUANTITY_BEFORE.test(before)) {continue;}
+    if (inText && !CELL_AFTER.test(after) && !CELL_BEFORE.test(before)) {continue;}
+    sizes.add(match[1] === "2170" ? "21700" : match[1] as CellFormat);
   }
-  if (/(?:^|[^0-9])2170(?:[^0-9]|$)/.test(text)) {return "21700";}
-  if (/prismati/.test(text)) {return "prismatic";}
-  if (/pouch/.test(text)) {return "pouch";}
-  if (/cylind|round/.test(text)) {return "cylindrical";}
+  if (sizes.size > 1) {return null;}
+  if (sizes.size === 1) {return [...sizes][0];}
+  const distinct = [...text.matchAll(SIZE_TOKEN)].filter((m) => !QUANTITY_AFTER.test(text.slice(m.index + m[0].length)));
+  if (new Set(distinct.map((m) => m[1] === "2170" ? "21700" : m[1])).size > 1) {return null;}
+  if (/\bprismatic\b/.test(text)) {return "prismatic";}
+  if (/\bpouch\b/.test(text)) {return "pouch";}
+  if (/\b(?:cylindrical|round)\b/.test(text)) {return "cylindrical";}
   return null;
 }
 

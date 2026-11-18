@@ -18,7 +18,7 @@ create or replace function buyer_interest_cell_format(value text) returns text l
     when t ~ '(^|[^0-9])4680([^0-9]|$)' then '4680'
     when t ~ 'prismati' then 'prismatic'
     when t ~ 'pouch' then 'pouch'
-    when t ~ '(cylind|round)' then 'cylindrical'
+    when t ~ '\y(cylindrical|round)\y' then 'cylindrical'
     else null end
   from (select lower(coalesce(value, '')) as t) x
 $$;
