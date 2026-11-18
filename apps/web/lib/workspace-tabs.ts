@@ -1311,7 +1311,9 @@ export function workspaceTabsReducer(
 }
 
 export function isMarkdownPath(path: string | null | undefined): boolean {
-  return !!path && /\.mdx?$/i.test(path.split(/[?#]/)[0]);
+  if (!path) return false;
+  // Agent artifacts (mail drafts and messages) are documents too: a reload shows the chat.
+  return /\.mdx?$/i.test(path.split(/[?#]/)[0]) || /^~mail\/(draft|message)\//.test(path);
 }
 
 /** Keeps the tab but makes the chat the visible surface when the active content tab is a markdown document. */

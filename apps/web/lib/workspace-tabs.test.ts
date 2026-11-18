@@ -734,3 +734,12 @@ describe("deactivateMarkdownTab", () => {
     expect(deactivateMarkdownTab(crm)).toBe(crm);
   });
 });
+
+describe("isMarkdownPath artifacts", () => {
+  it("treats mail draft and message artifacts like documents", async () => {
+    const { isMarkdownPath } = await import("./workspace-tabs");
+    expect(isMarkdownPath("~mail/draft/17f3ee6a7eb641d2a9d4c26fe3b8ad68")).toBe(true);
+    expect(isMarkdownPath("~mail/message/abc")).toBe(true);
+    expect(isMarkdownPath("~crm/people")).toBe(false);
+  });
+});
