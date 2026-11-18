@@ -83,6 +83,7 @@ const toSupplyFacts = (listing: Record<string, unknown>): SupplyFacts => {
     platform: pick<string>("platform", "platform"),
     format: pick<string>("format", "format"),
     chemistry: pick<string>("chemistry", "chemistry"),
+    cellFormat: pick<string>("cellFormat", "cell_format"),
     kwh: pick<number>("kwh", "kwh"),
     kwhMin: pick<number>("kwhMin", "kwh_min"),
     kwhMax: pick<number>("kwhMax", "kwh_max"),

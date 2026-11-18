@@ -356,19 +356,25 @@ class Backfill(unittest.TestCase):
             holder.close()
 
     # --- (b) the profile path ---------------------------------------------
-    def test_a_researched_row_becomes_an_inferred_line_from_its_observation_date(self):
-        row_id = self.demand_row(status="closed", closed_reason="research_profile", observed_on="2026-09-04",
-                                 source_kind="research",
-                                 spec={"basis": "estimated", "formats": ["Cells"], "chemistries": ["NMC"]})
+    def test_a_researched_row_writes_no_broad_line_but_a_named_model_becomes_an_inferred_line(self):
+        # Since 8a32cb539 a research profile writes a Research want only for a named model or part number.
+        broad = self.demand_row(status="closed", closed_reason="research_profile", observed_on="2026-09-04",
+                                source_kind="research",
+                                spec={"basis": "estimated", "formats": ["Cells"], "chemistries": ["NMC"]})
         with self.cursor() as cur:
-            rows = self.backfill.profile_rows(cur, [row_id])
-            result = self.backfill.sync_profile_rows(cur, rows)
+            result = self.backfill.sync_profile_rows(cur, self.backfill.profile_rows(cur, [broad]))
         self.conn.commit()
-        self.assertEqual(result["written"], 1)
+        self.assertEqual(self.lines(), [])  # the row is processed, but no broad line is written
+        named = self.demand_row(status="closed", closed_reason="research_profile", observed_on="2026-09-04",
+                                source_kind="research",
+                                spec={"basis": "estimated", "makes": ["BYD"], "formats": ["Packs"], "model": "Seal"})
+        with self.cursor() as cur:
+            result = self.backfill.sync_profile_rows(cur, self.backfill.profile_rows(cur, [named]))
+        self.conn.commit()
         [line] = self.lines()
         self.assertEqual(line["kind"], "inferred")
         self.assertEqual(line["ownership"], "mastered")
-        self.assertEqual(line["product_key"], "broad:nmc-cells")
+        self.assertNotIn("broad:", line["product_key"])
         self.assertEqual(str(line["first_seen"]), "2026-09-04")
         self.assertEqual(str(line["expires_on"]), "2027-03-03")  # inferred: first seen + 180 days
 
