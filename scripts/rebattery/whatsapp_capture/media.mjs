@@ -21,10 +21,13 @@ export function errorCode(err) {
 }
 
 // Read a download stream into memory, aborting as soon as it passes the size cap.
-export async function collectLimited(stream, limit = MEDIA_MAX_BYTES) {
+export async function collectLimited(stream, limit = MEDIA_MAX_BYTES, signal) {
   const chunks = [];
   let total = 0;
+  const abort = () => stream.destroy?.();
+  signal?.addEventListener('abort', abort, { once: true });
   for await (const chunk of stream) {
+    if (signal?.aborted) break;
     total += chunk.length;
     if (total > limit) {
       stream.destroy?.();
@@ -32,12 +35,17 @@ export async function collectLimited(stream, limit = MEDIA_MAX_BYTES) {
     }
     chunks.push(chunk);
   }
+  signal?.removeEventListener('abort', abort);
+  if (signal?.aborted) throw Object.assign(new Error('aborted'), { isStore: true, code: 'download_timeout' });
   return Buffer.concat(chunks);
 }
 
-function withTimeout(promise, ms, code) {
+function withTimeout(start, ms, code) {
   let timer;
-  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error('timeout'), { isStore: true, code })), ms); });
+  const controller = new AbortController();
+  const promise = Promise.resolve().then(() => start(controller.signal));
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(Object.assign(new Error('timeout'), { isStore: true, code })); }, ms); });
+  promise.catch(() => {});
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
@@ -76,7 +84,7 @@ export function createMediaPipeline({ dir, download, store, record, serialize = 
     }
     let error;
     try {
-      const data = await withTimeout(Promise.resolve(download(entry.msg)), downloadTimeoutMs, 'download_timeout');
+      const data = await withTimeout(signal => download(entry.msg, signal), downloadTimeoutMs, 'download_timeout');
       if (!data?.length) throw Object.assign(new Error('empty'), { isStore: true, code: 'empty_download' });
       if (data.length > MEDIA_MAX_BYTES) throw Object.assign(new Error('big'), { isStore: true, code: 'too_large' });
       if (createHash('sha256').update(data).digest('hex') !== r.attachment.sha256) {

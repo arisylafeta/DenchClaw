@@ -92,7 +92,7 @@ function append(records) {
 // encrypted storage through rebattery_whatsapp/media_store.py; failures are recorded and retried, never fatal.
 const media = PAIR ? null : createMediaPipeline({
   dir: path.join(STATE, 'media-queue'),
-  download: async msg => collectLimited(await downloadMediaMessage(msg, 'stream', {}, { logger, reuploadRequest: sock.updateMediaMessage })),
+  download: async (msg, signal) => collectLimited(await downloadMediaMessage(msg, 'stream', { signal }, { logger, reuploadRequest: sock.updateMediaMessage }), undefined, signal),
   store: pythonStore({ script: fileURLToPath(new URL('../rebattery_whatsapp/media_store.py', import.meta.url)) }),
   serialize: msg => JSON.stringify(msg, BufferJSON.replacer),
   deserialize: text => JSON.parse(text, BufferJSON.reviver),

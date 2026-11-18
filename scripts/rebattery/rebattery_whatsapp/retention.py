@@ -71,7 +71,8 @@ def purge_media(cur, rows):
             media_store.delete(ref)
         except media_store.StoreError:
             continue
-        cur.execute("update whatsapp_event set payload=jsonb_set(payload,'{media,ref}','null') where payload->'media'->>'ref'=%s", (ref,))
+        # The media event only describes content that is now revoked, expired or erased: blank it with the object.
+        cur.execute("update whatsapp_event set payload='{}'::jsonb where kind='media' and payload->'media'->>'ref'=%s", (ref,))
         purged += 1
     return purged
 

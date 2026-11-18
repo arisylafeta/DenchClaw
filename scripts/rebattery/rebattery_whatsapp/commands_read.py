@@ -31,7 +31,7 @@ def register_attachment_command(commands):
 
 
 def safe_name(name, fallback):
-    name = re.sub(r'[^A-Za-z0-9._ -]', '_', Path(name or '').name).strip(' .')
+    name = re.sub(r'[^A-Za-z0-9._ -]', '_', Path(name if isinstance(name, str) else '').name).strip(' .')
     return name[:120] or fallback
 
 

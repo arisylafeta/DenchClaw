@@ -183,9 +183,10 @@ test('a revoke while uploading removes the object that was just written', async 
   h.cleanup();
 });
 
-test('a hung download times out, is recorded and does not block other messages', async () => {
+test('a hung download times out, is aborted, recorded and does not block other messages', async () => {
+  let aborted = false;
   const h = harness({ downloadTimeoutMs: 30, concurrency: 1,
-    download: msg => msg.key.id === 'HUNG' ? new Promise(() => {}) : Promise.resolve(data), put: async () => ({ ref: 'REF' }) });
+    download: (msg, signal) => { if (msg.key.id !== 'HUNG') return Promise.resolve(data); signal.addEventListener('abort', () => { aborted = true; }); return new Promise(() => {}); }, put: async () => ({ ref: 'REF' }) });
   h.pipeline.submit(doc({}, 'HUNG'), toRecord(doc({}, 'HUNG'), opts));
   h.pipeline.submit(doc({}, 'OK'), toRecord(doc({}, 'OK'), opts));
   await new Promise(resolve => setTimeout(resolve, 120));
@@ -194,5 +195,6 @@ test('a hung download times out, is recorded and does not block other messages',
   assert.equal(byId.HUNG.error, 'download_timeout');
   assert.ok(byId.HUNG.retryAt);
   assert.equal(byId.OK.status, 'stored');
+  assert.ok(aborted, 'the in-flight download is signalled to stop');
   h.cleanup();
 });
