@@ -41,6 +41,10 @@ A line from a dossier is judged against the dossier's products as well as the re
   R12 exact size written for a stated minimum: an ask/standing/interest line with no model (broad key) whose
       kwh_min = kwh_max while its source text says '+', minimum, at least or from next to that number. Bought and
       declined lines are exempt.
+  R13 non-canonical model key: two live lines (bought and declined excluded, any companies) whose model keys differ only in
+      the make segment (model:fpt-ebs37-36.9kwh, model:iveco-ebs37-36.9kwh) or only in kWh within 2 kWh for the same make
+      and model (model:kia-niro-64kwh, model:kia-niro-64.8kwh). Each non-canonical key is reported once; the canonical key
+      is the keyMakes make or kwhVariants figure of model_aliases.json, else the key most lines carry.
 
 The rule functions take plain dicts (see `check`), so they need no database. `main` reads one database in a
 read-only session and writes nothing to it.
@@ -74,6 +78,7 @@ RULES = {
     "R10": "Same product key in two saved searches of one company (report only)",
     "R11": "Line carries one cell format while its source states several (narrower than source)",
     "R12": "Exact kWh written for a stated minimum",
+    "R13": "Non-canonical model key (make spelling or near-identical kWh)",
 }
 EXAMPLES_PER_RULE = 20
 LEVEL_RANK = {"broad": 0, "model": 1, "cell": 1, "pack": 1, "part": 2}
@@ -1091,9 +1096,85 @@ def r12(ctx):
     return found
 
 
+# ---------------------------------------------------------------------------------------------- R13
+
+KWH_NEAR = 2.0
+_KEY_PARTS = re.compile(r"^model:(?P<rest>.+?)(?:-(?P<kwh>\d+(?:\.\d+)?)kwh)?$")
+
+
+def _model_key_parts(line):
+    """(make segment, model slug, kwh or None) of a live model key whose model text gives the slug, else None."""
+    if line.get("kind") in ("bought", "declined"):
+        return None
+    m = _KEY_PARTS.match(str(line.get("product_key") or ""))
+    slug = model_aliases.model_slug(line.get("make"), line.get("model")) if m and line.get("model") else None
+    if not m or not slug:
+        return None
+    rest = m.group("rest")
+    if rest == slug:
+        make = ""
+    elif rest.endswith("-" + slug):
+        make = rest[:-len(slug) - 1]
+    else:
+        return None
+    return make, slug, float(m.group("kwh")) if m.group("kwh") else None
+
+
+def _key_of(make, slug, kwh):
+    return "model:" + "-".join(p for p in (make, slug) if p) + (f"-{model_aliases.kwh_text(kwh)}kwh" if kwh is not None else "")
+
+
+def r13(ctx):
+    counts = collections.Counter()
+    first = {}
+    parts = {}
+    for line in ctx["lines"]:
+        p = _model_key_parts(line)
+        if p:
+            key = line["product_key"]
+            counts[key] += 1
+            first.setdefault(key, line)
+            parts[key] = p
+    flagged = {}  # key -> why
+    by_model = collections.defaultdict(set)
+    for key, (make, slug, kwh) in parts.items():
+        by_model[(slug, kwh)].add(make)
+    for (slug, kwh), makes in by_model.items():
+        if len(makes) < 2:
+            continue
+        mapped = {model_aliases.canonical_make_slug(m) for m in makes} - {None}
+        if len(mapped) == 1 and next(iter(mapped)) in makes:
+            winner = next(iter(mapped))
+        else:
+            winner = max(sorted(makes), key=lambda m: (counts[_key_of(m, slug, kwh)], -len(m)))
+        for m in makes - {winner}:
+            flagged[_key_of(m, slug, kwh)] = f"make spelling '{m}' for the same model; canonical key {_key_of(winner, slug, kwh)}"
+    by_make = collections.defaultdict(set)
+    for key, (make, slug, kwh) in parts.items():
+        if kwh is not None:
+            by_make[(make, slug)].add(kwh)
+    for (make, slug), values in by_make.items():
+        ordered = sorted(values)
+        cluster = [ordered[0]]
+        for v in ordered[1:] + [None]:
+            if v is not None and v - cluster[-1] <= KWH_NEAR:
+                cluster.append(v)
+                continue
+            if len(cluster) > 1:
+                snapped = {model_aliases.snap_kwh(make, slug, c) for c in cluster} & set(cluster)
+                winner = (min(snapped) if snapped else
+                          max(cluster, key=lambda c: (counts[_key_of(make, slug, c)], -c)))
+                for c in cluster:
+                    key = _key_of(make, slug, c)
+                    if c != winner and key not in flagged:
+                        flagged[key] = f"kWh {c:g} is within {KWH_NEAR:g} kWh of {winner:g}; canonical key {_key_of(make, slug, winner)}"
+            cluster = [v] if v is not None else []
+    return [_violation(ctx, "R13", first[key], f"non-canonical model key {key}: {why}") for key, why in sorted(flagged.items())]
+
+
 # ---------------------------------------------------------------------------------------------- run and report
 
-RULE_FUNCTIONS = {"R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5, "R6": r6, "R7": r7, "R8": r8, "R9": r9, "R10": r10, "R11": r11, "R12": r12}
+RULE_FUNCTIONS = {"R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5, "R6": r6, "R7": r7, "R8": r8, "R9": r9, "R10": r10, "R11": r11, "R12": r12, "R13": r13}
 
 
 def check(ctx):
