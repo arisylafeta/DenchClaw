@@ -560,6 +560,18 @@ def _already_says(cur, company_id, key, kind):
     return cur.fetchone() is not None
 
 
+def _source_says(cur, company_id, key, kind, refs):
+    """A dossier product sourced from a request (crm:btd_<id>) is not written when that request's own sync already wrote
+    a line with demand_id (or offer_id) = that id on the same kind and product key."""
+    ids = [str(ref)[4:] for ref in refs if str(ref).startswith("crm:") and len(str(ref)) > 4]
+    if not ids:
+        return False
+    cur.execute("""select 1 from buyer_interest
+                    where company_id = %s and product_key = %s and kind = %s and id not like 'bi_dossier_%%'
+                      and (demand_id = any(%s) or offer_id = any(%s)) limit 1""", (company_id, key, kind, ids, ids))
+    return cur.fetchone() is not None
+
+
 def _write_line(cur, company_id, kind, ownership, keyed, seen, refs, reason=None, last_verified=None):
     """One mastered line per product and make; a synced line per purchase or decline, keyed by its source.
 
@@ -702,6 +714,9 @@ def sync_dossier_rows(cur, companies):
                     if kind in ("bought", "declined") and _already_says(cur, company["id"], keyed["key"], kind):
                         from_source += 1
                         continue
+                    if _source_says(cur, company["id"], keyed["key"], kind, refs):
+                        from_source += 1  # the request's own line already says it
+                        continue
                     _write_line(cur, company["id"], kind, ownership, keyed, seen, refs, reason, last_verified)
                     written += 1
                 cur.execute("release savepoint bi_row")
@@ -709,6 +724,15 @@ def sync_dossier_rows(cur, companies):
                 cur.execute("rollback to savepoint bi_row")
                 _record_error(cur, "crm_companies", company["id"], "dossier", exc)
                 errors += 1
+        # A dossier line the request's own line now duplicates (the request synced after the dossier wrote it) goes too.
+        cur.execute("""delete from buyer_interest w
+                        where w.company_id = %s and w.id like 'bi_dossier_%%'
+                          and exists (select 1 from buyer_interest s
+                                       where s.company_id = w.company_id and s.kind = w.kind
+                                         and s.product_key = w.product_key and s.id not like 'bi_dossier_%%'
+                                         and ('crm:' || coalesce(s.demand_id, s.offer_id)) = any(w.source_refs))""",
+                    (company["id"],))
+        from_source += cur.rowcount
         # Newer evidence wins: a want the dossier later declined on the same key is history, not a live want
         # (ELG asked for NCR2170M on 16 Oct and declined it on 24 Oct).
         cur.execute("""delete from buyer_interest w

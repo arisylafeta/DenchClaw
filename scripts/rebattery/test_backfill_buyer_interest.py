@@ -553,6 +553,27 @@ The story, unchanged by this step.
         self.assertEqual(len(bought), 1)
         self.assertIsNotNone(bought[0]["demand_id"])
 
+    def test_a_product_sourced_from_a_request_the_request_already_wrote_is_not_repeated(self):
+        self.write_dossier()
+        row_id = self.demand_row(company=self.dossier_company, spec={"makes": ["Renault"], "models": ["Zoe 41kWh"]})
+        self.sync([row_id])
+        [source] = [line for line in self.lines(self.dossier_company) if line["demand_id"] == row_id]
+        products = ('  - make: Renault\n    model: Zoe 41kWh\n    status: asked\n    one_off: true\n    seen: "2026-10-16"\n'
+                    '    src: "crm:%s"' % row_id)
+        self.write_dossier(markdown='---\ncompany_id: "%s"\ncompany: "Dossier Test Buyer"\nlast_verified: "2026-11-04"\nproducts:\n%s\n---\nThe story.\n'
+                           % (self.dossier_company, products))
+        # An earlier dossier line on the same key (written before the request synced) goes as well.
+        with self.cursor() as cur:
+            cur.execute("""insert into buyer_interest (id, company_id, kind, ownership, product_key, product_key_level,
+                             make, raw_product, first_seen, last_seen, quantity_basis, source_refs, expires_on)
+                           select 'bi_dossier_dup', company_id, kind, 'synced', product_key, product_key_level,
+                             make, raw_product, first_seen, last_seen, quantity_basis, array[%s], expires_on
+                             from buyer_interest where id = %s""", ("crm:" + row_id, source["id"]))
+        self.conn.commit()
+        result = self.convert()
+        self.assertEqual(result["already_from_source"], 1)
+        self.assertEqual([line["id"] for line in self.lines(self.dossier_company)], [source["id"]])
+
     def test_converting_twice_keeps_one_line_per_product(self):
         self.write_dossier()
         self.convert()
