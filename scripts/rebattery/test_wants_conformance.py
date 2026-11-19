@@ -566,10 +566,14 @@ class R13(unittest.TestCase):
         self.assertTrue(all("model:fpt-ebs37-36.9kwh" in v["why"] for v in found))
 
     def test_kwh_within_two_flags_the_non_variant(self):
-        lines = [self.mk("a", "model:kia-niro-64kwh", "Kia", "Niro"), self.mk("b", "model:kia-niro-64.8kwh", "Kia", "Niro")]
+        lines = [self.mk("a", "model:kia-niro-39kwh", "Kia", "Niro"), self.mk("b", "model:kia-niro-39.2kwh", "Kia", "Niro")]
         found = wc.r13(ctx(lines))
-        self.assertEqual([v["key"] for v in found], ["model:kia-niro-64kwh"])
-        self.assertIn("model:kia-niro-64.8kwh", found[0]["why"])
+        self.assertEqual([v["key"] for v in found], ["model:kia-niro-39kwh"])
+        self.assertIn("model:kia-niro-39.2kwh", found[0]["why"])
+
+    def test_two_listed_variants_are_both_canonical(self):
+        lines = [self.mk("a", "model:kia-niro-64kwh", "Kia", "Niro"), self.mk("b", "model:kia-niro-64.8kwh", "Kia", "Niro")]
+        self.assertEqual(wc.r13(ctx(lines)), [])
 
     def test_distinct_sizes_other_models_and_dead_lines_are_clean(self):
         lines = [self.mk("a", "model:kia-niro-39.2kwh", "Kia", "Niro"), self.mk("b", "model:kia-niro-64.8kwh", "Kia", "Niro"),

@@ -1166,6 +1166,8 @@ def r13(ctx):
                           max(cluster, key=lambda c: (counts[_key_of(make, slug, c)], -c)))
                 for c in cluster:
                     key = _key_of(make, slug, c)
+                    if c in snapped:  # a listed pack variant (Niro 64 and 64.8 are different packs)
+                        continue
                     if c != winner and key not in flagged:
                         flagged[key] = f"kWh {c:g} is within {KWH_NEAR:g} kWh of {winner:g}; canonical key {_key_of(make, slug, winner)}"
             cluster = [v] if v is not None else []
