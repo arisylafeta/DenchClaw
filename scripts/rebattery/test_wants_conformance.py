@@ -553,5 +553,30 @@ class R12(unittest.TestCase):
         self.assertEqual(len(wc.r12(ctx([a], [d]))), 1)
 
 
+class R13(unittest.TestCase):
+    def mk(self, id, key, make, model, kind="ask", company="c1"):
+        return line(id, product_key=key, make=make, model=model, kind=kind, company_id=company)
+
+    def test_make_spellings_flag_non_alias_keys_once(self):
+        lines = [self.mk("a", "model:fpt-ebs37-36.9kwh", "FPT", "EBS37"), self.mk("b", "model:iveco-ebs37-36.9kwh", "Iveco", "EBS37"),
+                 self.mk("c", "model:fpt-industrial-ebs37-36.9kwh", "FPT Industrial", "EBS37"), self.mk("d", "model:iveco-ebs37-36.9kwh", "Iveco", "EBS37", company="c2")]
+        found = wc.r13(ctx(lines))
+        self.assertEqual(len(found), 2)
+        self.assertEqual({v["key"] for v in found}, {"model:iveco-ebs37-36.9kwh", "model:fpt-industrial-ebs37-36.9kwh"})
+        self.assertTrue(all("model:fpt-ebs37-36.9kwh" in v["why"] for v in found))
+
+    def test_kwh_within_two_flags_the_non_variant(self):
+        lines = [self.mk("a", "model:kia-niro-64kwh", "Kia", "Niro"), self.mk("b", "model:kia-niro-64.8kwh", "Kia", "Niro")]
+        found = wc.r13(ctx(lines))
+        self.assertEqual([v["key"] for v in found], ["model:kia-niro-64kwh"])
+        self.assertIn("model:kia-niro-64.8kwh", found[0]["why"])
+
+    def test_distinct_sizes_other_models_and_dead_lines_are_clean(self):
+        lines = [self.mk("a", "model:kia-niro-39.2kwh", "Kia", "Niro"), self.mk("b", "model:kia-niro-64.8kwh", "Kia", "Niro"),
+                 self.mk("c", "model:kia-niro-64kwh", "Kia", "Niro", kind="declined"),
+                 self.mk("d", "model:nissan-leaf-40kwh", "Nissan", "Leaf")]
+        self.assertEqual(wc.r13(ctx(lines)), [])
+
+
 if __name__ == "__main__":
     unittest.main()
