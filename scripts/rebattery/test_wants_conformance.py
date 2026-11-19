@@ -623,3 +623,9 @@ class R13(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class R9PrefixModel(unittest.TestCase):
+    def test_bare_family_inside_longer_model_is_not_missing(self):
+        named = {("Ioniq", "ioniq"), ("Ioniq 5", "ioniq5")}
+        self.assertTrue(any(o != "ioniq" and o.startswith("ioniq") for _, o in named))

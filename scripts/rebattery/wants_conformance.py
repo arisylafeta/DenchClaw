@@ -972,7 +972,11 @@ def r9(ctx):
             if not any(make_folds(line.get("make")) & make_folds(make) for line in lines if line.get("make")) \
                     and not any(f and f in removed for f in make_folds(make)):
                 missing.append(f"make {make}")
-        for own, slug in sorted(_demand_models(demand)):
+        named = sorted(_demand_models(demand))
+        for own, slug in named:
+            # 'Ioniq 5' is one model: a bare family that only occurs as the start of a longer named model is not demand.
+            if any(other != slug and other.startswith(slug) for _, other in named):
+                continue
             if not any(_line_has_model(line, slug) for line in lines) and fold(slug) not in removed:
                 missing.append(f"model {slug}")
         family = _family_range(demand, lines)
