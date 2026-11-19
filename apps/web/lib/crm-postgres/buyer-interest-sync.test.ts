@@ -160,7 +160,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     const familySpec = { intent: "request", makes: ["Hyundai"], model: "Ioniq 5", formats: ["Packs"], chemistries: ["NMC"], kwh_min: 73, kwh_max: 73 };
     await listing(id("d8"), "demand", id("buyer4"), familySpec);
     const [familyRow] = await lines("demand_id = $1", [id("d8")]);
-    expect(familyRow.product_key).toBe("model:hyundai-ioniq5-73kwh");
+    expect(familyRow.product_key).toBe("model:hyundai-ioniq5-72.6kwh");
     expect(broaderKeysFor({
       make: "Hyundai", model: "Ioniq 5", format: "Packs", chemistry: "NMC", kwhMin: 73, kwhMax: 73,
     })).toContain(familyRow.product_key);
@@ -238,7 +238,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     const bought = await lines("offer_id = $1", [id("o1")]);
     expect(bought).toHaveLength(1);
     expect(bought[0]).toMatchObject({
-      kind: "bought", ownership: "synced", product_key: "model:kia-niro-64kwh", quantity: 40, quantity_unit: "packs",
+      kind: "bought", ownership: "synced", product_key: "model:kia-niro-64.8kwh", quantity: 40, quantity_unit: "packs",
       price: 4500, price_currency: "EUR", price_unit: "pack", price_basis: "paid", first_seen: "2026-10-20",
     });
     expect(bought[0].source_refs).toEqual([`crm:${id("o1")}`, `crm:${id("s1")}`]);
@@ -425,7 +425,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       expect(await keys()).toEqual(["bought:model:kia-niro", "declined:model:kia-niro"]);
 
       await setField(id("lf1"), "capacity_kwh", "64");  // insert
-      expect(await keys()).toEqual(["bought:model:kia-niro-64kwh", "declined:model:kia-niro-64kwh"]);
+      expect(await keys()).toEqual(["bought:model:kia-niro-64.8kwh", "declined:model:kia-niro-64.8kwh"]);
 
       await setField(id("lf1"), "model", "EV6");  // update
       await setField(id("lf1"), "capacity_kwh", "77.4");
@@ -499,7 +499,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
            '{"energy_kwh": 64, "trade_kind": "packs", "observed_quantity": 1, "makes": ["Kia"], "model": "Niro"}'::jsonb, '{"listing_title": "Audi pack"}'::jsonb)`, [id("title2")]);
       await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, stage) values ($1, $2, 'counterparty', $3, 'paid')`,
         [id("title2o"), id("title2"), id("buyer4")]);
-      expect((await lines("offer_id = $1", [id("title2o")])).map((row) => row.product_key)).toEqual(["model:kia-niro-64kwh"]);
+      expect((await lines("offer_id = $1", [id("title2o")])).map((row) => row.product_key)).toEqual(["model:kia-niro-64.8kwh"]);
     });
 
     it("still records a listing whose title names no make and states nothing else", async () => {
@@ -603,10 +603,11 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     });
 
     it("never writes a suppressed line, from a request or from an offer, and writes the rest", async () => {
-      await pg.queryPg(`insert into buyer_interest_suppressed (company_id, kind, product_key, source_ref, reason)
-        values ($1, 'ask', 'broad:lfp-packs', 'crm:x', 'removed in cleanup test'), ($1, 'bought', 'broad:lfp-packs', 'crm:x', 'removed in cleanup test')`,
-        [id("buyer4")]);
       const did = id("rule_supp");
+      const offerId = id("rule_supp_off");
+      await pg.queryPg(`insert into buyer_interest_suppressed (company_id, kind, product_key, source_ref, reason)
+        values ($1, 'ask', 'broad:lfp-packs', $2, 'removed in cleanup test'), ($1, 'bought', 'broad:lfp-packs', $3, 'removed in cleanup test')`,
+        [id("buyer4"), `crm:${did}`, `crm:${offerId}`]);
       await listing(did, "demand", id("buyer4"), stateOf({ chemistries: ["LFP"] }));
       expect(await lines("demand_id = $1", [did])).toEqual([]);
       // The same product for another company, and another kind of the same company, are not suppressed.
@@ -614,15 +615,16 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       await listing(other, "demand", id("buyer3"), stateOf({ chemistries: ["LFP"] }));
       expect((await lines("demand_id = $1", [other])).map((row) => row.kind)).toEqual(["ask"]);
       await pg.queryPg(`update crm_bulk_listings set status = 'closed', closed_reason = 'bought_from_us' where id = $1`, [did]);
-      expect(await lines("demand_id = $1", [did])).toEqual([]);
+      // The bought key was removed from the offer's source only: the request's own bought line is a different source.
+      expect((await lines("demand_id = $1", [did])).map((row) => row.kind)).toEqual(["bought"]);
       await pg.queryPg(`update crm_bulk_listings set status = 'closed', closed_reason = 'not_a_fit' where id = $1`, [did]);
       expect((await lines("demand_id = $1", [did])).map((row) => row.kind)).toEqual(["interest"]);
 
       const lid = id("rule_supp_sup");
       await listing(lid, "supply", null, { chemistries: ["LFP"], formats: ["Packs"] });
       await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, name, stage) values ($1, $2, 'counterparty', $3, 'Offer Buyer', 'paid')`,
-        [id("rule_supp_off"), lid, id("buyer4")]);
-      expect(await lines("offer_id = $1", [id("rule_supp_off")])).toEqual([]);
+        [offerId, lid, id("buyer4")]);
+      expect(await lines("offer_id = $1", [offerId])).toEqual([]);
       await pg.queryPg(`update crm_bulk_offers set stage = 'declined' where id = $1`, [id("rule_supp_off")]);
       expect((await lines("offer_id = $1", [id("rule_supp_off")])).map((row) => row.kind)).toEqual(["declined"]);
     });
@@ -648,13 +650,34 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       expect(await keysOf(single)).toEqual(["broad:toyota-nmc-packs"]);
     });
 
+    it("blocks a suppressed key only for its own source: a new request from another source writes its line", async () => {
+      const first = id("m124_src1");
+      const second = id("m124_src2");
+      const company = id("buyer3");
+      await listing(first, "demand", company, { intent: "request", makes: ["Kia"], formats: ["Packs"], models: ["e-Niro"] });
+      const [row] = await lines("demand_id = $1 and kind = 'ask'", [first]);
+      await pg.queryPg(`insert into buyer_interest_suppressed (company_id, kind, product_key, source_ref, reason) values ($1, 'ask', $2, $3, 'test')`,
+        [company, row.product_key, `crm:${first}`]);
+      await pg.queryPg(`delete from buyer_interest where demand_id = $1`, [first]);
+      await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [first]);
+      expect(await keysOf(first)).toEqual([]);
+      await listing(second, "demand", company, { intent: "request", makes: ["Kia"], formats: ["Packs"], models: ["e-Niro"] });
+      expect(await keysOf(second)).toEqual([row.product_key]);
+      // A suppressed row with no source blocks every source.
+      await pg.queryPg(`update buyer_interest_suppressed set source_ref = null where company_id = $1 and product_key = $2`, [company, row.product_key]);
+      await pg.queryPg(`delete from buyer_interest where demand_id = $1`, [second]);
+      await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [second]);
+      expect(await keysOf(second)).toEqual([]);
+      await pg.queryPg(`delete from buyer_interest_suppressed where company_id = $1 and product_key = $2`, [company, row.product_key]);
+    });
+
     it("does not re-create a suppressed model line on re-sync", async () => {
       const did = id("m121_supp");
       await listing(did, "demand", id("buyer3"), { intent: "request", makes: ["Kia"], formats: ["Packs"], models: ["e-Niro"] });
       const [row] = await lines("demand_id = $1 and kind = 'ask'", [did]);
       expect(row.product_key).toBe("model:kia-niro");
-      await pg.queryPg(`insert into buyer_interest_suppressed (company_id, kind, product_key, source_ref, reason) values ($1, 'ask', $2, 'crm:x', 'test')`,
-        [id("buyer3"), row.product_key]);
+      await pg.queryPg(`insert into buyer_interest_suppressed (company_id, kind, product_key, source_ref, reason) values ($1, 'ask', $2, $3, 'test')`,
+        [id("buyer3"), row.product_key, `crm:${did}`]);
       await pg.queryPg(`delete from buyer_interest where demand_id = $1`, [did]);
       await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [did]);
       expect(await keysOf(did)).toEqual([]);
@@ -697,7 +720,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
         `select array_agg(k order by k) as keys from buyer_interest_fact_sets($1::jsonb, '{}', '{}', 12, null, true) fs,
            unnest(fs.facts) f, buyer_interest_product_key(f) k`,
         [JSON.stringify({ makes: ["Hyundai", "Kia"], models: ["Kona, Niro 39 kWh"], formats: ["Packs"] })]);
-      expect(shared.keys).toEqual(["model:hyundai-kona-39kwh", "model:kia-niro-39kwh"]);
+      expect(shared.keys).toEqual(["model:hyundai-kona-39.2kwh", "model:kia-niro-39.2kwh"]);
     });
 
     it("gives the make a request names without a model its own line, and never the list text as a model", async () => {
@@ -738,7 +761,9 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       ["Mercedes-Benz", "Mercedes EQC", 80], ["Vauxhall", "Corsa-e", undefined], ["Opel", "Corsa e", 50], ["PSA", "Peugeot e-208", undefined],
       ["Peugeot", "2008", undefined], ["Peugeot", "3008", 73], ["Toyota", "Unknown 2019", undefined], ["Citroën", "ë-C4", 50], ["Škoda", "Enyaq iV 80", undefined], ["Tesla", "Model 3 Long Range", 75],
       ["Tesla", "Model Y (2021) battery pack", undefined], ["BMW", "i3 120Ah", undefined], ["Fiat", "500e Standard", 24], ["Ford", "Mustang Mach-E AWD", undefined],
-      ["Hyundai", "Ioniq 5 / Ioniq 6", 77], ["Toyota", "Unknown Thing 9", undefined], ["Kia", "Soul EV 2019", 64], ["Mini", "Mini Cooper SE", 32],
+      ["Hyundai", "Ioniq 5 / Ioniq 6", 77], ["FPT Industrial", "eBS37", 36.9], ["Iveco", "eBS37", 37], ["Iveco FPT", "eBS69", 69], ["LG Chem", "E78", undefined],
+      ["Stellantis", "500e", 23.8], ["Stellantis", "F1H300", 44], ["PSA", "208", 50], ["Kia", "Niro", 64], ["Kia", "Niro", 39], ["Hyundai", "Kona", 64], ["Tesla", "Model 3", 57],
+      ["Tesla", "Model 3", 80], ["Tesla", "Model 3", 70], ["Hyundai", "Ioniq 5", 77], ["Nissan", "Leaf", 41.9], ["Renault", "Zoe", 41], ["FPT", "Foo", 50.04], ["Toyota", "Unknown Thing 9", undefined], ["Kia", "Soul EV 2019", 64], ["Mini", "Mini Cooper SE", 32],
     ];
 
     it("gives identical keys for every text", async () => {

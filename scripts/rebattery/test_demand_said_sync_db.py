@@ -77,7 +77,7 @@ def test_an_open_request_stays_an_ask_and_closing_it_not_a_fit_turns_it_into_int
     lid = demand(cur, {"makes": ["Kia"], "model": "Niro", "kwh": 64}, None, status="open")
     assert [row[0] for row in lines(cur, lid)] == ["ask"]
     cur.execute("update crm_bulk_listings set status = 'closed', closed_reason = 'not_a_fit' where id = %s", (lid,))
-    assert [row[:3] for row in lines(cur, lid)] == [("interest", "mastered", "model:kia-niro-64kwh")]
+    assert [row[:3] for row in lines(cur, lid)] == [("interest", "mastered", "model:kia-niro-64.8kwh")]
     cur.execute("update crm_bulk_listings set closed_reason = 'duplicate' where id = %s", (lid,))
     assert lines(cur, lid) == []
 
