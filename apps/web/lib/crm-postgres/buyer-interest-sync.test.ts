@@ -238,7 +238,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     const bought = await lines("offer_id = $1", [id("o1")]);
     expect(bought).toHaveLength(1);
     expect(bought[0]).toMatchObject({
-      kind: "bought", ownership: "synced", product_key: "model:kia-niro-64.8kwh", quantity: 40, quantity_unit: "packs",
+      kind: "bought", ownership: "synced", product_key: "model:kia-niro-64kwh", quantity: 40, quantity_unit: "packs",
       price: 4500, price_currency: "EUR", price_unit: "pack", price_basis: "paid", first_seen: "2026-10-20",
     });
     expect(bought[0].source_refs).toEqual([`crm:${id("o1")}`, `crm:${id("s1")}`]);
@@ -425,7 +425,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       expect(await keys()).toEqual(["bought:model:kia-niro", "declined:model:kia-niro"]);
 
       await setField(id("lf1"), "capacity_kwh", "64");  // insert
-      expect(await keys()).toEqual(["bought:model:kia-niro-64.8kwh", "declined:model:kia-niro-64.8kwh"]);
+      expect(await keys()).toEqual(["bought:model:kia-niro-64kwh", "declined:model:kia-niro-64kwh"]);
 
       await setField(id("lf1"), "model", "EV6");  // update
       await setField(id("lf1"), "capacity_kwh", "77.4");
@@ -499,7 +499,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
            '{"energy_kwh": 64, "trade_kind": "packs", "observed_quantity": 1, "makes": ["Kia"], "model": "Niro"}'::jsonb, '{"listing_title": "Audi pack"}'::jsonb)`, [id("title2")]);
       await pg.queryPg(`insert into crm_bulk_offers (id, bulk_listing_id, role, company_id, stage) values ($1, $2, 'counterparty', $3, 'paid')`,
         [id("title2o"), id("title2"), id("buyer4")]);
-      expect((await lines("offer_id = $1", [id("title2o")])).map((row) => row.product_key)).toEqual(["model:kia-niro-64.8kwh"]);
+      expect((await lines("offer_id = $1", [id("title2o")])).map((row) => row.product_key)).toEqual(["model:kia-niro-64kwh"]);
     });
 
     it("still records a listing whose title names no make and states nothing else", async () => {

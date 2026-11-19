@@ -741,7 +741,7 @@ The story, unchanged by this step.
     kwh: [69.3]
     status: "asked"
     seen: "2026-10-07"''')
-        self.assertEqual(sorted(lines), ["model:iveco-fpt-ebs69-69.3kwh", "model:renault-zoe-52kwh", "model:tesla-model3-75kwh"])
+        self.assertEqual(sorted(lines), ["model:fpt-ebs69-69.3kwh", "model:renault-zoe-52kwh", "model:tesla-model3-75kwh"])
         self.assertEqual(lines["model:renault-zoe-52kwh"]["raw_product"], "Zoe 52 kWh (ZE50)")
         self.assertEqual(float(lines["model:renault-zoe-52kwh"]["kwh_min"]), 52)
 

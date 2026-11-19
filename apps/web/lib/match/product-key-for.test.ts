@@ -192,7 +192,7 @@ describe("productKeyFor", () => {
   });
 
   it("keys a model by the canonical slug of the alias list", () => {
-    expect(productKeyFor({ make: "Hyundai", model: "Kona Electric", kwh: 64 })).toBe("model:hyundai-kona-64.8kwh");
+    expect(productKeyFor({ make: "Hyundai", model: "Kona Electric", kwh: 64 })).toBe("model:hyundai-kona-64kwh");
     expect(productKeyFor({ make: "Kia", model: "e-Niro", kwh: 39 })).toBe("model:kia-niro-39.2kwh");
     expect(productKeyFor({ make: "Nissan", model: "Leaf e+", kwh: 62 })).toBe("model:nissan-leaf-62kwh");
     expect(productKeyFor({ make: "Citroen", model: "e-Berlingo", kwh: 50 })).toBe("model:citroen-berlingo-50kwh");
@@ -216,7 +216,7 @@ describe("productKeyFor", () => {
 
   it("snaps the kWh of a model key to the nominal variant within 2 kWh, else rounds to one decimal", () => {
     // Niro 64 kWh is also a reviewed pack family, which wins as the first key; the model key sits behind it.
-    expect(broaderKeysFor({ make: "Kia", model: "Niro", kwh: 64 })).toContain("model:kia-niro-64.8kwh");
+    expect(broaderKeysFor({ make: "Kia", model: "Niro", kwh: 64 })).toContain("model:kia-niro-64kwh");
     expect(broaderKeysFor({ make: "Kia", model: "Niro", kwh: 64.8 })).toContain("model:kia-niro-64.8kwh");
     expect(productKeyFor({ make: "Hyundai", model: "Kona", kwh: 39 })).toBe("model:hyundai-kona-39.2kwh");
     expect(productKeyFor({ make: "Tesla", model: "Model 3", kwh: 57 })).toBe("model:tesla-model3-57.5kwh");

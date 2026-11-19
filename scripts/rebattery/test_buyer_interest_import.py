@@ -247,7 +247,7 @@ class InterestLines(unittest.TestCase):
 
     def test_a_cell_maker_and_a_location_survive_on_the_line(self):
         self.assertEqual(self.write_search("sdi-gb-0000-4000-8000-000000000001", {"q": "Samsung sdi modules", "location_country": "GB"}),
-                         [("broad:any-modules", None, None, "Cell maker: Samsung SDI; Located in: United Kingdom")])
+                         [("broad:samsung-sdi-any-modules", None, None, "Cell maker: Samsung SDI; Located in: United Kingdom")])
 
     def test_corolla_cross_with_part_numbers_keeps_its_model_and_a_line_per_part(self):
         keys = self.write_search("cross-0000-4000-8000-000000000001",

@@ -61,9 +61,12 @@ create or replace function buyer_interest_snap_kwh(p_make text, p_model text, p_
                      from (values
     -- BEGIN GENERATED KWH VARIANTS
     ('kia', 'niro', 39.2),
+    ('kia', 'niro', 64),
     ('kia', 'niro', 64.8),
     ('hyundai', 'kona', 39.2),
-    ('hyundai', 'kona', 64.8),
+    ('hyundai', 'kona', 48.4),
+    ('hyundai', 'kona', 64),
+    ('hyundai', 'kona', 65.4),
     ('tesla', 'model3', 50),
     ('tesla', 'model3', 57.5),
     ('tesla', 'model3', 60),

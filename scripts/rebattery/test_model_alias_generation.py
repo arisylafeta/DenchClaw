@@ -53,7 +53,7 @@ def test_a_changed_variant_is_caught(monkeypatch):
 
 
 def test_snap_kwh_follows_the_variant_list():
-    assert ma.snap_kwh("kia", "niro", 64) == 64.8 and ma.snap_kwh("kia", "niro", 39) == 39.2
+    assert ma.snap_kwh("kia", "niro", 64) == 64 and ma.snap_kwh("kia", "niro", 39) == 39.2
     assert ma.snap_kwh("tesla", "model3", 80) == 78  # tie: the lower variant
     assert ma.snap_kwh("tesla", "model3", 70) == 70  # 5 kWh from any variant: unchanged
     assert ma.snap_kwh("fpt", "ebs37", 37) == 36.9
