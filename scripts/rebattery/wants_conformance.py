@@ -8,8 +8,10 @@ Reports every violation of ten rules, from the lines against the sources that pr
   R2  declined line whose only source is a closed request (no declined offer, no dossier declined product); a Said
       (interest) line of a request, valid only when the request is closed not_a_fit or offer_reply.
   R3  model key slug that is not the canonical slug of model_aliases.model_slug().
-  R4  duplicate lines (company + kind + product_key) and a less specific line next to a more specific one
-      from the same source.
+  R4  duplicate lines (company + kind + product_key), a less specific line next to a more specific one
+      from the same source, and a live dossier line whose source_refs name the demand/offer of another live line
+      of the same company, kind and key (the same evidence written twice). Separate requests or purchases with
+      the same key stay clean.
   R5  vehicle make carrying the systems format.
   R6  lost detail: cell makers, cell formats, part numbers, kWh or voltage the source states and no line of
       that source carries. Cell maker, part number and kWh count only in product_key, raw_product, make, model or the
@@ -46,6 +48,10 @@ A line from a dossier is judged against the dossier's products as well as the re
       and model (model:kia-niro-64kwh, model:kia-niro-64.8kwh). Each non-canonical key is reported once; the canonical key
       is the keyMakes make or kwhVariants figure of model_aliases.json, else the key most lines carry.
 
+  R14 request model not stated: a spec.models entry of a request that is only a prefix of another listed model
+      and never appears on its own in the request text (summary, spec.product_family, spec.model, note), e.g.
+      'Ioniq' next to 'Ioniq 5' when the text only says 'Ioniq 5'.
+
 The rule functions take plain dicts (see `check`), so they need no database. `main` reads one database in a
 read-only session and writes nothing to it.
 
@@ -79,6 +85,7 @@ RULES = {
     "R11": "Line carries one cell format while its source states several (narrower than source)",
     "R12": "Exact kWh written for a stated minimum",
     "R13": "Non-canonical model key (make spelling or near-identical kWh)",
+    "R14": "Request model listed but not stated on its own (prefix of another listed model)",
 }
 EXAMPLES_PER_RULE = 20
 LEVEL_RANK = {"broad": 0, "model": 1, "cell": 1, "pack": 1, "part": 2}
@@ -412,6 +419,22 @@ def r4(ctx):
             ids = ", ".join(i["id"] for i in items)
             for item in items[1:]:
                 found.append(_violation(ctx, "R4", item, f"duplicate of {items[0]['id']} (same source, kind {kind}, key {key}); lines: {ids}"))
+    # The same evidence written twice: a dossier line that cites the request or offer another live line is built from.
+    by_key = collections.defaultdict(list)
+    for line in ctx["lines"]:
+        if _unexpired(line):
+            by_key[(line.get("company_id"), line.get("kind"), line.get("product_key"))].append(line)
+    for items in by_key.values():
+        for dossier in items:
+            if not _is_dossier_line(dossier):
+                continue
+            refs = {str(r) for r in dossier.get("source_refs") or []}
+            for other in items:
+                if other is not dossier and not _is_dossier_line(other) and any(
+                        other.get(k) and f"crm:{other[k]}" in refs for k in ("demand_id", "offer_id")):
+                    found.append(_violation(ctx, "R4", dossier, f"duplicate of {other['id']} (same evidence: its source_refs name "
+                                            f"{other.get('demand_id') or other.get('offer_id')}, kind {dossier.get('kind')}, key {dossier.get('product_key')})"))
+                    break
     by_source = collections.defaultdict(list)
     for line in ctx["lines"]:
         by_source[(_source_key(line), line.get("kind"))].append(line)
@@ -1174,9 +1197,42 @@ def r13(ctx):
     return [_violation(ctx, "R13", first[key], f"non-canonical model key {key}: {why}") for key, why in sorted(flagged.items())]
 
 
+# ---------------------------------------------------------------------------------------------- R14
+
+def _tokens(text):
+    return re.sub(r"[^a-z0-9.]+", " ", str(text or "").lower()).split()
+
+
+def _find(tokens, needle):
+    return [i for i in range(len(tokens) - len(needle) + 1) if tokens[i:i + len(needle)] == needle]
+
+
+def r14(ctx):
+    found = []
+    for demand in ctx["demands"].values():
+        spec = demand.get("spec") if isinstance(demand.get("spec"), dict) else {}
+        models = [m for m in as_list(spec.get("models")) if isinstance(m, str) and _tokens(m)]
+        if len(models) < 2:
+            continue
+        text = _tokens(" \n ".join(_flat_strings([demand.get("summary"), spec.get("product_family"), spec.get("model"), demand.get("note")])))
+        for model in models:
+            mine = _tokens(model)
+            longer = [_tokens(o) for o in models if len(_tokens(o)) > len(mine) and _tokens(o)[:len(mine)] == mine]
+            if not longer:
+                continue
+            masked = list(text)
+            for other in longer:
+                for i in _find(text, other):
+                    masked[i:i + len(other)] = [None] * len(other)
+            if not any(masked[i:i + len(mine)] == mine for i in range(len(masked) - len(mine) + 1)):
+                found.append(_violation(ctx, "R14", {"company_id": demand.get("company_id"), "id": None}, f"spec.models lists '{model}' but the request text only says "
+                                        f"{', '.join(repr(o) for o in models if _tokens(o)[:len(mine)] == mine and o != model)}", source=f"demand {demand['id']}", key=model))
+    return found
+
+
 # ---------------------------------------------------------------------------------------------- run and report
 
-RULE_FUNCTIONS = {"R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5, "R6": r6, "R7": r7, "R8": r8, "R9": r9, "R10": r10, "R11": r11, "R12": r12, "R13": r13}
+RULE_FUNCTIONS = {"R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5, "R6": r6, "R7": r7, "R8": r8, "R9": r9, "R10": r10, "R11": r11, "R12": r12, "R13": r13, "R14": r14}
 
 
 def check(ctx):

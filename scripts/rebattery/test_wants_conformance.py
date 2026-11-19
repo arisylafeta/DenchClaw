@@ -143,6 +143,45 @@ class R4(unittest.TestCase):
         self.assertEqual([v["line_id"] for v in wc.r4(ctx(self.dossier_pair(), products=products))], ["bi_dossier_a"])
 
 
+class R4SameEvidence(unittest.TestCase):
+    def pair(self, **dossier_kw):
+        request = line("bi_req", demand_id="btd_1", kind="ask", product_key="model:hyundai-ioniq5")
+        dossier = line("bi_dossier_x", kind="ask", product_key="model:hyundai-ioniq5", source_refs=["crm:btd_1"], **dossier_kw)
+        return [request, dossier]
+
+    def test_a_dossier_line_citing_a_request_line_of_the_same_key_is_flagged(self):
+        self.assertEqual([v["line_id"] for v in wc.r4(ctx(self.pair()))], ["bi_dossier_x"])
+
+    def test_an_expired_line_is_not_live(self):
+        self.assertEqual(wc.r4(ctx(self.pair(expires_on="2020-01-01"))), [])
+
+    def test_separate_requests_and_separate_purchases_stay_clean(self):
+        lines = [line("a", demand_id="btd_1", product_key="model:r3-x"), line("b", demand_id="btd_2", product_key="model:r3-x"),
+                 line("c", demand_id="btd_3", kind="bought", product_key="model:sc-y"),
+                 line("d", demand_id="btd_4", kind="bought", product_key="model:sc-y")]
+        self.assertEqual(wc.r4(ctx(lines)), [])
+
+    def test_a_dossier_line_citing_another_source_is_clean(self):
+        lines = [line("a", demand_id="btd_1", product_key="model:k"), line("bi_dossier_x", product_key="model:k", source_refs=["crm:btd_9"])]
+        self.assertEqual(wc.r4(ctx(lines)), [])
+
+
+class R14(unittest.TestCase):
+    def demand(self, models, summary="Wants Ioniq 5 packs", **spec):
+        return {"id": "d1", "company_id": "c1", "status": "open", "summary": summary, "spec": {"models": models, **spec}}
+
+    def test_a_prefix_model_the_text_never_states_alone_is_flagged(self):
+        out = wc.r14(ctx([], [self.demand(["Ioniq", "Ioniq 5"])]))
+        self.assertEqual([v["key"] for v in out], ["Ioniq"])
+
+    def test_a_prefix_model_stated_on_its_own_is_clean(self):
+        self.assertEqual(wc.r14(ctx([], [self.demand(["Ioniq", "Ioniq 5"], summary="Ioniq 5 and Ioniq packs")])), [])
+        self.assertEqual(wc.r14(ctx([], [self.demand(["Ioniq", "Ioniq 5"], summary="Ioniq 5", product_family="Ioniq")])), [])
+
+    def test_unrelated_models_are_clean(self):
+        self.assertEqual(wc.r14(ctx([], [self.demand(["Zoe", "Leaf"], summary="Zoe Leaf")])), [])
+
+
 class R5(unittest.TestCase):
     def test_vehicle_make_with_systems(self):
         lines = [line("a", make="Nissan", format="system", product_key="broad:nissan-any-systems"),
