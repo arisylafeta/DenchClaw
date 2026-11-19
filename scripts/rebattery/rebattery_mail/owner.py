@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from .core import Refused, UsageError, connection, dict_cursor
 
 PROFILE_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
-KINDS = ('tag', 'sender', 'person', 'company', 'domain', 'mailbox')
+KINDS = ('tag', 'sender', 'person', 'company', 'dismantler', 'domain', 'mailbox')
 OWN_DOMAIN = 'rebattery.io'
 API_BASE = os.environ.get('HERMES_API_BASE', 'http://127.0.0.1:8642')
 ENV_FILE = '/root/.hermes/.env'
@@ -196,6 +196,45 @@ def plus_tags(addresses):
     return tags
 
 
+FREE_MAIL = re.compile(r'^(gmail|googlemail|hotmail|outlook|live|msn|yahoo|ymail|icloud|me|mac|aol|gmx|web|t-online|'
+                       r'libero|virgilio|tiscali|alice|tin|orange|free|wanadoo|laposte|sfr|ziggo|kpnmail|kpnplanet|home|'
+                       r'planet|hetnet|telenet|skynet|btinternet|btopenworld|sky|talktalk|virginmedia|ntlworld|mail|proton|'
+                       r'protonmail|zoho|seznam|wp|o2|onet|interia|bluewin|freenet|arcor|online|telia|yandex|qq|163)\.')
+
+
+def sender_company(cur, person_id, sender):
+    """The CRM company of the sender: by CRM person id, by an exact email on one company, else by the sender's
+    domain when exactly one company has it (never a free-mail domain)."""
+    if person_id:
+        cur.execute('select company_id from crm_people where id=%s', (person_id,))
+        row = cur.fetchone()
+        if row and row['company_id']:
+            return row['company_id']
+    if not sender or sender.endswith('@' + OWN_DOMAIN):
+        return None
+    cur.execute('select distinct company_id from crm_people where lower(email)=%s and company_id is not null', (sender,))
+    rows = cur.fetchall()
+    if len(rows) == 1:
+        return rows[0]['company_id']
+    domain = sender.rpartition('@')[2]
+    if not domain or FREE_MAIL.match(domain):
+        return None
+    cur.execute("""select id from crm_companies
+                   where lower(regexp_replace(domain, '^(https?://)?(www[.])?', '')) = %s limit 2""", (domain,))
+    rows = cur.fetchall()
+    return rows[0]['id'] if len(rows) == 1 else None
+
+
+def dismantler_value(cur, company, mailbox):
+    """Rule values a dismantler sender can match: the mailbox it reached (e.g. 'ari'), then 'any'."""
+    if not company:
+        return []
+    cur.execute('select 1 from crm_dismantlers where company_id=%s', (company,))
+    if cur.fetchone() is None:
+        return []
+    return [v for v in (mailbox, 'any') if v]
+
+
 def route(cur, message):
     """Who should own this inbound message's thread, and why. Returns (profile, session_id, why, rule_id) or None."""
     if message.get('thread_id'):
@@ -205,9 +244,12 @@ def route(cur, message):
     sender = (message.get('from_email') or '').lower()
     tags = plus_tags(list(message.get('to_emails') or []) + list(message.get('cc_emails') or []) + header_addresses(message))
     candidates = [('tag', t) for t in dict.fromkeys(tags)]
-    candidates += [('sender', sender), ('person', message.get('from_person_id') or message.get('person_id')),
-                   ('company', message.get('company_id')), ('domain', sender.rpartition('@')[2]),
-                   ('mailbox', message.get('identity_key'))]
+    person = message.get('from_person_id') or message.get('person_id')
+    company = message.get('company_id') or sender_company(cur, person, sender)
+    candidates += [('sender', sender), ('person', person), ('company', company)]
+    # 'dismantler' rules: value is a mailbox key ('ari' = mail from a crm_dismantlers company that reached ari@) or 'any'.
+    candidates += [('dismantler', v) for v in dismantler_value(cur, company, message.get('identity_key'))]
+    candidates += [('domain', sender.rpartition('@')[2]), ('mailbox', message.get('identity_key'))]
     for kind, value in candidates:
         if not value:
             continue

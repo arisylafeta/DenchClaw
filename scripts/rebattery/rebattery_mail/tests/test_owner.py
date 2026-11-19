@@ -226,3 +226,32 @@ def test_header_addresses_tolerate_missing_headers_and_dedupe_tags():
                'personalization': {'provider_headers': {'to': '"Supply" <supply+dismantlers@rebattery.io>', 'cc': None}}}
     tags = owner.plus_tags(message['to_emails'] + owner.header_addresses(message))
     assert list(dict.fromkeys(tags)) == ['dismantlers']
+
+
+def test_dismantler_rule_routes_dismantler_mail_by_mailbox(monkeypatch):
+    with psycopg2.connect(DSN) as db, db.cursor() as cur:
+        cur.execute("insert into mail_identity (key, address, display_name, gmail_account) values ('ari','ari@rebattery.io','Ari','ari@rebattery.io') on conflict do nothing")
+        cur.execute("insert into crm_companies (id, name, domain) values ('dm-co','Yard','yard.example'), ('other-co','Buyer','buyer.example') on conflict do nothing")
+        cur.execute("insert into crm_people (id, company_id, email) values ('dm-p','dm-co','pat@yard.example'), ('other-p','other-co','kim@buyer.example') on conflict do nothing")
+        cur.execute("insert into crm_dismantlers (company_id) values ('dm-co') on conflict do nothing")
+    owner.rules(Namespace(action='add', kind='dismantler', value='ari', profile='dismantlercampaigns', session='dc-main', priority=100, note=None, apply=True))
+    inbound('m1', 't1', 'PAT@yard.example', to=('ari@rebattery.io',), identity='ari')     # known person
+    inbound('m2', 't2', 'nico@yard.example', to=('ari@rebattery.io',), identity='ari')    # unknown person, company domain
+    inbound('m3', 't3', 'pat@yard.example')                                                # dismantler, but reached supply@
+    with psycopg2.connect(DSN) as db, db.cursor() as cur:
+        cur.execute("insert into mail_thread (id, subject) values ('t4','x') on conflict do nothing")
+    inbound('m4', 't4', 'kim@buyer.example', to=('ari@rebattery.io',), identity='ari')    # not a dismantler
+    with psycopg2.connect(DSN) as db, db.cursor(cursor_factory=__import__('psycopg2.extras').extras.RealDictCursor) as cur:
+        hits = {}
+        for m in ('m1', 'm2', 'm3', 'm4'):
+            cur.execute("select * from mail_message where id=%s", (m,))
+            hits[m] = owner.route(cur, cur.fetchone())
+    assert hits['m1'][:3] == ('dismantlercampaigns', 'dc-main', 'rule dismantler=ari')
+    assert hits['m2'][:3] == ('dismantlercampaigns', 'dc-main', 'rule dismantler=ari')
+    assert hits['m3'] is None and hits['m4'] is None
+
+
+def test_free_mail_domain_never_resolves_a_company():
+    with psycopg2.connect(DSN) as db, db.cursor(cursor_factory=__import__('psycopg2.extras').extras.RealDictCursor) as cur:
+        cur.execute("insert into crm_companies (id, name, domain) values ('gm-co','Gmail yard','gmail.com') on conflict do nothing")
+        assert owner.sender_company(cur, None, 'someone@gmail.com') is None
