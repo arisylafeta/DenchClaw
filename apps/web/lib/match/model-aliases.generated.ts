@@ -543,3 +543,12 @@ export const MODEL_MAKE_ALIASES: Readonly<Record<string, string>> = {"vw": "volk
 export const MODEL_BRAND_WORDS: readonly string[] = ["volkswagen", "vw", "audi", "mini", "skoda", "cupra", "porsche", "bmw", "mercedes benz", "mercedes", "tesla", "stellantis", "nissan", "renault", "dacia", "peugeot", "citroen", "opel", "vauxhall", "fiat", "jeep", "ford", "hyundai", "kia", "genesis", "toyota", "lexus", "honda", "mazda", "mitsubishi", "suzuki", "subaru", "volvo", "polestar", "jaguar", "land rover", "mg", "byd", "lotus", "lucid", "rivian", "nio", "xpeng", "zeekr", "leapmotor", "maxus", "smart", "seat"];
 
 export const MODEL_VARIANT_WORDS: readonly string[] = ["long", "range", "standard", "awd", "rwd", "fwd", "4wd", "2wd", "lr", "sr", "dual", "motor", "performance", "premium", "se"];
+
+export const MODEL_KEY_MAKES: Readonly<Record<string, string>> = {"fptindustrial": "fpt", "fptind": "fpt", "iveco": "fpt", "ivecofpt": "fpt", "fptiveco": "fpt", "ivecofptindustrial": "fpt", "lgchem": "lg", "lgenergysolution": "lg", "lgensol": "lg", "lges": "lg"};
+
+export const MODEL_GROUP_MAKES: readonly string[] = ["stellantis", "psa"];
+
+export const MODEL_KWH_SNAP = 2;
+
+// [key make, model slug, nominal kWh variants]
+export const MODEL_KWH_VARIANTS: readonly (readonly [string, string, readonly number[]])[] = [["kia", "niro", [39.2, 64.8]], ["hyundai", "kona", [39.2, 64.8]], ["tesla", "model3", [50, 57.5, 60, 75, 78, 82]], ["nissan", "leaf", [24, 30, 40, 62]], ["renault", "zoe", [22, 41, 52]], ["volkswagen", "id3", [45, 58, 77]], ["volkswagen", "id4", [52, 77]], ["hyundai", "ioniq", [28, 38.3]], ["hyundai", "ioniq5", [58, 72.6, 77.4, 84]], ["kia", "ev6", [58, 77.4, 84]], ["fpt", "ebs37", [36.9]], ["fpt", "ebs69", [69.3]]];

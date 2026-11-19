@@ -13,6 +13,10 @@ _DATA = json.loads(ALIASES_PATH.read_text(encoding="utf-8"))
 MAKE_ALIASES = _DATA["makeAliases"]
 VARIANT_WORDS = tuple(_DATA["variantWords"])
 BRAND_WORDS = tuple(_DATA["brandWords"])
+KEY_MAKES = _DATA["keyMakes"]
+GROUP_MAKES = tuple(_DATA["groupMakes"])
+KWH_SNAP = _DATA["kwhSnap"]
+KWH_VARIANTS = {(v["make"], v["model"]): tuple(v["kwh"]) for v in _DATA["kwhVariants"]}
 _FROM = "àáâãäåāăąçćčďèéêëēėęěìíîïīįñńňòóôõöøōőťùúûüūůűýÿžźżšśł"
 _TO = "aaaaaaaaacccdeeeeeeeeiiiiiinnnooooooootuuuuuuuyyzzzssl"
 _TABLE = str.maketrans(_FROM, _TO)
@@ -46,6 +50,23 @@ def _alias_rows():
 
 
 ALIAS_ROWS = _alias_rows()
+
+
+def snap_kwh(key_make, model_slug_, kwh):
+    """The kWh a model key carries: the nearest nominal variant of the model within KWH_SNAP kWh (the lower one on a tie),\n    else the figure rounded to one decimal. Mirrors buyer_interest_snap_kwh() in SQL and snapKwh() in product-key-for.ts."""
+    if kwh is None:
+        return None
+    near = sorted((abs(v - kwh), v) for v in KWH_VARIANTS.get((key_make, model_slug_), ()) if abs(v - kwh) <= KWH_SNAP)
+    return near[0][1] if near else round(kwh * 10 + 1e-9) / 10
+
+
+def kwh_text(kwh):
+    return None if kwh is None else re.sub(r"\.0$", "", f"{kwh:.1f}")
+
+
+def canonical_make_slug(spelling):
+    """The key make segment a spelling maps to through keyMakes (fpt-industrial -> fpt), else None."""
+    return KEY_MAKES.get(fold(spelling))
 
 
 def lists_models(raw):
@@ -285,10 +306,29 @@ def ts_table():
             f"export const MODEL_ALIAS_ROWS: readonly ModelAliasRow[] = [\n{rows},\n];\n\n"
             f"export const MODEL_MAKE_ALIASES: Readonly<Record<string, string>> = {json.dumps(MAKE_ALIASES, ensure_ascii=False)};\n\n"
             f"export const MODEL_BRAND_WORDS: readonly string[] = {json.dumps(list(BRAND_WORDS), ensure_ascii=False)};\n\n"
-            f"export const MODEL_VARIANT_WORDS: readonly string[] = {json.dumps(list(VARIANT_WORDS), ensure_ascii=False)};\n")
+            f"export const MODEL_VARIANT_WORDS: readonly string[] = {json.dumps(list(VARIANT_WORDS), ensure_ascii=False)};\n\n"
+            f"export const MODEL_KEY_MAKES: Readonly<Record<string, string>> = {json.dumps(KEY_MAKES, ensure_ascii=False)};\n\n"
+            f"export const MODEL_GROUP_MAKES: readonly string[] = {json.dumps(list(GROUP_MAKES), ensure_ascii=False)};\n\n"
+            f"export const MODEL_KWH_SNAP = {KWH_SNAP};\n\n"
+            "// [key make, model slug, nominal kWh variants]\n"
+            f"export const MODEL_KWH_VARIANTS: readonly (readonly [string, string, readonly number[]])[] = "
+            f"{json.dumps([[m, mo, list(k)] for (m, mo), k in KWH_VARIANTS.items()], ensure_ascii=False)};\n")
+
+
+def sql_key_make_whens():
+    return "\n".join(f"when {_sql_text(k)} then {_sql_text(v)}" for k, v in KEY_MAKES.items())
+
+
+def sql_group_makes():
+    return ", ".join(_sql_text(w) for w in GROUP_MAKES)
+
+
+def sql_kwh_variants():
+    return ",\n".join(f"({_sql_text(m)}, {_sql_text(mo)}, {k})" for (m, mo), kk in KWH_VARIANTS.items() for k in kk)
 
 
 MIGRATION = Path(__file__).resolve().parents[2] / "apps/web/lib/crm-postgres/migrations/121_buyer_interest_model_lines.sql"
+MIGRATION_124 = Path(__file__).resolve().parents[2] / "apps/web/lib/crm-postgres/migrations/124_buyer_interest_one_key.sql"
 TS_PATH = Path(__file__).resolve().parents[2] / "apps/web/lib/match/model-aliases.generated.ts"
 _BLOCKS = {
     "ALIASES": sql_inserts,
@@ -298,12 +338,19 @@ _BLOCKS = {
 }
 
 
-def render_migration(text):
+_BLOCKS_124 = {
+    "KEY MAKES": sql_key_make_whens,
+    "GROUP MAKES": sql_group_makes,
+    "KWH VARIANTS": sql_kwh_variants,
+}
+
+
+def render_migration(text, blocks=None):
     """The migration text with every generated block regenerated from the json."""
-    for name, make in _BLOCKS.items():
+    for name, make in (blocks or _BLOCKS).items():
         pattern = re.compile(rf"^([ \t]*)-- BEGIN GENERATED {name}\n(?:.*?\n)?[ \t]*-- END GENERATED {name}$", re.S | re.M)
         if not pattern.search(text):
-            raise SystemExit(f"migration 121 has no GENERATED {name} block")
+            raise SystemExit(f"migration has no GENERATED {name} block")
 
         def block(match, make=make, name=name):
             ind = match.group(1)
@@ -318,6 +365,9 @@ def drift():
     out = []
     if MIGRATION.read_text(encoding="utf-8") != render_migration(MIGRATION.read_text(encoding="utf-8")):
         out.append(str(MIGRATION))
+    text124 = MIGRATION_124.read_text(encoding="utf-8")
+    if text124 != render_migration(text124, _BLOCKS_124):
+        out.append(str(MIGRATION_124))
     if TS_PATH.read_text(encoding="utf-8") != ts_table():
         out.append(str(TS_PATH))
     return out
@@ -331,6 +381,7 @@ if __name__ == "__main__":
         print(ts_table(), end="")
     elif "--write" in sys.argv:
         MIGRATION.write_text(render_migration(MIGRATION.read_text(encoding="utf-8")), encoding="utf-8")
+        MIGRATION_124.write_text(render_migration(MIGRATION_124.read_text(encoding="utf-8"), _BLOCKS_124), encoding="utf-8")
         TS_PATH.write_text(ts_table(), encoding="utf-8")
     elif "--check" in sys.argv:
         names = drift()

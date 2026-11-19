@@ -192,14 +192,40 @@ describe("productKeyFor", () => {
   });
 
   it("keys a model by the canonical slug of the alias list", () => {
-    expect(productKeyFor({ make: "Hyundai", model: "Kona Electric", kwh: 64 })).toBe("model:hyundai-kona-64kwh");
-    expect(productKeyFor({ make: "Kia", model: "e-Niro", kwh: 39 })).toBe("model:kia-niro-39kwh");
+    expect(productKeyFor({ make: "Hyundai", model: "Kona Electric", kwh: 64 })).toBe("model:hyundai-kona-64.8kwh");
+    expect(productKeyFor({ make: "Kia", model: "e-Niro", kwh: 39 })).toBe("model:kia-niro-39.2kwh");
     expect(productKeyFor({ make: "Nissan", model: "Leaf e+", kwh: 62 })).toBe("model:nissan-leaf-62kwh");
     expect(productKeyFor({ make: "Citroen", model: "e-Berlingo", kwh: 50 })).toBe("model:citroen-berlingo-50kwh");
     expect(productKeyFor({ make: "Hyundai", model: "Kona Electric" })).toBe("model:hyundai-kona");
     // A model the list does not know keeps its folded text.
     expect(productKeyFor({ make: "Foo", model: "Bar Thing", kwh: 50 })).toBe("model:foo-barthing-50kwh");
     expect(modelAliasSlug("Hyundai", "Kona / Niro")).toBeNull();
+  });
+
+  it("keys one product under one make: FPT, LG, and the brand behind Stellantis", () => {
+    for (const make of ["FPT", "FPT Industrial", "Iveco", "Iveco FPT"]) {
+      expect(productKeyFor({ make, model: "eBS37", kwh: 36.9 })).toBe("model:fpt-ebs37-36.9kwh");
+    }
+    expect(productKeyFor({ make: "Iveco FPT", model: "eBS69", kwh: 69.3 })).toBe("model:fpt-ebs69-69.3kwh");
+    expect(productKeyFor({ make: "LG Chem", model: "E78" })).toBe("model:lg-e78");
+    expect(productKeyFor({ make: "Stellantis", model: "500e", kwh: 23.8 })).toBe("model:fiat-500e-23.8kwh");
+    expect(productKeyFor({ make: "PSA", model: "208" })).toBe("model:peugeot-208");
+    expect(productKeyFor({ make: "Stellantis", model: "F1H300", kwh: 44 })).toBe("model:stellantis-f1h300-44kwh");
+    expect(productKeyFor({ make: "FPT Industrial", format: "packs" })).toBe("broad:fpt-any-packs");
+  });
+
+  it("snaps the kWh of a model key to the nominal variant within 2 kWh, else rounds to one decimal", () => {
+    // Niro 64 kWh is also a reviewed pack family, which wins as the first key; the model key sits behind it.
+    expect(broaderKeysFor({ make: "Kia", model: "Niro", kwh: 64 })).toContain("model:kia-niro-64.8kwh");
+    expect(broaderKeysFor({ make: "Kia", model: "Niro", kwh: 64.8 })).toContain("model:kia-niro-64.8kwh");
+    expect(productKeyFor({ make: "Hyundai", model: "Kona", kwh: 39 })).toBe("model:hyundai-kona-39.2kwh");
+    expect(productKeyFor({ make: "Tesla", model: "Model 3", kwh: 57 })).toBe("model:tesla-model3-57.5kwh");
+    expect(productKeyFor({ make: "Tesla", model: "Model 3", kwh: 80 })).toBe("model:tesla-model3-78kwh"); // tie: lower variant
+    expect(productKeyFor({ make: "Tesla", model: "Model 3", kwh: 70 })).toBe("model:tesla-model3-70kwh"); // 5 from 75
+    expect(broaderKeysFor({ make: "Hyundai", model: "Ioniq 5", kwh: 77 })).toContain("model:hyundai-ioniq5-77.4kwh");
+    expect(productKeyFor({ make: "Foo", model: "Bar", kwh: 50.04 })).toBe("model:foo-bar-50kwh");
+    // A Want for 64 kWh and a lot of 64.8 kWh share the key, so the lot's chain holds it.
+    expect(broaderKeysFor({ make: "Kia", model: "Niro", kwh: 64.8, format: "pack" })).toContain("model:kia-niro-64.8kwh");
   });
 
   it("reports the level of a key from its prefix", () => {

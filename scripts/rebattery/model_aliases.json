@@ -1,6 +1,6 @@
 {
  "version": 1,
- "note": "Canonical model slugs shared by the lot side (productKeyFor) and buyer lines (SQL buyer_interest_model_slug, Python). Normalise the model text (lower case, accents folded, kWh/kW/Ah figures, bracketed asides, years, battery/pack/module words removed, punctuation to single spaces, leading make dropped, trailing trim words long/range/standard/awd/rwd/lr/sr/dual/motor/performance/premium/se dropped). A text that lists models (comma, semicolon or colon) has no model. With a slash the whole text must equal an alias; otherwise it equals an alias or starts with one followed by a space, longest alias first, and an alias that belongs to the line's own make wins. A bare short alias (digits, one or two characters) only applies to its own make. Unknown models keep the folded text. Regenerate the SQL twin with scripts/rebattery/model_aliases.py --sql. Make aliases, brand words and variant words in this file are generated into the SQL and TypeScript twins by model_aliases.py --write; test_model_alias_generation.py fails when they drift.",
+ "note": "Canonical model slugs shared by the lot side (productKeyFor) and buyer lines (SQL buyer_interest_model_slug, Python). Normalise the model text (lower case, accents folded, kWh/kW/Ah figures, bracketed asides, years, battery/pack/module words removed, punctuation to single spaces, leading make dropped, trailing trim words long/range/standard/awd/rwd/lr/sr/dual/motor/performance/premium/se dropped). A text that lists models (comma, semicolon or colon) has no model. With a slash the whole text must equal an alias; otherwise it equals an alias or starts with one followed by a space, longest alias first, and an alias that belongs to the line's own make wins. A bare short alias (digits, one or two characters) only applies to its own make. Unknown models keep the folded text. Regenerate the SQL twin with scripts/rebattery/model_aliases.py --sql. Make aliases, brand words and variant words in this file are generated into the SQL and TypeScript twins by model_aliases.py --write; test_model_alias_generation.py fails when they drift. keyMakes maps a make spelling (folded) to the make segment of a model key (FPT Industrial, Iveco and Iveco FPT are fpt; LG Chem is lg). groupMakes (Stellantis, PSA) name no vehicle: with a model of the alias list the key takes that model's own make (Stellantis 500e is Fiat). kwhVariants lists the nominal kWh of common packs per key make and model slug: a kWh in a model key snaps to the nearest variant within kwhSnap kWh (the lower on a tie), else rounds to one decimal.",
  "models": [
   {
    "make": "Tesla",
@@ -2275,5 +2275,129 @@
   "performance",
   "premium",
   "se"
+ ],
+ "keyMakes": {
+  "fptindustrial": "fpt",
+  "fptind": "fpt",
+  "iveco": "fpt",
+  "ivecofpt": "fpt",
+  "fptiveco": "fpt",
+  "ivecofptindustrial": "fpt",
+  "lgchem": "lg",
+  "lgenergysolution": "lg",
+  "lgensol": "lg",
+  "lges": "lg"
+ },
+ "groupMakes": [
+  "stellantis",
+  "psa"
+ ],
+ "kwhSnap": 2,
+ "kwhVariants": [
+  {
+   "make": "kia",
+   "model": "niro",
+   "kwh": [
+    39.2,
+    64.8
+   ]
+  },
+  {
+   "make": "hyundai",
+   "model": "kona",
+   "kwh": [
+    39.2,
+    64.8
+   ]
+  },
+  {
+   "make": "tesla",
+   "model": "model3",
+   "kwh": [
+    50,
+    57.5,
+    60,
+    75,
+    78,
+    82
+   ]
+  },
+  {
+   "make": "nissan",
+   "model": "leaf",
+   "kwh": [
+    24,
+    30,
+    40,
+    62
+   ]
+  },
+  {
+   "make": "renault",
+   "model": "zoe",
+   "kwh": [
+    22,
+    41,
+    52
+   ]
+  },
+  {
+   "make": "volkswagen",
+   "model": "id3",
+   "kwh": [
+    45,
+    58,
+    77
+   ]
+  },
+  {
+   "make": "volkswagen",
+   "model": "id4",
+   "kwh": [
+    52,
+    77
+   ]
+  },
+  {
+   "make": "hyundai",
+   "model": "ioniq",
+   "kwh": [
+    28,
+    38.3
+   ]
+  },
+  {
+   "make": "hyundai",
+   "model": "ioniq5",
+   "kwh": [
+    58,
+    72.6,
+    77.4,
+    84
+   ]
+  },
+  {
+   "make": "kia",
+   "model": "ev6",
+   "kwh": [
+    58,
+    77.4,
+    84
+   ]
+  },
+  {
+   "make": "fpt",
+   "model": "ebs37",
+   "kwh": [
+    36.9
+   ]
+  },
+  {
+   "make": "fpt",
+   "model": "ebs69",
+   "kwh": [
+    69.3
+   ]
+  }
  ]
 }

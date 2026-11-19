@@ -27,7 +27,16 @@ import {
   normalModel,
   partKey,
 } from "@/lib/commercial-stock";
-import { MODEL_ALIAS_ROWS, MODEL_BRAND_WORDS, MODEL_MAKE_ALIASES, MODEL_VARIANT_WORDS } from "./model-aliases.generated";
+import {
+  MODEL_ALIAS_ROWS,
+  MODEL_BRAND_WORDS,
+  MODEL_GROUP_MAKES,
+  MODEL_KEY_MAKES,
+  MODEL_KWH_SNAP,
+  MODEL_KWH_VARIANTS,
+  MODEL_MAKE_ALIASES,
+  MODEL_VARIANT_WORDS,
+} from "./model-aliases.generated";
 import { PACK_FAMILIES, type PackFamily } from "./pack-families";
 
 export type ProductFacts = {
@@ -91,7 +100,7 @@ function slug(value: string | null | undefined): string | null {
 /** The make segment of a model key: alias first, then the display name normalMake gives, then the raw slug. */
 export function makeKey(value: string | null | undefined): string | null {
   const folded = (value ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-  return MAKE_KEY_ALIASES[folded] ?? slug(normalMake(value ?? null)) ?? slug(value);
+  return MODEL_KEY_MAKES[folded] ?? MAKE_KEY_ALIASES[folded] ?? slug(normalMake(value ?? null)) ?? slug(value);
 }
 
 /**
@@ -321,12 +330,40 @@ function modelSegment(make: string | null | undefined, text: string | null | und
   return modelAliasSlug(make, text) ?? fold(text ?? null);
 }
 
+/**
+ * The make segment of a model key. A spelling the alias list maps (FPT Industrial, Iveco, LG Chem) is its canonical make; a
+ * group (Stellantis, PSA) with a model of exactly one other make takes that make (Stellantis 500e is fiat). Mirrors
+ * buyer_interest_key_make() in SQL.
+ */
+export function keyMakeFor(make: string | null | undefined, model: string | null | undefined): string | null {
+  if (MODEL_GROUP_MAKES.includes(fold(make ?? null)) && !MODEL_KEY_MAKES[fold(make ?? null)] && (model ?? "").trim() && !/[,;:]/.test(model ?? "")) {
+    const norm = modelNormText(make, model);
+    const owners = new Map<string, string>();
+    for (const [own, display, alias] of MODEL_ALIAS_ROWS) {
+      if (norm && (norm === alias || norm.startsWith(`${alias} `))) {owners.set(own, display);}
+    }
+    const [only] = owners.size === 1 ? [...owners] : [];
+    if (only && !MODEL_GROUP_MAKES.includes(only[0])) {return makeKey(only[1]);}
+  }
+  return makeKey(make);
+}
+
+/** The kWh of a model key: the nearest nominal variant of the model within MODEL_KWH_SNAP (the lower on a tie), else one decimal. Mirrors buyer_interest_snap_kwh() in SQL. */
+export function snapKwh(keyMake: string, modelSlug: string, kwh: number): number {
+  const near = (MODEL_KWH_VARIANTS.find(([make, model]) => make === keyMake && model === modelSlug)?.[2] ?? [])
+    .map((value) => [Math.abs(value - kwh), value] as const)
+    .filter(([distance]) => distance <= MODEL_KWH_SNAP + 1e-9)
+    .toSorted((a, b) => a[0] - b[0] || a[1] - b[1]);
+  return near.length ? near[0][1] : Math.round(kwh * 10) / 10;
+}
+
 function modelKey(facts: ProductFacts): string | null {
-  const make = makeKey(facts.make ?? null);
   if (isProseModel(facts.model ?? null)) {return null;}
-  const model = modelAliasSlug(facts.make, modelKeyText(facts.model ?? null))
-    ?? fold(normalModel(facts.make ?? null, modelKeyText(facts.model ?? null)) ?? modelKeyText(facts.model ?? null));
-  const kwh = kwhKeyText(singleKwh(facts));
+  const text = modelKeyText(facts.model ?? null);
+  const make = keyMakeFor(facts.make ?? null, text);
+  const model = modelAliasSlug(facts.make, text) ?? fold(normalModel(facts.make ?? null, text) ?? text);
+  const stated = singleKwh(facts);
+  const kwh = make && model && stated !== null ? kwhKeyText(snapKwh(make, model, stated)) : null;
   return make && model && kwh ? `model:${make}-${model}-${kwh}kwh` : null;
 }
 
@@ -347,8 +384,8 @@ export function modelWideText(make: string | null | undefined, model: string | n
  */
 function modelWideKey(facts: ProductFacts): string | null {
   if (facts.cellMaker) {return null;}  // a cell is keyed by its maker and model
-  const make = makeKey(facts.make ?? null);
   const text = modelWideText(facts.make, facts.model);
+  const make = keyMakeFor(facts.make ?? null, text);
   if (!make || !text || isProseModel(text)) {return null;}
   const model = modelSegment(facts.make, text);
   return model ? `model:${make}-${model}` : null;
