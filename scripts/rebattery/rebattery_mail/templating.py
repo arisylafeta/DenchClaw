@@ -63,7 +63,8 @@ def compose(template_row, variables, identity_row, purpose, transport):
     # Reserved variables cannot override the sending identity or policy.
     unsubscribe_html, unsubscribe_text = policy.unsubscribe(identity_row, purpose, transport)
     # An identity with auto_sign off (supply@, buy@) signs only the one-to-one drafts a person writes, never a template.
-    signs = identity_row.get('auto_sign', True)
+    # Transactional templates end with the catalogue footer, never the sender's signature (Ari, 19 Nov 2026).
+    signs = identity_row.get('auto_sign', True) and purpose != 'transactional'
     signature_html = (identity_row.get('signature_html') or '') if signs else ''
     # Marketing mail from a signing identity: the unsubscribe link sits inside the signature, on the same line as
     # the email address, in the same font and colour (Ari, 11 Nov 2026). Unsigned identities keep the footer.

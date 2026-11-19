@@ -42,7 +42,10 @@ def test_compose_catalogue(catalogue, purpose, transport, identity):
     author = {'key': identity, 'address': identity + '@example.test', **signatures.get(identity, {})}
     rendered = compose(rows[0], {**rows[0]['meta']['sample_vars'], 'name': '<Synthetic>'}, author, purpose, transport)
     assert '<html>' in rendered['html'] and '&lt;Synthetic&gt;' in rendered['html']
-    assert ('alex signature' in rendered['html']) == (identity == 'alex')
+    # Transactional templates carry the catalogue footer only, never the sender's signature (Ari, 19 Nov 2026).
+    signed = identity == 'alex' and purpose != 'transactional'
+    assert ('alex signature' in rendered['html']) == signed
+    assert ('alex signature' in rendered['text']) == signed
     assert ('Unsubscribe' in rendered['text'] or policy.UNSUBSCRIBE in rendered['text']) == (purpose == 'marketing')
     policy.content(dict(body_html=rendered['html'], body_text=rendered['text'], purpose=purpose, transport=transport))
     if purpose == 'marketing' and transport == 'postmark-broadcast':
