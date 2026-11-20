@@ -189,7 +189,7 @@ export async function talk(itemId: string, owner: { id: string; email: string },
 async function answer(item: RelayItem, owner: { id: string; email: string }, rows: Row[], text: string, target: string, started: number): Promise<void> {
   const signatures = await identitySignatures();
   const [ctx, stock, turns, asks] = await Promise.all([
-    draftContext(item, owner.id, item.note.trim() || "(No note: Alex is working on the drafts with you in the chat.)"),
+    draftContext(item, owner.id, item.note.trim() || "(No note: Alex is working on the drafts with you in the chat.)", { offers: false }),
     stockFits(item.id, owner.id),
     queryPg<{ role: TalkRole; text: string; target: string }>(
       "select role, text, target from (select role, text, target, created_at from relay_talk where item_id = $1 order by created_at desc limit 31) t order by created_at", [item.id]),

@@ -26,7 +26,8 @@ import type { PriceFill } from "./relay-price-types";
 import { askInstruction, askLabel, buildChecklist, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
 import { draftLeaks } from "./relay-leak";
 import { leakSentence } from "./relay-leak-core";
-import { HISTORY_CAP, type HistoryEntry } from "./relay-talk-core";
+import { HISTORY_CAP, hasPriceMarker, priceMarker, stockBlock, type HistoryEntry } from "./relay-talk-core";
+import { priceDraft, stockFits } from "./relay-price";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -357,7 +358,16 @@ export async function activeGuide(ownerId: string): Promise<string | null> {
 
 /** Everything a draft is written from: the thread, the deal, the background on the person (relay-context.ts), the writing
  * rules, the owner's voice and who the reply goes to. background: false skips the look-up when only the addressing is needed. */
-export async function draftContext(item: RelayItem, ownerId: string, note: string, opts: { background?: boolean } = {}) {
+/** For a reply to a buyer: the stock that fits their ask, and how to offer it, so the writer leaves Relay a price marker
+ * instead of a figure. Empty when nothing fits or the stock can't be read: the reply is still written, without offers. */
+async function offerBlock(item: RelayItem, ownerId: string): Promise<string> {
+  const fits = await stockFits(item.id, ownerId).catch((error) => { console.error("relay stock for draft", error); return []; });
+  if (!fits.length) return "";
+  return `${stockBlock(fits)}\nWhere the reply offers one of these, write its price exactly as ${priceMarker({ label: "<label>", key: "<key>" })} with that line's label and key. Relay works the price out and Alex checks it. Never write a figure of your own, and never name a supplier, their town or their cost.\n\n`;
+}
+
+/** opts.offers false leaves out the stock that fits (the chat adds its own). */
+export async function draftContext(item: RelayItem, ownerId: string, note: string, opts: { background?: boolean; offers?: boolean } = {}) {
   const messages = await threadMessages(item.mail_thread_id);
   const rules = await activeRules(ownerId);
   const lastInbound = messages.find((m) => m.direction === "inbound");
@@ -369,10 +379,12 @@ export async function draftContext(item: RelayItem, ownerId: string, note: strin
   const pack: Pack = to && opts.background !== false ? await contextPack(to, messages, item.bulk_listing_id) : NO_PACK;
   const bulk = identity !== "alex" || !!item.bulk_listing_id || item.contact_type === "buyer" || item.contact_type === "supplier";
   const intake = bulk ? intakeGuide() : "";
+  const toBuyer = item.contact_type === "buyer" || identity === "buy";
+  const offers = toBuyer && opts.offers !== false ? await offerBlock(item, ownerId) : "";
   // The deal's own label stays out: it can name the buyer, and the reply may go to a supplier.
   const where = `Sending as: ${identity === "supply" ? "supply@rebattery.io, ReBattery's seller inbox" : identity === "buy" ? "buy@rebattery.io, ReBattery's buyer inbox" : "Alex's own address"}. Writing to: ${to || "unknown"}.\n`
     + (item.bulk_listing_id ? "This email is linked to a deal (record below).\n" : bulk ? "This email is not linked to a deal yet. If they are offering or asking for batteries, write the first reply the intake guide describes.\n" : "");
-  const prompt = `${voice ? voiceExamplesBlock(voice.card, voice.examples) : ""}${where}\n${intake ? `ReBattery's intake guide (follow it for what to ask, and for what never to share):\n${intake}\n\n` : ""}Alex's note (what he wants to say):\n${note}\n\n${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}${pack.block ? `${pack.block}\n\n` : ""}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
+  const prompt = `${voice ? voiceExamplesBlock(voice.card, voice.examples) : ""}${where}\n${intake ? `ReBattery's intake guide (follow it for what to ask, and for what never to share):\n${intake}\n\n` : ""}Alex's note (what he wants to say):\n${note}\n\n${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}${pack.block ? `${pack.block}\n\n` : ""}${offers}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
   if (!to) throw new RelayError(400, "Relay couldn't find who to reply to on this thread.");
   // known: every fact the writer was given, for checking a reply's numbers against.
   const known = `${note}\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n${deal ?? ""}\n${pack.block ?? ""}`;
@@ -730,6 +742,11 @@ async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, 
     }
     await tx.query("update relay_item set status = 'review', updated_at = now() where id = $1", [itemId]);
   });
+  // The writer leaves price markers for the stock it offers; Relay prices them now so the reply opens with its prices in.
+  if (hasPriceMarker(body)) {
+    const [draft] = await queryPg<{ id: string }>("select id from relay_draft where mail_message_id = $1 and role = 'primary'", [primaryId]);
+    if (draft) await priceDraft(draft.id, ownerId).catch((error) => console.error("relay price new draft", error));
+  }
 }
 
 // ---------- agent jobs ----------
