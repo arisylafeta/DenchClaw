@@ -13,11 +13,14 @@ const SIGN_OFF = /^(?:(?:kind(?:est)?|best|warm(?:est)?|many|with)\s+(?:regards|
 /** Where the boilerplate starts: everything from this line down goes. */
 const BOILERPLATE = /^\s*(?:confidential(?:ity)?(?:\s+notice)?\s*:?|disclaimer\s*:?|this (?:e-?mail|message|communication)\b.{0,60}\b(?:confidential|privileged|intended)|we proudly represent\b|sent from my (?:iphone|ipad|android|samsung|mobile|galaxy)|sent from (?:outlook|mail) for|get outlook for|please consider the environment|think before you print|--\s*$|_{5,}\s*$)/i;
 
+const IMAGE_LINE = /^\s*\[(?:image|cid:[^\]]*|image:[^\]]*)\]\s*$/i;
+
 /** A name under the sign-off: short, no address, link or phone number. */
 const looksLikeName = (line: string) => line.length <= 40 && !/[@:/]|\d{3}/.test(line);
 
 export function cleanEmail(raw: string): string {
-  const lines = stripQuoted(raw.replace(/\r\n?/g, "\n")).split("\n").map((l) => l.replace(/\s+$/, ""));
+  // Inline pictures (logos, banners) come through as "[image]" or "[cid:…]" lines: nothing to read.
+  const lines = stripQuoted(raw.replace(/\r\n?/g, "\n")).split("\n").map((l) => l.replace(/\s+$/, "")).filter((l) => !IMAGE_LINE.test(l));
   let end = lines.length;
   const boiler = lines.findIndex((l) => BOILERPLATE.test(l));
   if (boiler >= 0) end = boiler;

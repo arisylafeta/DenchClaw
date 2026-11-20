@@ -285,3 +285,29 @@ export function earlierRows<E extends { direction: string; at: string; from_emai
     return { email, when, who: ours ? "Alex" : match?.who.split(",")[0].trim() || theirName, summary: match?.summary ?? null };
   });
 }
+
+// ---------- editing a draft by hand: price markers become short placeholders and back
+
+const PRICE_MARKER = /\[\s*BLANK\s*:\s*price for ([^\]]*?)\s*\(ref [^)\]]+\)\s*\]/gi;
+
+/**
+ * The draft as Alex edits it: each Relay price marker reads "[price: <label>]", the rest as written. `markers` maps
+ * each placeholder back, so saving keeps Relay's prices; typing a figure over one makes that price his.
+ */
+export function toEditable(body: string): { text: string; markers: Record<string, string> } {
+  const markers: Record<string, string> = {};
+  const text = body.replace(PRICE_MARKER, (marker, label: string) => {
+    let place = `[price: ${label.trim()}]`;
+    for (let n = 2; markers[place] && markers[place] !== marker; n++) place = `[price: ${label.trim()} (${n})]`;
+    markers[place] = marker;
+    return place;
+  });
+  return { text, markers };
+}
+
+export const fromEditable = (text: string, markers: Readonly<Record<string, string>>) =>
+  Object.entries(markers).reduce((t, [place, marker]) => t.split(place).join(marker), text);
+
+/** Addresses typed in a To, Cc or Bcc box: commas, semicolons or spaces between them. */
+export const addressList = (typed: string) => typed.split(/[\s,;]+/).map((a) => a.trim().replace(/^<|>$/g, "").toLowerCase()).filter(Boolean);
+

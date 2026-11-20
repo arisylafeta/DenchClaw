@@ -7,8 +7,9 @@ import type { PriceFill } from "@/lib/relay-price-types";
 import { SEND_MODES, type SendMode } from "@/lib/relay-talk-core";
 import { londonInputValue, londonWallToUtc, sendAtProblem, sendLabel, sendSlots, undoSecondsLeft } from "@/lib/relay-send-time";
 import {
-  draftNeeds, paragraphs, parsePrice, priceText, SEND_MODE_WORDS, sendGate, tabNote, whenWords, type Piece,
+  addressList, draftNeeds, fromEditable, paragraphs, parsePrice, priceText, SEND_MODE_WORDS, sendGate, tabNote, toEditable, whenWords, type Piece,
 } from "@/lib/relay-workspace-core";
+import { Pencil } from "lucide-react";
 import { ThinkingIndicator } from "@/app/components/chat-native/thinking";
 import { cx, failureText, firstOf } from "./relay-ui";
 import type { SendRun, StockView } from "./relay-workspace-work";
@@ -26,6 +27,8 @@ export type SheetActions = {
   cancelLater: (d: TalkDraft) => Promise<void>;
   saveGaps: (draftId: string) => Promise<unknown>;
   typeGap: (draftId: string, index: number, value: string) => void;
+  /** Alex's own edit of the text, subject or recipients; true when it saved. */
+  edit: (d: TalkDraft, changes: { body?: string; subject?: string; to?: string[]; cc?: string[]; bcc?: string[] }) => Promise<boolean>;
 };
 
 type Typed = Record<string, Record<number, string>>;
@@ -108,11 +111,22 @@ function Panel({ d, name, typed, stock, marksOn, onMarks, actions, busy }: {
   const to = mail.to_emails.join(", ") || "nobody yet";
   const cc = mail.cc_emails.length ? `, copying ${mail.cc_emails.join(", ")}` : "";
   const head = d.role === "primary" ? `To ${to}${cc}. From ${mail.from_email ?? "alex@rebattery.io"}.` : `To ${to}. ${whenWords(d)}.`;
-  const guard = d.leaks.length ? null : d.to_kind === "supplier" ? `Never mentions ${firstOf(name)} or what we charge.` : d.role === "follow" && d.to_kind === "buyer" ? "Never names the supplier or their cost." : null;
+  // Only a linked email to the other side of the deal needs the reminder: the reply goes to the person it's about.
+  const guard = d.leaks.length || d.role !== "follow" ? null : d.to_kind === "supplier" ? `Never mentions ${firstOf(name)} or what we charge.` : d.to_kind === "buyer" ? "Never names the supplier or their cost." : null;
+  const [editing, setEditing] = useState(false);
+
+  if (editing) return (
+    <div className={w.panel} role="tabpanel" id="relay-draft-panel" aria-labelledby={`relay-tab-${d.id}`}>
+      <EditDraft d={d} onCancel={() => setEditing(false)} onSave={async (changes) => { if (await actions.edit(d, changes)) setEditing(false); }} />
+    </div>
+  );
 
   return (
     <div className={w.panel} role="tabpanel" id="relay-draft-panel" aria-labelledby={`relay-tab-${d.id}`}>
-      <span className={w.to}>{head}{d.role === "follow" && d.why ? ` ${d.why}` : ""}</span>
+      <span className={w.toRow}>
+        <span className={w.to}>{head}{d.role === "follow" && d.why ? ` ${d.why}` : ""}</span>
+        {!locked && <button type="button" className={w.editBtn} onClick={() => setEditing(true)}><Pencil size={12} aria-hidden />Edit</button>}
+      </span>
       {d.state === "sent" && <p className={w.status}>Sent.</p>}
       {scheduled && (
         <p className={w.status}>
@@ -198,10 +212,11 @@ function Body({ d, typed, stock, locked, marksOn, onMarks, actions }: {
     if (after) after.focus(); else from.blur();
   };
 
+  const margin = notes.some((n) => n.length > 0);
   return (
-    <div className={w.doc} ref={root}>
+    <div className={cx(w.doc, !margin && w.docSolo)} ref={root}>
       {paras.map((p, k) => (
-        <Row key={k} notes={notes[k]}>
+        <Row key={k} notes={notes[k]} margin={margin}>
           {p.map((piece, j) => <PieceView key={j} piece={piece} d={d} typed={typed} locked={locked} fill={piece.kind === "price" ? fillOf(piece.key) : undefined} actions={actions} onNext={next} />)}
         </Row>
       ))}
@@ -209,12 +224,69 @@ function Body({ d, typed, stock, locked, marksOn, onMarks, actions }: {
   );
 }
 
-function Row({ notes, children }: { notes: Note[]; children: ReactNode }) {
+function Row({ notes, margin, children }: { notes: Note[]; margin: boolean; children: ReactNode }) {
   return (
     <>
       <p className={w.para}>{children}</p>
-      {notes.length ? <div className={w.side}>{notes.map((n) => <div key={n.key}>{n.body}</div>)}</div> : <span className={w.rail} aria-hidden />}
+      {notes.length ? <div className={w.side}>{notes.map((n) => <div key={n.key}>{n.body}</div>)}</div> : margin ? <span className={w.rail} aria-hidden /> : null}
     </>
+  );
+}
+
+/**
+ * Alex edits the email himself: who it goes to, the subject and the text. Relay's prices stay as "[price: …]" so they
+ * are still filled at Send; a figure typed over one is his own. Saved as one change, so Undo can take it back.
+ */
+function EditDraft({ d, onCancel, onSave }: { d: TalkDraft; onCancel: () => void; onSave: (changes: Parameters<SheetActions["edit"]>[1]) => Promise<void> }) {
+  const mail = d.mail!;
+  const start = useRef(toEditable(mail.main));
+  const [to, setTo] = useState(mail.to_emails.join(", "));
+  const [cc, setCc] = useState(mail.cc_emails.join(", "));
+  const [bcc, setBcc] = useState((mail.bcc_emails ?? []).join(", "));
+  const [subject, setSubject] = useState(mail.subject ?? "");
+  const [text, setText] = useState(start.current.text);
+  const [saving, setSaving] = useState(false);
+  const area = useRef<HTMLTextAreaElement>(null);
+  // The box grows with the email, so the whole draft is in view while he edits.
+  useEffect(() => { const el = area.current; if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight + 2}px`; } }, [text]);
+  useEffect(() => { area.current?.focus(); }, []);
+
+  const same = (a: string[], b: string[]) => a.join(",") === b.join(",");
+  const save = async () => {
+    const changes: Parameters<SheetActions["edit"]>[1] = {};
+    const body = fromEditable(text, start.current.markers);
+    if (body !== mail.main) changes.body = body;
+    if (subject !== (mail.subject ?? "")) changes.subject = subject;
+    if (!same(addressList(to), mail.to_emails)) changes.to = addressList(to);
+    if (!same(addressList(cc), mail.cc_emails)) changes.cc = addressList(cc);
+    if (!same(addressList(bcc), mail.bcc_emails ?? [])) changes.bcc = addressList(bcc);
+    if (!Object.keys(changes).length) { onCancel(); return; }
+    setSaving(true);
+    try { await onSave(changes); } finally { setSaving(false); }
+  };
+  const keys = (e: KeyboardEvent) => {
+    if (e.key === "Escape") onCancel();
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void save(); }
+  };
+  const hasPrices = Object.keys(start.current.markers).length > 0;
+
+  return (
+    <div className={w.editor} onKeyDown={keys}>
+      <label className={w.field}><span>To</span><input value={to} onChange={(e) => setTo(e.target.value)} autoComplete="off" spellCheck={false} /></label>
+      <label className={w.field}><span>Cc</span><input value={cc} onChange={(e) => setCc(e.target.value)} autoComplete="off" spellCheck={false} placeholder="Nobody" /></label>
+      <label className={w.field}><span>Bcc</span><input value={bcc} onChange={(e) => setBcc(e.target.value)} autoComplete="off" spellCheck={false} placeholder="Nobody" /></label>
+      {d.role === "follow" && <label className={w.field}><span>Subject</span><input value={subject} onChange={(e) => setSubject(e.target.value)} /></label>}
+      <label className={w.bodyField}>
+        <span className={w.srOnly}>The email</span>
+        <textarea ref={area} value={text} onChange={(e) => setText(e.target.value)} rows={8} />
+      </label>
+      {hasPrices && <span className={w.muted}>Relay's prices show as [price: …] and are filled in at Send. Type a figure over one to set your own.</span>}
+      <span className={w.editBtns}>
+        <button type="button" className={w.save} disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button>
+        <button type="button" className={w.qchip} disabled={saving} onClick={onCancel}>Cancel</button>
+        <span className={w.muted}>⌘ Enter to save, Esc to cancel</span>
+      </span>
+    </div>
   );
 }
 

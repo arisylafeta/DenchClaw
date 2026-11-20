@@ -112,7 +112,7 @@
 .olderBody { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 2px 12px 12px 30px; color: var(--color-text); }
 
 /* ---------- the sheet: one tab per email */
-.sheet { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; display: flex; flex-direction: column; min-width: 0; }
+.sheet { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; display: flex; flex-direction: column; min-width: 0; container-type: inline-size; }
 .tabs { display: flex; gap: 4px; padding: 8px 8px 0; border-bottom: 1px solid var(--color-border); overflow-x: auto; scrollbar-width: none; }
 .tab { flex: none; max-width: 210px; display: flex; flex-direction: column; align-items: flex-start; min-height: 44px; border: 0; border-radius: 8px 8px 0 0; padding: 6px 12px 8px; margin-bottom: -1px; text-align: left; background: transparent; color: var(--ws-soft); }
 .tab b { max-width: 100%; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -125,11 +125,32 @@
 .noReply b { color: var(--color-text); font-weight: 600; }
 .steps { padding-left: 18px; font-size: 12px; color: var(--ws-soft); }
 .to { font-size: 12px; color: var(--color-text-muted); }
+.toRow { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.editBtn { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; border: 1px solid var(--color-border); border-radius: 8px; padding: 3px 10px; background: var(--color-surface); font-size: 12px; font-weight: 600; color: var(--color-text); }
+.editBtn:hover { background: var(--color-surface-hover); }
+
+/* Alex editing the email himself */
+.editor { display: flex; flex-direction: column; gap: 8px; }
+.field { display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: center; gap: 8px; border-bottom: 1px solid var(--color-border); padding-bottom: 6px; font-size: 12px; color: var(--color-text-muted); }
+.field input { min-width: 0; min-height: 30px; border: 0; outline: 0; background: transparent; font-size: 13.5px; color: var(--color-text); }
+.field:focus-within { border-bottom-color: var(--color-accent); }
+.bodyField textarea { display: block; width: 100%; box-sizing: border-box; min-height: 180px; resize: vertical; border: 1px solid var(--color-border); border-radius: 10px; padding: 10px 12px; background: var(--color-main-bg); font: inherit; font-size: 13.5px; line-height: 1.55; color: var(--color-text); }
+.bodyField textarea:focus { outline: none; border-color: var(--color-accent); }
+.editBtns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-weight: 600; }
 .guard { font-size: 12px; line-height: 1.5; font-weight: 600; color: var(--color-accent); }
 
 /* the body, with Alex's margin on the right */
-.doc { display: grid; grid-template-columns: minmax(0, 1fr) 232px; column-gap: 20px; row-gap: 7px; font-size: 13.5px; line-height: 1.55; }
+.doc { display: grid; grid-template-columns: minmax(0, 1fr) var(--ws-margin, 232px); column-gap: 20px; row-gap: 7px; font-size: 13.5px; line-height: 1.55; }
+/* Nothing for the margin (no prices, no change to note): the email gets the full width. */
+.docSolo { grid-template-columns: minmax(0, 1fr); }
+/* A narrow sheet puts each note under its paragraph instead of beside it. */
+@container (max-width: 680px) {
+  .doc { grid-template-columns: minmax(0, 1fr); }
+  .rail { display: none; }
+  .side { padding: 0 0 6px 12px; border-left: 2px solid var(--color-border); }
+}
 .para { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .side, .rail { border-left: 1px solid var(--color-border); }
 .side { min-width: 0; padding-left: 14px; display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 1.45; color: var(--ws-soft); overflow-wrap: anywhere; }
@@ -249,9 +270,8 @@
 
 /* ---------- narrower screens */
 @media (max-width: 1279px) {
-  .ws { --ws-list: 232px; --ws-chat: 360px; }
+  .ws { --ws-list: 232px; --ws-chat: 360px; --ws-margin: 200px; }
   .main { padding: 22px 24px 32px; }
-  .doc { grid-template-columns: minmax(0, 1fr) 200px; }
 }
 /* Below 1024 the chat goes under the email, and the two scroll as one. */
 @media (max-width: 1023px) {

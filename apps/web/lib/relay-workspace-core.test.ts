@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TalkDraft } from "./relay-talk";
 import type { PriceFill } from "./relay-price-types";
 import type { WaitingRow } from "./relay-rank-core";
-import { earlierRows,
+import { addressList, earlierRows, fromEditable, toEditable,
   bodyPieces, draftNeeds, gapSpans, listEntries, matchesRow, paragraphs, parsePrice, sendGate, tabNote, versionsOf, visibleRows, waitedDays, whenWords,
   type Bands,
 } from "./relay-workspace-core";
@@ -20,7 +20,7 @@ const draft = (over: Partial<TalkDraft> & { main?: string }): TalkDraft => {
   const { main = "Hi,\n\nThanks.\n\nBest,\nAlex", ...rest } = over;
   return {
     id: "d1", role: "primary", position: 0, title: "Reply to Ben", why: "", state: "draft", to_kind: "buyer", send_mode: "with_reply", send_at: null, included: true,
-    mail: { id: "m1", state: "draft", from_email: "alex@rebattery.io", to_emails: ["ben@example.co.uk"], cc_emails: [], subject: "Re: MEB pack", main, updated_at: "2026-11-20T09:00:00.000Z", scheduled: null, failure: null },
+    mail: { id: "m1", state: "draft", from_email: "alex@rebattery.io", to_emails: ["ben@example.co.uk"], cc_emails: [], bcc_emails: [], subject: "Re: MEB pack", main, updated_at: "2026-11-20T09:00:00.000Z", scheduled: null, failure: null },
     change: null, undone: null, marks: [], leaks: [], fills: [], gaps: false, price_markers: false,
     ...rest,
   };
@@ -205,3 +205,22 @@ describe("earlierRows", () => {
     ]);
   });
 });
+
+describe("toEditable / fromEditable", () => {
+  const body = "Hi Ben,\n\nVW ID.3 62 kWh: [BLANK: price for VW ID.3 62 kWh, 2020 (ref stock:a1)] collected.\nAnd [BLANK: who collects]?";
+  it("shows price markers as short placeholders and puts them back on save", () => {
+    const { text, markers } = toEditable(body);
+    expect(text).toBe("Hi Ben,\n\nVW ID.3 62 kWh: [price: VW ID.3 62 kWh, 2020] collected.\nAnd [BLANK: who collects]?");
+    expect(fromEditable(text.replace("Hi Ben,", "Hello Ben,"), markers)).toBe(body.replace("Hi Ben,", "Hello Ben,"));
+  });
+  it("keeps two lines with the same label apart", () => {
+    const two = "[BLANK: price for ID.3 (ref stock:a)] or [BLANK: price for ID.3 (ref stock:b)]";
+    const { text, markers } = toEditable(two);
+    expect(text).toBe("[price: ID.3] or [price: ID.3 (2)]");
+    expect(fromEditable(text, markers)).toBe(two);
+  });
+  it("reads addresses however they're typed", () => {
+    expect(addressList("Ben@x.com, sean@rebattery.io;  <tom@y.co.uk>")).toEqual(["ben@x.com", "sean@rebattery.io", "tom@y.co.uk"]);
+  });
+});
+

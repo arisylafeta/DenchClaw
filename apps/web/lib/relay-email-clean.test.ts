@@ -53,6 +53,9 @@ Fabiano Solari`);
   it("leaves an email with no sign-off whole, with the gaps squeezed", () => {
     expect(cleanEmail("Line one.\n\n\n\nLine two.")).toBe("Line one.\n\nLine two.");
   });
+  it("drops inline picture placeholders", () => {
+    expect(cleanEmail("[image]\nThe modules are ready.\n[cid:logo.png@01D]\n\nKind regards,\nFabiano")).toBe("The modules are ready.\n\nKind regards,\nFabiano");
+  });
   it("splits paragraphs on blank lines only", () => {
     expect(emailParagraphs("Hi,\n\nA\nB\n\nKind regards,\nBen")).toEqual(["Hi,", "A\nB", "Kind regards,\nBen"]);
   });

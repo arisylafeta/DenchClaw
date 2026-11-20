@@ -47,7 +47,7 @@ export type TalkDraft = {
   id: string; role: "primary" | "follow"; position: number; title: string; why: string; state: "draft" | "gmail" | "sent";
   to_kind: ToKind; send_mode: SendMode; send_at: string | null; included: boolean;
   mail: {
-    id: string; state: string; from_email: string | null; to_emails: string[]; cc_emails: string[]; subject: string | null; main: string; updated_at: string;
+    id: string; state: string; from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null; main: string; updated_at: string;
     scheduled: { at: string; undo: boolean; unless_reply: boolean } | null; failure: { reason: string; detail?: unknown } | null;
   } | null;
   change: { reason: string; at: string; by: HistoryEntry["by"] } | null;
@@ -65,7 +65,7 @@ export type TalkState = { turns: TalkTurn[]; drafts: TalkDraft[]; read: ReadSumm
 type Row = {
   id: string; item_id: string; role: "primary" | "follow"; position: number; title: string; why: string; state: string; to_kind: ToKind | null;
   send_mode: SendMode; send_at: string | null; included: boolean; history: unknown; redo: unknown; background: unknown; fills: unknown; mail_message_id: string | null;
-  mail_state: string | null; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; subject: string | null;
+  mail_state: string | null; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null;
   body_text: string | null; updated_at: string | null; thread_id: string | null;
   scheduled: { at?: string; undo?: boolean; unless_reply?: unknown } | null; failure: { reason: string; detail?: unknown } | null;
 };
@@ -75,7 +75,7 @@ async function draftRows(itemId: string): Promise<Row[]> {
   return queryPg<Row>(
     `select d.id, d.item_id, d.role, d.position, d.title, d.why, d.state, d.to_kind, d.send_mode, d.send_at::text as send_at, d.included, d.history, d.redo,
        d.background, d.fills, d.mail_message_id, m.state as mail_state, m.identity_key, m.from_email, coalesce(m.to_emails, '{}') as to_emails,
-       coalesce(m.cc_emails, '{}') as cc_emails, m.subject, m.body_text, m.updated_at, m.thread_id,
+       coalesce(m.cc_emails, '{}') as cc_emails, coalesce(m.bcc_emails, '{}') as bcc_emails, m.subject, m.body_text, m.updated_at, m.thread_id,
        m.personalization->'scheduled_send' as scheduled, m.personalization->'send_failure' as failure
      from relay_draft d left join mail_message m on m.id = d.mail_message_id
      where d.item_id = $1 and d.state <> 'skipped' order by d.role = 'primary' desc, d.position, d.created_at`, [itemId]);
@@ -106,7 +106,7 @@ async function draftViews(item: RelayItem, ownerId: string, rows: Row[], stock: 
       id: r.id, role: r.role, position: r.position, title: r.title, why: r.why, state: sent ? "sent" : r.state === "gmail" ? "gmail" : "draft",
       to_kind: toKind, send_mode: r.send_mode, send_at: r.send_at, included: r.role === "primary" || r.included,
       mail: r.mail_message_id ? {
-        id: r.mail_message_id, state: r.mail_state ?? "draft", from_email: r.from_email, to_emails: r.to_emails, cc_emails: r.cc_emails, subject: r.subject, main,
+        id: r.mail_message_id, state: r.mail_state ?? "draft", from_email: r.from_email, to_emails: r.to_emails, cc_emails: r.cc_emails, bcc_emails: r.bcc_emails, subject: r.subject, main,
         updated_at: r.updated_at ?? "", failure: r.failure,
         scheduled: r.mail_state === "draft" && r.scheduled?.at ? { at: r.scheduled.at, undo: r.scheduled.undo === true, unless_reply: !!r.scheduled.unless_reply } : null,
       } : null,

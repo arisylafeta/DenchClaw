@@ -300,7 +300,17 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
   };
   const prompt = (words: string) => { setText(words); requestAnimationFrame(() => { const el = composer.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }); };
 
-  const actions: SheetActions = { setPrice, acceptPrice, undo, setLinked, sendAll, undoAll, toGmail, sendLater, cancelLater, saveGaps,
+  const edit = async (d: TalkDraft, changes: Parameters<SheetActions["edit"]>[1]) => {
+    await saves.current;
+    const latest = talkRef.current?.drafts.find((x) => x.id === d.id) ?? d;
+    if (!latest.mail) return false;
+    try {
+      await api(`/api/relay/drafts/${d.id}/edit`, { method: "PATCH", body: { updated_at: latest.mail.updated_at, ...changes } });
+      await load();
+      return true;
+    } catch (err) { say(message(err, "Couldn't save your edit.")); return false; }
+  };
+  const actions: SheetActions = { setPrice, acceptPrice, undo, setLinked, sendAll, undoAll, toGmail, sendLater, cancelLater, saveGaps, edit,
     typeGap: (draftId, index, value) => setTyped((t) => ({ ...t, [draftId]: { ...t[draftId], [index]: value } })) };
 
   const msg = item?.last_message;

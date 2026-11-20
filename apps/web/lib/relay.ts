@@ -1229,6 +1229,35 @@ export async function saveDraftBody(draftId: string, mail: MailDraft, changes: P
     [draftId, JSON.stringify(entry), JSON.stringify([{ text: change.reason.slice(0, 300), at }]), HISTORY_CAP]);
 }
 
+/** What Alex changes by hand in a Relay draft: the text and/or who it goes to. */
+export type DraftEdit = { body?: string; subject?: string; to?: string[]; cc?: string[]; bcc?: string[] };
+const ADDRESS = /^[^@\s,;<>()"']+@[^@\s,;<>()"']+\.[a-z]{2,}$/i;
+
+/**
+ * Alex's own edit of an unsent Relay draft, on the version he saw. A body change keeps the copy it replaced, so Undo puts
+ * it back like any of Relay's changes. Not while a send is held or scheduled: that version is pinned, so he cancels first.
+ */
+export async function editRelayDraft(draftId: string, ownerId: string, updatedAt: string, edit: DraftEdit): Promise<void> {
+  const relayDraft = await relayDraftForOwner(draftId, ownerId);
+  if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
+  const mail = await readMailDraft(relayDraft.mail_message_id, ownerId);
+  if (!mail) throw new RelayError(404, "Not found");
+  if (mail.state !== "draft") throw new RelayError(409, "This email was already sent.");
+  if (!sameVersion(mail.updated_at, updatedAt)) throw new RelayError(409, "This draft changed since you opened it. Reload to see the latest.");
+  const [pinned] = await queryPg<{ id: string }>("select id from mail_message where id = $1 and personalization ? 'scheduled_send'", [mail.id]);
+  if (pinned) throw new RelayError(409, "It's waiting to send. Cancel that first, then edit it.");
+  for (const list of [edit.to, edit.cc, edit.bcc]) {
+    const bad = (list ?? []).find((a) => !ADDRESS.test(a));
+    if (bad) throw new RelayError(400, `“${bad}” isn't an email address.`);
+  }
+  if (edit.to && !edit.to.length) throw new RelayError(400, "Add someone to send it to.");
+  if (edit.subject !== undefined && (!edit.subject.trim() || edit.subject.length > 300)) throw new RelayError(400, "The subject must be 1 to 300 characters.");
+  if (edit.body !== undefined && !edit.body.trim()) throw new RelayError(400, "The email is empty.");
+  const changes = { subject: edit.subject, to: edit.to, cc: edit.cc, bcc: edit.bcc, body: edit.body };
+  if (edit.body !== undefined && edit.body !== (await editableCopy(mail)).main) await saveDraftBody(draftId, mail, changes, { reason: "Your edit", by: "alex" });
+  else await editDraft(mail, { ...changes, body: undefined });
+}
+
 // ---------- stock lists ----------
 
 const STOCK_LIST = "/root/denchclaw/scripts-live/scripts/rebattery/stock_list.py";
