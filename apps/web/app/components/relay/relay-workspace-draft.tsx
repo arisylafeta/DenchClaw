@@ -1,0 +1,416 @@
+"use client";
+
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import type { RelayJob } from "@/lib/relay";
+import type { SendOutcome, TalkDraft } from "@/lib/relay-talk";
+import type { PriceFill } from "@/lib/relay-price-types";
+import { SEND_MODES, type SendMode } from "@/lib/relay-talk-core";
+import { londonInputValue, londonWallToUtc, sendAtProblem, sendLabel, sendSlots, undoSecondsLeft } from "@/lib/relay-send-time";
+import {
+  draftNeeds, paragraphs, parsePrice, priceText, SEND_MODE_WORDS, sendGate, tabNote, whenWords, type Piece,
+} from "@/lib/relay-workspace-core";
+import { ThinkingIndicator } from "@/app/components/chat-native/thinking";
+import { cx, failureText, firstOf } from "./relay-ui";
+import type { SendRun, StockView } from "./relay-workspace-work";
+import w from "./relay-workspace.module.css";
+
+export type SheetActions = {
+  setPrice: (draftId: string, key: string, value: number | null) => Promise<boolean>;
+  acceptPrice: (draftId: string, key: string) => Promise<void>;
+  undo: (draftId: string, redo: boolean) => Promise<void>;
+  setLinked: (draftId: string, patch: { included?: boolean; send_mode?: SendMode; send_at?: string | null }) => Promise<boolean>;
+  sendAll: () => Promise<void>;
+  undoAll: () => Promise<void>;
+  toGmail: (d: TalkDraft) => Promise<void>;
+  sendLater: (d: TalkDraft, at: string) => Promise<void>;
+  cancelLater: (d: TalkDraft) => Promise<void>;
+  saveGaps: (draftId: string) => Promise<unknown>;
+  typeGap: (draftId: string, index: number, value: string) => void;
+};
+
+type Typed = Record<string, Record<number, string>>;
+const isLocked = (d: TalkDraft) => d.state === "sent" || !d.mail || !!d.mail.scheduled || d.mail.state !== "draft";
+
+/**
+ * The emails from this conversation, one tab each (the reply first), with the reply's body as Alex will send it: lime
+ * marks on Relay's last change, price fields and other gaps in the sentence, and the working in the margin only he sees.
+ * Under it: the linked emails that go with the reply, and Send.
+ */
+export function DraftSheet({ drafts, current, onTab, name, typed, stock, busy, run, actions, job, jobNote, pendingFirst }: {
+  drafts: TalkDraft[]; current: TalkDraft | null; onTab: (id: string) => void; name: string; typed: Typed; stock: StockView | { error: string } | null;
+  busy: "send" | "gmail" | "later" | "undo" | null; run: SendRun | null; actions: SheetActions; job: RelayJob | null; jobNote: string; pendingFirst: boolean;
+}) {
+  const shown = drafts.filter((d) => d.mail);
+  const [marksOn, setMarksOn] = useState(true);
+  if (!shown.length || !current?.mail) return <NoReply job={job} note={jobNote} writing={pendingFirst} name={name} />;
+  const linked = shown.filter((d) => d.role === "follow");
+  const primary = shown.find((d) => d.role === "primary") ?? null;
+  return (
+    <section className={w.sheet} aria-label="Emails from this conversation">
+      <div className={w.tabs} role="tablist" aria-label="Email">
+        {shown.map((d) => {
+          const note = tabNote(d, draftNeeds(d.mail!.main, d.fills, typed[d.id]));
+          return (
+            <button key={d.id} type="button" role="tab" id={`relay-tab-${d.id}`} aria-controls="relay-draft-panel" aria-selected={d.id === current.id} className={w.tab} onClick={() => onTab(d.id)}>
+              <b>{d.role === "primary" ? `Reply to ${firstOf(name)}` : d.title}</b>
+              <span className={cx(note.tone === "warn" && w.warn, note.tone === "danger" && w.danger)}>{note.text}</span>
+            </button>
+          );
+        })}
+      </div>
+      <Panel key={current.id} d={current} name={name} typed={typed[current.id] ?? {}} stock={current.role === "primary" && current.to_kind === "buyer" ? stock : null}
+        marksOn={marksOn} onMarks={() => setMarksOn(!marksOn)} actions={actions} busy={busy} />
+      {linked.length > 0 && <Linked drafts={linked} actions={actions} />}
+      {(run || (primary && !isLocked(primary))) && <SendBar drafts={drafts} primary={primary} current={current} typed={typed} busy={busy} run={run} actions={actions} />}
+    </section>
+  );
+}
+
+function NoReply({ job, note, writing, name }: { job: RelayJob | null; note: string; writing: boolean; name: string }) {
+  if (job && job.status === "failed") {
+    return (
+      <section className={cx(w.sheet, w.panel)} aria-label="The reply">
+        <p className={w.error} role="alert">Relay couldn't finish the reply: {job.error ?? "something went wrong"}.</p>
+        <p className={w.muted}>Tell Relay again on the right, maybe more simply, and it writes a quick one.</p>
+      </section>
+    );
+  }
+  if (writing || job) {
+    return (
+      <section className={cx(w.sheet, w.panel)} aria-label="The reply" aria-busy>
+        <ThinkingIndicator>{job ? (job.status === "ready" || job.status === "finalising" ? "Writing the reply and attaching files" : "Researching before it writes. Usually 2 to 5 minutes") : "Writing the reply"}</ThinkingIndicator>
+        {job && note && <p className={w.muted}>From your note: “{note}”</p>}
+        {job?.steps.length ? <ol className={w.steps}>{job.steps.map((s, k) => <li key={k}>{s}</li>)}</ol> : null}
+      </section>
+    );
+  }
+  return (
+    <section className={cx(w.sheet, w.panel, w.noReply)} aria-label="The reply">
+      <b>No reply yet.</b>
+      <span>Tell Relay how to answer {firstOf(name)}, and it writes the reply and any emails that go with it. Nothing is sent until you press Send.</span>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------- one email
+
+function Panel({ d, name, typed, stock, marksOn, onMarks, actions, busy }: {
+  d: TalkDraft; name: string; typed: Record<number, string>; stock: StockView | { error: string } | null; marksOn: boolean; onMarks: () => void; actions: SheetActions;
+  busy: string | null;
+}) {
+  const mail = d.mail!;
+  const locked = isLocked(d);
+  const scheduled = mail.scheduled;
+  const [, tick] = useState(0);
+  useEffect(() => { if (!scheduled?.undo) return; const t = setInterval(() => tick((n) => n + 1), 500); return () => clearInterval(t); }, [scheduled?.undo]);
+  const left = scheduled?.undo ? undoSecondsLeft(scheduled.at) : 0;
+
+  const to = mail.to_emails.join(", ") || "nobody yet";
+  const cc = mail.cc_emails.length ? `, copying ${mail.cc_emails.join(", ")}` : "";
+  const head = d.role === "primary" ? `To ${to}${cc}. From ${mail.from_email ?? "alex@rebattery.io"}.` : `To ${to}. ${whenWords(d)}.`;
+  const guard = d.leaks.length ? null : d.to_kind === "supplier" ? `Never mentions ${firstOf(name)} or what we charge.` : d.role === "follow" && d.to_kind === "buyer" ? "Never names the supplier or their cost." : null;
+
+  return (
+    <div className={w.panel} role="tabpanel" id="relay-draft-panel" aria-labelledby={`relay-tab-${d.id}`}>
+      <span className={w.to}>{head}{d.role === "follow" && d.why ? ` ${d.why}` : ""}</span>
+      {d.state === "sent" && <p className={w.status}>Sent.</p>}
+      {scheduled && (
+        <p className={w.status}>
+          {scheduled.undo ? (left > 0 ? `Sending in ${left} s.` : "On its way.") : `Goes ${sendLabel(scheduled.at)}${scheduled.unless_reply ? ", unless they reply first" : ""}.`}
+          {scheduled.undo && left > 0 && <button type="button" className={w.linkbtn} disabled={!!busy} onClick={() => void actions.undoAll()}>Undo</button>}
+          {!scheduled.undo && <button type="button" className={w.linkbtn} disabled={!!busy} onClick={() => void actions.cancelLater(d)}>Cancel</button>}
+        </p>
+      )}
+      {mail.failure && mail.state === "draft" && <p className={w.error} role="alert">The last try didn't go: {failureText(mail.failure, mail.state)}</p>}
+      <Body d={d} typed={typed} stock={stock} locked={locked} marksOn={marksOn} onMarks={onMarks} actions={actions} />
+      {d.leaks.map((leak, k) => <p key={k} className={w.error} role="alert">Can't go like this: {leak.text.replace(/^./, (c) => c.toLowerCase())} Ask Relay to take it out.</p>)}
+      {guard && <span className={w.guard}>{guard}</span>}
+    </div>
+  );
+}
+
+type Note = { key: string; body: ReactNode };
+
+/** The body in paragraphs, each with its notes in the margin: the last change with Undo, and each price's working. */
+function Body({ d, typed, stock, locked, marksOn, onMarks, actions }: {
+  d: TalkDraft; typed: Record<number, string>; stock: StockView | { error: string } | null; locked: boolean; marksOn: boolean; onMarks: () => void; actions: SheetActions;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  const paras = paragraphs(d.mail!.main, marksOn && !locked ? d.marks : []);
+  const notes: Note[][] = paras.map(() => []);
+  const fillOf = (key: string) => d.fills.find((f) => f.key === key);
+
+  // The last change, beside the first paragraph it touched.
+  if (!locked && (d.change || d.undone)) {
+    const marked = paragraphs(d.mail!.main, d.marks).findIndex((p) => p.some((x) => x.marked));
+    const at = marked >= 0 ? Math.min(marked, paras.length - 1) : Math.min(1, paras.length - 1);
+    const back = !!d.undone && !d.marks.length;
+    const why = back ? "Back to how it was." : d.change?.by === "alex" ? "Your edit." : d.change?.by === "undo" ? "Put back." : d.change ? `Changed when you asked “${d.change.reason}”.` : "";
+    notes[at].push({
+      key: "change",
+      body: (
+        <span className={w.note}>
+          <span>{why}</span>
+          <span className={w.noteBtns}>
+            {d.change && !back && <button type="button" className={w.linkbtn} onClick={() => void actions.undo(d.id, false)}>Undo</button>}
+            {d.undone && <button type="button" className={w.linkbtn} onClick={() => void actions.undo(d.id, true)}>Redo</button>}
+            {d.marks.length > 0 && <button type="button" className={w.linkbtn} aria-pressed={!marksOn} onClick={onMarks}>{marksOn ? "Hide marks" : "Show marks"}</button>}
+          </span>
+        </span>
+      ),
+    });
+  }
+
+  // Each price's working; the first one says the margin is Alex's alone.
+  let firstPrice = -1;
+  if (!locked) paras.forEach((p, k) => {
+    for (const piece of p) {
+      if (piece.kind !== "price") continue;
+      if (firstPrice < 0) firstPrice = k;
+      notes[k].push({ key: `price-${piece.key}`, body: <PriceNote fill={fillOf(piece.key)} locked={locked} onUse={() => void actions.acceptPrice(d.id, piece.key)} /> });
+    }
+  });
+  if (firstPrice >= 0) {
+    const at = firstPrice > 0 && !notes[firstPrice - 1].length ? firstPrice - 1 : firstPrice;
+    notes[at].unshift({ key: "private", body: <span className={w.private}>Only you see this side. It never goes in the email.</span> });
+    // What else fits but isn't offered, after the last price.
+    if (stock && !locked) {
+      const offered = new Set(paras.flat().flatMap((x) => (x.kind === "price" ? [x.key] : [])));
+      const lastPrice = paras.reduce((at2, p, k) => (p.some((x) => x.kind === "price") ? k : at2), firstPrice);
+      const target = lastPrice + 1 < paras.length && !notes[lastPrice + 1].length ? lastPrice + 1 : lastPrice;
+      if ("error" in stock) notes[target].push({ key: "stock", body: <span>{stock.error}</span> });
+      else {
+        const rest = stock.fits.filter((f) => !offered.has(f.key)).slice(0, 3);
+        if (rest.length) {
+          const line = rest.map((f) => {
+            const price = stock.prices.find((p) => p.key === f.key)?.value;
+            return `${f.label}${price != null ? ` at £${priceText(price)}` : ""} from ${f.supplier.name || "a supplier"}${f.soh != null ? `, state of health ${f.soh}%` : ""}`;
+          }).join("; ");
+          notes[target].push({ key: "stock", body: <span>Also fits, not offered: {line}.</span> });
+        }
+      }
+    }
+  }
+
+  const next = (from: HTMLInputElement) => {
+    const fields = Array.from(root.current?.querySelectorAll("input") ?? []);
+    const after = fields[fields.indexOf(from) + 1];
+    if (after) after.focus(); else from.blur();
+  };
+
+  return (
+    <div className={w.doc} ref={root}>
+      {paras.map((p, k) => (
+        <Row key={k} notes={notes[k]}>
+          {p.map((piece, j) => <PieceView key={j} piece={piece} d={d} typed={typed} locked={locked} fill={piece.kind === "price" ? fillOf(piece.key) : undefined} actions={actions} onNext={next} />)}
+        </Row>
+      ))}
+    </div>
+  );
+}
+
+function Row({ notes, children }: { notes: Note[]; children: ReactNode }) {
+  return (
+    <>
+      <p className={w.para}>{children}</p>
+      {notes.length ? <div className={w.side}>{notes.map((n) => <div key={n.key}>{n.body}</div>)}</div> : <span className={w.rail} aria-hidden />}
+    </>
+  );
+}
+
+function PieceView({ piece, d, typed, locked, fill, actions, onNext }: {
+  piece: Piece; d: TalkDraft; typed: Record<number, string>; locked: boolean; fill: PriceFill | undefined; actions: SheetActions; onNext: (from: HTMLInputElement) => void;
+}) {
+  if (piece.kind === "text") return piece.marked ? <span className={w.mark}>{piece.text}</span> : <>{piece.text}</>;
+  if (piece.kind === "price") {
+    if (locked) return <span className={piece.marked ? w.mark : undefined}>{fill?.value != null ? `£${priceText(fill.value)}` : "[price]"}</span>;
+    return <PriceField key={`${piece.key}:${fill?.value ?? ""}:${fill?.by ?? ""}`} label={piece.label} fill={fill} marked={piece.marked}
+      onSave={(value) => actions.setPrice(d.id, piece.key, value)} onNext={onNext} />;
+  }
+  const value = typed[piece.index] ?? "";
+  if (locked) return <span>[{piece.label || "gap"}]</span>;
+  const label = piece.label || "fill in";
+  return (
+    <input className={cx(w.field, w.gap, value.trim() && w.filled, piece.marked && w.fieldMarked)} value={value} placeholder={label} aria-label={`Fill in: ${label}`}
+      style={{ width: `${Math.min(44, Math.max(7, (value || label).length + 2))}ch` }}
+      onChange={(e) => actions.typeGap(d.id, piece.index, e.target.value)} onBlur={() => void actions.saveGaps(d.id)}
+      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onNext(e.currentTarget); } }} />
+  );
+}
+
+/** A price in the sentence: Relay's in yellow until Alex changes or keeps it, his own plain, an empty one dashed. */
+function PriceField({ label, fill, marked, onSave, onNext }: {
+  label: string; fill: PriceFill | undefined; marked: boolean; onSave: (value: number | null) => Promise<boolean>; onNext: (from: HTMLInputElement) => void;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  const [bad, setBad] = useState<string | null>(null);
+  const saving = useRef(false);
+  const shown = text ?? priceText(fill?.value);
+  // Typing makes it his; until then it is whoever set it last.
+  const state = !shown.trim() ? w.pEmpty : text != null || fill?.by === "alex" ? w.pAlex : w.pRelay;
+  const commit = async () => {
+    if (text == null || saving.current) return;
+    const parsed = parsePrice(text);
+    if ("error" in parsed) { setBad(parsed.error); return; }
+    setBad(null);
+    // The same figure again changes nothing: keeping Relay's price is "Use this price".
+    if (parsed.value === (fill?.value ?? null)) { setText(null); return; }
+    saving.current = true;
+    const ok = await onSave(parsed.value);
+    saving.current = false;
+    if (ok) setText(null);
+  };
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") { e.preventDefault(); onNext(e.currentTarget); }
+    if (e.key === "Escape") { setText(null); setBad(null); }
+  };
+  return (
+    <span className={cx(w.price, state, marked && w.fieldMarked)} title={bad ?? undefined}>
+      £<input value={shown} inputMode="decimal" placeholder="price" aria-label={`Price for ${label}${fill?.basis ? `, ${fill.basis}` : ""}`} aria-invalid={!!bad || undefined}
+        style={{ width: `${Math.max(5, shown.length + 1)}ch` }} onChange={(e) => setText(e.target.value)} onBlur={() => void commit()} onKeyDown={onKey} />
+    </span>
+  );
+}
+
+function PriceNote({ fill, locked, onUse }: { fill: PriceFill | undefined; locked: boolean; onUse: () => void }) {
+  if (!fill) return <span className={w.note}><b>No price yet</b><span>Relay hasn't priced this line. Type yours, or ask Relay to re-price.</span></span>;
+  const relay = fill.by === "relay";
+  return (
+    <span className={w.note}>
+      <b>{fill.value == null ? "No price yet" : relay ? "Relay’s price" : "Your price"}{fill.value != null ? `, ${fill.basis}` : ""}</b>
+      {fill.working.map((line, k) => <span key={k}>{line}</span>)}
+      {fill.needsDeliveryQuote && <span className={w.warnLine}>Delivered needs a quote from the transport partner.</span>}
+      {fill.warnings.map((line, k) => <span key={`w${k}`} className={w.warnLine}>{line}</span>)}
+      {relay && fill.value != null && !locked && <button type="button" className={w.linkbtn} onClick={onUse}>Use this price</button>}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------- linked emails
+
+/** "Goes with this reply": each linked email with a tick, when it goes and how. */
+function Linked({ drafts, actions }: { drafts: TalkDraft[]; actions: SheetActions }) {
+  return (
+    <div className={w.linked}>
+      <h3>Goes with this reply</h3>
+      {drafts.map((d) => <LinkedRow key={d.id} d={d} actions={actions} />)}
+    </div>
+  );
+}
+
+function LinkedRow({ d, actions }: { d: TalkDraft; actions: SheetActions }) {
+  const locked = isLocked(d);
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [time, setTime] = useState(() => (d.send_at ? londonInputValue(new Date(d.send_at)) : ""));
+  const [bad, setBad] = useState<string | null>(null);
+  useEffect(() => { setTime(d.send_at ? londonInputValue(new Date(d.send_at)) : ""); }, [d.send_at]);
+  const change = async (patch: Parameters<SheetActions["setLinked"]>[1]) => { setBusy(true); await actions.setLinked(d.id, patch); setBusy(false); };
+  const pickMode = (mode: SendMode) => {
+    const timed = mode === "at" || mode === "unless_reply";
+    void change(timed ? { send_mode: mode, send_at: d.send_at ?? sendSlots()[0].at } : { send_mode: mode });
+  };
+  const commitTime = () => {
+    if (!time) return;
+    const [date, clock] = time.split("T");
+    const at = londonWallToUtc(date, clock);
+    const problem = londonInputValue(at) !== time ? "That time doesn't exist in London: the clocks change then." : sendAtProblem(at);
+    setBad(problem);
+    if (!problem && at.toISOString() !== (d.send_at && new Date(d.send_at).toISOString())) void change({ send_at: at.toISOString() });
+  };
+  const id = `relay-linked-${d.id}`;
+  const timed = d.send_mode === "at" || d.send_mode === "unless_reply";
+  return (
+    <div className={w.lrow}>
+      <input type="checkbox" id={id} checked={d.state === "sent" || d.included} disabled={locked || busy} onChange={() => void change({ included: !d.included })} />
+      <label htmlFor={id} className={cx(w.ltitle, !d.included && d.state !== "sent" && w.off)}>{d.title}{d.why && <span>{d.why}</span>}</label>
+      {d.state === "sent" ? <span className={w.lwhen}>Sent</span>
+        : d.mail?.scheduled ? <span className={w.lwhen}>{tabNote(d, { emptyPrices: 0, otherGaps: 0, relayPrices: 0, alexPrices: 0 }).text}</span>
+        : <button type="button" className={w.lwhenBtn} aria-expanded={editing} aria-label={`When “${d.title}” goes: ${whenWords(d)}. Change`} onClick={() => setEditing(!editing)}>{whenWords(d)}</button>}
+      {editing && !locked && (
+        <span className={w.ledit}>
+          <select className={w.select} value={d.send_mode} disabled={busy} aria-label={`How “${d.title}” goes`} onChange={(e) => pickMode(e.target.value as SendMode)}>
+            {SEND_MODES.map((m) => <option key={m} value={m}>{SEND_MODE_WORDS[m]}</option>)}
+          </select>
+          {timed && (
+            <input type="datetime-local" className={w.select} value={time} disabled={busy} aria-label={`Time for “${d.title}”, London`} aria-invalid={!!bad || undefined}
+              onChange={(e) => setTime(e.target.value)} onBlur={commitTime} />
+          )}
+          <button type="button" className={w.linkbtn} onClick={() => { commitTime(); setEditing(false); }}>Done</button>
+        </span>
+      )}
+      {bad && <span className={w.badLine} role="alert">{bad}</span>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Send
+
+function SendBar({ drafts, primary, current, typed, busy, run, actions }: {
+  drafts: TalkDraft[]; primary: TalkDraft | null; current: TalkDraft; typed: Typed; busy: string | null; run: SendRun | null; actions: SheetActions;
+}) {
+  const gate = sendGate(drafts, typed);
+  const [later, setLater] = useState(false);
+  const [custom, setCustom] = useState("");
+  const [bad, setBad] = useState<string | null>(null);
+  const [, tick] = useState(0);
+  const counting = !!run && run.until > Date.now();
+  useEffect(() => { if (!counting) return; const t = setInterval(() => tick((n) => n + 1), 500); return () => clearInterval(t); }, [counting]);
+
+  const replyGate = primary ? sendGate([primary], typed) : null;
+  const currentNeeds = current.mail ? draftNeeds(current.mail.main, current.fills, typed[current.id]) : null;
+  const gmailReady = !isLocked(current) && !!currentNeeds && !currentNeeds.emptyPrices && !currentNeeds.otherGaps && !current.leaks.length;
+  const pickLater = (at: string) => { setLater(false); if (primary) void actions.sendLater(primary, at); };
+  const scheduleCustom = () => {
+    if (!custom) return;
+    const [date, clock] = custom.split("T");
+    const at = londonWallToUtc(date, clock);
+    const problem = londonInputValue(at) !== custom ? "That time doesn't exist in London: the clocks change then." : sendAtProblem(at);
+    setBad(problem);
+    if (!problem) pickLater(at.toISOString());
+  };
+  const left = run ? undoSecondsLeft(new Date(run.until)) : 0;
+
+  return (
+    <>
+      {primary && !isLocked(primary) && <div className={w.sendbar}>
+        <button type="button" className={w.send} disabled={!gate.ready || !!busy} aria-describedby="relay-gate" onClick={() => void actions.sendAll()}>
+          {busy === "send" ? "Sending…" : gate.label}
+        </button>
+        <span id="relay-gate" className={cx(w.gate, gate.tone === "ok" && w.ok, gate.tone === "danger" && w.danger)}>{gate.line}</span>
+        <span className={w.secondary}>
+          <button type="button" className={w.ghost} disabled={!gmailReady || !!busy} title={gmailReady ? undefined : "Fill the gaps first"} onClick={() => void actions.toGmail(current)}>
+            {busy === "gmail" ? "Putting it in Gmail…" : current.state === "gmail" ? "Update in Gmail drafts" : "Put in Gmail drafts"}
+          </button>
+          <button type="button" className={w.ghost} aria-expanded={later} disabled={!replyGate?.ready || !!busy} onClick={() => setLater(!later)}>Send later</button>
+          {later && (
+            <div className={w.menu} role="dialog" aria-label="Send the reply later">
+              <span className={w.menuNote}>The reply only. Linked emails stay as drafts.</span>
+              {sendSlots().map((s) => <button key={s.at} type="button" onClick={() => pickLater(s.at)}>{s.label}</button>)}
+              <label className={w.menuCustom}>
+                <span>Or pick a time, London</span>
+                <input type="datetime-local" className={w.select} value={custom} onChange={(e) => setCustom(e.target.value)} aria-invalid={!!bad || undefined} />
+              </label>
+              {bad && <span className={w.badLine} role="alert">{bad}</span>}
+              <button type="button" className={w.menuGo} disabled={!custom} onClick={scheduleCustom}>Schedule</button>
+            </div>
+          )}
+        </span>
+      </div>}
+      {run && (
+        <ul className={cx(w.results, primary && isLocked(primary) && w.resultsOnly)} aria-live="polite">
+          {run.results.map((r) => <li key={r.draftId} className={cx(r.outcome === "failed" && w.badLine)}><b>{r.title}</b>: {outcomeWords(r, left)}</li>)}
+          {left > 0 && <li><button type="button" className={w.linkbtn} disabled={!!busy} onClick={() => void actions.undoAll()}>Undo all ({left} s)</button></li>}
+        </ul>
+      )}
+    </>
+  );
+}
+
+const outcomeWords = (r: SendOutcome, left: number) => {
+  if (r.outcome === "queued") return left > 0 ? `sending in ${left} s` : "sending";
+  if (r.outcome === "scheduled") return r.at ? `goes ${sendLabel(r.at)}` : "scheduled";
+  if (r.outcome === "todo") return "a to-do for when they order";
+  if (r.outcome === "cancelled") return "stopped";
+  return `not sent. ${r.why ?? "Try it on its own."}`;
+};

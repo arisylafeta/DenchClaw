@@ -14,8 +14,9 @@ import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
 import { Lanes, useSuggestions } from "./relay-lanes";
 import { LeadCards, useLeadCards } from "./relay-lead-card";
 import { JulesFlag } from "./relay-jules-flag";
+import { RelayWorkspace } from "./relay-workspace";
 import { GapBody, WayTabs, waysBusy } from "./relay-ways";
-import { api, colour, cx, firstName, initials } from "./relay-ui";
+import { api, colour, cx, failureText, firstName, initials } from "./relay-ui";
 import s from "./relay.module.css";
 import c from "./relay-lead-card.module.css";
 import r from "./relay-review.module.css";
@@ -58,8 +59,28 @@ function duration(minutes: number | null): string {
 const Arrow = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M5 12h14M13 6l6 6-6 6" /></svg>;
 const Logo = () => <span className={s.logo}><i /></span>;
 
-export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: { onOpenListing?: (id: string, title?: string) => void; onOpenMailMessage?: (id: string, title?: string) => void; onOpenCompany?: (id: string) => void }) {
-  const [page, setPage] = useState<Page>("inbox");
+type ViewProps = { onOpenListing?: (id: string, title?: string) => void; onOpenMailMessage?: (id: string, title?: string) => void; onOpenCompany?: (id: string) => void };
+/** The new Relay (relay-workspace.tsx) sits behind this switch, remembered on this device and off until Alex turns it on. */
+const V2_KEY = "relay.v2";
+
+export function RelayView(props: ViewProps) {
+  // null until this device's choice is read, so neither Relay flashes before the other.
+  const [v2, setV2] = useState<boolean | null>(null);
+  /** Rules or To-dos opened from the new Relay: today's page, with the way back. */
+  const [away, setAway] = useState<"rules" | "todos" | null>(null);
+  useEffect(() => { try { setV2(localStorage.getItem(V2_KEY) === "on"); } catch { setV2(false); } }, []);
+  const switchV2 = (on: boolean) => {
+    setV2(on);
+    setAway(null);
+    try { localStorage.setItem(V2_KEY, on ? "on" : "off"); } catch { /* not remembered */ }
+  };
+  if (v2 === null) return null;
+  if (v2 && !away) return <RelayWorkspace onBack={() => switchV2(false)} onOpenPage={setAway} />;
+  return <RelayClassic key={away ?? "classic"} {...props} start={away ?? "inbox"} v2={v2} onNew={() => (v2 ? setAway(null) : switchV2(true))} />;
+}
+
+function RelayClassic({ onOpenListing, onOpenMailMessage, onOpenCompany, start, v2, onNew }: ViewProps & { start: Page; v2: boolean; onNew: () => void }) {
+  const [page, setPage] = useState<Page>(start);
   const [tab, setTab] = useState<RelayTab>("action");
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -207,6 +228,11 @@ export function RelayView({ onOpenListing, onOpenMailMessage, onOpenCompany }: {
           {lanesOn === false && (
             <button type="button" role="switch" aria-checked={false} className={s.leadswitch} onClick={() => switchLanes(true)} title="The inbox sorted into lanes: new leads with the reply ready, deal replies, and answers to pick for the rest. Nothing is sent until you press Send.">
               <i aria-hidden /><span>New inbox</span>
+            </button>
+          )}
+          {v2 ? <button type="button" className={s.leadswitch} onClick={onNew}>Back to the new Relay</button> : (
+            <button type="button" role="switch" aria-checked={false} className={s.leadswitch} onClick={onNew} title="One screen: who is waiting on you, the reply with its linked emails, and Relay's chat. Nothing is sent until you press Send.">
+              <i aria-hidden /><span>Try the new Relay</span>
             </button>
           )}
           <div className={s.scan} title="Relay reads new Gmail and sorts it about every 10 minutes">
@@ -1158,31 +1184,6 @@ function JobCard({ job, itemId, reload, say }: { job: RelayJob; itemId: string; 
       </div>
     </div>
   );
-}
-
-/** Plain words for why a send didn't go out. */
-function failureText(failure: { reason: string; detail?: unknown } | null, state: string): string {
-  const detail = (failure?.detail ?? {}) as { cause?: string; rule?: string; refused?: string };
-  const reason = detail.cause ?? detail.refused ?? failure?.reason ?? state;
-  const words: Record<string, string> = {
-    thread_has_reply: "they replied since this was drafted. Read their reply first.",
-    gmail_auth_unavailable: "Gmail login check failed. Try again in a minute.",
-    gmail_send_as_missing: 'Gmail can\'t send from this address yet. Add it in Gmail under Settings, Accounts, "Send mail as", or pick another From.',
-    gmail_read_failed: "couldn't read Gmail to check for new replies. Try again.",
-    approval_digest_mismatch: "the draft changed while sending. Check it and send again.",
-    reply_mailbox_unavailable: "couldn't find the mailbox to check for replies.",
-    gmail_reply_anchor_missing: "couldn't find the email it replies to.",
-    recipient_suppressed: "the recipient is on the do-not-email list.",
-    not_sent_released: "an earlier attempt didn't go out. It's ready to send again.",
-    send_timed_out: "the send took too long. Use Check if it went.",
-    unknown: "Gmail didn't confirm. Use Check if it went.",
-    failed: "Gmail refused it. Use Check if it went.",
-    preflight_error: "a pre-send check failed. Try again.",
-    schedule_changed: "the draft changed after you scheduled it. Check it and send or schedule again.",
-    schedule_missed: "the scheduled time passed while Relay was down. Send it now or pick a new time.",
-    schedule_invalid: "the schedule was incomplete. Schedule it again.",
-  };
-  return words[reason] ?? `${reason.replace(/_/g, " ")}.`;
 }
 
 // ---------------------------------------------------------------- Rules

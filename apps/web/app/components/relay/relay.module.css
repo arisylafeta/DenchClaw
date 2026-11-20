@@ -40,7 +40,7 @@
 .leadswitch[aria-checked="true"] { color: var(--ink); }
 .leadswitch[aria-checked="true"] i { background: var(--blue); }
 .leadswitch[aria-checked="true"] i::after { transform: translateX(12px); }
-.leadswitch + .scan { margin-left: 0; }
+.leadswitch + .scan, .leadswitch + .leadswitch { margin-left: 0; }
 .scan { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 5px 9px; }
 .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
 .pulse.stale { background: var(--amber); }
