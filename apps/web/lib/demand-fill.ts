@@ -2,6 +2,9 @@ import "server-only";
 import { cleanSpec, parseDemandInput, type DemandInput } from "./bulk-demand";
 import type { Registry } from "./bulk-registry";
 
+/** Our own filters (the Criteria panel): never filled from a buyer's email, and not listed to the model (about 100 countries). */
+const OUR_FILTERS = new Set(["supplier_countries", "supplier_regions", "delivery_country"]);
+
 const system = (registry: Registry) => `You read a pasted email or note in which a company asks to buy batteries, and fill a demand form.
 Reply with ONLY JSON: {"buyer", "contact", "email", "wants", "quantity", "location", "kind", "needed_by", "volume",
 "volume_unit", "max_price", "price_currency", "price_unit", "spec"}; null when not stated. Never invent a value.
@@ -12,7 +15,7 @@ Reply with ONLY JSON: {"buyer", "contact", "email", "wants", "quantity", "locati
 - "volume" + "volume_unit" (${registry.volumeUnits.join(", ")}): the total for a request, per month for standing.
 - "max_price" + "price_currency" (${registry.currencies.join(", ")}) + "price_unit" (${registry.priceUnits.join(", ")}).
 - "spec": only these keys, each a list of values copied exactly from its options, only when stated:
-${Object.keys(registry.specLists).map((key) => `  ${key}: ${registry.specLists[key].join(" | ")}`).join("\n")}
+${Object.keys(registry.specLists).filter((key) => !OUR_FILTERS.has(key)).map((key) => `  ${key}: ${registry.specLists[key].join(" | ")}`).join("\n")}
   and numbers kwh_min, kwh_max (per unit), min_soh (0-100); mixed_ok true/false.
   Storage systems (BESS, containers): formats "Systems", origins "Stationary storage", brand in system_brands, not makes.`;
 
@@ -53,6 +56,7 @@ export async function fillDemandFromText(text: string, registry: Registry): Prom
     if (!("error" in checked) && checked.value[amount] != null) Object.assign(out, checked.value);
   }
   const spec = cleanSpec(raw.spec, registry);
+  for (const key of OUR_FILTERS) delete spec[key];
   if (Object.keys(spec).length) out.spec = spec;
   if (out.email) out.email = out.email.toLowerCase();
   if (out.kind === "standing") delete out.needed_by;

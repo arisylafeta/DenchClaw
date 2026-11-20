@@ -34,7 +34,7 @@ export const CRITERIA: Def[] = [
   { key: "chemistries", label: "Chemistry", owner: "buyer", kind: "multi", spec: "chemistries" },
   { key: "conditions", label: "Condition", owner: "buyer", kind: "multi", spec: "conditions" },
   { key: "excludes", label: "Exclude", owner: "buyer", kind: "multi", spec: "excludes", no: true },
-  { key: "delivery", label: "Delivery", owner: "buyer", kind: "country1" },
+  { key: "delivery", label: "Delivery", owner: "buyer", kind: "country1", spec: "delivery_country" },
   { key: "max_price", label: "Price ceiling", owner: "buyer", kind: "price", sign: "≤" },
   { key: "min_price", label: "Price floor", owner: "ours", kind: "price", sign: "≥" },
   { key: "volume", label: "Total quantity", owner: "buyer", kind: "qty" },
@@ -90,8 +90,11 @@ export function readCriteria(c: MatchCriteria): Values {
   const kwhMin = num(spec.kwh_min);
   const kwhMax = num(spec.kwh_max);
   if (kwhMin || kwhMax) out.kwh_unit = { min: kwhMin ?? "", max: kwhMax ?? "" };
+  // The structured delivery country wins; the country parsed from the free-text `location` is the fallback.
+  const chosen = list(spec.delivery_country)[0];
   const place = text(c.location);
-  if (place) {
+  if (chosen) out.delivery = chosen;
+  else if (place) {
     const code = countryInText(place);
     out.delivery = (code && countryNameOf(code)) || place;
   }
@@ -227,7 +230,8 @@ export function patchFor(key: CriterionKey, value: Value | null, c: MatchCriteri
     }
     return { spec };
   }
-  if (key === "delivery") return { location: value ? (value as string) : null };
+  // Delivery writes only its own key: `location` keeps whatever free text the buyer or Alex wrote.
+  if (key === "delivery") return setSpec("delivery_country", value ? [value as string] : null);
   if (def.kind === "num") return setSpec(def.spec!, value == null ? null : Number(value));
   if (def.kind === "text") {
     const allowed = options?.lists[def.spec!] ?? [];

@@ -458,7 +458,8 @@ export function requirementFor(demand: Demand, vocab?: Set<string>): Requirement
     kwhNeeded: kwhCount(demand),
     buyerEurPerKwh,
     buyerEurPerUnit,
-    country: countryFromText(demand.location),
+    // The structured delivery country wins; the free text of `location` is only the fallback.
+    country: countryCodeOf(spec.delivery_country?.[0]) ?? countryFromText(demand.location),
     minSoh: spec.min_soh ?? null,
     excludedFormats: [...new Set((spec.excludes ?? []).map(formatKey).filter((key): key is string => !!key))],
     minLotKwh: typeof spec.min_lot_kwh === "number" && spec.min_lot_kwh > 0 ? spec.min_lot_kwh : null,

@@ -471,4 +471,12 @@ describe("criteria filters", () => {
     expect(scoreCandidate(req, cells({ price: 9 }))).toBeNull();
     expect(scoreCandidate(req, unit({ format: "Packs", title: "NMC pack", chemistry: "NMC", kwh: 50, price: 3000 }))).not.toBeNull();
   });
+
+  it("reads the delivery country from spec.delivery_country over the free text, and falls back to the text when it is empty", () => {
+    const text = "Ukraine (Kharkiv base; delivery site tbc)";
+    expect(requirementFor(demand({ wants: "NMC cells", location: text })).country).toBe("UA");
+    expect(requirementFor(demand({ wants: "NMC cells", location: text, spec: { delivery_country: ["Poland"] } })).country).toBe("PL");
+    expect(requirementFor(demand({ wants: "NMC cells", location: text, spec: { delivery_country: [] } })).country).toBe("UA");
+    expect(requirementFor(demand({ wants: "NMC cells", location: null, spec: { delivery_country: ["Brazil"] } })).country).toBe("BR");
+  });
 });

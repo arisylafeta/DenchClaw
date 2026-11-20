@@ -43,7 +43,7 @@ export type SpecListKey = string;
 export type SpecNumberKey = string;
 
 /** Structured criteria. Every key is optional; an empty spec means only "wants" describes the demand. */
-type SpecLists = "chemistries" | "formats" | "cell_formats" | "conditions" | "origins" | "makes" | "cell_makers" | "system_brands" | "evidence" | "excludes" | "supplier_countries" | "supplier_regions";
+type SpecLists = "chemistries" | "formats" | "cell_formats" | "conditions" | "origins" | "makes" | "cell_makers" | "system_brands" | "evidence" | "excludes" | "supplier_countries" | "supplier_regions" | "delivery_country";
 type SpecNumbers = "kwh_min" | "kwh_max" | "min_soh" | "min_lot_kwh";
 /** The keys the app code reads directly are typed; the registry (database) decides which keys are allowed. */
 export type Spec = Partial<Record<SpecLists, string[]> & Record<SpecNumbers, number> & { mixed_ok: boolean }> & Record<string, unknown>;
@@ -197,7 +197,18 @@ export function parseSpec(value: unknown, registry: Registry): Parsed<Spec> {
   if (out.kwh_min !== undefined && out.kwh_max !== undefined && out.kwh_min > out.kwh_max) {
     return { error: "spec.kwh_min is above spec.kwh_max." };
   }
+  if (Array.isArray(out.delivery_country) && out.delivery_country.length > 1) {
+    return { error: "spec.delivery_country is one country." };
+  }
   return { value: out };
+}
+
+/** A price floor above the buyer's ceiling, when both are in the same currency and unit: the error to show, else null. */
+export function floorAboveCeiling(spec: Spec | undefined, ceiling: Pick<Demand, "max_price" | "price_currency" | "price_unit">): string | null {
+  const floor = spec?.price_floor as { amount?: number; currency?: string; unit?: string } | undefined;
+  if (!floor || ceiling.max_price == null || floor.currency !== ceiling.price_currency || floor.unit !== ceiling.price_unit) return null;
+  return (floor.amount ?? 0) > ceiling.max_price
+    ? `The price floor (${floor.currency} ${floor.amount} per ${floor.unit}) is above the ceiling (${ceiling.price_currency} ${ceiling.max_price} per ${ceiling.price_unit}).` : null;
 }
 
 /** For specs a model wrote: keeps the valid parts and drops the rest, instead of rejecting the whole spec. */
@@ -273,6 +284,12 @@ export function parseDemandInput(body: unknown, creating: boolean, registry: Reg
     || !((value.max_price == null && value.price_currency == null && value.price_unit == null)
       || (value.max_price != null && value.price_currency != null && value.price_unit != null)))) {
     return { error: "A max price needs a currency and a unit; clear all three together." };
+  }
+  // A body that carries both the floor and the ceiling is checked here; one that carries only one is checked by the route
+  // against the saved other half.
+  if (value.spec && value.max_price !== undefined) {
+    const problem = floorAboveCeiling(value.spec, { max_price: value.max_price ?? null, price_currency: value.price_currency ?? null, price_unit: value.price_unit ?? null });
+    if (problem) return { error: problem };
   }
   if (creating) {
     value.kind ??= "standing";

@@ -177,4 +177,19 @@ describe("CriteriaPanel", () => {
     expect((await screen.findByRole("alert")).textContent).toBe("The demand could not be saved.");
     expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
   });
+
+  it("edits Delivery into spec.delivery_country and leaves the free-text location alone", async () => {
+    const user = userEvent.setup();
+    const calls: PatchBody[] = [];
+    render(<Harness calls={calls} />);
+    await user.click(screen.getByRole("button", { name: /^Delivery: Ukraine/ }));
+    await user.click(screen.getByRole("button", { name: /Delivery/ }));
+    await user.type(screen.getByPlaceholderText("Search countries"), "pol");
+    await user.click(screen.getByRole("option", { name: /Poland/ }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect((calls[0].spec as Record<string, unknown>).delivery_country).toEqual(["Poland"]);
+    expect(calls[0]).not.toHaveProperty("location");
+    expect(await screen.findByRole("button", { name: /^Delivery: Poland/ })).toBeTruthy();
+  });
 });

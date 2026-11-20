@@ -2,6 +2,7 @@
 --   min_lot_kwh         a lot below this many kWh is dropped (ours; `volume` stays the buyer's own figure)
 --   supplier_countries  the supplier's country must be one of these (a lot with no known country stays as Check)
 --   supplier_regions    the supplier's country must be in one of these regions (union with supplier_countries)
+--   delivery_country    where the buyer wants it (one country); `location` keeps the free text
 -- Also adds the two option values the editor offers that the registry lacked: excludes 'Pouch cells' (demands already
 -- store it, which parseSpec would reject on the next save) and cell_formats 'Blade'.
 -- The price floor is spec.price_floor {amount, currency, unit}, validated in parseSpec, not a registry row.
@@ -12,7 +13,8 @@ begin;
 insert into crm_bulk_attributes (key, side, label, type, unit, needed_for, visibility, min, max, group_name, sort_order) values
   ('min_lot_kwh', 'demand', 'Min lot size (kWh)', 'number', null, null, null, 0, 100000000, 'Product', 37),
   ('supplier_countries', 'demand', 'Supplier country', 'set', null, null, null, null, null, 'Product', 38),
-  ('supplier_regions', 'demand', 'Supplier region', 'set', null, null, null, null, null, 'Product', 39)
+  ('supplier_regions', 'demand', 'Supplier region', 'set', null, null, null, null, null, 'Product', 39),
+  ('delivery_country', 'demand', 'Delivery country', 'set', null, null, null, null, null, 'Product', 40)
 on conflict (key) do nothing;
 
 insert into crm_bulk_attribute_options (attribute_key, value, sort_order) values
@@ -124,6 +126,12 @@ insert into crm_bulk_attribute_options (attribute_key, value, sort_order) values
   ('supplier_regions', 'Africa', 3),
   ('supplier_regions', 'Asia', 4),
   ('supplier_regions', 'SE Asia', 5)
+on conflict (attribute_key, value) do nothing;
+
+-- Delivery country is one country from the same list as the supplier country (spec.delivery_country holds a list of one).
+-- The free text in `location` is not touched; the matcher reads this key first and falls back to the text.
+insert into crm_bulk_attribute_options (attribute_key, value, sort_order)
+select 'delivery_country', value, sort_order from crm_bulk_attribute_options where attribute_key = 'supplier_countries'
 on conflict (attribute_key, value) do nothing;
 
 commit;

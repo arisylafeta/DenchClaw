@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TEST_REGISTRY } from "./bulk-registry.fixture";
-import { checkReason, cleanSpec, demandRank, parseDemandInput, parseSpec, priceLabel, specLines, volumeLabel } from "./bulk-demand";
+import { checkReason, cleanSpec, demandRank, floorAboveCeiling, parseDemandInput, parseSpec, priceLabel, specLines, volumeLabel } from "./bulk-demand";
 
 const TODAY = "2026-09-30";
 const open = { status: "open" as const, needed_by: null, confirmed_on: null, observed_on: null };
@@ -90,7 +90,7 @@ describe("labels", () => {
 
 describe("criteria spec keys", () => {
   const registry = {
-    specLists: { supplier_countries: ["Poland"], supplier_regions: ["Europe"] }, specLabels: {}, specGroups: {},
+    specLists: { supplier_countries: ["Poland"], supplier_regions: ["Europe"], delivery_country: ["Poland", "Ukraine"] }, specLabels: {}, specGroups: {},
     specNumbers: { min_lot_kwh: { label: "Min lot size (kWh)", min: 0, max: 100000000 } },
     currencies: ["EUR", "USD", "GBP"], priceUnits: ["kWh", "pack", "cell"],
   } as unknown as Parameters<typeof parseSpec>[1];
@@ -105,5 +105,22 @@ describe("criteria spec keys", () => {
     expect(parseSpec({ price_floor: { amount: -1, currency: "EUR", unit: "kWh" } }, registry)).toHaveProperty("error");
     expect(parseSpec({ price_floor: { amount: 5, currency: "XXX", unit: "kWh" } }, registry)).toHaveProperty("error");
     expect(parseSpec({ supplier_countries: ["Atlantis"] }, registry)).toHaveProperty("error");
+  });
+
+  it("keeps delivery_country to one country", () => {
+    expect(parseSpec({ delivery_country: ["Ukraine"] }, registry)).toEqual({ value: { delivery_country: ["Ukraine"] } });
+    expect(parseSpec({ delivery_country: ["Ukraine", "Poland"] }, registry)).toHaveProperty("error");
+  });
+
+  it("refuses a price floor above the ceiling in the same currency and unit, server side", () => {
+    const floor = (amount: number, currency = "EUR") => ({ amount, currency, unit: "kWh" });
+    expect(floorAboveCeiling({ price_floor: floor(50) }, { max_price: 40, price_currency: "EUR", price_unit: "kWh" })).toMatch(/above the ceiling/);
+    expect(floorAboveCeiling({ price_floor: floor(30) }, { max_price: 40, price_currency: "EUR", price_unit: "kWh" })).toBeNull();
+    expect(floorAboveCeiling({ price_floor: floor(50, "USD") }, { max_price: 40, price_currency: "EUR", price_unit: "kWh" })).toBeNull();
+    expect(floorAboveCeiling({ price_floor: floor(50) }, { max_price: null, price_currency: null, price_unit: null })).toBeNull();
+    // A body carrying both halves is refused by the parser.
+    const body = { spec: { price_floor: floor(50) }, max_price: 40, price_currency: "EUR", price_unit: "kWh" };
+    expect(parseDemandInput(body, false, TEST_REGISTRY)).toHaveProperty("error");
+    expect(parseDemandInput({ ...body, spec: { price_floor: floor(30) } }, false, TEST_REGISTRY)).not.toHaveProperty("error");
   });
 });

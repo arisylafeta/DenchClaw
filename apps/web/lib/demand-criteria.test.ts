@@ -77,6 +77,20 @@ describe("patchFor", () => {
     expect(patchFor("max_price", { cur: "USD", amt: "55", unit: "kWh" }, base)).toEqual({ max_price: 55, price_currency: "USD", price_unit: "kWh" });
     expect(patchFor("max_price", null, base)).toEqual({ max_price: null, price_currency: null, price_unit: null });
   });
+  it("edits Delivery through spec.delivery_country only, so the free text in location stays", () => {
+    const body = patchFor("delivery", "Poland", base) as { spec: Record<string, unknown>; location?: string };
+    expect(body.spec.delivery_country).toEqual(["Poland"]);
+    expect(body.spec.min_lot_kwh).toBe(500);
+    expect(body).not.toHaveProperty("location");
+    const cleared = patchFor("delivery", null, base) as { spec: Record<string, unknown> };
+    expect(cleared.spec).not.toHaveProperty("delivery_country");
+    expect(cleared).not.toHaveProperty("location");
+  });
+  it("shows the structured delivery country over the parsed location text, and falls back to the text", () => {
+    expect(readCriteria({ ...base, spec: { delivery_country: ["Poland"] } }).delivery).toBe("Poland");
+    expect(readCriteria({ ...base, spec: {} }).delivery).toBe("Ukraine");
+    expect(readCriteria({ ...base, spec: {}, location: null }).delivery).toBeUndefined();
+  });
   it("keeps the price floor in the spec as one object", () => {
     const body = patchFor("min_price", { cur: "EUR", amt: "20", unit: "kWh" }, base) as { spec: Record<string, unknown> };
     expect(body.spec.price_floor).toEqual({ amount: 20, currency: "EUR", unit: "kWh" });
@@ -85,8 +99,6 @@ describe("patchFor", () => {
   it("saves quantity, delivery and the kWh range on their own fields", () => {
     expect(patchFor("volume", { n: "500", unit: "kWh" }, base)).toEqual({ volume: 500, volume_unit: "kWh" });
     expect(patchFor("volume", null, base)).toEqual({ volume: null, volume_unit: null });
-    expect(patchFor("delivery", "Poland", base)).toEqual({ location: "Poland" });
-    expect(patchFor("delivery", null, base)).toEqual({ location: null });
     const range = patchFor("kwh_unit", { min: "0.2", max: "1" }, base) as { spec: Record<string, unknown> };
     expect(range.spec).toMatchObject({ kwh_min: 0.2, kwh_max: 1 });
   });

@@ -1,5 +1,5 @@
-import { BASES, CLOSED_REASONS, parseDemandInput, type Basis, type ClosedReason } from "@/lib/bulk-demand";
-import { categorizeDemand, closeDemand, confirmDemand, makeStanding, setBasis, updateDemand } from "@/lib/crm-postgres/bulk-demand";
+import { BASES, CLOSED_REASONS, floorAboveCeiling, parseDemandInput, type Basis, type ClosedReason } from "@/lib/bulk-demand";
+import { categorizeDemand, closeDemand, confirmDemand, getDemand, makeStanding, setBasis, updateDemand } from "@/lib/crm-postgres/bulk-demand";
 import { loadRegistry } from "@/lib/crm-postgres/bulk-registry";
 import { badRequest, guardBulkTrades, notFound, readJson } from "@/lib/bulk-trades-route";
 
@@ -33,6 +33,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ demand
   } else {
     const parsed = parseDemandInput(body, false, await loadRegistry());
     if ("error" in parsed) return badRequest(parsed.error);
+    // The floor and the ceiling can be saved separately: check the half that is not in this body against the saved one.
+    if (parsed.value.spec || parsed.value.max_price !== undefined) {
+      const saved = await getDemand(demandId);
+      if (saved) {
+        const problem = floorAboveCeiling(parsed.value.spec ?? saved.spec, {
+          max_price: parsed.value.max_price !== undefined ? parsed.value.max_price : saved.max_price,
+          price_currency: parsed.value.price_currency !== undefined ? parsed.value.price_currency : saved.price_currency,
+          price_unit: parsed.value.price_unit !== undefined ? parsed.value.price_unit : saved.price_unit,
+        });
+        if (problem) return badRequest(problem);
+      }
+    }
     demand = await updateDemand(demandId, parsed.value);
   }
   return demand ? Response.json({ demand }) : notFound("Demand");
