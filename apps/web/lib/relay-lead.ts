@@ -1,6 +1,6 @@
 import "server-only";
 import { queryPg, withPgTransaction } from "./postgres";
-import { activeGuide, activeRules, askAgent, cancelScheduledSend, createMailDraft, dealChecklistFor, dismantlersOf, parseJson, queueSend, readRelayItem, RelayError, SKIP_DRAFTS_SQL, type RelayItem } from "./relay";
+import { activeGuide, activeRules, askAgent, cancelScheduledSend, createMailDraft, dealChecklistFor, dismantlersOf, parseJson, queueSend, readRelayItem, RelayError, replyAllPeople, SKIP_DRAFTS_SQL, type RelayItem } from "./relay";
 import { voiceGuideBlock } from "./relay-voice";
 import { HAS_FILES_SQL, recentCallWith, threadFiles } from "./relay-context";
 import { ownText } from "./relay-context-core";
@@ -28,7 +28,7 @@ export type LeadCardView = {
   /** The email the card was prepared against. A newer email from them makes it a new card under the same id. */
   message_id: string;
   who: LeadWho; identity: ReplyIdentity | null; data: LeadData | null; state: LeadState; deal_label: string | null;
-  /** Who else the reply goes to: everyone already on the thread, as the mail tool copies them in. */
+  /** Who else the reply goes to: everyone on the thread's newest email, as Reply all copies them in. */
   cc: string[];
 };
 export type LeadCards = { cards: LeadCardView[]; answers: Record<string, string> };
@@ -43,10 +43,8 @@ export const NEWEST_INBOUND = `(select m.id from mail_message m where m.thread_i
 export const ELIGIBLE = `i.owner_id = $1::uuid and i.tab = 'action' and i.status = 'open' and (i.snooze_until is null or i.snooze_until <= now())
   and i.contact_type in ('supplier', 'buyer') and i.mail_thread_id is not null
   and not exists (select 1 from mail_message o where o.thread_id = i.mail_thread_id and o.direction = 'outbound' and o.state in ${READ_STATES})`;
-/** Everyone who sent or received mail on the item's thread, less our own mailboxes: the mail tool's --cc-thread rule. */
-const THREAD_PEOPLE = `array(select distinct lower(trim(a)) from mail_message m, unnest(array[m.from_email] || coalesce(m.to_emails,'{}') || coalesce(m.cc_emails,'{}')) a
-  where m.thread_id = i.mail_thread_id and m.state in ('received', 'accepted') and coalesce(trim(a), '') <> ''
-    and lower(trim(a)) not in (select lower(trim(v)) from mail_identity mi, unnest(array[mi.address, mi.reply_to, mi.gmail_account]) v where v is not null))`;
+/** Who the card's reply copies in: everyone on the thread's newest email, as Reply all would (the same rule the draft uses). */
+const THREAD_PEOPLE = replyAllPeople("i.mail_thread_id");
 /** Emails read at once. Each is one call to the reader, so a full inbox is worked through a few at a time. */
 const MAX_PREPARING = 3;
 /** A card still "preparing" after this long was dropped (a restart, a timeout) and is read again. */
@@ -386,7 +384,7 @@ export async function sendLeadCard(cardId: string, owner: Owner, input: { state:
     const newest = messages.find((m) => m.direction === "inbound");
     const to = (newest?.from_email ?? "").trim();
     if (!item || !newest || newest.id !== card.message_id || !to.includes("@")) throw new RelayError(409, "This thread has moved on since the card was prepared. Reload to see the latest.");
-    const mailId = await createMailDraft({ identity: replyIdentity(messages, item.contact_type), to: [to], ccThread: true, thread: item.mail_thread_id,
+    const mailId = await createMailDraft({ identity: replyIdentity(messages, item.contact_type), to: [to], replyAll: true, thread: item.mail_thread_id,
       subject: replySubject(newest.subject ?? lead.email.subject), body: reply.body });
     // The answers this Send saves, with what each replaces (null: nothing), so Undo can put them back.
     const remembered = Object.entries(state.picks).filter(([id, pick]) => pick.remember && pick.text && !id.startsWith("other:"));

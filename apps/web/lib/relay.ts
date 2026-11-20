@@ -686,7 +686,7 @@ async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, 
   const since = sinceFrom(ctx.pack.sources);
   if (since.length) log.push(`${SINCE_NOTE}${since.join("; ")}`);
   if (ctx.pack.read) log.push(ctx.pack.read);
-  const primaryId = await createMailDraft({ identity: ctx.identity, to: [ctx.to], ccThread: true, thread: item.mail_thread_id, subject, body });
+  const primaryId = await createMailDraft({ identity: ctx.identity, to: [ctx.to], replyAll: true, thread: item.mail_thread_id, subject, body });
   if (files.length) {
     try { await run(MAIL_CLI, ["attachment", "add", primaryId, ...files], { timeout: 60_000, maxBuffer: 4 << 20 }); }
     catch { log.push("Couldn't attach the files; attach them with Attach stock list or in Gmail"); }
@@ -699,7 +699,7 @@ async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, 
     const fBody = String(f.body ?? "").trim();
     if (!fBody) continue;
     // A follow-on with no known recipient has no draft yet; the card says so.
-    const mailId = fTo ? await createMailDraft({ identity: "alex", to: [fTo], ccThread: false, thread: null, subject: String(f.subject ?? f.title ?? "").slice(0, 300) || "(no subject)", body: fBody }).catch(() => null) : null;
+    const mailId = fTo ? await createMailDraft({ identity: "alex", to: [fTo], replyAll: false, thread: null, subject: String(f.subject ?? f.title ?? "").slice(0, 300) || "(no subject)", body: fBody }).catch(() => null) : null;
     followRows.push({ title: String(f.title ?? "Follow-on email").slice(0, 120), why: String(f.why ?? "").slice(0, 200), mailId });
   }
   // What Relay wrote, split from the signature the same way as the sent copy, so learning compares like with like.
@@ -821,7 +821,21 @@ export async function finaliseJobs(ownerId: string): Promise<void> {
   }
 }
 
-export type NewDraft = { identity: ReplyIdentity; to: string[]; ccThread: boolean; thread: string | null; subject: string; body: string };
+/** `replyAll`: copy in everyone on the thread's newest email, as Reply all would (replyAllPeople). */
+export type NewDraft = { identity: ReplyIdentity; to: string[]; replyAll: boolean; thread: string | null; subject: string; body: string };
+
+/** Our own mailboxes, never copied in. */
+const OWN_ADDRESSES = `(select lower(trim(v)) from mail_identity mi, unnest(array[mi.address, mi.reply_to, mi.gmail_account]) v where v is not null)`;
+/**
+ * Who a reply copies in: everyone on the thread's newest sent or received email (its sender, To and Cc), as Reply all
+ * would, less our own mailboxes. Not everyone ever on the thread: people dropped along the way stay dropped (Alex,
+ * 17 Nov 2026: an Iveco reply copied four people from an earlier part of the thread). `thread` is a SQL expression.
+ */
+export const replyAllPeople = (thread: string) => `array(select distinct lower(trim(a)) from (
+    select m.from_email, m.to_emails, m.cc_emails from mail_message m where m.thread_id = ${thread} and m.state in ('received', 'accepted')
+    order by coalesce(m.sent_at, m.accepted_at, m.created_at) desc limit 1) n,
+  unnest(array[n.from_email] || coalesce(n.to_emails, '{}') || coalesce(n.cc_emails, '{}')) a
+  where coalesce(trim(a), '') <> '' and lower(trim(a)) not in ${OWN_ADDRESSES})`;
 
 /** Creates a mail_message draft through the mail CLI, so threading, the identity signature and content policy apply. */
 export async function createMailDraft(d: NewDraft): Promise<string> {
@@ -829,7 +843,13 @@ export async function createMailDraft(d: NewDraft): Promise<string> {
   const args = ["draft", "--identity", d.identity, "--transport", "gmail", "--purpose", "personal", "--sign", "--to", d.to.join(","),
     `--subject=${d.subject}`, `--body=${d.body}`, `--html=${textToHtml(d.body)}`];  // the CLI wraps it with the signature in Gmail-native markup
   if (d.thread) args.push("--thread", d.thread);
-  if (d.thread && d.ccThread) args.push("--cc-thread");
+  if (d.thread && d.replyAll) {
+    // Not the mail tool's --cc-thread, which copies everyone ever on the thread.
+    const [row] = await queryPg<{ people: string[] }>(`select ${replyAllPeople("$1")} as people`, [d.thread]);
+    const to = new Set(d.to.map((a) => a.trim().toLowerCase()));
+    const cc = (row?.people ?? []).filter((a) => !to.has(a));
+    if (cc.length) args.push(`--cc=${cc.join(",")}`);
+  }
   args.push("--apply");
   try {
     const { stdout } = await run(MAIL_CLI, args, { timeout: 90_000, maxBuffer: 8 << 20 });
