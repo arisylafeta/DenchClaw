@@ -55,6 +55,7 @@ describe("bot config and main session", () => {
   it("shows display names while keeping the profile id", () => {
     expect(botName("sorcerer")).toBe("Sourcing Requests");
     expect(botName("papajules")).toBe("Jules Watcher");
+    expect(botName("recyclops")).toBe("Recycling Requests");
     expect(botName("devon")).toBe("devon");
   });
   it("lists only single bots", () => {

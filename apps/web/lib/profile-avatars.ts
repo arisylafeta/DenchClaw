@@ -8,6 +8,7 @@ import vangridAvatar from "@/public/profile-avatars/vangrid.png";
 import sorcererAvatar from "@/public/profile-avatars/sorcerer.png";
 import papajulesAvatar from "@/public/profile-avatars/papajules.png";
 import pennyAvatar from "@/public/profile-avatars/penny.png";
+import recyclopsAvatar from "@/public/profile-avatars/recyclops.png";
 
 /** A bot's blob: a bloub body shape and palette colour id. */
 export type BlobLook = { shape: string; color: string };
@@ -30,6 +31,7 @@ const looks: Record<string, BlobLook> = {
   vangrid: { shape: "squircle", color: "ambre" },
   penny: { shape: "nuage", color: "rose" },
   auctions: { shape: "hexagone", color: "turquoise" },
+  recyclops: { shape: "galet", color: "vert" },
 };
 
 function hash(name: string): number {
@@ -60,6 +62,7 @@ const stills: Record<string, { src: string } | string> = {
   sorcerer: sorcererAvatar,
   papajules: papajulesAvatar,
   penny: pennyAvatar,
+  recyclops: recyclopsAvatar,
 };
 
 export function bundledProfileAvatar(name: string): string | undefined {
