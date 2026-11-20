@@ -71,6 +71,9 @@ export function pennyRange(card: PennyCard | null): { low: number; expected: num
   return { low: round(card.quick_gbp_kwh), expected: card.expected_gbp_kwh == null ? null : round(card.expected_gbp_kwh), high: round(card.patient_gbp_kwh) };
 }
 
+/** Penny confidences good enough to warn on a price outside the card's range. */
+const TRUSTED_PENNY = new Set(["medium", "high"]);
+
 const VALUE_WARNING = /is below cost|Penny's (quick|patient) price/;
 
 /** What a value says against cost and Penny's range. Shown, never blocking. */
@@ -116,18 +119,22 @@ export function priceFor(fit: StockFit, { penny, fx, now, askedDelivered }: Pric
   }
   if (askedDelivered) working.push("Delivery isn't included: it needs a quote from the transport partner.");
   const range = pennyRange(penny);
+  // Only a card Penny is fairly sure of is checked against; a low-confidence one is shown for what it is.
+  const checked = range && penny && TRUSTED_PENNY.has(penny.confidence.toLowerCase()) ? { low: range.low, high: range.high } : null;
   if (!penny) {
     working.push("No Penny price yet.");
   } else if (!range) {
     working.push(`Penny has a card for ${penny.battery} but no price yet.`);
+  } else if (!checked) {
+    working.push(`Penny (${penny.confidence.toLowerCase()} confidence): ${gbp(range.low)} to ${gbp(range.high)} (${penny.battery}, ${longDay(penny.created_at)}).`);
   } else {
     const expected = range.expected != null ? `, ${gbp(range.expected)} expected` : "";
     working.push(`Penny: ${gbp(range.low)} quick${expected}, ${gbp(range.high)} patient (${penny.battery}, ${penny.confidence.toLowerCase()} confidence, ${longDay(penny.created_at)}).`);
   }
-  warnings.push(...valueWarnings(value, floor, range));
+  warnings.push(...valueWarnings(value, floor, checked));
   return {
     key: fit.key, label: fit.label, value, basis: "collected", working, warnings,
-    needsDeliveryQuote: askedDelivered, by: "relay", floor, pennyRange: range ? { low: range.low, high: range.high } : null,
+    needsDeliveryQuote: askedDelivered, by: "relay", floor, pennyRange: checked,
   };
 }
 
@@ -247,12 +254,15 @@ export type Ask = {
   recent: boolean;
   /** Marketplace listings the email links to (their slugs): those rank first. */
   listings: string[];
+  /** They want it delivered in the UK (a UK postcode or the UK named): UK stock ranks first among equal fits. */
+  ukDelivery: boolean;
 };
 
 const ASK_SENTENCE = /\?|\b(price|prices|quote|cost|how much|looking for|need|needs|want|wants|wanted|interested|after|buy|source|require|requirement)\b/i;
 const KWH_LIST = /((?:\d+(?:[.,]\d+)?\s*(?:kwh)?\s*(?:\/|,|or|and|&)\s*)*\d+(?:[.,]\d+)?)\s*kwh/gi;
 const RANGE = /(\d+(?:\.\d+)?)\s*(?:kwh)?\s*(?:–|-|to)\s*(\d+(?:\.\d+)?)\s*kwh/i;
 const DELIVERED = /\b(deliver(?:y|ed|ing)?|ship(?:ped|ping)? (?:it )?to|ddp|dap|sent to|send (?:it )?to)\b/i;
+const UK_PLACE = /\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b|\b(uk|united kingdom|england|scotland|wales|northern ireland)\b/i;
 const RECENT = /\b(new|newer|newest|recent|young|latest|low mileage|low miles)\b/i;
 // One make under two names, so "VW" in an ask still takes a stock line that says "Volkswagen".
 const MAKE_SYNONYMS: string[][] = [["vw", "volkswagen"], ["mercedes", "mercedes-benz"], ["skoda", "škoda"]];
@@ -350,10 +360,13 @@ export function readAsk(texts: string[], vocab: Set<string>): Ask {
   const parsed = products.length || kwh.length
     ? parseLines([{ label: (requirement.pinned.join(", ") || "What they asked for").slice(0, 80), products, kwh, qty_min: requirement.unitsNeeded ?? 1 }])
     : { value: [] };
+  const delivered = DELIVERED.test(all) && !/\b(collect|collection|pick(?:ing)? (?:it )?up)\b/i.test(askSentences(all));
   return {
     requirement, lines: "value" in parsed ? parsed.value : [], text,
     listings: [...new Set([...all.matchAll(LISTING_URL)].map((m) => m[1].toLowerCase()))],
-    delivered: DELIVERED.test(all) && !/\b(collect|collection|pick(?:ing)? (?:it )?up)\b/i.test(askSentences(all)), recent: RECENT.test(text),
+    delivered, recent: RECENT.test(text),
+    // The postcode or country in the sentence that asks for delivery ("Delivery to BA2 0BS").
+    ukDelivery: delivered && all.split(/(?<=[.?!])\s+|\n+/).some((line) => DELIVERED.test(line) && UK_PLACE.test(line)),
   };
 }
 
@@ -362,71 +375,95 @@ export function readAsk(texts: string[], vocab: Set<string>): Ask {
 const fold = (v: string | null | undefined) => (v ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 /**
- * The capacities that mean the same physical pack: the stated one, plus its reviewed family's (gross and usable, so an
- * ID.3 sold as 58 kWh and its 62 kWh label are one pack). Only families in match/pack-families.ts count.
+ * Capacities Relay treats as one physical pack, on top of Matcha's reviewed families (match/pack-families.ts). For
+ * Relay's fits and Penny cards only: Matcha's product keys and matching do not read this.
+ * ID.3 / Born "58 kWh" is the usable figure of the pack labelled 62 kWh: the Broekhuis ID.3 stock line
+ * (sto_stock_a6e56842bbaefd9bb483) reads 62 kWh on the pack label of a car sold as "Pro 58 kWh", and the supply scan
+ * of 8 Oct 2026 lists ID.3 stock at 58 kWh and eBay packs at 62 kWh.
+ */
+const RELAY_SAME_PACK: { modelPrefixes: string[]; kwh: number[] }[] = [{ modelPrefixes: ["id3", "born"], kwh: [58, 62] }];
+
+/**
+ * The capacities that mean the same physical pack: the stated one, plus its family's (gross and usable, so an ID.3
+ * sold as 58 kWh and its 62 kWh label are one pack).
  */
 export function packKwhs(make: string | null, model: string | null, kwh: number): number[] {
   const name = fold(model).replace(new RegExp(`^${fold(make)}`), "");
-  const family = PACK_FAMILIES.find((f) => f.modelPrefixes.some((p) => name.startsWith(p)) && f.kwh.some((k) => Math.abs(k - kwh) <= 1.5));
+  const family = [...PACK_FAMILIES, ...RELAY_SAME_PACK].find((f) => f.modelPrefixes.some((p) => name.startsWith(p)) && f.kwh.some((k) => Math.abs(k - kwh) <= 1.5));
   return [...new Set([kwh, ...(family?.kwh ?? [])])];
 }
 
-/** How well a stock line fits the buyer's pack types: 0 fits (within 5%), 1 close (kWh not stated), 2 matched only loosely. */
-export function lineTier(lines: DemandLine[], c: LineCandidate): 0 | 1 | 2 {
-  if (!lines.length) return 2;
-  const kwhs = c.kwh != null && !c.kwhEstimated ? packKwhs(c.make, c.model, c.kwh) : [null];
-  let best: 0 | 1 | 2 = 2;
-  for (const kwh of kwhs) {
-    const fit = lineFor({ ...c, kwh }, lines);
-    if (fit?.state === "fits") return 0;
-    if (fit?.state === "close") best = 1;
-  }
-  return best;
+/**
+ * How well a stock line fits the buyer's pack types, best first: 0 its stated kWh is one they asked for (within 5%),
+ * 1 it is the same pack under another figure (58 kWh for 62), 2 kWh not stated, 3 matched only loosely.
+ */
+export type FitTier = 0 | 1 | 2 | 3;
+export function fitTier(lines: DemandLine[], c: LineCandidate): FitTier {
+  if (!lines.length) return 3;
+  const stated = c.kwh != null && !c.kwhEstimated ? c.kwh : null;
+  const direct = lineFor({ ...c, kwh: stated }, lines);
+  if (direct?.state === "fits") return 0;
+  if (stated != null && packKwhs(c.make, c.model, stated).some((kwh) => lineFor({ ...c, kwh }, lines)?.state === "fits")) return 1;
+  if (direct?.state === "close") return 2;
+  return 3;
 }
 
 export type RankedFit = {
   fit: StockFit;
   /** A listing the email links to. */
   named: boolean;
-  tier: 0 | 1 | 2;
+  tier: FitTier;
   /** Matcha's verdict: exact when everything the ask names is confirmed. */
   exact: boolean;
   /** Rough pounds, for ordering only. */
   roughGbp: number | null;
+  /** The pack is in the UK. */
+  uk: boolean;
 };
 
 /** A pack under this state of health ranks after the others: few buyers of one pack want it. */
 export const WORN_SOH = 70;
 
 /**
- * Best fit first: the buyer's pack type, then Matcha's verdict, then a price to quote, then a state of health of at
- * least WORN_SOH, then newer stock (when they asked for new) or the cheaper. One per supplier comes first, so Alex sees his options before a second pack from
- * the same seller.
+ * Best fit first. How well it fits the ask decides first: a listing the email links to, then the fit tier (kWh and
+ * pack family), a price to quote, and a state of health of at least WORN_SOH. Among equally good fits: newer, then
+ * better state of health, when they asked for something new; UK stock before stock abroad when they want it
+ * delivered in the UK; then the cheaper. Within each band of equally good fits, one pack per supplier comes first, so
+ * a second pack from one seller never pushes out an equally good one from another, and never a better fit.
  */
-export function rankFits(rows: RankedFit[], recent: boolean, limit = MAX_FITS): StockFit[] {
+export function rankFits(rows: RankedFit[], { recent, uk }: { recent: boolean; uk: boolean }, limit = MAX_FITS): StockFit[] {
+  const worn = (r: RankedFit) => r.fit.soh != null && r.fit.soh < WORN_SOH;
+  const band = (r: RankedFit) => [Number(!r.named), r.tier, Number(r.roughGbp == null), Number(worn(r))];
+  const byBand = (a: RankedFit, b: RankedFit) => band(a).reduce((d, v, i) => d || v - band(b)[i], 0);
   const year = (r: RankedFit) => r.fit.year ?? 0;
   const price = (r: RankedFit) => r.roughGbp ?? Number.MAX_SAFE_INTEGER;
-  const worn = (r: RankedFit) => r.fit.soh != null && r.fit.soh < WORN_SOH;
-  const sorted = rows.toSorted((a, b) => Number(b.named) - Number(a.named)
-    || a.tier - b.tier
+  const sorted = rows.toSorted((a, b) => byBand(a, b)
+    || (recent ? year(b) - year(a) || (b.fit.soh ?? 0) - (a.fit.soh ?? 0) : 0)
+    || (uk ? Number(b.uk) - Number(a.uk) : 0)
+    || price(a) - price(b)
+    || year(b) - year(a)
     || Number(b.exact) - Number(a.exact)
-    || Number(b.roughGbp != null) - Number(a.roughGbp != null)
-    || Number(worn(a)) - Number(worn(b))
-    || (recent ? year(b) - year(a) || price(a) - price(b) : price(a) - price(b) || year(b) - year(a))
-    || (b.fit.soh ?? 0) - (a.fit.soh ?? 0)
     || a.fit.key.localeCompare(b.fit.key));
-  const picked: RankedFit[] = [];
-  const sellers = new Set<string>();
-  for (const r of sorted) {
-    if (picked.length >= limit) break;
-    const seller = fold(r.fit.supplier.name) || r.fit.key;
-    if (sellers.has(seller)) continue;
-    sellers.add(seller);
-    picked.push(r);
+  const out: RankedFit[] = [];
+  for (let i = 0; i < sorted.length && out.length < limit;) {
+    let j = i;
+    while (j < sorted.length && byBand(sorted[i], sorted[j]) === 0) j++;
+    // Within the band: each supplier's best, then each one's second, and so on, keeping the band's order per round.
+    const seen = new Map<string, number>();
+    const rounds = sorted.slice(i, j).map((r, at) => {
+      const seller = fold(r.fit.supplier.name) || r.fit.key;
+      const round = seen.get(seller) ?? 0;
+      seen.set(seller, round + 1);
+      return { r, round, at };
+    });
+    out.push(...rounds.toSorted((a, b) => a.round - b.round || a.at - b.at).map((x) => x.r));
+    i = j;
   }
-  for (const r of sorted) if (picked.length < limit && !picked.includes(r)) picked.push(r);
-  return picked.toSorted((a, b) => sorted.indexOf(a) - sorted.indexOf(b)).map((r) => r.fit);
+  return out.slice(0, limit).map((r) => r.fit);
 }
+
+/** True when a place names the UK ("Shelford, United Kingdom", "GB"). */
+export const isUk = (place: string | null | undefined) => /^(gb|uk)$/i.test((place ?? "").trim()) || /\b(united kingdom|england|scotland|wales|northern ireland)\b/i.test(place ?? "");
 
 // ---------- labels and Penny cards ----------
 

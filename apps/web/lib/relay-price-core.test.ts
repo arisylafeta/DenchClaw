@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  alexFill, applyFills, askKwh, askSentences, fillValue, fitLabel, lineTier, MARGIN, mergeFills, missingFill, parseFills, pennyCardFor,
+  alexFill, applyFills, askKwh, askSentences, fillValue, fitLabel, fitTier, isUk, MARGIN, packKwhs, mergeFills, missingFill, parseFills, pennyCardFor,
   priceFor, priceGapMarker, priceGapRef, priceGaps, rankFits, readAsk, sameFills, shellOnly, tidyModel, unfilledGaps, yearFrom,
   type Fx, type PennyCard, type RankedFit,
 } from "./relay-price-core";
 import type { PriceFill, StockFit } from "./relay-price-types";
+import { PACK_FAMILIES } from "./match/pack-families";
 
 const FX: Fx = { gbpPerEur: 0.83595, gbpPerUsd: 0.7472, date: "2026-11-12", source: "ECB reference" };
 const NOW = new Date("2026-11-20T12:00:00Z");
@@ -84,18 +85,26 @@ describe("priceFor", () => {
     expect(p.working).toContain("Delivery isn't included: it needs a quote from the transport partner.");
   });
 
-  it("checks against Penny's quick to patient range", () => {
-    const p = priceFor(fit(), { ...OPTS, penny: ID3_CARD });
+  it("checks against Penny's quick to patient range when the card is medium or high confidence", () => {
+    const p = priceFor(fit(), { ...OPTS, penny: { ...ID3_CARD, confidence: "Medium" } });
     expect(p.pennyRange).toEqual({ low: 1530, high: 2000 });
-    expect(p.working.at(-1)).toBe("Penny: £1,530 quick, £1,600 expected, £2,000 patient (VW ID.3 / Cupra Born / Skoda Enyaq 58 kWh MEB pack, low confidence, 25 Oct 2026).");
+    expect(p.working.at(-1)).toBe("Penny: £1,530 quick, £1,600 expected, £2,000 patient (VW ID.3 / Cupra Born / Skoda Enyaq 58 kWh MEB pack, medium confidence, 25 Oct 2026).");
     expect(p.warnings).toEqual(["£5,040 is above Penny's patient price (£2,000)."]);
+    expect(priceFor(fit({ cost: { amount: 1000, currency: "GBP" } }), { ...OPTS, penny: { ...ID3_CARD, confidence: "High" } }).warnings).toEqual(["£1,300 is below Penny's quick price (£1,530)."]);
+  });
+
+  it("only shows a low-confidence Penny card, without warning", () => {
+    const p = priceFor(fit(), { ...OPTS, penny: ID3_CARD });
+    expect(p.working.at(-1)).toBe("Penny (low confidence): £1,530 to £2,000 (VW ID.3 / Cupra Born / Skoda Enyaq 58 kWh MEB pack, 25 Oct 2026).");
+    expect(p.warnings).toEqual([]);
+    expect(p.pennyRange).toBeNull();
     const blank = priceFor(fit(), { ...OPTS, penny: { ...ID3_CARD, quick_gbp_kwh: null, patient_gbp_kwh: null } });
     expect(blank.working.at(-1)).toBe("Penny has a card for VW ID.3 / Cupra Born / Skoda Enyaq 58 kWh MEB pack but no price yet.");
   });
 });
 
 describe("Alex's fills", () => {
-  const relay = priceFor(fit(), { ...OPTS, penny: ID3_CARD });
+  const relay = priceFor(fit(), { ...OPTS, penny: { ...ID3_CARD, confidence: "Medium" } });
 
   it("marks his value and checks it again against cost and Penny", () => {
     const below = alexFill(relay, 4000);
@@ -197,30 +206,59 @@ describe("reading the ask", () => {
 describe("ranking", () => {
   const lines = readAsk(["What's the price of a 55kWh or 62kWh VW MEB battery?"], new Set(["id.3"])).lines;
 
-  it("counts an ID.3 sold as 58 kWh as the 62 kWh pack", () => {
-    expect(lineTier(lines, { make: "Volkswagen", model: "ID.3", title: "Volkswagen ID.3 58kWh", kwh: 58 })).toBe(0);
-    expect(lineTier(lines, { make: "Volkswagen", model: "ID.3", title: "VW ID.3", kwh: null })).toBe(1);
-    expect(lineTier(lines, { make: "Kia", model: "EV6", title: "Kia EV6 58 kWh", kwh: 58 })).toBe(2);
+  it("ranks a stated kWh above the same pack under another figure, then unstated, then loose", () => {
+    expect(fitTier(lines, { make: "Volkswagen", model: "ID.3", title: "VW ID.3 62kWh", kwh: 62 })).toBe(0);
+    expect(fitTier(lines, { make: "Volkswagen", model: "ID.3", title: "Volkswagen ID.3 58kWh", kwh: 58 })).toBe(1);
+    expect(fitTier(lines, { make: "Volkswagen", model: "ID.3", title: "VW ID.3", kwh: null })).toBe(2);
+    expect(fitTier(lines, { make: "Kia", model: "EV6", title: "Kia EV6 58 kWh", kwh: 58 })).toBe(3);
   });
 
-  const row = (key: string, supplier: string, o: Partial<RankedFit> & { year?: number | null; soh?: number | null } = {}): RankedFit => ({
-    fit: fit({ key, supplier: { name: supplier, country: null, email: null }, year: o.year ?? 2020, soh: o.soh ?? null }),
-    named: o.named ?? false, tier: o.tier ?? 0, exact: o.exact ?? true, roughGbp: o.roughGbp === undefined ? 4000 : o.roughGbp,
+  it("keeps the ID.3 58/62 pack to Relay: Matcha's families are unchanged", () => {
+    expect(packKwhs("Volkswagen", "ID.3", 58)).toEqual([58, 62]);
+    expect(PACK_FAMILIES.some((f) => f.kwh.includes(58) && f.modelPrefixes.includes("id3"))).toBe(false);
   });
 
-  it("puts the best per supplier first, then fills up", () => {
-    const rows = [row("stock:a1", "A", { roughGbp: 3000 }), row("stock:a2", "A", { roughGbp: 3100 }), row("stock:b", "B", { roughGbp: 5000 }), row("stock:c", "C", { tier: 2, roughGbp: 100 })];
-    expect(rankFits(rows, false, 3).map((f) => f.key)).toEqual(["stock:a1", "stock:b", "stock:c"]);
-    expect(rankFits(rows, false, 4).map((f) => f.key)).toEqual(["stock:a1", "stock:a2", "stock:b", "stock:c"]);
+  type Row = Partial<RankedFit> & { year?: number | null; soh?: number | null };
+  const row = (key: string, supplier: string, o: Row = {}): RankedFit => ({
+    fit: fit({ key, supplier: { name: supplier, country: null, email: null }, year: o.year === undefined ? 2020 : o.year, soh: o.soh ?? null }),
+    named: o.named ?? false, tier: o.tier ?? 0, exact: o.exact ?? true, roughGbp: o.roughGbp === undefined ? 4000 : o.roughGbp, uk: o.uk ?? false,
+  });
+  const keys = (rows: RankedFit[], o: { recent?: boolean; uk?: boolean } = {}, limit?: number) =>
+    rankFits(rows, { recent: o.recent ?? false, uk: o.uk ?? false }, limit).map((f) => f.key);
+
+  it("gives one place per supplier only among equally good fits", () => {
+    const rows = [row("stock:a1", "A", { roughGbp: 3000 }), row("stock:a2", "A", { roughGbp: 3100 }), row("stock:b", "B", { roughGbp: 5000 }), row("stock:c", "C", { tier: 1, roughGbp: 100 })];
+    expect(keys(rows, {}, 3)).toEqual(["stock:a1", "stock:b", "stock:a2"]);
+    expect(keys(rows)).toEqual(["stock:a1", "stock:b", "stock:a2", "stock:c"]);
   });
 
-  it("puts a linked listing first, priced before unpriced, worn packs after, newer first when asked", () => {
+  it("never lets a weaker fit push out a better one", () => {
+    const exact = row("stock:roberto-2020", "Parts Roberto", { year: 2020, uk: true });
+    const rows = [exact, ...["S", "T", "U", "V", "W", "X"].map((s, i) => row(`market:${s}`, s, { tier: 1, year: 2025, roughGbp: 1000 + i }))];
+    expect(keys(rows, { recent: true, uk: true })[0]).toBe("stock:roberto-2020");
+  });
+
+  it("orders equal fits by year and condition when asked for new, then UK first, then price", () => {
     const rows = [
       row("stock:old", "A", { year: 2019, roughGbp: 1000 }), row("stock:new", "B", { year: 2023, roughGbp: 5000 }), row("stock:none", "C", { roughGbp: null }),
-      row("stock:worn", "D", { year: 2024, soh: 55, roughGbp: 900 }), row("market:linked", "E", { named: true, tier: 2, exact: false }),
+      row("stock:worn", "D", { year: 2024, soh: 55, roughGbp: 900 }), row("market:linked", "E", { named: true, tier: 3, exact: false }),
     ];
-    expect(rankFits(rows, true).map((f) => f.key)).toEqual(["market:linked", "stock:new", "stock:old", "stock:worn", "stock:none"]);
-    expect(rankFits(rows, false).map((f) => f.key)).toEqual(["market:linked", "stock:old", "stock:new", "stock:worn", "stock:none"]);
+    expect(keys(rows, { recent: true })).toEqual(["market:linked", "stock:new", "stock:old", "stock:worn", "stock:none"]);
+    expect(keys(rows)).toEqual(["market:linked", "stock:old", "stock:new", "stock:worn", "stock:none"]);
+    const abroad = row("stock:nl", "NL", { year: 2020, roughGbp: 3000 });
+    const home = row("stock:uk", "UK", { year: 2020, roughGbp: 4500, uk: true });
+    expect(keys([abroad, home], { recent: true, uk: true })).toEqual(["stock:uk", "stock:nl"]);
+    expect(keys([abroad, home], { recent: true })).toEqual(["stock:nl", "stock:uk"]);
+    expect(keys([row("stock:soh80", "A", { soh: 80 }), row("stock:soh95", "B", { soh: 95 })], { recent: true })).toEqual(["stock:soh95", "stock:soh80"]);
+  });
+
+  it("reads where they want it delivered", () => {
+    expect(readAsk(["Price for a 62kWh ID.3? Delivery to BA2 0BS."], new Set()).ukDelivery).toBe(true);
+    expect(readAsk(["Price for a 62kWh ID.3 delivered to Saint-Etienne, France?"], new Set()).ukDelivery).toBe(false);
+    expect(readAsk(["Price for a 62kWh ID.3? I'm in the UK and will collect."], new Set()).ukDelivery).toBe(false);
+    expect(isUk("Shelford, United Kingdom")).toBe(true);
+    expect(isUk("GB")).toBe(true);
+    expect(isUk("Lithuania")).toBe(false);
   });
 });
 

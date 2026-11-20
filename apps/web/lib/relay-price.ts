@@ -5,14 +5,14 @@ import { stockCandidate, type StockRow } from "./crm-postgres/demand-matches-v2"
 import { marketplaceCandidates } from "./crm-postgres/demand-match-supply";
 import { cleanModel, normalMake } from "./commercial-stock";
 import { parseLines } from "./demand-lines";
-import { requirementFor, scoreCandidate, toEur, vocabulary, type Candidate } from "./demand-match";
+import { countryFromText, requirementFor, scoreCandidate, toEur, vocabulary, type Candidate } from "./demand-match";
 import { editableCopy } from "./mail-draft-actions";
 import type { MailDraft } from "./mail-types";
 import { queryPg, withPgTransaction } from "./postgres";
 import { readRelayItem, relayDraftForOwner, RelayError, type RelayItem } from "./relay";
 import { ownText } from "./relay-context-core";
 import {
-  alexFill, fitLabel, lineTier, MAX_FITS, shellOnly, mergeFills, missingFill, parseFills, pennyCardFor, priceFor, priceGaps, rankFits, readAsk, yearFrom,
+  alexFill, fitLabel, fitTier, isUk, MAX_FITS, shellOnly, mergeFills, missingFill, parseFills, pennyCardFor, priceFor, priceGaps, rankFits, readAsk, yearFrom,
   type Ask, type Fx, type PennyCard, type RankedFit,
 } from "./relay-price-core";
 import type { Money, PriceFill, StockFit } from "./relay-price-types";
@@ -27,7 +27,7 @@ import type { Money, PriceFill, StockFit } from "./relay-price-types";
 /** Stock that fits, what Relay read from the email, and anything it could not read. */
 export type StockReport = {
   fits: StockFit[];
-  ask: { text: string; wants: string[]; delivered: boolean; from: "email" | "deal" };
+  ask: { text: string; wants: string[]; delivered: boolean; ukDelivery: boolean; from: "email" | "deal" };
   /** Sources that could not be read, e.g. the marketplace. The fits are then from what could be. */
   errors: string[];
 };
@@ -87,11 +87,17 @@ function label(make: string | null, model: string | null, kwh: number | null, ye
   return fitLabel(shown, cleanModel(make, model) ?? model, kwh, year, title);
 }
 
+/** Where the stock is: the country its location names ("Shelford, United Kingdom"), else the supplier's. */
+function stockCountry(location: string | null, companyCountry: string | null): string | null {
+  const last = location?.split(",").at(-1)?.trim() ?? "";
+  return last && countryFromText(last) ? last : companyCountry;
+}
+
 function supplierFit(row: SupplyRow): StockFit {
   const year = yearFrom(row.year, row.title);
   return {
     key: `stock:${row.id}`, label: label(row.make, row.model, row.capacity_kwh, year, row.title), kind: "supplier",
-    supplier: { name: row.supplier ?? "Unknown supplier", country: row.country_name, email: row.email },
+    supplier: { name: row.supplier ?? "Unknown supplier", country: stockCountry(row.location, row.country_name), email: row.email },
     kwh: row.capacity_kwh, year, soh: row.soh_percent, cost: supplierCost(row), listed: null, href: `/trades/stock/${row.id}`,
   };
 }
@@ -107,7 +113,7 @@ function marketFit(c: Candidate): StockFit | null {
   };
 }
 
-type MirrorRow = { listing_id: string; title: string; supplier: string | null; make: string | null; model: string | null; kwh: number | null; price: number; currency: string; year: number | null; soh: number | null; country: string | null; slug: string | null };
+type MirrorRow = { listing_id: string; title: string; supplier: string | null; make: string | null; model: string | null; kwh: number | null; price: number; currency: string; year: number | null; soh: number | null; country: string | null; location: string | null; slug: string | null };
 
 /**
  * The CRM's copy of published marketplace listings (stock lines the platform sync marked published, with the listed
@@ -118,14 +124,14 @@ async function marketplaceMirror(listingIds?: string[]): Promise<Candidate[]> {
     `select s.marketplace_listing_id as listing_id, s.title, coalesce(c.name, p.full_name) as supplier, nullif(trim(s.details->>'make'), '') as make,
             s.details->>'model' as model, ${NUMBER("'capacity_kwh'")} as kwh, s.price::float8 as price, upper(s.currency) as currency,
             case when (s.details->>'year') ~ '^(19|20)[0-9]{2}$' then (s.details->>'year')::int end as year, ${NUMBER("'soh_percent'")} as soh,
-            nullif(c.country, '') as country, s.details->'marketplace'->>'slug' as slug
+            nullif(c.country, '') as country, s.location, s.details->'marketplace'->>'slug' as slug
      from crm_stock_opportunities s left join crm_companies c on c.id = s.company_id left join crm_people p on p.id = s.person_id
      where s.status = 'listed' and s.marketplace_status = 'published' and s.price > 0
        and ($1::text[] is null or s.marketplace_listing_id = any($1))`, [listingIds ?? null]);
   return rows.map((r) => ({
     key: `listing:${r.listing_id}`, source: "marketplace", title: r.title, seller: r.supplier, make: r.make, model: r.model, format: "Packs",
     chemistry: null, cellFormat: null, kwh: r.kwh, kwhEstimated: false, units: 1, unitsBare: true, price: r.price, currency: r.currency,
-    currencyAssumed: false, country: r.country, location: r.country, soh: r.soh, year: yearFrom(r.year, r.title), partNumber: null, photos: 0,
+    currencyAssumed: false, country: stockCountry(r.location, r.country), location: r.location, soh: r.soh, year: yearFrom(r.year, r.title), partNumber: null, photos: 0,
     tested: false, verified: false, seen: null, sourceKind: "marketplace listing",
     href: `https://www.rebattery.io/marketplace/${r.slug ?? r.listing_id}`, ai: null, alsoIn: [],
   }));
@@ -231,7 +237,7 @@ export async function stockReport(itemId: string, ownerId: string, { limit = MAX
   const supply = rows.map((row) => ({ row, candidate: stockCandidate(row) }));
   const { ask, from } = await askFor(item, vocabulary([...listings, ...supply.map((s) => s.candidate)]));
   const wants = ask.requirement.pinned;
-  if (!wants.length && !ask.listings.length) return { fits: [], ask: { text: ask.text, wants, delivered: ask.delivered, from }, errors };
+  if (!wants.length && !ask.listings.length) return { fits: [], ask: { text: ask.text, wants, delivered: ask.delivered, ukDelivery: ask.ukDelivery, from }, errors };
 
   const ranked: RankedFit[] = [];
   const consider = (candidate: Candidate, fit: StockFit | null) => {
@@ -244,13 +250,14 @@ export async function stockReport(itemId: string, ownerId: string, { limit = MAX
     const eur = money ? toEur(money.amount, money.currency) : null;
     ranked.push({
       fit, named, exact: match?.verdict === "exact", roughGbp: eur == null ? null : eur / (toEur(1, "GBP") ?? 1),
-      tier: lineTier(ask.lines, { make: candidate.make, model: candidate.model, title: candidate.title, kwh: candidate.kwh, kwhEstimated: candidate.kwhEstimated }),
+      uk: isUk(fit.supplier.country),
+      tier: fitTier(ask.lines, { make: candidate.make, model: candidate.model, title: candidate.title, kwh: candidate.kwh, kwhEstimated: candidate.kwhEstimated }),
     });
   };
   // A stock line with no make is judged only when a code in the ask names it, as on Matcha's Matches tab.
   for (const { row, candidate } of supply) if (candidate.make) consider(candidate, supplierFit(row));
   for (const listing of listings) consider(listing, marketFit(listing));
-  return { fits: rankFits(ranked, ask.recent, limit), ask: { text: ask.text, wants, delivered: ask.delivered, from }, errors };
+  return { fits: rankFits(ranked, { recent: ask.recent, uk: ask.ukDelivery }, limit), ask: { text: ask.text, wants, delivered: ask.delivered, ukDelivery: ask.ukDelivery, from }, errors };
 }
 
 /**

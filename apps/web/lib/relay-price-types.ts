@@ -39,6 +39,7 @@ export type PriceFill = {
   by: "relay" | "alex";
   /** Optional: the cost in whole pounds (the listed price for marketplace stock), so a value Alex types is checked against it. */
   floor?: number | null;
-  /** Optional: Penny's quick to patient price for the pack in whole pounds, so a value Alex types is checked against it. */
+  /** Optional: Penny's quick to patient price for the pack in whole pounds, so a value Alex types is checked against it.
+   * Only from a medium or high confidence card; a low-confidence card is a working line, not a check. */
   pennyRange?: { low: number; high: number } | null;
 };
