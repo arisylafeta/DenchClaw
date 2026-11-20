@@ -5,6 +5,8 @@ Started by the CRM after Alex confirms (lib/relay.ts queueSend) as: relay_send.p
 Send later: `relay_send.py --due` (cron, every minute) sends each draft whose personalization.scheduled_send time has
 come (set by lib/relay.ts scheduleSend), through the same path. It claims a schedule by removing it, so a draft is
 tried once; it refuses a draft edited after scheduling (the pinned version differs) or one more than MISSED_AFTER late.
+A schedule with `unless_reply` (a linked chase from Relay's chat, lib/relay-talk.ts) is cancelled instead if one of the
+people it names wrote on one of its threads after it was scheduled: "Not sent: they replied first".
 Prints one line per scheduled email that did not go, nothing otherwise.
 The mail CLI owns the send and its safety gates (approval digest, reply check, suppression, idempotency claim)
 and records failures after its claim. This runner only adds what the CLI cannot: a refusal BEFORE the claim leaves
@@ -72,8 +74,13 @@ def main(message_id: str, approver: str) -> int:
         conn.close()
 
 
+THEY_REPLIED = {"reason": "they_replied_first", "detail": {"message": "Not sent: they replied first"}}
+
+
 def decide(row: dict, now: datetime) -> dict | None:
     """What to do with one claimed schedule: None to send it, else the failure to record on the draft."""
+    if row.get("replied"):
+        return THEY_REPLIED
     if not row["same_version"]:
         return {"reason": "schedule_changed", "detail": {"at": row["at"]}}
     if now - row["at"] > MISSED_AFTER:
@@ -85,6 +92,14 @@ def decide(row: dict, now: datetime) -> dict | None:
 
 RECLAIM_AFTER = timedelta(minutes=20)  # a claim this old was left by a runner that died; the next run retries it
 AT_SQL = "(case when m.personalization->'scheduled_send'->>'at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' then (m.personalization->'scheduled_send'->>'at')::timestamptz end)"
+# unless_reply: {threads: [mail_thread ids], from: [addresses]}. They replied: one of those people wrote on one of those
+# threads after the send was scheduled (set_at).
+REPLIED_SQL = """coalesce(m.personalization->'scheduled_send' ? 'unless_reply' and exists (
+    select 1 from mail_message r
+    where r.direction = 'inbound'
+      and r.thread_id in (select jsonb_array_elements_text(m.personalization->'scheduled_send'->'unless_reply'->'threads'))
+      and lower(trim(r.from_email)) in (select lower(trim(a)) from jsonb_array_elements_text(m.personalization->'scheduled_send'->'unless_reply'->'from') a)
+      and coalesce(r.sent_at, r.accepted_at, r.created_at) > (m.personalization->'scheduled_send'->>'set_at')::timestamptz), false)"""
 
 
 def claim_next(conn) -> dict | None:
@@ -103,11 +118,12 @@ def claim_next(conn) -> dict | None:
             from d where m.id = d.id
             returning m.id, m.personalization->'scheduled_send'->>'by', {AT_SQL},
               coalesce(m.updated_at = (m.personalization->'scheduled_send'->>'version')::timestamptz
-                and coalesce(m.personalization->'scheduled_send'->'attachments', 'null'::jsonb) = coalesce(m.personalization->'attachments', 'null'::jsonb), false)""",
+                and coalesce(m.personalization->'scheduled_send'->'attachments', 'null'::jsonb) = coalesce(m.personalization->'attachments', 'null'::jsonb), false),
+              {REPLIED_SQL}""",
                     (f"{int(RECLAIM_AFTER.total_seconds())} seconds",))
         r = cur.fetchone()
     conn.commit()
-    return {"id": r[0], "by": r[1], "at": r[2], "same_version": r[3]} if r else None
+    return {"id": r[0], "by": r[1], "at": r[2], "same_version": r[3], "replied": r[4]} if r else None
 
 
 def unpin(conn, message_id: str) -> None:

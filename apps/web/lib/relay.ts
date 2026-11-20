@@ -24,6 +24,9 @@ import { hasGap, type StoredWay, type WaysState } from "./relay-ways-core";
 import { applyFills, parseFills, sameFills, unfilledGaps } from "./relay-price-core";
 import type { PriceFill } from "./relay-price-types";
 import { askInstruction, askLabel, buildChecklist, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
+import { draftLeaks } from "./relay-leak";
+import { leakSentence } from "./relay-leak-core";
+import { HISTORY_CAP, type HistoryEntry } from "./relay-talk-core";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -679,7 +682,7 @@ async function mainCopies(mailIds: string[]): Promise<Map<string, string>> {
 }
 
 /** Writes the drafts, attaches files and saves to-dos for one item, then puts it in Review. Shared by quick drafts and agent jobs. */
-async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, ctx: Awaited<ReturnType<typeof draftContext>>, parsed: Record<string, unknown>, files: string[], origin: "note" | "job" = "note"): Promise<void> {
+async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, ctx: Awaited<ReturnType<typeof draftContext>>, parsed: Record<string, unknown>, files: string[], origin: "note" | "job" = "note", keepLinked = false): Promise<void> {
   const itemId = item.id;
   const rawSubject = String(parsed.subject || ctx.messages[0]?.subject || item.headline || "").trim();
   const subject = (rawSubject.replace(/^((re|aw|fw|fwd)\s*:\s*)+/i, (m) => (/^(re|aw)/i.test(m) ? "Re: " : m)).slice(0, 300)) || "Re:";
@@ -709,12 +712,14 @@ async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, 
   // What Relay wrote, split from the signature the same way as the sent copy, so learning compares like with like.
   const originals = await mainCopies([primaryId, ...followRows.map((f) => f.mailId).filter((id): id is string => !!id)]);
   await withPgTransaction(async (tx) => {
-    await tx.query(SKIP_DRAFTS_SQL, [itemId]);
+    await tx.query(keepLinked ? SKIP_PRIMARY_SQL : SKIP_DRAFTS_SQL, [itemId]);
     await tx.query(`insert into relay_draft (item_id, role, position, title, why, mail_message_id, source_note, agent_log, original_body, origin, background) values ($1, 'primary', 0, $2, '', $3, $4, $5::jsonb, $6, $7, $8::jsonb)`,
       [itemId, `Reply to ${item.counterpart_name ?? ctx.to}`, primaryId, note, JSON.stringify([...log, ...sources]), originals.get(primaryId) ?? null, origin, JSON.stringify(ctx.pack.sources)]);
+    // Linked emails kept from the chat stay first; new follow-ons go after them.
+    const { rows: [{ next }] } = await tx.query<{ next: number }>("select coalesce(max(position), 0) + 1 as next from relay_draft where item_id = $1 and state <> 'skipped'", [itemId]);
     for (const [index, f] of followRows.entries()) {
       await tx.query(`insert into relay_draft (item_id, role, position, title, why, mail_message_id, source_note, original_body, origin) values ($1, 'follow', $2, $3, $4, $5, $6, $7, $8)`,
-        [itemId, index + 1, f.title, f.why, f.mailId, note, f.mailId ? originals.get(f.mailId) ?? null : null, origin]);
+        [itemId, next + index, f.title, f.why, f.mailId, note, f.mailId ? originals.get(f.mailId) ?? null : null, origin]);
     }
     await tx.query("delete from relay_todo where item_id = $1 and state = 'suggested'", [itemId]);
     for (const t of todos) {
@@ -763,9 +768,14 @@ ${rules.map((r) => `- ${r}`).join("\n")}
 Finish with ONLY this JSON as your final message:
 {"subject": "Re: …", "body": "the reply", "files": ["absolute paths of files you made in ${dir} to attach"], "sources": ["one line per fact you used, e.g. CRM stock: 76 LFP lots, 19,454 kWh"], "todos": [{"title": "…", "detail": "…", "kind": "suggested" | "promise"}], "follow_ons": [], "log": ["3-6 short past-tense lines of what you did"]}`;
 
-/** Queues an agent job for the note and starts the runner. The item moves to Review straight away and shows progress there. */
+/** A research job asked for in Relay's chat: when it finishes it replaces the reply only, and the linked emails stay. */
+export const TALK_JOB_NOTE = "[talk] ";
+
+/** Queues an agent job for the note and starts the runner. The item moves to Review straight away and shows progress there.
+ * A chat research job (TALK_JOB_NOTE) leaves the drafts in place while it works, so Alex can keep going. */
 async function startJob(item: RelayItem, ownerId: string, rawNote: string): Promise<void> {
   const note = rawNote.startsWith(DEAL_NOTE) ? ` ${rawNote}` : rawNote;  // a typed "[deal:" note must never run as a Matcha deal job
+  const fromTalk = note.startsWith(TALK_JOB_NOTE);
   const ctx = await draftContext(item, ownerId, note);
   const [job] = await queryPg<{ id: string }>("insert into relay_job (item_id, owner_id, note, steps) values ($1, $2::uuid, $3, $4::jsonb) returning id",
     [item.id, ownerId, note, JSON.stringify(["Queued"])]);
@@ -774,11 +784,21 @@ async function startJob(item: RelayItem, ownerId: string, rawNote: string): Prom
   writeFileSync(join(dir, "prompt.txt"), `${JOB_SYSTEM(ctx.rules, dir, ctx.guide)}\n\n${ctx.prompt}`, { mode: 0o600 });
   writeFileSync(join(dir, BACKGROUND_FILE), JSON.stringify(ctx.pack), { mode: 0o600 });  // what the prompt was built from, for the draft's record
   await withPgTransaction(async (tx) => {
-    await tx.query(SKIP_DRAFTS_SQL, [item.id]);
+    if (!fromTalk) await tx.query(SKIP_DRAFTS_SQL, [item.id]);
     await tx.query("update relay_item set status = 'review', updated_at = now() where id = $1", [item.id]);
   });
   const child = spawn("/usr/bin/python3", [JOB_RUNNER, job.id], { detached: true, stdio: "ignore" });
   child.unref();
+}
+
+/** Research Relay's chat asked for: the background job reads what it needs and writes a new reply from the current one.
+ * Refused while a job is already working on this email. */
+export async function startResearchJob(item: RelayItem, ownerId: string, ask: string, currentReply: string): Promise<void> {
+  const [busy] = await queryPg<{ id: string }>(`select id from relay_job where item_id = $1 and left(note, 6) <> $2 and status in ('queued','running','ready','finalising')
+    and created_at > now() - ($3 || ' minutes')::interval limit 1`, [item.id, DEAL_NOTE, String(JOB_STALE_MINUTES)]);
+  if (busy) throw new RelayError(409, "Relay is already researching this email.");
+  const note = `${TALK_JOB_NOTE}Research first: ${ask}\n\nThen rewrite the reply below with what you found. Keep everything Alex already has in it unless the research changes it.${item.note.trim() ? `\n\nAlex's note on this email: ${item.note.trim()}` : ""}\n\nThe reply so far:\n${currentReply}`;
+  await startJob(item, ownerId, note.slice(0, 8000));
 }
 
 /** Runs the item's last agent job again with the same note. */
@@ -817,7 +837,7 @@ export async function finaliseJobs(ownerId: string): Promise<void> {
         } catch { return []; }
       });
       const ctx = { ...(await draftContext(item, ownerId, job.note, { background: false })), pack: jobBackground(dir) };
-      await saveDraftOutputs(item, ownerId, job.note, ctx, job.result, files, "job");
+      await saveDraftOutputs(item, ownerId, job.note, ctx, job.result, files, "job", job.note.startsWith(TALK_JOB_NOTE));
       await queryPg("update relay_job set status = 'done', finished_at = now(), steps = steps || $2::jsonb where id = $1", [job.id, JSON.stringify(["Draft ready"])]);
     } catch (error) {
       await queryPg("update relay_job set status = 'failed', error = $2, finished_at = now() where id = $1", [job.id, (error instanceof Error ? error.message : "Couldn't save the draft").slice(0, 300)]);
@@ -872,6 +892,8 @@ export async function createMailDraft(d: NewDraft): Promise<string> {
 /** Drops an item's unsent drafts; a dropped draft's send-later is cancelled with it, so it can never go out. */
 export const SKIP_DRAFTS_SQL = `with s as (update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail') returning mail_message_id)
   update mail_message set personalization = personalization - 'scheduled_send' where id in (select mail_message_id from s) and state = 'draft' and personalization ? 'scheduled_send'`;
+/** The same for the reply alone: a chat research job's new reply replaces it and the linked emails stay. */
+const SKIP_PRIMARY_SQL = SKIP_DRAFTS_SQL.replace("state in ('draft','gmail')", "state in ('draft','gmail') and role = 'primary'");
 
 type DraftRow = { id: string; item_id: string; role: "primary" | "follow"; position: number; title: string; why: string; state: RelayDraftView["state"]; source_note: string; agent_log: unknown; background: unknown; ways: unknown; mail_message_id: string | null; gmail_draft_id: string | null; fills?: unknown };
 
@@ -1013,11 +1035,33 @@ async function withFills(draftId: string, mail: MailDraft, ownerId: string, gapR
 }
 
 /**
+ * The leak guard before anything leaves Relay: an email to the buyer may not carry a supplier's name, address or cost, and
+ * one to a supplier may not carry the buyer's name, company, address or price. If the check itself can't run, nothing goes.
+ */
+export async function guardLeaks(draftId: string, ownerId: string, action: "send" | "schedule" | "gmail"): Promise<void> {
+  let found: Awaited<ReturnType<typeof draftLeaks>>;
+  try {
+    found = await draftLeaks(draftId, ownerId);
+  } catch (error) {
+    console.error("relay leak check", error);
+    throw new RelayError(503, `Relay couldn't check this email for supplier or buyer details, so it ${action === "gmail" ? "isn't in Gmail" : action === "schedule" ? "isn't scheduled" : "hasn't gone"}. Try again.`);
+  }
+  if (found.problems.length) throw new RelayError(409, `${leakSentence(found.to, found.problems)} Take it out before it goes.`);
+}
+
+/** unlessReply: the runner drops the send if any of `from` writes on one of `threads` after it was scheduled. */
+export type UnlessReply = { threads: string[]; from: string[] };
+
+/** What a send carries besides the version: the fills Alex saw, and for a chase, who replying first cancels it. */
+export type SendOptions = { seen?: SeenFill[]; unlessReply?: UnlessReply | null };
+
+/**
  * Pins the exact version Alex confirmed to a send time; the scheduled-send runner (relay_send.py --due) sends it then.
  * His version is checked first; then the price fills go into the email (withFills) and the version with them in is
  * the one pinned, so the approval digest and the runner's same-version check both cover the prices.
  */
-async function pinSend(draftId: string, owner: { id: string; email: string }, updatedAt: string, sendAt: Date, undo: boolean, seen?: SeenFill[]): Promise<{ at: string; updated_at: string }> {
+async function pinSend(draftId: string, owner: { id: string; email: string }, updatedAt: string, sendAt: Date, undo: boolean, opts: SendOptions = {}): Promise<{ at: string; updated_at: string }> {
+  const { seen, unlessReply = null } = opts;
   const relayDraft = await relayDraftForOwner(draftId, owner.id);
   if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
   let mail = await readMailDraft(relayDraft.mail_message_id, owner.id);
@@ -1030,11 +1074,13 @@ async function pinSend(draftId: string, owner: { id: string; email: string }, up
   mail = await withFills(draftId, mail, owner.id, "There's a gap to fill in before this can go.", seen);
   // A gap is something only Alex knows that the draft still needs: it never goes out with one in it.
   if (hasGap((await editableCopy(mail)).main)) throw new RelayError(400, "There's a gap to fill in before this can go.");
+  await guardLeaks(draftId, owner.id, undo ? "send" : "schedule");
   const [row] = await queryPg<{ at: string }>(
     `update mail_message set personalization = jsonb_set(coalesce(personalization, '{}'::jsonb) - 'send_failure', '{scheduled_send}',
-       jsonb_build_object('at', $2::timestamptz, 'version', updated_at, 'attachments', coalesce(personalization->'attachments', 'null'::jsonb), 'by', $3::text, 'set_at', now(), 'undo', $5::boolean), true)
+       jsonb_build_object('at', $2::timestamptz, 'version', updated_at, 'attachments', coalesce(personalization->'attachments', 'null'::jsonb), 'by', $3::text, 'set_at', now(), 'undo', $5::boolean)
+         || case when $6::jsonb is null then '{}'::jsonb else jsonb_build_object('unless_reply', $6::jsonb) end, true)
      where id = $1 and state = 'draft' and date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $4::timestamptz) and not ${SEND_CLAIMED_SQL}
-     returning personalization->'scheduled_send'->>'at' as at`, [mail.id, sendAt.toISOString(), owner.email, new Date(mail.updated_at).toISOString(), undo]);
+     returning personalization->'scheduled_send'->>'at' as at`, [mail.id, sendAt.toISOString(), owner.email, new Date(mail.updated_at).toISOString(), undo, unlessReply ? JSON.stringify(unlessReply) : null]);
   if (!row) throw new RelayError(409, "This draft changed since you opened it, or it is sending now. Reload to see the latest.");
   return { at: row.at, updated_at: mail.updated_at };
 }
@@ -1046,7 +1092,7 @@ async function pinSend(draftId: string, owner: { id: string; email: string }, up
  * scheduled-send cron sends it. Nothing here can kill a send half way.
  */
 export async function queueSend(draftId: string, owner: { id: string; email: string }, updatedAt: string, seen?: SeenFill[]): Promise<{ at: string; updated_at: string }> {
-  const held = await pinSend(draftId, owner, updatedAt, new Date(Date.now() + UNDO_SEND_SECONDS * 1000), true, seen);
+  const held = await pinSend(draftId, owner, updatedAt, new Date(Date.now() + UNDO_SEND_SECONDS * 1000), true, { seen });
   setTimeout(() => spawn("/usr/bin/python3", [SEND_RUNNER, "--due"], { detached: true, stdio: "ignore" }).unref(), UNDO_SEND_SECONDS * 1000 + 500).unref();
   return held;
 }
@@ -1056,10 +1102,10 @@ export async function queueSend(draftId: string, owner: { id: string; email: str
  * then through the same runner and gates as Send; if the draft changed after scheduling, or they replied meanwhile,
  * it does not go and Relay says why.
  */
-export async function scheduleSend(draftId: string, owner: { id: string; email: string }, updatedAt: string, sendAt: Date, seen?: SeenFill[]): Promise<{ at: string; updated_at: string }> {
+export async function scheduleSend(draftId: string, owner: { id: string; email: string }, updatedAt: string, sendAt: Date, opts: SendOptions = {}): Promise<{ at: string; updated_at: string }> {
   const problem = sendAtProblem(sendAt);
   if (problem) throw new RelayError(400, problem);
-  return pinSend(draftId, owner, updatedAt, sendAt, false, seen);
+  return pinSend(draftId, owner, updatedAt, sendAt, false, opts);
 }
 
 /** Undo send, or cancel a pending send-later: the draft stays as it is. Refused once the runner has claimed it. */
@@ -1140,13 +1186,31 @@ export async function rewriteDraft(draftId: string, ownerId: string, instruction
   const known = new Set([...mail.to_emails, ...mail.cc_emails, ...mail.bcc_emails, ...(instruction.match(/[^\s,;<>()]+@[^\s,;<>()]+\.[^\s,;<>()]+/g) ?? [])].map((a) => a.toLowerCase()));
   const wantTo = list(parsed.to)?.filter((a) => a.trim());
   const toOk = !!wantTo?.length && wantTo.every((a) => known.has(a.trim().toLowerCase()));
-  await editDraft(mail, { body, to: toOk ? wantTo : undefined, cc: list(parsed.cc), bcc: list(parsed.bcc) });
-  await queryPg("update relay_draft set edit_requests = edit_requests || $2::jsonb where id = $1", [draftId, JSON.stringify([{ text: instruction.slice(0, 300), at: new Date().toISOString() }])]);
+  await saveDraftBody(draftId, mail, { body, to: toOk ? wantTo : undefined, cc: list(parsed.cc), bcc: list(parsed.bcc) }, { reason: instruction, by: "relay" });
   const note = String(parsed.note ?? "Updated the draft.").slice(0, 200);
   return { body, note: wantTo?.length && !toOk ? `${note} I left To unchanged: I only change it to an address already on the draft or one you write out.` : note };
 }
 
 const claimsAttachment = (text: string) => /\b(attached|enclosed|attaching|i've attached|please find)\b/i.test(text);
+
+/**
+ * Saves an AI change to a Relay draft through the mail CLI (editDraft), keeping the copy it replaced in the draft's
+ * history (newest last, HISTORY_CAP kept) so Undo can put it back, and recording what Alex asked for learning. A new
+ * change clears Redo.
+ */
+export async function saveDraftBody(draftId: string, mail: MailDraft, changes: Parameters<typeof editDraft>[1], change: { reason: string; by: HistoryEntry["by"] }): Promise<void> {
+  const before = (await editableCopy(mail)).main;
+  await editDraft(mail, changes);
+  const at = new Date().toISOString();
+  const entry: HistoryEntry = { body: before, at, reason: change.reason.slice(0, 300), by: change.by };
+  await queryPg(
+    `update relay_draft set
+       history = (select coalesce(jsonb_agg(e order by n), '[]'::jsonb) from (
+         select e, n from jsonb_array_elements(coalesce(history, '[]'::jsonb) || jsonb_build_array($2::jsonb)) with ordinality as x(e, n) order by n desc limit $4) kept),
+       redo = '[]'::jsonb, edit_requests = edit_requests || $3::jsonb, updated_at = now()
+     where id = $1`,
+    [draftId, JSON.stringify(entry), JSON.stringify([{ text: change.reason.slice(0, 300), at }]), HISTORY_CAP]);
+}
 
 // ---------- stock lists ----------
 
@@ -1244,6 +1308,7 @@ export async function saveToGmailDrafts(draftId: string, ownerId: string, seen?:
     "select subject, body_html, body_text, coalesce(to_emails,'{}') as to_emails, coalesce(cc_emails,'{}') as cc_emails, from_email, personalization, state from mail_message where id = $1", [relayDraft.mail_message_id]);
   if (!m) throw new RelayError(404, "Not found");
   if (m.state !== "draft") throw new RelayError(409, "This email was already sent.");
+  await guardLeaks(draftId, ownerId, "gmail");
   const args = ["--account", "alex@rebattery.io", "--gmail-no-send", "--enable-commands-exact", "gmail.drafts.create", "--no-input", "--json",
     "gmail", "drafts", "create", "--subject", m.subject ?? "", "--body", m.body_text ?? "", "--body-html", m.body_html ?? textToHtml(m.body_text ?? "")];
   if (m.to_emails.length) args.push("--to", m.to_emails.join(","));

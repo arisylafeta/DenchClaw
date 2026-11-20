@@ -22,6 +22,8 @@ vi.mock("./postgres", () => ({
   }),
   withPgTransaction: vi.fn(),
 }));
+// The leak guard has its own tests; here it finds nothing, so only the fills decide.
+vi.mock("./relay-leak", () => ({ draftLeaks: vi.fn(async () => ({ to: "ben@example.com", problems: [] })) }));
 vi.mock("./crm-postgres/mail", () => ({ readMailDraft: vi.fn(async () => ({ ...mail.current })), draftAttachments: vi.fn(() => []) }));
 vi.mock("./mail-draft-actions", () => ({
   sameVersion: (a: string, b: string) => new Date(a).getTime() === new Date(b).getTime(),
@@ -73,7 +75,7 @@ describe("sending fills the prices in before the pin", () => {
   });
 
   it("refuses when the page showed other prices", async () => {
-    await expect(scheduleSend("d1", owner, "2026-11-20T10:00:00.000Z", later(), [{ key: "stock:sto_1", value: 4900 }])).rejects.toThrow(/prices changed/);
+    await expect(scheduleSend("d1", owner, "2026-11-20T10:00:00.000Z", later(), { seen: [{ key: "stock:sto_1", value: 4900 }] })).rejects.toThrow(/prices changed/);
     expect(mail.edits).toEqual([]);
   });
 

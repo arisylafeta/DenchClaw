@@ -21,7 +21,7 @@ export async function POST(req: Request, { params }: Context) {
   const fills = readSeenFills(body.fills);
   if ("error" in fills) return Response.json({ error: fills.error }, { status: 400 });
   try {
-    const scheduled = await scheduleSend(id, guard.user, body.updated_at, new Date(body.send_at), fills.seen);
+    const scheduled = await scheduleSend(id, guard.user, body.updated_at, new Date(body.send_at), { seen: fills.seen });
     return Response.json({ scheduled });
   } catch (error) {
     return relayError(error);

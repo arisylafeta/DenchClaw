@@ -40,3 +40,20 @@ def test_due_refuses_a_long_missed_time():
 def test_due_refuses_a_schedule_without_an_approver():
     from datetime import datetime, timezone
     assert rs.decide(_row(by=None), datetime(2026, 11, 9, 8, 1, tzinfo=timezone.utc))["reason"] == "schedule_invalid"
+
+
+def test_due_cancels_a_chase_they_already_answered():
+    from datetime import datetime, timezone
+    failure = rs.decide(_row(replied=True), datetime(2026, 11, 9, 8, 1, tzinfo=timezone.utc))
+    assert failure["reason"] == "they_replied_first"
+    assert failure["detail"]["message"] == "Not sent: they replied first"
+
+
+def test_due_sends_a_chase_nobody_answered():
+    from datetime import datetime, timezone
+    assert rs.decide(_row(replied=False), datetime(2026, 11, 9, 8, 1, tzinfo=timezone.utc)) is None
+
+
+def test_they_replied_wins_over_an_edit_after_scheduling():
+    from datetime import datetime, timezone
+    assert rs.decide(_row(replied=True, same_version=False), datetime(2026, 11, 9, 8, 1, tzinfo=timezone.utc))["reason"] == "they_replied_first"
