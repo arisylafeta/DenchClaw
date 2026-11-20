@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TalkDraft } from "./relay-talk";
 import type { PriceFill } from "./relay-price-types";
 import type { WaitingRow } from "./relay-rank-core";
-import {
+import { earlierRows,
   bodyPieces, draftNeeds, gapSpans, listEntries, matchesRow, paragraphs, parsePrice, sendGate, tabNote, versionsOf, visibleRows, waitedDays, whenWords,
   type Bands,
 } from "./relay-workspace-core";
@@ -189,5 +189,19 @@ describe("the list", () => {
   it("reads how long they waited", () => {
     expect(waitedDays("7 d")).toBe(7);
     expect(waitedDays("today")).toBe(0);
+  });
+});
+
+describe("earlierRows", () => {
+  const email = (at: string, direction: string) => ({ direction, at, from_email: direction === "outbound" ? "alex@rebattery.io" : "fabiano@eecc.swiss" });
+  it("puts each summary over its email by day and side, once each", () => {
+    const rows = earlierRows(
+      [email("2026-11-03T09:00:00Z", "inbound"), email("2026-11-02T15:00:00Z", "outbound"), email("2026-11-02T08:00:00Z", "inbound"), email("2026-10-01T08:00:00Z", "inbound")],
+      [{ who: "Fabiano", when: "03 Nov", summary: "Thanked Alex." }, { who: "Alex", when: "02 Nov", summary: "Promised to come back." }, { who: "Fabiano", when: "2 Nov", summary: "Re-sent the offer." }],
+      "Fabiano",
+    );
+    expect(rows.map((r) => [r.when, r.who, r.summary])).toEqual([
+      ["03 Nov", "Fabiano", "Thanked Alex."], ["02 Nov", "Alex", "Promised to come back."], ["02 Nov", "Fabiano", "Re-sent the offer."], ["01 Oct", "Fabiano", null],
+    ]);
   });
 });

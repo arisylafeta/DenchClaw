@@ -257,3 +257,31 @@ export function sendGate(drafts: readonly TalkDraft[], typed: Readonly<Record<st
 
 /** The versions Send pins: every draft it takes, by id, at the mail version the page shows. */
 export const versionsOf = (going: readonly TalkDraft[]) => Object.fromEntries(going.flatMap((d) => (d.mail ? [[d.id, d.mail.updated_at]] : [])));
+
+// ---------- earlier emails: the scan's one-line summary over each full email
+
+/** The day an email went, as the scan writes it ("03 Nov"), in London. */
+export const dayMonth = (iso: string) => {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", day: "2-digit", month: "short" }).formatToParts(new Date(iso));
+  return `${parts.find((p) => p.type === "day")?.value ?? ""} ${parts.find((p) => p.type === "month")?.value ?? ""}`;
+};
+
+export type EarlierRow<E> = { email: E; when: string; who: string; summary: string | null };
+
+/**
+ * Pairs the thread's earlier emails (newest first) with the scan's summaries by day and side (Alex or them), each
+ * summary used once. An email the scan didn't summarise gets none, and the page shows its first line instead.
+ */
+export function earlierRows<E extends { direction: string; at: string; from_email: string | null }>(
+  emails: readonly E[], summaries: readonly { who: string; when: string; summary: string }[], theirName: string,
+): EarlierRow<E>[] {
+  const left = summaries.map((s) => ({ ...s, day: s.when.trim().replace(/^(\d)\b/, "0$1").toLowerCase(), ours: /^alex\b/i.test(s.who.trim()) }));
+  return emails.map((email) => {
+    const when = dayMonth(email.at);
+    const ours = email.direction === "outbound";
+    const at = left.findIndex((s) => s.day === when.toLowerCase() && s.ours === ours);
+    const match = at >= 0 ? left.splice(at, 1)[0] : null;
+    // The scan writes "Ben, bbament@gmail.com": the name is enough here.
+    return { email, when, who: ours ? "Alex" : match?.who.split(",")[0].trim() || theirName, summary: match?.summary ?? null };
+  });
+}

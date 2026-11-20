@@ -1,16 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type RefObject, type SetStateAction } from "react";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { RelayItem, RelayJob, RelayReviewItem } from "@/lib/relay";
 import type { SendOutcome, TalkDraft, TalkState } from "@/lib/relay-talk";
 import type { PriceFill, StockFit } from "@/lib/relay-price-types";
 import type { SendMode } from "@/lib/relay-talk-core";
 import { fillGaps } from "@/lib/relay-ways-core";
-import { draftNeeds, gapSpans, sendGate, versionsOf } from "@/lib/relay-workspace-core";
+import { draftNeeds, earlierRows, gapSpans, sendGate, versionsOf, type EarlierRow } from "@/lib/relay-workspace-core";
+import { cleanEmail, emailParagraphs, firstLine, type ThreadEmail } from "@/lib/relay-email-clean";
 import { AUTO_NOTE } from "@/lib/relay-auto-note";
 import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
-import { api, failureText, firstName, firstOf } from "./relay-ui";
+import { api, cx, failureText, firstName, firstOf } from "./relay-ui";
 import { DraftSheet, type SheetActions } from "./relay-workspace-draft";
 import { RelayChat } from "./relay-workspace-chat";
 import w from "./relay-workspace.module.css";
@@ -27,10 +28,12 @@ const message = (err: unknown, fallback: string) => (err instanceof Error ? err.
 const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
 
 /** One person's email: who they are, what they wrote, the reply with its linked emails, and Relay's chat about them. */
-export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, say, text, setText, composer, onDone, onSnooze, onOpen, onBack, refreshLists }: {
+export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, onOpenDeal, onOpenMail, say, text, setText, composer, onDone, onSnooze, onOpen, onBack, refreshLists }: {
   itemId: string; name: string; waited: string | null; item: RelayItem | RelayReviewItem | null; job: RelayJob | null; reviewIds: string[];
   /** Write Relay's first reply on opening when there is none ("Waiting on you" only). */
   autoDraft: boolean;
+  /** Opens the linked deal, or an email as it was sent, in a new CRM tab. */
+  onOpenDeal?: (id: string, title?: string) => void; onOpenMail?: (id: string, title?: string) => void;
   say: Say; text: string; setText: (next: SetStateAction<string>) => void; composer: RefObject<HTMLTextAreaElement | null>;
   onDone?: () => void; onSnooze?: () => void; onOpen: (itemId: string) => void; onBack: () => void; refreshLists: () => Promise<void>;
 }) {
@@ -52,6 +55,14 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, sa
     } catch (err) { setLoadError(message(err, "Couldn't load this email.")); return null; }
   }, [itemId, setTalk]);
   useEffect(() => { void load(); }, [load]);
+
+  // The thread's emails in full, newest first: the newest shown cleaned, the earlier ones opened from their summary.
+  const [thread, setThread] = useState<ThreadEmail[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    api<{ emails: ThreadEmail[] }>(`/api/relay/items/${itemId}/thread`).then((t) => { if (live) setThread(t.emails); }).catch(() => { if (live) setThread([]); });
+    return () => { live = false; };
+  }, [itemId]);
 
   // What else fits, for the margin of a buyer's reply. Only Alex sees it.
   const [stock, setStock] = useState<StockView | { error: string } | null>(null);
@@ -308,19 +319,18 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, sa
             <span className={w.actions}>
               {onSnooze && <button type="button" className={w.act} onClick={onSnooze}>Snooze</button>}
               {onDone && <button type="button" className={w.act} onClick={onDone}>No reply needed</button>}
-              {deal ? <span className={w.dealName}>Deal: <b>{deal}</b></span>
+              {deal && item?.bulk_listing_id ? <button type="button" className={w.dealChip} title={`Open the deal: ${deal}`} onClick={() => onOpenDeal?.(item.bulk_listing_id!, deal)} disabled={!onOpenDeal}><span>{deal}</span></button>
                 : <button type="button" className={`${w.act} ${w.strong}`} onClick={() => void createDeal()} disabled={dealBusy}>{dealBusy ? "Creating the deal…" : "+ Create deal"}</button>}
             </span>
           </div>
-          {item?.context && <p className={w.who}>{item.context}</p>}
         </section>
 
         {msg && (
           <section className={w.email} aria-label={`What ${firstOf(name)} wrote`}>
             <span className={w.meta}>{[when(msg.at), msg.from_email].filter(Boolean).join(", ")}{msg.direction === "outbound" ? ". Your last email, no reply since." : ""}</span>
-            <NewestEmail text={msg.text} />
+            <NewestEmail text={thread?.[0]?.text || msg.text} onOriginal={thread?.[0] && onOpenMail ? () => onOpenMail(thread[0].id, `Email from ${name}`) : undefined} />
             {item?.attachment_message_id && <AttachmentStrip messageId={item.attachment_message_id} />}
-            <Earlier item={item} />
+            <Earlier rows={thread ? earlierRows(thread.slice(1), item?.earlier ?? [], firstOf(name)) : null} count={item?.earlier?.length ?? 0} onOpenMail={onOpenMail} />
           </section>
         )}
         {reviewIds.length > 0 && reviewIds[0] !== itemId && (
@@ -343,30 +353,60 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, sa
   );
 }
 
-function NewestEmail({ text }: { text: string }) {
-  const long = text.length > 900;
+/** An email as Alex reads it: cleaned (no quotes, signature block or disclaimer), in tight paragraphs. */
+function EmailText({ text, className }: { text: string; className?: string }) {
+  return <div className={cx(w.mailText, className)}>{emailParagraphs(text).map((p, k) => <p key={k}>{p}</p>)}</div>;
+}
+
+function NewestEmail({ text, onOriginal }: { text: string; onOriginal?: () => void }) {
+  const long = cleanEmail(text).length > 1200;
   const [open, setOpen] = useState(false);
   return (
     <>
-      <p className={long && !open ? `${w.newest} ${w.clamp}` : w.newest}>{text}</p>
-      {long && <button type="button" className={w.linkbtn} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show the whole email"}</button>}
+      <EmailText text={text} className={long && !open ? w.clamp : undefined} />
+      {(long || onOriginal) && (
+        <span className={w.mailLinks}>
+          {long && <button type="button" className={w.linkbtn} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show the whole email"}</button>}
+          {onOriginal && <button type="button" className={w.quietLink} onClick={onOriginal}>Open the original</button>}
+        </span>
+      )}
     </>
   );
 }
 
-function Earlier({ item }: { item: RelayItem | null }) {
+/** The earlier emails: one line each (the scan's summary, or the email's first line), each opening to the full email. */
+function Earlier({ rows, count, onOpenMail }: { rows: EarlierRow<ThreadEmail>[] | null; count: number; onOpenMail?: (id: string, title?: string) => void }) {
   const [open, setOpen] = useState(false);
-  const earlier = item?.earlier ?? [];
-  if (!earlier.length) return null;
+  const [shown, setShown] = useState<Record<string, boolean>>({});
+  const total = rows ? rows.length : count;
+  if (!total) return null;
   return (
     <>
-      {open && (
+      {open && rows && (
         <ol className={w.older}>
-          {earlier.map((e, k) => <li key={k}><span className={w.meta}>{[e.when, e.who].filter(Boolean).join(", ")}</span><span>{e.summary}</span></li>)}
+          {rows.map(({ email, when, who, summary }) => {
+            const on = !!shown[email.id];
+            const line = summary ?? firstLine(email.text);
+            return (
+              <li key={email.id} className={on ? w.olderOpen : undefined}>
+                <button type="button" className={w.olderRow} aria-expanded={on} onClick={() => setShown((m) => ({ ...m, [email.id]: !on }))}>
+                  <ChevronRight size={13} aria-hidden className={w.olderChevron} />
+                  <span className={w.meta}>{when}, {who}</span>
+                  <span className={w.olderLine}>{line}</span>
+                </button>
+                {on && (
+                  <div className={w.olderBody}>
+                    <EmailText text={email.text} />
+                    {onOpenMail && <button type="button" className={w.quietLink} onClick={() => onOpenMail(email.id, `Email from ${who}, ${when}`)}>Open the original</button>}
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ol>
       )}
-      <span><button type="button" className={w.linkbtn} aria-expanded={open} onClick={() => setOpen(!open)}>
-        {open ? "Hide the earlier emails" : `${earlier.length} earlier ${earlier.length === 1 ? "email" : "emails"}`}
+      <span><button type="button" className={w.linkbtn} aria-expanded={open} onClick={() => setOpen(!open)} disabled={!rows}>
+        {open ? "Hide the earlier emails" : `${total} earlier ${total === 1 ? "email" : "emails"}`}
       </button></span>
     </>
   );

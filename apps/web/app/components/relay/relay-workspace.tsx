@@ -34,7 +34,11 @@ const typing = (e: KeyboardEvent) => {
   return e.metaKey || e.ctrlKey || e.altKey || !!el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
 };
 
-export function RelayWorkspace({ onBack, onOpenPage }: { onBack: () => void; onOpenPage: (page: "rules" | "todos") => void }) {
+export function RelayWorkspace({ onBack, onOpenPage, onOpenListing, onOpenMailMessage }: {
+  onBack: () => void; onOpenPage: (page: "rules" | "todos") => void;
+  /** Open a deal, or an email as sent, in a new CRM tab. */
+  onOpenListing?: (id: string, title?: string) => void; onOpenMailMessage?: (id: string, title?: string) => void;
+}) {
   const [view, setView] = useState<View>("waiting");
   const [waiting, setWaiting] = useState<WaitingView | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -222,7 +226,7 @@ export function RelayWorkspace({ onBack, onOpenPage }: { onBack: () => void; onO
         <div className={w.work} ref={workPane}>
           {picked ? (
             <Work key={picked.itemId} itemId={picked.itemId} name={picked.name} waited={view === "waiting" ? picked.waited : null} item={item} job={job}
-              reviewIds={picked.reviewIds} autoDraft={view === "waiting"} say={say} text={textOf} setText={setText(picked.itemId)} composer={composer}
+              reviewIds={picked.reviewIds} autoDraft={view === "waiting"} onOpenDeal={onOpenListing} onOpenMail={onOpenMailMessage} say={say} text={textOf} setText={setText(picked.itemId)} composer={composer}
               onDone={view === "waiting" ? () => void markDone(picked) : undefined} onSnooze={view === "waiting" ? () => void snooze(picked) : undefined}
               onOpen={(itemId) => setPicked({ ...picked, key: itemId, itemId, reviewIds: [] })} onBack={() => setPane("list")} refreshLists={reloadLists} />
           ) : (

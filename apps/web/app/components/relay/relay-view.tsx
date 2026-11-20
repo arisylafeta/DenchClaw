@@ -75,7 +75,7 @@ export function RelayView(props: ViewProps) {
     try { localStorage.setItem(V2_KEY, on ? "on" : "off"); } catch { /* not remembered */ }
   };
   if (v2 === null) return null;
-  if (v2 && !away) return <RelayWorkspace onBack={() => switchV2(false)} onOpenPage={setAway} />;
+  if (v2 && !away) return <RelayWorkspace onBack={() => switchV2(false)} onOpenPage={setAway} onOpenListing={props.onOpenListing} onOpenMailMessage={props.onOpenMailMessage} />;
   return <RelayClassic key={away ?? "classic"} {...props} start={away ?? "inbox"} v2={v2} onNew={() => (v2 ? setAway(null) : switchV2(true))} />;
 }
 
