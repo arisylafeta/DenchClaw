@@ -54,4 +54,10 @@ describe("noticeForRow", () => {
     expect(noticeForRow({ role: "user", text })).toEqual({ kind: "invite", text: "Invited matcha · from default chat", details: "@matcha The user invited you." });
     expect(noticeForRow({ role: "assistant", text })).toBeNull();
   });
+  it("shows a mail wake-up as a muted notice, not the user's words", () => {
+    const text = '[mail] A new email on a thread you own: "RE: Your payout setup" from victor@didier.be.\nThread: t1. Read it.';
+    expect(noticeForRow({ role: "user", text })).toEqual({ kind: "mail", text: "Received mail: RE: Your payout setup from victor@didier.be", details: text });
+    expect(noticeForRow({ role: "user", text: "[mail] 2 new emails on a thread you own.\nThread: t1" })).toMatchObject({ kind: "mail", text: "Received 2 emails" });
+    expect(noticeForRow({ role: "user", text: "please check [mail] on a thread you own" })).toBeNull();
+  });
 });

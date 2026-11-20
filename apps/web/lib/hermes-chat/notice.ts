@@ -4,14 +4,14 @@ import { GOAL_CONTINUATION } from './goal'
  * Hermes writes system events (finished background subagents, watcher pings, resumes, steers, model switches)
  * as `user` rows. They are not the user's words and must not render as the user's bubble.
  */
-export type NoticeKind = 'delegation' | 'notification' | 'resume' | 'steer' | 'model' | 'process' | 'invite' | 'goal'
+export type NoticeKind = 'delegation' | 'notification' | 'resume' | 'steer' | 'model' | 'process' | 'invite' | 'goal' | 'mail'
 export interface Notice { kind: NoticeKind; text: string; details?: string; tone?: 'error'; key?: string; pending?: boolean }
 
 const KINDS: Record<string, NoticeKind> = {
   async_delegation_complete: 'delegation', internal_notification: 'notification', auto_continue: 'resume', steer: 'steer', model_switch: 'model', background_process: 'process', process_complete: 'process',
 }
 const FALLBACK: Record<NoticeKind, string> = {
-  delegation: 'A background task finished', notification: 'Background update', resume: 'Hermes resumed an interrupted turn', steer: 'You steered the agent', model: 'Model changed', process: 'Background process update', invite: 'An agent was invited into this chat', goal: 'Continued toward the goal',
+  delegation: 'A background task finished', notification: 'Background update', resume: 'Hermes resumed an interrupted turn', steer: 'You steered the agent', model: 'Model changed', process: 'Background process update', invite: 'An agent was invited into this chat', goal: 'Continued toward the goal', mail: 'Received mail',
 }
 /** Hermes wraps a mid-turn steer in an out-of-band marker; only the user's words matter. */
 const OOB_OPEN = /^\s*\[OUT-OF-BAND USER MESSAGE[^\]\n]*\]\s*/
@@ -23,6 +23,8 @@ export const steerOwnText = (text: string): string => { if (!OOB_OPEN.test(text)
 export const PROCESS_TAIL = /\n+(?:\[?IMPORTANT: (\d+) background processes? completed\.[^\n]*Treat these results as one batch|\[IMPORTANT: Background process \S+ )/
 /** First line of an /invite handoff, written by inviteHandoff in hermes-native.ts. */
 export const INVITE_HEAD = /^\[ROOM INVITE host=(\S+) session=(\S+) invitee=(\S+)\]\n/
+/** Dispatcher wake-up for mail on a thread an agent owns (scripts/mail_dispatch): `[mail] A new email on a thread you own: "Subject" from a@b.c.` */
+export const MAIL_WAKE = /^\s*\[mail\] (?:A new email|(\d+) new emails) on a thread you own(?:: "([^"\n]*)"(?: from ([^\s\n]+?))?)?(?:\.(?:\s|$)|\n)/
 const clip = (text: string, max = 140) => { const line = text.replace(/\s+/g, ' ').trim(); return line.length > max ? `${line.slice(0, max - 1)}…` : line }
 const readMetadata = (value: unknown): Record<string, unknown> => {
   if (typeof value === 'string') { try { const parsed = JSON.parse(value); return parsed && typeof parsed === 'object' ? parsed : {} } catch { return {} } }
@@ -36,9 +38,10 @@ export function noticeForRow(row: { role: string; displayKind?: string | null; d
   const legacy = !typed && /^\[ASYNC DELEGATION BATCH COMPLETE/.test(text) ? 'delegation' : undefined
   const invite = !typed && !legacy && INVITE_HEAD.test(text) ? 'invite' as const : undefined
   const goal = !typed && !legacy && !invite && GOAL_CONTINUATION.test(text) ? 'goal' as const : undefined
-  const process = !typed && !legacy && !invite && !goal && /^\[IMPORTANT: (?:Background process \S+|\d+ background processes? completed)/.test(text) ? 'process' as const : undefined
-  const wrapped = !typed && !legacy && !invite && !goal && !process && OOB_OPEN.test(text) ? 'steer' as const : undefined
-  const kind = typed ?? legacy ?? invite ?? goal ?? process ?? wrapped
+  const mail = !typed && !legacy && !invite && !goal && MAIL_WAKE.test(text) ? 'mail' as const : undefined
+  const process = !typed && !legacy && !invite && !goal && !mail && /^\[IMPORTANT: (?:Background process \S+|\d+ background processes? completed)/.test(text) ? 'process' as const : undefined
+  const wrapped = !typed && !legacy && !invite && !goal && !mail && !process && OOB_OPEN.test(text) ? 'steer' as const : undefined
+  const kind = typed ?? legacy ?? invite ?? goal ?? mail ?? process ?? wrapped
   if (!kind) return null
   const display = typeof readMetadata(row.displayMetadata).display_text === 'string' ? String(readMetadata(row.displayMetadata).display_text) : ''
   let summary = display
@@ -60,6 +63,11 @@ export function noticeForRow(row: { role: string; displayKind?: string | null; d
   if (!summary && kind === 'invite') {
     const head = INVITE_HEAD.exec(text)
     if (head) summary = `Invited ${head[3]} · from ${head[1]} chat`
+  }
+  if (!summary && kind === 'mail') {
+    const m = MAIL_WAKE.exec(text)
+    const count = m?.[1] ? `${m[1]} emails` : 'mail'
+    if (m) summary = `Received ${count}${m[2] ? `: ${m[2]}` : ''}${m[3] ? ` from ${m[3]}` : ''}`
   }
   // A steer row's text is the user's own instruction: show it, not a generic label.
   const steerFull = kind === 'steer' ? stripSteerEnvelope(text) : ''
