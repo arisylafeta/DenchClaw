@@ -13,6 +13,8 @@ export type RankBand = "now" | "today" | "week" | "later";
 /** One open Relay email with what the server looked up about it and its sender. */
 export type RankItem = {
   id: string;
+  /** Open emails make the rows. An email in Review only joins its person's row to say a draft is ready. */
+  status: "open" | "review";
   email: string | null;
   name: string | null;
   company: string | null;
@@ -32,6 +34,7 @@ export type RankItem = {
   companyId: string | null;
   /** The address is on a personal or ISP domain, so it says nothing about a company. */
   personal: boolean;
+  /** The linked deal. live: open or qualifying in the CRM and not on hold (closed, lost, withdrawn and held deals are not). */
   deal: { live: boolean; value: string | null; quantity: string | null } | null;
   /** When their messages arrived since Alex last wrote on the thread. */
   waitingInbound: string[];
@@ -44,7 +47,7 @@ export type RankItem = {
   /** Every email they have sent us, and when the first came. */
   inboundEmails: number;
   firstInboundAt: string | null;
-  /** An unsent Relay draft is waiting on this email. */
+  /** An unsent Relay draft (not yet sent or skipped) is waiting on this email. */
   hasDraft: boolean;
 };
 
@@ -280,9 +283,11 @@ export function signalsOf(group: RankItem[], now = new Date()): RankSignals {
   const newest = [...group].sort((a, b) => at(b.lastAt ?? b.waitingSince) - at(a.lastAt ?? a.waitingSince))[0];
   const type = newest.contactType;
   const trading = group.some((i) => LEAD_TYPES.has(i.contactType ?? ""));
-  const live = group.filter((i) => i.deal?.live).map((i) => ({ value: dealValue(i.deal!.value), quantity: i.deal!.quantity }));
+  // A deal they just called off ("we are terminating the sale") is no stake, even before the CRM closes it.
+  const liveDeal = (i: RankItem) => !!i.deal?.live && i.situation !== "decline";
+  const live = group.filter(liveDeal).map((i) => ({ value: dealValue(i.deal!.value), quantity: i.deal!.quantity }));
   const best = live.sort((a, b) => (b.value?.gbp ?? 0) - (a.value?.gbp ?? 0))[0];
-  const lot = group.map((i) => largeLot(`${i.headline}\n${i.text}`) ?? (i.deal?.live ? largeLot(i.deal.quantity) : null)).find(Boolean) ?? null;
+  const lot = group.map((i) => largeLot(`${i.headline}\n${i.text}`) ?? (liveDeal(i) ? largeLot(i.deal!.quantity) : null)).find(Boolean) ?? null;
   const newLead = trading && group.every((i) => i.firstContact);
   const firstInbound = earliest(group.map((i) => i.firstInboundAt));
   const inbound = Math.max(...group.map((i) => i.inboundEmails));
@@ -374,8 +379,11 @@ export type WaitingRow = RankScore & {
   ask: string;
   waited: string;
   waitingSince: string | null;
+  /** The person's open emails. */
   itemIds: string[];
   openId: string;
+  /** Their emails in Review, whose drafts make hasDraft. */
+  reviewIds: string[];
   /** Their emails waiting for an answer, over every thread. */
   emails: number;
   hasDraft: boolean;
@@ -388,14 +396,18 @@ function displayName(group: RankItem[]): string {
   return (named ?? group.find((i) => i.name) ?? group[0]).name ?? group[0].email ?? "Unknown";
 }
 
-/** Merges the items into one row per person, scores each and returns them best first. */
+/** Merges the items into one row per person, scores each and returns them best first. A person with only emails in
+ * Review has no row: those wait in Drafts. */
 export function rankItems(items: RankItem[], now = new Date()): WaitingRow[] {
-  return mergeByPerson(items).map((group) => {
+  return mergeByPerson(items).flatMap((all) => {
+    const group = all.filter((i) => i.status === "open");
+    if (!group.length) return [];
+    const review = all.filter((i) => i.status === "review");
     const newest = [...group].sort((a, b) => at(b.lastAt ?? b.waitingSince) - at(a.lastAt ?? a.waitingSince))[0];
-    const signals = signalsOf(group, now);
+    const signals = { ...signalsOf(group, now), hasDraft: all.some((i) => i.hasDraft) };
     const score = scoreSignals(signals, now);
     const company = group.find((i) => i.company && !i.personal)?.company ?? null;
-    return {
+    return [{
       ...score,
       key: [...group].sort((a, b) => at(a.waitingSince ?? a.lastAt) - at(b.waitingSince ?? b.lastAt))[0].id,
       name: displayName(group),
@@ -405,9 +417,10 @@ export function rankItems(items: RankItem[], now = new Date()): WaitingRow[] {
       waitingSince: signals.waitingSince,
       itemIds: group.map((i) => i.id),
       openId: newest.id,
+      reviewIds: review.map((i) => i.id),
       emails: Math.max(group.length, group.reduce((n, i) => n + i.waitingInbound.length, 0)),
       hasDraft: signals.hasDraft,
       contactType: signals.contactType,
-    };
+    }];
   }).sort((a, b) => b.score - a.score || at(a.waitingSince) - at(b.waitingSince));
 }

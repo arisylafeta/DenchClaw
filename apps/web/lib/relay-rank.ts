@@ -17,7 +17,7 @@ export type WaitingView = {
 const TRADED = "('bought_from_us','sold','became_trade')";
 const AT = "coalesce(m.sent_at, m.accepted_at, m.created_at)";
 
-type ItemFacts = { id: string; waiting_inbound: string[]; deal_status: string | null; deal_value: string | null; deal_quantity: string | null; has_draft: boolean };
+type ItemFacts = { id: string; waiting_inbound: string[]; deal_status: string | null; deal_held: boolean; deal_value: string | null; deal_quantity: string | null; has_draft: boolean };
 type SenderFacts = {
   email: string; person_id: string | null; merged_into: string[]; company_id: string | null; customer: boolean;
   past_deals: number; inbound: number; first_inbound: string | null;
@@ -30,7 +30,7 @@ const itemFacts = (ownerId: string, ids: string[]) => queryPg<ItemFacts>(
         where m.thread_id = i.mail_thread_id and m.direction = 'inbound' and m.state = 'received'
           and ${AT} > coalesce((select max(coalesce(o.sent_at, o.accepted_at, o.created_at)) from mail_message o
             where o.thread_id = i.mail_thread_id and o.direction = 'outbound' and o.state = 'accepted'), '-infinity'::timestamptz)), '{}') as waiting_inbound,
-     b.status as deal_status, b.value as deal_value, b.quantity as deal_quantity,
+     b.status as deal_status, coalesce(b.hold_until >= current_date, false) as deal_held, b.value as deal_value, b.quantity as deal_quantity,
      exists (select 1 from relay_draft d where d.item_id = i.id and d.state in ('draft','gmail')) as has_draft
    from relay_item i left join crm_bulk_listings b on b.id = i.bulk_listing_id
    where i.owner_id = $1::uuid and i.id = any($2)`, [ownerId, ids]);
@@ -62,16 +62,27 @@ const writtenTo = (emails: string[], domains: string[]) => queryPg<{ address: st
    where m.direction = 'outbound' and m.state in ('accepted','received') and m.campaign_id is null and coalesce(m.purpose, '') <> 'marketing'
      and (lower(a) = any($1) or split_part(lower(a), '@', 2) = any($2))`, [emails, domains]);
 
+/** The fields of a Relay email the ranking reads. */
+export type RankSource = Pick<RelayItem, "id" | "status" | "tab" | "priority" | "counterpart_name" | "counterpart_email" | "company" | "contact_type"
+  | "situation" | "headline" | "waiting_since" | "last_message">;
+
+/** The owner's emails in Review with a draft not yet sent: they join their person's row as "Draft ready". */
+export const reviewWithDrafts = (ownerId: string) => queryPg<RankSource>(
+  `select i.id, i.status, i.tab, i.priority, i.counterpart_name, i.counterpart_email, i.company, i.contact_type, i.situation, i.headline,
+     i.waiting_since, i.last_message
+   from relay_item i where i.owner_id = $1::uuid and i.status = 'review'
+     and exists (select 1 from relay_draft d where d.item_id = i.id and d.state in ('draft','gmail'))`, [ownerId]);
+
 const LIVE = new Set(["open", "qualifying"]);
 /** pg hands timestamps back as Dates, jsonb ones as text: the ranking reads ISO text. */
 const iso = (v: unknown): string | null => {
   const t = v instanceof Date ? v.getTime() : typeof v === "string" ? Date.parse(v) : NaN;
   return Number.isNaN(t) ? null : new Date(t).toISOString();
 };
-const emailOf = (i: RelayItem) => (i.counterpart_email ?? "").toLowerCase().trim();
+const emailOf = (i: RankSource) => (i.counterpart_email ?? "").toLowerCase().trim();
 
 /** Builds what the ranking reads for each open email. */
-export async function rankInputs(ownerId: string, items: RelayItem[]): Promise<RankItem[]> {
+export async function rankInputs(ownerId: string, items: RankSource[]): Promise<RankItem[]> {
   if (!items.length) return [];
   const emails = [...new Set(items.map(emailOf).filter(Boolean))];
   const domains = [...new Set(emails.map((e) => e.split("@")[1] ?? "").filter((d) => d && !isPersonalDomain(d) && d !== "rebattery.io"))];
@@ -88,13 +99,13 @@ export async function rankInputs(ownerId: string, items: RelayItem[]): Promise<R
     const f = factOf.get(i.id);
     const s = senderOf.get(email);
     return {
-      id: i.id, email: email || null, name: i.counterpart_name, company: i.company, contactType: i.contact_type, situation: i.situation,
+      id: i.id, status: i.status === "review" ? "review" : "open", email: email || null, name: i.counterpart_name, company: i.company, contactType: i.contact_type, situation: i.situation,
       tab: i.tab, priority: i.priority, headline: i.headline, waitingSince: iso(i.waiting_since), lastAt: iso(i.last_message?.at) ?? iso(i.waiting_since),
       text: i.last_message?.direction === "inbound" ? i.last_message.text : "",
       personIds: [s?.person_id, ...(s?.merged_into ?? [])].filter((p): p is string => !!p),
       companyId: s?.company_id ?? null,
       personal: !domain || isPersonalDomain(domain),
-      deal: f?.deal_status ? { live: LIVE.has(f.deal_status), value: f.deal_value, quantity: f.deal_quantity } : null,
+      deal: f?.deal_status ? { live: LIVE.has(f.deal_status) && !f.deal_held, value: f.deal_value, quantity: f.deal_quantity } : null,
       waitingInbound: (f?.waiting_inbound ?? []).map(iso).filter((t): t is string => !!t),
       firstContact: !!email && !wroteTo.has(email) && !wroteDomain.has(domain),
       pastDeals: s?.past_deals ?? 0,
@@ -116,6 +127,6 @@ export function waitingView(rows: WaitingRow[], counts: Pick<RelayCounts, "follo
 /** "Waiting on you": the open emails that need a reply, one row per person, ranked at read time, by band. Snoozed
  * emails stay hidden (listRelayItems). Chase due is Relay's follow-ups, Drafts the emails in Review. */
 export async function listWaiting(ownerId: string, now = new Date()): Promise<WaitingView> {
-  const [items, counts] = await Promise.all([listRelayItems(ownerId, "action"), relayCounts(ownerId)]);
-  return waitingView(rankItems(await rankInputs(ownerId, items), now), counts);
+  const [items, review, counts] = await Promise.all([listRelayItems(ownerId, "action"), reviewWithDrafts(ownerId), relayCounts(ownerId)]);
+  return waitingView(rankItems(await rankInputs(ownerId, [...items, ...review]), now), counts);
 }

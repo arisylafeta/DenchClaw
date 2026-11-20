@@ -6,7 +6,7 @@ const now = new Date("2026-11-20T10:00:00Z");
 
 let n = 0;
 const item = (over: Partial<RankItem> = {}): RankItem => ({
-  id: `i${++n}`, email: "someone@example.co.uk", name: "Some One", company: null, contactType: "buyer", situation: null, tab: "action",
+  id: `i${++n}`, status: "open", email: "someone@example.co.uk", name: "Some One", company: null, contactType: "buyer", situation: null, tab: "action",
   priority: "high", headline: "A question", waitingSince: "2026-11-19T09:00:00Z", lastAt: "2026-11-19T09:00:00Z", text: "",
   personIds: [], companyId: null, personal: false, deal: null, waitingInbound: ["2026-11-19T09:00:00Z"], firstContact: false,
   pastDeals: 0, customer: false, inboundEmails: 1, firstInboundAt: "2026-11-19T09:00:00Z", hasDraft: false, ...over,
@@ -171,6 +171,22 @@ describe("score", () => {
   });
   it("says draft ready when an unsent draft waits", () => {
     expect(score([item({ hasDraft: true })]).tag).toBe("Draft ready");
+  });
+  it("takes Draft ready from the person's email in Review, which makes no row of its own", () => {
+    const open = item({ id: "o", email: "bbament@gmail.com", name: "Ben Bament", personal: true });
+    const inReview = item({ id: "r", status: "review", email: "ben@silentclassics.co.uk", name: "Ben Bament", companyId: "sc", hasDraft: true });
+    const alone = item({ id: "x", status: "review", email: "x@other.com", name: "Xavier Other", hasDraft: true });
+    const rows = rankItems([open, inReview, alone], now);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ itemIds: ["o"], reviewIds: ["r"], openId: "o", hasDraft: true, tag: "Draft ready" });
+  });
+  it("adds no stake for a deal that is off: not live in the CRM, or called off in their email", () => {
+    const deal = { live: true, value: "$516,800", quantity: "680,000 cells" };
+    expect(score([item({ contactType: "supplier", deal })]).tag).toBe("Live deal $517k");
+    const off = score([item({ contactType: "supplier", situation: "decline", deal })]);
+    expect(off.why.join()).not.toMatch(/live deal|large lot/);
+    const closed = score([item({ contactType: "supplier", deal: { ...deal, live: false } })]);
+    expect(closed.why.join()).not.toMatch(/live deal|large lot/);
   });
   it("orders rows best first and gives each its band", () => {
     const rows = rankItems([
