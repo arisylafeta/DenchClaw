@@ -24,8 +24,37 @@ const buyer = (overrides: Partial<BuyerFacts> = {}): BuyerFacts => ({
 const AS_OF = "2026-03-01";
 
 describe("rule_out", () => {
-  it("rules out a stated, different chemistry", () => {
-    expect(ruleOut(listing(), buyer({ profile: { chemistries: ["LFP"], formats: ["Packs"] } }))?.code).toBe("chemistry");
+  it("rules out a stated, different chemistry for a buyer with a stated Want or dossier", () => {
+    const lfp = { chemistries: ["LFP"], formats: ["Packs"] };
+    const line = { kind: "interest", productKey: "broad:lfp-packs", firstSeen: "2026-01-01", lastSeen: "2026-01-01", expiresOn: "2027-01-01" };
+    expect(ruleOut(listing(), buyer({ profile: lfp, lines: [line] }), false, AS_OF)?.code).toBe("chemistry");
+  });
+
+  describe("research-only buyers: chemistry ranks, formats filter", () => {
+    const site = (chemistries: string[], formats = ["Packs"]) => ({ profile: { chemistries, formats } });
+    const inferred = { kind: "inferred", productKey: "broad:lfp-packs", firstSeen: "2026-01-01", lastSeen: "2026-01-01", expiresOn: "2027-01-01" };
+
+    it("keeps an LFP research buyer in an NMC pack lot, below the NMC research buyer, with the reason", () => {
+      const lfp = buyer({ id: "lfp", name: "LFP Site", ...site(["LFP"]), lines: [inferred] });
+      const nmc = buyer({ id: "nmc", name: "NMC Site", ...site(["NMC"]), lines: [] });
+      const ranked = rankA1(listing(), [lfp, nmc], AS_OF);
+      expect(ranked.map((row) => [row.companyId, row.productTier])).toEqual([["nmc", 1], ["lfp", 1]]);
+      const key = buildProductKey({ fields: [{ field_key: "model", value: "Test Model", status: "confirmed" }, { field_key: "format", value: "packs", status: "confirmed" }, { field_key: "chemistry", value: "NMC", status: "confirmed" }, { field_key: "capacity", value: "50 kWh per pack", status: "confirmed" }] });
+      const rows = rankBuyers(supplyFactsFromKey(key), [lfp, nmc], { asOf: AS_OF, key }).ranked;
+      expect(rows.map((row) => row.companyId)).toEqual(["nmc", "lfp"]);
+      expect(rows[1].fits).toContain("Chemistry differs: their site lists LFP");
+    });
+
+    it("still filters a research buyer whose format does not fit", () => {
+      expect(ruleOut(listing(), buyer({ ...site(["LFP"], ["Cells"]), lines: [] }), false, AS_OF)?.code).toBe("chemistry");
+      expect(ruleOut(listing(), buyer({ ...site(["NMC"], ["Cells"]), lines: [] }), false, AS_OF)?.code).toBe("format");
+      expect(rankA1(listing(), [buyer({ ...site(["LFP"], ["Cells"]), lines: [] })], AS_OF)).toEqual([]);
+    });
+
+    it("gives a dossier buyer with LFP no chemistry match for an NMC lot", () => {
+      const dossier = buyer({ id: "d", lines: [], dossier: { frontmatter: { products: [{ format: "packs", chemistry: "LFP", status: "asked" }] } } });
+      expect(rankA1(listing(), [dossier], AS_OF).map((row) => [row.companyId, row.productTier, row.chemDiffers])).toEqual([["d", 0, false]]);
+    });
   });
 
   it("never rules out on a missing chemistry", () => {
@@ -493,7 +522,8 @@ describe("buyer interest lines as evidence", () => {
       const ruledOut = (lines: BuyerLine[]) => rank(asLfp(lines)).ruledOut.length === 1;
       expect(ruledOut([line({ kind: "interest" })])).toBe(true);
       expect(ruledOut([line({ kind: "saved_search" })])).toBe(true);
-      expect(ruledOut([line({ kind: "inferred" })])).toBe(true);
+      // Only an inferred line: a research-only buyer, whose chemistry ranks instead of filtering.
+      expect(ruledOut([line({ kind: "inferred" })])).toBe(false);
       expect(ruledOut([line({ kind: "declined" })])).toBe(true);
       expect(ruledOut([line({ kind: "bought", productKey: "broad:nmc-packs" })])).toBe(true);
       expect(ruledOut([line({ kind: "bought", productKey: "broad:toyota-nmc-packs" })])).toBe(true);
@@ -608,7 +638,7 @@ describe("buyer interest lines as evidence", () => {
         plain("d", null, { profile: { chemistries: ["LFP"], formats: ["Packs"] } }),
       ];
       const off = rankBuyers(supplies, buyers, { asOf: AS_OF_LIVE, key });
-      const empty = rankBuyers(supplies, buyers.map((entry) => ({ ...entry, lines: [] })), { asOf: AS_OF_LIVE, key });
+      const empty = rankBuyers(supplies, buyers.map((entry) => ({ ...entry, lines: entry.id === "d" ? [line({ kind: "interest" })] : [] })), { asOf: AS_OF_LIVE, key });
       expect(empty).toEqual(off);
       expect(off.ranked.map((row) => [row.companyId, row.productTier, row.fits])).toEqual([
         ["c", 4, "Same part number: 50 kWh packs NMC"],

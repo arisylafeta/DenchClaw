@@ -100,6 +100,8 @@ export type RankedBuyer = {
   priceMargin: number;
   /** Relative gap between the lot and the nearest size a dossier buyer bought or asked for; 0 when unknown. Smaller ranks higher, after the price keys. */
   sizeGap?: number;
+  /** A research-only buyer whose site lists other chemistries than the lot. Stays in, ranks below the same tier without it. */
+  chemDiffers?: boolean;
   stage: string | null;
   basis: string | null;
   lastTouch: string;
@@ -200,6 +202,22 @@ export function platformMatch(a: unknown, b: unknown): boolean {
 }
 
 const hasDossier = (buyer: BuyerFacts) => !!buyer.dossier && Object.keys(buyer.dossier).length > 0;
+/** Kinds of Want that mean a buyer has told us something themselves; only `inferred` (a research guess) does not. */
+const STATED_KINDS = new Set(["ask", "saved_search", "standing", "interest", "bought", "declined"]);
+
+/** Research-only (lines loaded): no dossier and no live Want of a stated kind, so the website buy box is the only evidence. */
+export function researchOnly(buyer: BuyerFacts, asOf: string): boolean {
+  // `lines` absent means the lines are off: today's ranking, so nobody counts as research-only.
+  return !hasDossier(buyer) && Array.isArray(buyer.lines) && !buyer.lines.some((line) => STATED_KINDS.has(line.kind) && lineLive(line, asOf));
+}
+
+/** The research-only buyer's website chemistries when none match the lot's chemistry, else null. */
+function researchChemDiffers(supply: SupplyFacts, buyer: BuyerFacts, asOf: string): string[] | null {
+  const chem = String(supply.chemistry ?? "").toUpperCase();
+  const stated = list(buyer.profile.chemistries).map((value) => value.toUpperCase());
+  return chem && stated.length && !stated.includes(chem) && researchOnly(buyer, asOf) ? stated : null;
+}
+
 const frontmatter = (buyer: BuyerFacts): Record<string, unknown> => buyer.dossier?.frontmatter ?? {};
 
 function dossierProducts(buyer: BuyerFacts): Record<string, unknown>[] {
@@ -353,7 +371,10 @@ export function productTier(supply: SupplyFacts, buyer: BuyerFacts, asOf: string
   const chemistries = buyerChemistries(buyer);
   const chemOk = chemMatch(supply, chemistries);
   const fmtOk = formatMatch(supply, buyerFormats(buyer));
-  const earlyTier1 = (chemOk && fmtOk)
+  // A research-only buyer's chemistry ranks instead of filtering; the format still has to fit.
+  const chemRanks = !!researchChemDiffers(supply, buyer, asOf) && (fmtOk || !supply.format);
+  const earlyTier1 = chemRanks
+    || (chemOk && fmtOk)
     || (chemOk && !supply.format)
     || (fmtOk && !supply.chemistry)
     || (fmtOk && !chemistries.length);
@@ -623,7 +644,9 @@ export function ruleOut(supply: SupplyFacts, buyer: BuyerFacts, ignoreBuyBoxList
     }
   } else if (!ignoreBuyBoxLists) {
     const stated = list(profile.chemistries).map((value) => value.toUpperCase());
-    if (chem && stated.length && !stated.includes(chem)) {
+    const statedFormats0 = list(profile.formats).map((value) => value.toLowerCase());
+    const formatFits = !fmt || statedFormats0.includes(fmt);
+    if (chem && stated.length && !stated.includes(chem) && !(formatFits && researchOnly(buyer, asOf))) {
       return { code: "chemistry", detail: `buy profile chemistries are ${stated.join("/")}`, buyBox: true, stated: stated.join("/") };
     }
     const statedFormats = list(profile.formats).map((value) => value.toLowerCase());
@@ -1035,10 +1058,12 @@ export function rankA1(supply: SupplyFacts, buyers: BuyerFacts[], asOf: string, 
       productTier: Math.max(productTier(supply, buyer, asOf, bodyFallback), evidence.tier),
       lineKind: evidence.kindRank, lineRecency: evidence.recency,
       priceFit: price[0], priceBasis: price[1], priceMargin: price[2], sizeGap: sizeFit(supply, buyer)?.gap ?? 0,
+      chemDiffers: !!researchChemDiffers(supply, buyer, asOf),
       stage: buyer.stage, basis: buyer.basis, lastTouch: lastTouch(buyer, asOf), isLead: isLead(buyer),
     });
   }
   ranked.sort((a, b) => b.productTier - a.productTier
+    || Number(!!a.chemDiffers) - Number(!!b.chemDiffers)
     || b.priceFit - a.priceFit
     || b.priceBasis - a.priceBasis
     || b.priceMargin - a.priceMargin
@@ -1213,9 +1238,11 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
         productTier: Math.max(productTier(supply, buyer, asOf), evidence.tier),
         lineKind: evidence.kindRank, lineRecency: evidence.recency,
         priceFit: price[0], priceBasis: price[1], priceMargin: price[2], sizeGap: sizeFit(supply, buyer)?.gap ?? 0,
+        chemDiffers: !!researchChemDiffers(supply, buyer, asOf),
         stage: buyer.stage, basis: buyer.basis, lastTouch: lastTouch(buyer, asOf), isLead: isLead(buyer),
       };
       if (!best || (candidate.productTier - best.row.productTier
+        || Number(!!best.row.chemDiffers) - Number(!!candidate.chemDiffers)
         || candidate.priceFit - best.row.priceFit
         || candidate.priceMargin - best.row.priceMargin
         || (best.row.sizeGap ?? 0) - (candidate.sizeGap ?? 0)
@@ -1243,8 +1270,12 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
     const todayTier = productTier(supply, buyer, asOf);
     // The line leads the row when it names something specific or lifts the tier; otherwise today's wording stays.
     const lineLeads = !!evidence.best && (evidence.best.tier >= 2 || evidence.best.tier > todayTier);
-    const fits = lineLeads ? lineFits(evidence, asOf, evidence.tier >= todayTier ? null : today) ?? today : today;
+    const siteChem = researchChemDiffers(supply, buyer, asOf);
+    const chemNote = siteChem ? `Chemistry differs: their site lists ${siteChem.join("/")}` : null;
+    const tierText = chemNote && best.row.productTier === 1 ? `${chemNote}: ${product}` : today;
+    const fits = lineLeads ? lineFits(evidence, asOf, evidence.tier >= todayTier ? null : today) ?? today : tierText;
     const checks = line && options.key ? checksFor(options.key, line, supply, buyer) : checksFor(options.key ?? emptyKey(), emptyLine(), supply, buyer);
+    if (chemNote && best.row.productTier !== 1) { checks.push(chemNote); }
     const unstated = wantedCellFormats(supply, buyer, asOf);
     if (unstated.length) { checks.push(`Cell format not stated; they need ${unstated.join(" or ")}`); }
     const sizeNote = sizeFit(supply, buyer)?.note;
@@ -1266,6 +1297,7 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
   const ordered = [...rows.values()].toSorted((a, b) =>
     Number(b.userVerdict === "shortlist") - Number(a.userVerdict === "shortlist")
     || b.productTier - a.productTier
+    || Number(!!a.chemDiffers) - Number(!!b.chemDiffers)
     || b.priceFit - a.priceFit
     || b.priceBasis - a.priceBasis
     || b.priceMargin - a.priceMargin

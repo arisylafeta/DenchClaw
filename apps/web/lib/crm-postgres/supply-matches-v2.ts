@@ -288,7 +288,7 @@ export async function supplyMatchesV2(listingId: string): Promise<MatchesResult 
       dossier: company.dossier && typeof company.dossier === "object"
         ? { frontmatter: company.dossier as Record<string, unknown>, body: null }
         : null,
-      lines: lines.get(company.id) ?? null,
+      lines: withLines ? lines.get(company.id) ?? [] : null,
     }));
   const ranked = rankBuyers(supplies, buyers, {
     asOf, top: 30, verdicts: companyVerdicts, key,
