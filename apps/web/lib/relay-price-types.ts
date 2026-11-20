@@ -3,7 +3,7 @@
 
 /** One pack or lot that fits what the person asked for. Supplier details never go in an email to a buyer. */
 export type StockFit = {
-  /** Stable for the same stock across reads, e.g. "bulk:<listing id>" or "market:<listing id>". */
+  /** Stable for the same stock across reads: "stock:<crm_stock_opportunities id>" or "market:<marketplace listing id>". */
   key: string;
   /** What the buyer would read: "VW ID.3 62 kWh, 2020". */
   label: string;
@@ -37,4 +37,9 @@ export type PriceFill = {
   warnings: string[];
   needsDeliveryQuote: boolean;
   by: "relay" | "alex";
+  /** Optional: the cost in whole pounds (the listed price for marketplace stock), so a value Alex types is checked against it. */
+  floor?: number | null;
+  /** Optional: Penny's quick to patient price for the pack in whole pounds, so a value Alex types is checked against it.
+   * Only from a medium or high confidence card; a low-confidence card is a working line, not a check. */
+  pennyRange?: { low: number; high: number } | null;
 };

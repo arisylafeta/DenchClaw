@@ -1,5 +1,5 @@
 import { guardRelay, readBody, relayError } from "@/lib/relay-route";
-import { cancelScheduledSend, scheduleSend } from "@/lib/relay";
+import { cancelScheduledSend, readSeenFills, scheduleSend } from "@/lib/relay";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -7,7 +7,8 @@ type Context = { params: Promise<{ id: string }> };
 
 /**
  * Send later: schedules one Relay draft, only on Alex's explicit confirm (`confirm: true`), for the version he saw
- * (`updated_at`), at `send_at` (ISO). The scheduled-send cron sends it then through the normal send runner.
+ * (`updated_at`), at `send_at` (ISO). The scheduled-send cron sends it then through the normal send runner. Relay's
+ * prices go into the email before it is scheduled; optional `fills` ([{ key, value }]) refuses it if they changed.
  */
 export async function POST(req: Request, { params }: Context) {
   const guard = await guardRelay();
@@ -17,8 +18,10 @@ export async function POST(req: Request, { params }: Context) {
   if (body?.confirm !== true || typeof body.updated_at !== "string" || typeof body.send_at !== "string") {
     return Response.json({ error: "confirm, updated_at and send_at required" }, { status: 400 });
   }
+  const fills = readSeenFills(body.fills);
+  if ("error" in fills) return Response.json({ error: fills.error }, { status: 400 });
   try {
-    const scheduled = await scheduleSend(id, guard.user, body.updated_at, new Date(body.send_at));
+    const scheduled = await scheduleSend(id, guard.user, body.updated_at, new Date(body.send_at), fills.seen);
     return Response.json({ scheduled });
   } catch (error) {
     return relayError(error);
