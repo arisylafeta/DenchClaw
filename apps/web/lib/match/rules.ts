@@ -948,7 +948,7 @@ export type BuyBoxOverride = { rule: RuleOut; line: BuyerLine };
  */
 export function buyBoxOverride(supply: SupplyFacts, buyer: BuyerFacts, asOf: string): BuyBoxOverride | null {
   if (!buyer.lines?.length) { return null; }
-  const rule = ruleOut(supply, buyer);
+  const rule = ruleOut(supply, buyer, false, asOf);
   if (!rule?.buyBox) { return null; }
   const own = new Set(broaderKeysFor(supplyProductFacts(supply)).filter((key) => productKeyLevel(key) !== "broad"));
   let found: BuyerLine | null = null;
