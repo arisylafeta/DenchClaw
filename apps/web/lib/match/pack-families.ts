@@ -82,6 +82,16 @@ export const PACK_FAMILIES: PackFamily[] = [
     source: `${SUPPLY_SCAN}, row "VW ID.3": note "MEB pack shared with ID.4/ID.5/Enyaq/Born", stock at 77 kWh usable / 82 kWh gross.`,
   },
   {
+    id: "vw-meb-58kwh",
+    label: "VW MEB 58 kWh",
+    makes: ["VW Group", "Volkswagen", "Cupra"],
+    modelPrefixes: ["id3", "born"],
+    kwh: [58, 62],
+    chemistry: "NMC",
+    partNumbers: [],
+    source: `${SUPPLY_SCAN}, row "VW ID.3": stock at 58.0 kWh, eBay at 62 kWh; row "Cupra Born": note "MEB 58/62/77 kWh". The CRM stock line sto_stock_a6e56842bbaefd9bb483 (Broekhuis ID.3) reads 62 kWh on the pack label for a car sold as "Pro 58 kWh" (details.capacity_kwh_gross 62, capacity_kwh_usable 58).`,
+  },
+  {
     id: "bmw-i3-42kwh",
     label: "BMW i3 42 kWh",
     makes: ["BMW"],

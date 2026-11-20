@@ -218,7 +218,10 @@ export function kwhFromText(text: string): Requirement["kwh"] {
   return options.length ? { options } : null;
 }
 
-function unitCount(demand: Demand): number | null {
+/** What the requirement reads from a demand: enough for a buyer's email to be judged the same way as a request. */
+export type DemandAsk = Pick<Demand, "spec" | "product_family" | "wants" | "quantity" | "location" | "volume" | "volume_unit" | "max_price" | "price_currency" | "price_unit">;
+
+function unitCount(demand: DemandAsk): number | null {
   const unit = demand.volume_unit?.toLowerCase();
   if (demand.volume && unit && /pack|cell|module|system|unit/.test(unit)) return demand.volume;
   const m = demand.quantity?.replace(/,(\d{3})/g, "$1").match(/(\d+(?:\.\d+)?)\s*(packs?|cells?|modules?|units?|systems?)/i);
@@ -240,7 +243,7 @@ export function unitRange(demand: Pick<Demand, "quantity" | "wants">): { min: nu
   return null;
 }
 
-function kwhCount(demand: Demand): number | null {
+function kwhCount(demand: DemandAsk): number | null {
   const unit = demand.volume_unit?.toLowerCase();
   if (!demand.volume || !unit) return null;
   return unit === "kwh" ? demand.volume : unit === "mwh" ? demand.volume * 1000 : null;
@@ -349,7 +352,7 @@ const NO_MAKER = new Set(["unknown", "n", "na", "n.a", "none", "other", "various
 
 /** Reads what a demand row actually pins down: the structured spec first, then its words. A word only counts as a
  * product when some seller uses it in a make or model (`vocab`), so "homogeneous lots" never becomes a product. */
-export function requirementFor(demand: Demand, vocab?: Set<string>): Requirement {
+export function requirementFor(demand: DemandAsk, vocab?: Set<string>): Requirement {
   const spec = demand.spec ?? {};
   const parts = [demand.product_family ?? "", demand.wants].filter(Boolean);
   const text = parts.join(" ; ");

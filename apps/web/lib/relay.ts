@@ -9,7 +9,7 @@ import { queryPg, withPgTransaction, type PgTransaction } from "./postgres";
 import { draftAttachments, readMailDraft } from "./crm-postgres/mail";
 import { mailboxScopeSql } from "./mail-scope";
 import { changeDraftIdentity, DraftActionError, editDraft, editableCopy, identitySignatures, sameVersion, textToHtml, splitCopy } from "./mail-draft-actions";
-import type { DraftAttachment } from "./mail-types";
+import type { DraftAttachment, MailDraft } from "./mail-types";
 import { amountsIn, NEEDS_AGENT, senderRuleMatch } from "./relay-checks";
 import { sendAtProblem, UNDO_SEND_SECONDS } from "./relay-send-time";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
@@ -21,6 +21,8 @@ import { knownBackground, NO_PACK, SINCE_NOTE, sinceFrom, stripQuoted, type Pack
 import { julesReplies } from "./relay-jules";
 import type { JulesReply } from "./relay-jules-core";
 import { hasGap, type StoredWay, type WaysState } from "./relay-ways-core";
+import { applyFills, parseFills, sameFills, unfilledGaps } from "./relay-price-core";
+import type { PriceFill } from "./relay-price-types";
 import { askInstruction, askLabel, buildChecklist, MANUAL_KEYS, type DismantlerPhase, type ChecklistDoc, type ChecklistField, type ChecklistListing, type DealChecklist } from "./relay-checklist";
 
 const run = promisify(execFile);
@@ -100,6 +102,8 @@ export type RelayDraftView = {
   } | null;
   /** The ways to answer this email (relay-ways.ts): ways[picked] is this draft, the others can be picked instead. Null until written. */
   ways: WaysState | null;
+  /** Relay's prices for the draft's price gaps, and Alex's (relay-price.ts). Sending writes them into the email. */
+  fills?: PriceFill[];
 };
 
 export type RelayTodo = { id: string; item_id: string | null; title: string; detail: string; kind: "suggested" | "promise" | "manual"; state: string; reb_key: string | null; source: string | null; created_at: string };
@@ -869,7 +873,7 @@ export async function createMailDraft(d: NewDraft): Promise<string> {
 export const SKIP_DRAFTS_SQL = `with s as (update relay_draft set state = 'skipped', updated_at = now() where item_id = $1 and state in ('draft','gmail') returning mail_message_id)
   update mail_message set personalization = personalization - 'scheduled_send' where id in (select mail_message_id from s) and state = 'draft' and personalization ? 'scheduled_send'`;
 
-type DraftRow = { id: string; item_id: string; role: "primary" | "follow"; position: number; title: string; why: string; state: RelayDraftView["state"]; source_note: string; agent_log: unknown; background: unknown; ways: unknown; mail_message_id: string | null; gmail_draft_id: string | null };
+type DraftRow = { id: string; item_id: string; role: "primary" | "follow"; position: number; title: string; why: string; state: RelayDraftView["state"]; source_note: string; agent_log: unknown; background: unknown; ways: unknown; mail_message_id: string | null; gmail_draft_id: string | null; fills?: unknown };
 
 /** The stored ways as the page sees them: names and text, without the first copies kept for learning. */
 function waysView(raw: unknown): WaysState | null {
@@ -885,7 +889,9 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
   const items = await queryPg<RelayItem>(`select ${ITEM_COLUMNS} from relay_item i where i.owner_id = $1::uuid and i.status = 'review' order by i.updated_at asc`, [ownerId]);
   if (!items.length) return [];
   const ids = items.map((i) => i.id);
-  const drafts = await queryPg<DraftRow>(`select id,item_id,role,position,title,why,state,source_note,agent_log,background,ways,mail_message_id,gmail_draft_id from relay_draft where item_id = any($1) and state <> 'skipped' order by position`, [ids]);
+  // fills is read through to_jsonb so the list still loads before migration 125 adds the column.
+  const drafts = await queryPg<DraftRow>(`select id,item_id,role,position,title,why,state,source_note,agent_log,background,ways,mail_message_id,gmail_draft_id,to_jsonb(d)->'fills' as fills
+    from relay_draft d where item_id = any($1) and state <> 'skipped' order by position`, [ids]);
   const mailIds = drafts.map((d) => d.mail_message_id).filter((id): id is string => !!id);
   const mails = mailIds.length ? await queryPg<{ id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null; body_text: string | null; updated_at: string; personalization: { attachments?: unknown; send_failure?: { reason: string; detail?: unknown }; scheduled_send?: { at?: string; undo?: boolean } } | null; transport: string | null; schedule_changed: boolean }>(
     `select id,state,identity_key,from_email,coalesce(to_emails,'{}') as to_emails,coalesce(cc_emails,'{}') as cc_emails,coalesce(bcc_emails,'{}') as bcc_emails,subject,body_text,updated_at,personalization,transport,
@@ -921,7 +927,7 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
       return {
         id: d.id, role: d.role, position: d.position, title: d.title, why: d.why, state: sent ? "sent" : d.state, source_note: d.source_note,
         agent_log: Array.isArray(d.agent_log) ? (d.agent_log as unknown[]).filter((l): l is string => typeof l === "string") : [],
-        mail_message_id: d.mail_message_id, gmail_draft_id: d.gmail_draft_id, ways: d.role === "primary" ? waysView(d.ways) : null,
+        mail_message_id: d.mail_message_id, gmail_draft_id: d.gmail_draft_id, ways: d.role === "primary" ? waysView(d.ways) : null, fills: parseFills(d.fills),
         mail: m ? { id: m.id, state: m.state, identity_key: m.identity_key, from_email: m.from_email, to_emails: m.to_emails, cc_emails: m.cc_emails, bcc_emails: m.bcc_emails, subject: m.subject,
           main: splitCopy(m.body_text, signatures.get(m.identity_key ?? "") ?? null).main, updated_at: m.updated_at, attachments: draftAttachments(m.personalization?.attachments), transport: m.transport,
           failure: m.personalization?.send_failure ?? null,
@@ -970,15 +976,58 @@ const SEND_RUNNER = "/root/denchclaw/scripts-live/scripts/rebattery/relay_send.p
 /** True while the runner holds a claim on the draft's send (it is going out now). Matches relay_send.py RECLAIM_AFTER. */
 const SEND_CLAIMED_SQL = "coalesce((personalization->'scheduled_send'->>'claimed_at')::timestamptz > now() - interval '20 minutes', false)";
 
-/** Pins the exact version Alex confirmed to a send time; the scheduled-send runner (relay_send.py --due) sends it then. */
-async function pinSend(draftId: string, owner: { id: string; email: string }, updatedAt: string, sendAt: Date, undo: boolean): Promise<{ at: string }> {
+/** A price fill as Alex's page showed it, sent back with Send so a re-price he did not see cannot go out. */
+export type SeenFill = { key: string; value: number | null };
+/** The fills a route was sent (`fills`), or undefined when it sent none; an error for anything else. */
+export function readSeenFills(raw: unknown): { seen?: SeenFill[] } | { error: string } {
+  if (raw === undefined) return {};
+  if (!Array.isArray(raw) || raw.length > 50) return { error: "fills must be a list of { key, value }" };
+  const seen: SeenFill[] = [];
+  for (const f of raw) {
+    const o = (f && typeof f === "object" ? f : {}) as Record<string, unknown>;
+    if (typeof o.key !== "string" || !(o.value === null || (typeof o.value === "number" && Number.isFinite(o.value)))) return { error: "fills must be a list of { key, value }" };
+    seen.push({ key: o.key, value: o.value as number | null });
+  }
+  return { seen };
+}
+
+/**
+ * Writes the draft's price fills into the email itself, so the version that is then approved, pinned or copied to
+ * Gmail carries the prices Alex saw. Refuses, before anything is written, while any gap would still be open, or when
+ * `seen` (the fills his page showed) differs from what is stored. Returns the mail as it now is. A draft with no
+ * price gap is returned unchanged. Only ever call this before a pin: an edit after one makes the runner refuse it.
+ */
+async function withFills(draftId: string, mail: MailDraft, ownerId: string, gapRefusal: string, seen?: SeenFill[]): Promise<MailDraft> {
+  // Read through to_jsonb so sending still works before migration 125 adds the column (then there are no fills).
+  const [row] = await queryPg<{ fills: unknown }>("select to_jsonb(d)->'fills' as fills from relay_draft d where d.id = $1", [draftId]);
+  const fills = parseFills(row?.fills);
+  const main = (await editableCopy(mail)).main;
+  if (seen && !sameFills(main, fills, seen)) throw new RelayError(409, "Relay's prices changed since you opened this. Reload to see the latest.");
+  if (unfilledGaps(main, fills).length) throw new RelayError(400, gapRefusal);
+  const filled = applyFills(main, fills);
+  if (filled === main) return mail;
+  await editDraft(mail, { body: filled });
+  const after = await readMailDraft(mail.id, ownerId);
+  if (!after || after.state !== "draft") throw new RelayError(409, "This draft changed while its prices went in. Reload to see the latest.");
+  return after;
+}
+
+/**
+ * Pins the exact version Alex confirmed to a send time; the scheduled-send runner (relay_send.py --due) sends it then.
+ * His version is checked first; then the price fills go into the email (withFills) and the version with them in is
+ * the one pinned, so the approval digest and the runner's same-version check both cover the prices.
+ */
+async function pinSend(draftId: string, owner: { id: string; email: string }, updatedAt: string, sendAt: Date, undo: boolean, seen?: SeenFill[]): Promise<{ at: string; updated_at: string }> {
   const relayDraft = await relayDraftForOwner(draftId, owner.id);
   if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
-  const mail = await readMailDraft(relayDraft.mail_message_id, owner.id);
+  let mail = await readMailDraft(relayDraft.mail_message_id, owner.id);
   if (!mail) throw new RelayError(404, "Not found");
   if (mail.state !== "draft") throw new RelayError(409, mail.state === "accepted" ? "Already sent." : "A send is already in progress or needs checking.");
   if (!sameVersion(mail.updated_at, updatedAt)) throw new RelayError(409, "This draft changed since you opened it. Reload to see the latest.");
   if (!mail.to_emails.length) throw new RelayError(400, `Add a recipient before ${undo ? "sending" : "scheduling"}.`);
+  const [held] = await queryPg<{ id: string }>(`select id from mail_message where id = $1 and ${SEND_CLAIMED_SQL}`, [mail.id]);
+  if (held) throw new RelayError(409, "This draft changed since you opened it, or it is sending now. Reload to see the latest.");
+  mail = await withFills(draftId, mail, owner.id, "There's a gap to fill in before this can go.", seen);
   // A gap is something only Alex knows that the draft still needs: it never goes out with one in it.
   if (hasGap((await editableCopy(mail)).main)) throw new RelayError(400, "There's a gap to fill in before this can go.");
   const [row] = await queryPg<{ at: string }>(
@@ -987,7 +1036,7 @@ async function pinSend(draftId: string, owner: { id: string; email: string }, up
      where id = $1 and state = 'draft' and date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $4::timestamptz) and not ${SEND_CLAIMED_SQL}
      returning personalization->'scheduled_send'->>'at' as at`, [mail.id, sendAt.toISOString(), owner.email, new Date(mail.updated_at).toISOString(), undo]);
   if (!row) throw new RelayError(409, "This draft changed since you opened it, or it is sending now. Reload to see the latest.");
-  return row;
+  return { at: row.at, updated_at: mail.updated_at };
 }
 
 /**
@@ -996,8 +1045,8 @@ async function pinSend(draftId: string, owner: { id: string; email: string }, up
  * outcome on the message. The timer only makes the send prompt: if this process restarts meanwhile, the every-minute
  * scheduled-send cron sends it. Nothing here can kill a send half way.
  */
-export async function queueSend(draftId: string, owner: { id: string; email: string }, updatedAt: string): Promise<{ at: string }> {
-  const held = await pinSend(draftId, owner, updatedAt, new Date(Date.now() + UNDO_SEND_SECONDS * 1000), true);
+export async function queueSend(draftId: string, owner: { id: string; email: string }, updatedAt: string, seen?: SeenFill[]): Promise<{ at: string; updated_at: string }> {
+  const held = await pinSend(draftId, owner, updatedAt, new Date(Date.now() + UNDO_SEND_SECONDS * 1000), true, seen);
   setTimeout(() => spawn("/usr/bin/python3", [SEND_RUNNER, "--due"], { detached: true, stdio: "ignore" }).unref(), UNDO_SEND_SECONDS * 1000 + 500).unref();
   return held;
 }
@@ -1007,10 +1056,10 @@ export async function queueSend(draftId: string, owner: { id: string; email: str
  * then through the same runner and gates as Send; if the draft changed after scheduling, or they replied meanwhile,
  * it does not go and Relay says why.
  */
-export async function scheduleSend(draftId: string, owner: { id: string; email: string }, updatedAt: string, sendAt: Date): Promise<{ at: string }> {
+export async function scheduleSend(draftId: string, owner: { id: string; email: string }, updatedAt: string, sendAt: Date, seen?: SeenFill[]): Promise<{ at: string; updated_at: string }> {
   const problem = sendAtProblem(sendAt);
   if (problem) throw new RelayError(400, problem);
-  return pinSend(draftId, owner, updatedAt, sendAt, false);
+  return pinSend(draftId, owner, updatedAt, sendAt, false, seen);
 }
 
 /** Undo send, or cancel a pending send-later: the draft stays as it is. Refused once the runner has claimed it. */
@@ -1178,18 +1227,23 @@ function gogEnv(): NodeJS.ProcessEnv {
   try { return { ...process.env, GOG_KEYRING_PASSWORD: readFileSync(process.env.GOG_KEYRING_PASSWORD_FILE || KEYRING_PASSWORD_FILE, "utf8").trim() }; } catch { return process.env; }
 }
 
-/** Copies a Relay draft into Alex's Gmail drafts, threaded as a reply, for further editing there. Gmail sending stays blocked. */
-export async function saveToGmailDrafts(draftId: string, ownerId: string): Promise<{ gmailDraftId: string | null }> {
+/**
+ * Copies a Relay draft into Alex's Gmail drafts, threaded as a reply, for further editing there. Gmail sending stays
+ * blocked. The price fills go into the draft first (withFills), so the Gmail copy carries Relay's prices.
+ */
+export async function saveToGmailDrafts(draftId: string, ownerId: string, seen?: SeenFill[]): Promise<{ gmailDraftId: string | null }> {
   const relayDraft = await relayDraftForOwner(draftId, ownerId);
   if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
+  const current = await readMailDraft(relayDraft.mail_message_id, ownerId);
+  if (!current) throw new RelayError(404, "Not found");
+  if (current.state !== "draft") throw new RelayError(409, "This email was already sent.");
+  // Gmail can send what lands in its drafts, so a draft with a gap stays here until the gap is filled.
+  const mail = await withFills(draftId, current, ownerId, "There's a gap to fill in before this can go to Gmail drafts.", seen);
+  if (hasGap((await editableCopy(mail)).main)) throw new RelayError(400, "There's a gap to fill in before this can go to Gmail drafts.");
   const [m] = await queryPg<{ subject: string | null; body_html: string | null; body_text: string | null; to_emails: string[]; cc_emails: string[]; from_email: string | null; personalization: { reply_gmail_message_id?: string; attachments?: { storedPath?: string }[] } | null; state: string }>(
     "select subject, body_html, body_text, coalesce(to_emails,'{}') as to_emails, coalesce(cc_emails,'{}') as cc_emails, from_email, personalization, state from mail_message where id = $1", [relayDraft.mail_message_id]);
   if (!m) throw new RelayError(404, "Not found");
   if (m.state !== "draft") throw new RelayError(409, "This email was already sent.");
-  // Gmail can send what lands in its drafts, so a draft with a gap stays here until the gap is filled.
-  const mail = await readMailDraft(relayDraft.mail_message_id, ownerId);
-  if (!mail) throw new RelayError(404, "Not found");
-  if (hasGap((await editableCopy(mail)).main)) throw new RelayError(400, "There's a gap to fill in before this can go to Gmail drafts.");
   const args = ["--account", "alex@rebattery.io", "--gmail-no-send", "--enable-commands-exact", "gmail.drafts.create", "--no-input", "--json",
     "gmail", "drafts", "create", "--subject", m.subject ?? "", "--body", m.body_text ?? "", "--body-html", m.body_html ?? textToHtml(m.body_text ?? "")];
   if (m.to_emails.length) args.push("--to", m.to_emails.join(","));
