@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type RefObject, type SetStateAction } from
 import { ArrowUp } from "lucide-react";
 import type { TalkApplied, TalkDraft, TalkState, TalkTurn, TraceApplied } from "@/lib/relay-talk";
 import { ThinkingIndicator } from "@/app/components/chat-native/thinking";
+import { isAutoNote } from "@/lib/relay-auto-note";
 import { cx, firstOf } from "./relay-ui";
 import w from "./relay-workspace.module.css";
 
@@ -18,7 +19,7 @@ const short = (text: string, max = 24) => (text.length > max ? `${text.slice(0, 
  */
 export function RelayChat({ talk, name, drafts, current, all, onTarget, pending, error, onRetry, text, setText, onAsk, composer, firstNote, repricing, quick, saveRule }: {
   talk: TalkState | null; name: string; drafts: TalkDraft[]; current: TalkDraft | null; all: boolean; onTarget: (id: string) => void;
-  pending: { text: string; started: number; first: boolean } | null; error: { text: string; message: string } | null; onRetry: () => void;
+  pending: { text: string; started: number; first: boolean; auto?: boolean } | null; error: { text: string; message: string } | null; onRetry: () => void;
   text: string; setText: (next: SetStateAction<string>) => void; onAsk: (text: string) => void; composer: RefObject<HTMLTextAreaElement | null>;
   firstNote: string; repricing: boolean; quick: Quick; saveRule: (rule: string) => Promise<boolean>;
 }) {
@@ -36,7 +37,8 @@ export function RelayChat({ talk, name, drafts, current, all, onTarget, pending,
   const rule = offer ? (offer.applied as TalkApplied).ruleOffer : null;
   const ruleState = offer ? ruleDone[offer.id] : undefined;
 
-  const showNote = !!firstNote.trim() && !turns.some((t) => t.role === "alex" && t.text.trim() === firstNote.trim());
+  const auto = isAutoNote(firstNote);
+  const showNote = !auto && !!firstNote.trim() && !turns.some((t) => t.role === "alex" && t.text.trim() === firstNote.trim());
   const placeholder = !live.length ? `Say how to answer ${first}, like “offer the 62 kWh, and say we can get the mileage from the VIN”`
     : all ? `Change ${live.length === 2 ? "both" : `all ${count}`} at once, like “sign off as Alex and the team”`
     : `Change ${target}, or ask for another email: “also email Broekhuis”, “price the 62 kWh at 5k”`;
@@ -47,11 +49,12 @@ export function RelayChat({ talk, name, drafts, current, all, onTarget, pending,
       <div className={w.chatScroll} ref={scroller}>
         <span className={w.chatHead}>Relay <span>on {target}</span></span>
         {talk && talk.read.items.length > 0 && <ReadLine read={talk.read} />}
+        {auto && live.length > 0 && <p className={w.chatEmpty}>Relay wrote this reply before you opened it. Ask for any change, or another email to go with it.</p>}
         {showNote && <Mine text={firstNote} />}
         {turns.map((t) => (t.role === "alex" ? <Mine key={t.id} text={t.text} /> : isTrace(t) ? <Trace key={t.id} turn={t} /> : <RelaySays key={t.id} turn={t} />))}
         {pending && (
           <>
-            <Mine text={pending.text} />
+            {!pending.auto && <Mine text={pending.text} />}
             <Working started={pending.started} first={pending.first} />
           </>
         )}
@@ -61,7 +64,7 @@ export function RelayChat({ talk, name, drafts, current, all, onTarget, pending,
             <button type="button" className={w.linkbtn} onClick={onRetry}>Try again</button>
           </div>
         )}
-        {!turns.length && !pending && !showNote && !error && talk && (
+        {!turns.length && !pending && !showNote && !(auto && live.length) && !error && talk && (
           <p className={w.chatEmpty}>{live.length ? "Ask for any change, or another email to go with the reply." : `Tell Relay how to answer ${first}. It has read the thread and their history first.`}</p>
         )}
       </div>

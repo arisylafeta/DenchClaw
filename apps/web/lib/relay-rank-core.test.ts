@@ -172,13 +172,18 @@ describe("score", () => {
   it("says draft ready when an unsent draft waits", () => {
     expect(score([item({ hasDraft: true })]).tag).toBe("Draft ready");
   });
-  it("takes Draft ready from the person's email in Review, which makes no row of its own", () => {
+  it("takes Draft ready from the person's email in Review, and opens their newest open email", () => {
     const open = item({ id: "o", email: "bbament@gmail.com", name: "Ben Bament", personal: true });
     const inReview = item({ id: "r", status: "review", email: "ben@silentclassics.co.uk", name: "Ben Bament", companyId: "sc", hasDraft: true });
-    const alone = item({ id: "x", status: "review", email: "x@other.com", name: "Xavier Other", hasDraft: true });
-    const rows = rankItems([open, inReview, alone], now);
+    const rows = rankItems([open, inReview], now);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ itemIds: ["o"], reviewIds: ["r"], openId: "o", hasDraft: true, tag: "Draft ready" });
+  });
+  it("keeps a row for someone whose only email has a draft waiting: it is still on Alex until it goes", () => {
+    const alone = item({ id: "x", status: "review", email: "x@other.com", name: "Xavier Other", hasDraft: true });
+    const rows = rankItems([alone], now);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ itemIds: ["x"], reviewIds: ["x"], openId: "x", hasDraft: true, tag: "Draft ready" });
   });
   it("adds no stake for a deal that is off: not live in the CRM, or called off in their email", () => {
     const deal = { live: true, value: "$516,800", quantity: "680,000 cells" };

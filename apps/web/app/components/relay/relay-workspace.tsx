@@ -222,7 +222,7 @@ export function RelayWorkspace({ onBack, onOpenPage }: { onBack: () => void; onO
         <div className={w.work} ref={workPane}>
           {picked ? (
             <Work key={picked.itemId} itemId={picked.itemId} name={picked.name} waited={view === "waiting" ? picked.waited : null} item={item} job={job}
-              reviewIds={picked.reviewIds} say={say} text={textOf} setText={setText(picked.itemId)} composer={composer}
+              reviewIds={picked.reviewIds} autoDraft={view === "waiting"} say={say} text={textOf} setText={setText(picked.itemId)} composer={composer}
               onDone={view === "waiting" ? () => void markDone(picked) : undefined} onSnooze={view === "waiting" ? () => void snooze(picked) : undefined}
               onOpen={(itemId) => setPicked({ ...picked, key: itemId, itemId, reviewIds: [] })} onBack={() => setPane("list")} refreshLists={reloadLists} />
           ) : (

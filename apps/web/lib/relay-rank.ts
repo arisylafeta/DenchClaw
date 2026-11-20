@@ -70,7 +70,7 @@ export type RankSource = Pick<RelayItem, "id" | "status" | "tab" | "priority" | 
 export const reviewWithDrafts = (ownerId: string) => queryPg<RankSource>(
   `select i.id, i.status, i.tab, i.priority, i.counterpart_name, i.counterpart_email, i.company, i.contact_type, i.situation, i.headline,
      i.waiting_since, i.last_message
-   from relay_item i where i.owner_id = $1::uuid and i.status = 'review'
+   from relay_item i where i.owner_id = $1::uuid and i.status = 'review' and i.tab = 'action' and (i.snooze_until is null or i.snooze_until <= now())
      and exists (select 1 from relay_draft d where d.item_id = i.id and d.state in ('draft','gmail'))`, [ownerId]);
 
 const LIVE = new Set(["open", "qualifying"]);

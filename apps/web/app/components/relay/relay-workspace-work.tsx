@@ -8,6 +8,7 @@ import type { PriceFill, StockFit } from "@/lib/relay-price-types";
 import type { SendMode } from "@/lib/relay-talk-core";
 import { fillGaps } from "@/lib/relay-ways-core";
 import { draftNeeds, gapSpans, sendGate, versionsOf } from "@/lib/relay-workspace-core";
+import { AUTO_NOTE } from "@/lib/relay-auto-note";
 import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
 import { api, failureText, firstName, firstOf } from "./relay-ui";
 import { DraftSheet, type SheetActions } from "./relay-workspace-draft";
@@ -26,8 +27,10 @@ const message = (err: unknown, fallback: string) => (err instanceof Error ? err.
 const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
 
 /** One person's email: who they are, what they wrote, the reply with its linked emails, and Relay's chat about them. */
-export function Work({ itemId, name, waited, item, job, reviewIds, say, text, setText, composer, onDone, onSnooze, onOpen, onBack, refreshLists }: {
+export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, say, text, setText, composer, onDone, onSnooze, onOpen, onBack, refreshLists }: {
   itemId: string; name: string; waited: string | null; item: RelayItem | RelayReviewItem | null; job: RelayJob | null; reviewIds: string[];
+  /** Write Relay's first reply on opening when there is none ("Waiting on you" only). */
+  autoDraft: boolean;
   say: Say; text: string; setText: (next: SetStateAction<string>) => void; composer: RefObject<HTMLTextAreaElement | null>;
   onDone?: () => void; onSnooze?: () => void; onOpen: (itemId: string) => void; onBack: () => void; refreshLists: () => Promise<void>;
 }) {
@@ -215,7 +218,7 @@ export function Work({ itemId, name, waited, item, job, reviewIds, say, text, se
   };
 
   // ---- the chat
-  const [pending, setPending] = useState<{ text: string; started: number; first: boolean } | null>(null);
+  const [pending, setPending] = useState<{ text: string; started: number; first: boolean; auto?: boolean } | null>(null);
   const [chatError, setChatError] = useState<{ text: string; message: string } | null>(null);
   const hasReply = drafts.some((d) => d.mail);
   const jobBusy = !!job && JOB_BUSY.has(job.status);
@@ -248,6 +251,22 @@ export function Work({ itemId, name, waited, item, job, reviewIds, say, text, se
       void load();
     } finally { setPending(null); }
   };
+  // An email with no reply gets Relay's first draft as soon as it opens (once per visit), unless Alex has started typing.
+  // The top of the list is usually drafted ahead of time (relay-prepare.ts); this covers the rest.
+  const autoTried = useRef<string | null>(null);
+  useEffect(() => {
+    if (!autoDraft || !talk || hasReply || jobBusy || pending || autoTried.current === itemId || text.trim()) return;
+    // A draft already waits on another of their emails: that one is the reply.
+    if (reviewIds.some((id) => id !== itemId)) return;
+    autoTried.current = itemId;
+    setPending({ text: "", started: Date.now(), first: true, auto: true });
+    setChatError(null);
+    api(`/api/relay/items/${itemId}/draft`, { method: "POST", body: { note: AUTO_NOTE, mode: "quick" } })
+      .then(() => Promise.all([load(), refreshLists()]))
+      .catch((err) => say(message(err, "Relay couldn't write a first reply. Tell it how to answer instead.")))
+      .finally(() => setPending(null));
+  }, [autoDraft, talk, hasReply, jobBusy, pending, itemId, text]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // While a first-reply job researches, check on it every few seconds; when it finishes, bring the drafts in.
   useEffect(() => {
     if (!jobBusy) return;

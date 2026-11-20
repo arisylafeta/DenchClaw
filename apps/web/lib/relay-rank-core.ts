@@ -396,11 +396,12 @@ function displayName(group: RankItem[]): string {
   return (named ?? group.find((i) => i.name) ?? group[0]).name ?? group[0].email ?? "Unknown";
 }
 
-/** Merges the items into one row per person, scores each and returns them best first. A person with only emails in
- * Review has no row: those wait in Drafts. */
+/** Merges the items into one row per person, scores each and returns them best first. A reply Relay has drafted is
+ * still waiting on Alex until it goes, so a person whose emails are all in Review keeps a row, ranked on those. */
 export function rankItems(items: RankItem[], now = new Date()): WaitingRow[] {
   return mergeByPerson(items).flatMap((all) => {
-    const group = all.filter((i) => i.status === "open");
+    const open = all.filter((i) => i.status === "open");
+    const group = open.length ? open : all;
     if (!group.length) return [];
     const review = all.filter((i) => i.status === "review");
     const newest = [...group].sort((a, b) => at(b.lastAt ?? b.waitingSince) - at(a.lastAt ?? a.waitingSince))[0];
