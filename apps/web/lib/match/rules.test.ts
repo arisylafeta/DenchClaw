@@ -528,8 +528,9 @@ describe("buyer interest lines as evidence", () => {
       expect(ruledOut([line({ kind: "bought", productKey: "broad:nmc-packs" })])).toBe(true);
       expect(ruledOut([line({ kind: "bought", productKey: "broad:toyota-nmc-packs" })])).toBe(true);
       expect(ruledOut([line({ kind: "bought", productKey: "part:OTHER123" })])).toBe(true);
-      expect(ruledOut([line({ kind: "bought", expiresOn: "2026-11-14" })])).toBe(true);
-      expect(ruledOut([line({ kind: "bought", firstSeen: "2026-12-01" })])).toBe(true);
+      // No live stated Want left (expired, or not started yet): research-only, so chemistry ranks.
+      expect(ruledOut([line({ kind: "bought", expiresOn: "2026-11-14" })])).toBe(false);
+      expect(ruledOut([line({ kind: "bought", firstSeen: "2026-12-01" })])).toBe(false);
       expect(ruledOut([line({ kind: "bought", expiresOn: "2026-11-15" })])).toBe(false);
     });
 
