@@ -140,7 +140,7 @@ export function PreviewDemandPanel({ demand, today, onChanged, onClose, onOpenTr
           <TheAsk demand={demand} loading={false} onChanged={onChanged} />
         </div>
       )}
-      <DemandMatchesTab demandId={demand.id} active={tab === "Matches"} onOpenOffers={() => setTab("Offers")} onOpenDetails={() => setTab("Details")} />
+      <DemandMatchesTab demandId={demand.id} active={tab === "Matches"} onOpenOffers={() => setTab("Offers")} onOpenDetails={() => setTab("Details")} onDemandChanged={onChanged} />
       <MatchaTab listingId={demand.id} active={tab === "Matcha"} />
       {tab === "Documents" && <DocumentsTab listingId={demand.id} />}
       {tab === "Offers" && <OffersTab listingId={demand.id} demandId={demand.id} request onChanged={onChanged} />}

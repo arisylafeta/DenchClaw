@@ -12,6 +12,7 @@ import type { FitMark, FitState, MatchOffer, MatchRow, MatchTag, MatchUnit, Matc
 import type { OfferStage } from "@/lib/crm-postgres/bulk-offers";
 import css from "./request-matches.module.css";
 import { GroupMatches, NeedsCard } from "./group-matches";
+import { LiveCriteriaPanel, type CriteriaPanelProps } from "./criteria-panel";
 
 export const STAGES: [OfferStage, string][] = [
   ["candidate", "Candidate"], ["offered", "Offered"], ["negotiating", "Negotiating"],
@@ -231,11 +232,17 @@ type Props = {
   onOpenDetails?: () => void;
   /** Group matches: one offer for a supplier, with all their stock on the buyer's pack types. */
   onAddSupplier: (supplier: SupplierMatch) => void;
+  /** Saves one criterion (the demand's own fields) and reloads the matches. Absent: the Criteria list is read-only text. */
+  onSaveCriteria?: CriteriaPanelProps["save"];
+  /** Lots now against before the last criteria edit; null when there is no edit to compare with. */
+  lotDelta?: number | null;
+  /** The matches are reloading after an edit. */
+  refreshing?: boolean;
 };
 
 export function RequestMatches({
   result, rows, hidden, onShowAll, criteriaOpen, onToggleCriteria, adding, onAdd, asking, onAskNotAFit, notAFitForm, error, onOpenOffers,
-  onOpenDetails, onAddSupplier,
+  onOpenDetails, onAddSupplier, onSaveCriteria, lotDelta = null, refreshing = false,
 }: Props) {
   const [open, setOpen] = useState<string | null>(null);
   // A request with several pack types opens on Group matches; one with fewer keeps the Per battery list alone.
@@ -245,6 +252,7 @@ export function RequestMatches({
   const coverage = result.coverage;
   const outreach = result.summary?.outreach ?? null;
   const chips = result.summary?.chips ?? [{ label: result.lotKey.line, strong: true }];
+  const editable = !!onSaveCriteria && !!result.criteria;
   const count = result.rows.length;
   const tally = result.summary?.count ?? null;
   const packTypes = result.summary?.packTypes ?? null;
@@ -269,22 +277,32 @@ export function RequestMatches({
       <section className={`${css.card} ${css.summary}`} aria-label="What we matched on">
         <div className={css.matchedOn}>
           <span className={css.matchedOnLabel}>Matched on</span>
-          {chips.map((chip) => (
+          {/* Open Criteria lists every criterion, so the chips step aside and the header carries the live count. */}
+          {!(editable && criteriaOpen) && chips.map((chip) => (
             <span key={chip.label} className={css.chip} title={chip.label}>{chip.strong ? <b>{chip.label}</b> : chip.label}</span>
           ))}
-          {result.lotKey.full.length > 0 && (
+          {editable && criteriaOpen && tally && (
+            <span className={`${css.liveCount} ${refreshing ? css.liveCountBusy : ""}`} aria-live="polite">
+              <span><b>{tally.suppliers}</b> {tally.suppliers === 1 ? "supplier" : "suppliers"} · <b>{tally.units.toLocaleString("en-GB")}</b> {tally.word}</span>
+              {lotDelta != null && lotDelta !== 0 && !refreshing && (
+                <span className={lotDelta > 0 ? css.deltaUp : css.deltaDown}>{lotDelta > 0 ? "+" : "−"}{Math.abs(lotDelta).toLocaleString("en-GB")}</span>
+              )}
+            </span>
+          )}
+          {(editable || result.lotKey.full.length > 0) && (
             <button type="button" className={`${css.btn} ${css.btnGhost} ${css.criteriaToggle}`} aria-expanded={criteriaOpen}
               aria-controls="request-matches-criteria" onClick={onToggleCriteria}>
               Criteria {criteriaOpen ? <ChevronDown size={14} aria-hidden /> : <ChevronRight size={14} aria-hidden />}
             </button>
           )}
         </div>
-        {criteriaOpen && (
+        {criteriaOpen && editable && <LiveCriteriaPanel criteria={result.criteria!} save={onSaveCriteria!} />}
+        {criteriaOpen && !editable && (
           <ul id="request-matches-criteria" className={css.criteria}>
             {result.lotKey.full.map((line) => <li key={line}>{line}</li>)}
           </ul>
         )}
-        {count > 0 && (
+        {count > 0 && !(editable && criteriaOpen) && (
           <div className={css.stats}>
             {tally ? (
               <span>

@@ -201,3 +201,13 @@
 .sStockTitle b { font-weight: 600; }
 .sVehicles { font-size: 12px; color: #3f3f3a; }
 .otherOnly { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; padding: 12px 18px; border-top: 1px solid rgba(0, 0, 0, 0.06); }
+
+/* Live count in the header while Criteria is open, and the change an edit made. */
+.liveCount { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; font-size: 12.5px; white-space: nowrap; }
+.liveCount b { font-variant-numeric: tabular-nums; }
+.liveCountBusy b, .liveCountBusy span { color: transparent; background: linear-gradient(90deg, #ecebe8, #f6f5f3, #ecebe8); background-size: 200% 100%; border-radius: 4px; animation: shimmer 1s linear infinite; }
+.deltaUp { color: #146c36; font-weight: 600; }
+.deltaDown { color: #6f6f68; font-weight: 600; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .liveCountBusy b, .liveCountBusy span { animation: none; } }
+.liveCount + .criteriaToggle { margin-left: 0; }

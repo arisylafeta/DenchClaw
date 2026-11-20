@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { MatchOffer, MatchRow, MatchTag, MatchesResult } from "@/lib/matches-types";
+import type { PatchBody } from "@/lib/demand-criteria";
 import type { OfferStage } from "@/lib/crm-postgres/bulk-offers";
 import { Button, Chip, LinkButton, StatusDot, type ChipTone } from "@/components/ui/board";
 import { ErrorText, request } from "./trade-ui";
@@ -33,13 +34,17 @@ type Props = {
   onOpenOffers?: () => void;
   /** Requests: opens Details, where the buyer's pack types are edited. */
   onOpenDetails?: () => void;
+  /** Requests: saves one criterion and reloads the matches, so the Criteria list is editable. */
+  onSaveCriteria?: (body: PatchBody) => Promise<{ lots: number | null }>;
+  /** Lots now against before the last criteria edit. */
+  lotDelta?: number | null;
 };
 
 /**
  * One ranked list, the same on a supply listing and on a request: rank, who, why it fits, what to check, the firm
  * price, and the two actions. Add to offers is the only button; Not a fit is a quiet action with quick reasons.
  */
-export function MatchesList({ result, loading, error, onRetry, offersEndpoint, onAdded, onNotAFit, onOpenOffers, onOpenDetails }: Props) {
+export function MatchesList({ result, loading, error, onRetry, offersEndpoint, onAdded, onNotAFit, onOpenOffers, onOpenDetails, onSaveCriteria, lotDelta }: Props) {
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [showRuledOut, setShowRuledOut] = useState(false);
@@ -211,6 +216,9 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
         error={<ErrorText error={actionError} />}
         onOpenOffers={onOpenOffers}
         onOpenDetails={onOpenDetails}
+        onSaveCriteria={onSaveCriteria}
+        lotDelta={lotDelta}
+        refreshing={loading}
         onAddSupplier={(supplier) => {
           const first = result.rows.find((item) => supplier.rowKeys.includes(item.key));
           if (!first) return;
@@ -378,7 +386,11 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
 }
 
 /** Loads one listing's matches and owns the writes the list makes. */
-export function MatchesTab({ kind, id, active, onOpenOffers, onOpenDetails }: { kind: "supply" | "demand"; id: string; active: boolean; onOpenOffers?: () => void; onOpenDetails?: () => void }) {
+export function MatchesTab({ kind, id, active, onOpenOffers, onOpenDetails, onDemandChanged }: {
+  kind: "supply" | "demand"; id: string; active: boolean; onOpenOffers?: () => void; onOpenDetails?: () => void;
+  /** Requests: a criterion was saved, so the page's copy of the demand is stale. */
+  onDemandChanged?: () => void;
+}) {
   const base = kind === "supply"
     ? `/api/bulk-listings/${encodeURIComponent(id)}/matches/v2`
     : `/api/bulk-trades/demand/${encodeURIComponent(id)}/matches/v2`;
@@ -388,21 +400,42 @@ export function MatchesTab({ kind, id, active, onOpenOffers, onOpenDetails }: { 
   const [data, setData] = useState<MatchesResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [baseline, setBaseline] = useState<number | null>(null);
+  const fetchMatches = useCallback(async () => {
+    const payload = await request<MatchesResult>(base);
+    if (!payload || !Array.isArray(payload.rows) || !payload.lotKey) {
+      throw new Error("Could not load matches.");
+    }
+    setData(payload);
+    setError(null);
+    return payload;
+  }, [base]);
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const payload = await request<MatchesResult>(base);
-      if (!payload || !Array.isArray(payload.rows) || !payload.lotKey) {
-        throw new Error("Could not load matches.");
-      }
-      setData(payload);
-      setError(null);
+      await fetchMatches();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load matches.");
     } finally {
       setLoading(false);
     }
-  }, [base]);
+  }, [fetchMatches]);
+  const lots = data?.summary?.count?.units ?? null;
+  // A criterion saves through the demand's own PATCH (the Details tab's write path), then the matches are read again.
+  const saveCriteria = useCallback(async (body: PatchBody) => {
+    const before = lots;
+    setLoading(true);
+    try {
+      await request(`/api/bulk-trades/demand/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
+      onDemandChanged?.();
+      const payload = await fetchMatches();
+      const now = payload.summary?.count?.units ?? null;
+      setBaseline(before != null && now != null ? before : null);
+      return { lots: now };
+    } finally {
+      setLoading(false);
+    }
+  }, [id, lots, fetchMatches, onDemandChanged]);
   useEffect(() => {
     if (active) {
       void load();
@@ -420,6 +453,8 @@ export function MatchesTab({ kind, id, active, onOpenOffers, onOpenDetails }: { 
       offersEndpoint={offersEndpoint}
       onOpenOffers={onOpenOffers}
       onOpenDetails={onOpenDetails}
+      onSaveCriteria={kind === "demand" ? saveCriteria : undefined}
+      lotDelta={baseline != null && lots != null ? lots - baseline : null}
       // A supplier is one offer: adding any of their rows marks the supplier in Group matches too.
       onAdded={(row, offer) => setData((current) => current && {
         ...current,
