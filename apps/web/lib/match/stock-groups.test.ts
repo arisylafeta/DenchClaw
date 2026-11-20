@@ -171,7 +171,7 @@ describe("grouping a request's stock by seller and pack identity", () => {
   });
 
   it("gives the group ranges where units differ, and counts SoH stated", () => {
-    const req = ask({ wants: "2-13 Vauxhall Vivaro-e 50 kWh packs", max_price: 2100, price_currency: "EUR", price_unit: "pack" });
+    const req = ask({ wants: "2-13 Vauxhall Vivaro-e 50 kWh packs", max_price: 2300, price_currency: "EUR", price_unit: "pack" });
     const lines = [
       line({ graph: STELLANTIS, price_eur: 2020, soh_percent: 92 }),
       line({ graph: STELLANTIS, price_eur: 2075 }),

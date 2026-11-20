@@ -180,6 +180,8 @@ function DemandDialogForm({
         if (value !== null) spec[key] = value;
       }
       if (draft.mixed_ok) spec.mixed_ok = draft.mixed_ok === "yes";
+      // The Criteria panel owns the price floor; this form has no field for it and must not drop it.
+      if (demand?.spec?.price_floor !== undefined) spec.price_floor = demand.spec.price_floor;
       const volume = toNumber(draft.volume);
       const maxPrice = toNumber(draft.max_price);
       const body: Record<string, unknown> = {

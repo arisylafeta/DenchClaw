@@ -87,3 +87,23 @@ describe("labels", () => {
       demandRank({ kind: "standing", basis: "agreed" })]).toEqual([3, 0, 1]);
   });
 });
+
+describe("criteria spec keys", () => {
+  const registry = {
+    specLists: { supplier_countries: ["Poland"], supplier_regions: ["Europe"] }, specLabels: {}, specGroups: {},
+    specNumbers: { min_lot_kwh: { label: "Min lot size (kWh)", min: 0, max: 100000000 } },
+    currencies: ["EUR", "USD", "GBP"], priceUnits: ["kWh", "pack", "cell"],
+  } as unknown as Parameters<typeof parseSpec>[1];
+
+  it("accepts our own filters and a whole price floor", () => {
+    const parsed = parseSpec({ min_lot_kwh: 500, supplier_countries: ["Poland"], price_floor: { amount: 20, currency: "EUR", unit: "kWh" } }, registry);
+    expect(parsed).toEqual({ value: { min_lot_kwh: 500, supplier_countries: ["Poland"], price_floor: { amount: 20, currency: "EUR", unit: "kWh" } } });
+  });
+
+  it("rejects an incomplete or invalid price floor", () => {
+    expect(parseSpec({ price_floor: { amount: 20, currency: "EUR" } }, registry)).toHaveProperty("error");
+    expect(parseSpec({ price_floor: { amount: -1, currency: "EUR", unit: "kWh" } }, registry)).toHaveProperty("error");
+    expect(parseSpec({ price_floor: { amount: 5, currency: "XXX", unit: "kWh" } }, registry)).toHaveProperty("error");
+    expect(parseSpec({ supplier_countries: ["Atlantis"] }, registry)).toHaveProperty("error");
+  });
+});

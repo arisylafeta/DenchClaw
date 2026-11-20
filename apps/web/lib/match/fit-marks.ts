@@ -117,13 +117,18 @@ function asked(req: Requirement, key: string): string {
       return req.cellTokens.filter((tok) => /^\d+$/.test(tok)).join(" / ");
     case "format":
       return [req.cellFormats.join(" / "), req.formats.join(" / ").toLowerCase()].filter(Boolean).join(" ") || "Any";
+    case "cellformat":
+      return req.cellFormats.join(" / ") || "Any";
+    case "origin":
+      return req.supplierCodes.length ? "Supplier country in our filter" : "Any";
     case "capacity":
       return req.pinned.find((pin) => /kwh/i.test(pin)) ?? "Any";
     case "chemistry":
       return req.chemistries.join(" / ");
     case "quantity":
       return req.unitsRange ? `${count(req.unitsRange.min)}–${count(req.unitsRange.max)}`
-        : req.unitsNeeded ? count(req.unitsNeeded) : req.kwhNeeded ? `${count(req.kwhNeeded)} kWh` : "Any";
+        : req.unitsNeeded ? count(req.unitsNeeded) : req.kwhNeeded ? `${count(req.kwhNeeded)} kWh`
+        : req.minLotKwh != null ? `${count(req.minLotKwh)} kWh per lot` : "Any";
     case "price":
       return "Under ceiling";
     case "condition":
@@ -137,13 +142,14 @@ function asked(req: Requirement, key: string): string {
 
 const REQUIREMENT_NAME: Record<string, string> = {
   model: "Model", size: "Cell size", format: "Format", capacity: "Capacity", chemistry: "Chemistry",
-  quantity: "Quantity", price: "Price", condition: "Condition", location: "Delivery",
+  quantity: "Quantity", price: "Price", condition: "Condition", location: "Delivery", cellformat: "Cell format", origin: "Supplier country",
 };
 
 /** What to ask the seller for, from the requirements they have not stated. */
 const ASK_FOR: Record<string, string> = {
   model: "the exact model", size: "the cell size", format: "the format", capacity: "the capacity", chemistry: "the chemistry",
   quantity: "quantity", price: "price per unit", condition: "SoH or test data", location: "where the stock is",
+  cellformat: "the cell format", origin: "where the stock is",
 };
 export function askFor(marks: FitMark[]): string[] {
   return marks.filter((mark) => mark.state === "unstated").map((mark) => ASK_FOR[mark.key] ?? mark.key);
@@ -179,6 +185,10 @@ export function fitMarks(req: Requirement, match: Match, opts: { price?: string 
   const format = find(match.checks, "format");
   if (format) {
     add("format", format.state === "pass" ? format.detail : "Format", STATE[format.state], format.state === "pass" ? format.detail : NOT_STATED);
+  }
+  const cellFormat = find(match.checks, "cellformat");
+  if (cellFormat) {
+    add("cellformat", cellFormat.state === "pass" ? cellFormat.detail : "Cell format", STATE[cellFormat.state], cellFormat.state === "pass" ? cellFormat.detail : NOT_STATED);
   }
   const capacity = find(match.checks, "capacity");
   if (capacity) {
@@ -221,6 +231,10 @@ export function fitMarks(req: Requirement, match: Match, opts: { price?: string 
     } else {
       add("location", "Location", "unstated", NOT_STATED);
     }
+  }
+  const origin = find(match.checks, "origin");
+  if (origin) {
+    add("origin", origin.state === "pass" ? origin.detail : "Country", STATE[origin.state], origin.state === "pass" ? origin.detail : NOT_STATED);
   }
   return marks;
 }

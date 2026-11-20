@@ -252,7 +252,7 @@ function reasonFor(match: Match, candidate: Candidate): string {
 // The checks each fit mark already shows, so the row does not say the same thing twice.
 const MARKED: Record<string, string[]> = {
   model: ["product", "model"], size: ["product"], format: ["format"], capacity: ["capacity"], chemistry: ["chemistry"],
-  quantity: ["quantity"], price: ["price"],
+  quantity: ["quantity"], price: ["price"], cellformat: ["cellformat"], origin: ["origin"],
 };
 
 /** What to check on a request row beyond its marks: an open gap no mark shows, then the evidence to ask for. */
@@ -520,6 +520,10 @@ export async function demandMatchesV2(demandId: string, preview: { lines?: unkno
     id: demandId,
     kind: "demand",
     lotKey: requirementView(requirement, evidence, demand),
+    criteria: {
+      spec: demand.spec ?? {}, max_price: demand.max_price, price_currency: demand.price_currency, price_unit: demand.price_unit,
+      volume: demand.volume, volume_unit: demand.volume_unit, location: demand.location,
+    },
     rows,
     considered: candidates.length + stockCandidates.length,
     blocked: rows.length ? null : "Nothing fits yet. Add a dossier or a listing field to widen the match.",

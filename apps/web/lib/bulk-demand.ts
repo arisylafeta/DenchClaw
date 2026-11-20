@@ -43,8 +43,8 @@ export type SpecListKey = string;
 export type SpecNumberKey = string;
 
 /** Structured criteria. Every key is optional; an empty spec means only "wants" describes the demand. */
-type SpecLists = "chemistries" | "formats" | "cell_formats" | "conditions" | "origins" | "makes" | "cell_makers" | "system_brands" | "evidence" | "excludes";
-type SpecNumbers = "kwh_min" | "kwh_max" | "min_soh";
+type SpecLists = "chemistries" | "formats" | "cell_formats" | "conditions" | "origins" | "makes" | "cell_makers" | "system_brands" | "evidence" | "excludes" | "supplier_countries" | "supplier_regions";
+type SpecNumbers = "kwh_min" | "kwh_max" | "min_soh" | "min_lot_kwh";
 /** The keys the app code reads directly are typed; the registry (database) decides which keys are allowed. */
 export type Spec = Partial<Record<SpecLists, string[]> & Record<SpecNumbers, number> & { mixed_ok: boolean }> & Record<string, unknown>;
 
@@ -182,6 +182,14 @@ export function parseSpec(value: unknown, registry: Registry): Parsed<Spec> {
     } else if (key === "mixed_ok") {
       if (typeof raw !== "boolean") return { error: "spec.mixed_ok must be true or false." };
       out.mixed_ok = raw;
+    } else if (key === "price_floor") {
+      // Our own lower bound on a seller's price, kept whole: amount, currency and unit are meaningless apart.
+      const floor = raw as Record<string, unknown>;
+      if (typeof raw !== "object" || Array.isArray(raw) || typeof floor.amount !== "number" || !Number.isFinite(floor.amount) || floor.amount <= 0
+        || !registry.currencies.includes(floor.currency as string) || !registry.priceUnits.includes(floor.unit as string)) {
+        return { error: "spec.price_floor needs an amount above 0, a currency and a unit." };
+      }
+      out.price_floor = { amount: floor.amount, currency: floor.currency, unit: floor.unit };
     } else {
       return { error: `Unknown spec field: ${key}` };
     }
@@ -200,7 +208,7 @@ export function cleanSpec(value: unknown, registry: Registry): Spec {
     if (key in registry.specLists && Array.isArray(raw)) {
       const kept = raw.filter((item) => registry.specLists[key].includes(item as string));
       if (kept.length) out[key] = kept;
-    } else if (key in registry.specNumbers || key === "mixed_ok") {
+    } else if (key in registry.specNumbers || key === "mixed_ok" || key === "price_floor") {
       out[key] = raw;
     }
   }

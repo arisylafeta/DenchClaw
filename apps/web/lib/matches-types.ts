@@ -132,10 +132,23 @@ export type MatchKeyView = {
   open: boolean;
 };
 
+/** A request's own criteria fields, as saved: what the Criteria panel shows and edits. */
+export type MatchCriteria = {
+  spec: Record<string, unknown>;
+  max_price: number | null;
+  price_currency: string | null;
+  price_unit: string | null;
+  volume: number | null;
+  volume_unit: string | null;
+  location: string | null;
+};
+
 export type MatchesResult = {
   id: string;
   kind: "supply" | "demand";
   lotKey: MatchKeyView;
+  /** Requests only: the saved criteria behind the match, for the editable Criteria panel. */
+  criteria?: MatchCriteria;
   rows: MatchRow[];
   /** Supply tab: buyers a dossier rule excludes, kept visible with the rule. Adding one to offers is an explicit override. */
   ruledOut?: MatchRow[];

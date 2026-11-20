@@ -76,13 +76,12 @@ describe("scoreCandidate", () => {
     expect(scoreCandidate(r, unit({ make: "Toyota", model: "Proace", title: "Toyota Proace", kwh: 50 }))).not.toBeNull();
   });
 
-  it("compares prices across currencies and flags units over the buyer's budget", () => {
+  it("compares prices across currencies and drops units over the buyer's budget", () => {
     const r = req({ wants: "Kona 64 kWh", max_price: 40, price_currency: "EUR", price_unit: "kWh" });
     const cheap = scoreCandidate(r, kona({ price: 1600, currency: "GBP" }))!; // ≈ €29/kWh
     expect(cheap.economics.sellerEurPerKwh).toBeCloseTo(29, 0);
     expect(cheap.economics.marginPct).toBeGreaterThan(0.2);
-    const dear = scoreCandidate(r, kona({ price: 3500, currency: "EUR" }))!; // ≈ €55/kWh
-    expect(dear.checks.find((c) => c.key === "price")?.state).toBe("fail");
+    expect(scoreCandidate(r, kona({ price: 3500, currency: "EUR" }))).toBeNull(); // ≈ €55/kWh, over the €40 ceiling
     expect(cheap.verdict).toBe("exact");
   });
 
@@ -397,5 +396,79 @@ describe("review fixes (v4 slice 1)", () => {
     // A Murata line on a Sony request is the same maker, not a miss.
     const sony = requirementFor(demand({ wants: "Sony VTC6 18650 cells", spec: { formats: ["Cells"], cell_makers: ["Sony"] } }));
     expect(cellMiss(sony, unit({ format: "Cells", make: "Murata", title: "Murata 18650 cells" }))).toBeNull();
+  });
+});
+
+describe("criteria filters", () => {
+  const cellAsk = (spec: Demand["spec"], o: Partial<Demand> = {}) =>
+    requirementFor(demand({ wants: "Prismatic cells and modules", spec: { formats: ["Cells", "Modules"], chemistries: ["NMC", "LFP"], ...spec }, ...o }));
+  const cells = (o: Partial<Candidate> = {}) => unit({ format: "Cells", title: "Lishen NMC cells", chemistry: "NMC", kwh: 0.2, units: 5000, ...o });
+  const check = (m: ReturnType<typeof scoreCandidate>, key: string) => m?.checks.find((x) => x.key === key);
+
+  it("applies cell_formats to every cell and module line, not only sized asks", () => {
+    const req = cellAsk({ cell_formats: ["Prismatic"] });
+    expect(scoreCandidate(req, cells({ title: "Kokam pouch cells" }))).toBeNull();
+    expect(scoreCandidate(req, cells({ cellFormat: "Pouch" }))).toBeNull();
+    expect(scoreCandidate(req, cells({ format: "Modules", title: "Microvast pouch module" }))).toBeNull();
+    const known = scoreCandidate(req, cells({ title: "Lishen prismatic NMC cells" }))!;
+    expect(check(known, "cellformat")).toMatchObject({ state: "pass", detail: "Prismatic" });
+    // Packs are not cell lots, so the cell format does not apply to them.
+    expect(check(scoreCandidate(req, unit({ format: "Packs", title: "NMC pack", chemistry: "NMC", kwh: 60 })), "cellformat")).toBeUndefined();
+  });
+
+  it("keeps a line with no stated cell format visible as Check, never Exact", () => {
+    const req = cellAsk({ cell_formats: ["Prismatic"] });
+    const unknown = scoreCandidate(req, cells({ price: 20, currency: "EUR" }))!;
+    expect(check(unknown, "cellformat")).toMatchObject({ state: "unknown", detail: "Cell format not stated" });
+    expect(unknown.verdict).toBe("check");
+  });
+
+  it("reads format words in excludes and drops lines that say them", () => {
+    const req = cellAsk({ excludes: ["Pouch cells", "Water or impact damage"] });
+    expect(req.excludedFormats).toEqual(["pouch"]);
+    expect(scoreCandidate(req, cells({ title: "Pouch cells NMC" }))).toBeNull();
+    expect(scoreCandidate(req, cells({ title: "Prismatic cells NMC" }))).not.toBeNull();
+  });
+
+  it("drops a lot below the per-lot kWh floor, keeps unstated totals as Check", () => {
+    const req = cellAsk({ min_lot_kwh: 500 });
+    expect(scoreCandidate(req, cells({ units: 1200, kwh: 0.3 }))).toBeNull(); // 360 kWh
+    const ok = scoreCandidate(req, cells({ units: 5000, kwh: 0.2 }))!; // 1,000 kWh
+    expect(check(ok, "quantity")).toMatchObject({ state: "pass" });
+    const noUnits = scoreCandidate(req, cells({ units: null }))!;
+    expect(check(noUnits, "quantity")).toMatchObject({ state: "unknown" });
+    expect(noUnits.verdict).toBe("check");
+    expect(scoreCandidate(req, cells({ units: 10, kwh: 0.3, kwhEstimated: true }))).not.toBeNull();
+  });
+
+  it("filters by supplier country and region, keeping an unknown country as Check", () => {
+    const req = cellAsk({ supplier_countries: ["Poland"], supplier_regions: ["SE Asia"] });
+    expect(req.supplierCodes).toContain("PL");
+    expect(req.supplierCodes).toContain("VN");
+    expect(scoreCandidate(req, cells({ country: "DE" }))).toBeNull();
+    expect(scoreCandidate(req, cells({ country: "PL" }))).not.toBeNull();
+    expect(scoreCandidate(req, cells({ country: "Vietnam" }))).not.toBeNull();
+    expect(scoreCandidate(req, cells({ country: null, location: "Brumunddal, Innlandet, Norway" }))).toBeNull();
+    const unknown = scoreCandidate(req, cells({ country: null, location: null }))!;
+    expect(check(unknown, "origin")).toMatchObject({ state: "unknown" });
+    expect(unknown.verdict).toBe("check");
+  });
+
+  it("drops a stated price above the ceiling or below the floor, after EUR conversion", () => {
+    const req = requirementFor(demand({
+      wants: "NMC packs 60 kWh", max_price: 100, price_currency: "EUR", price_unit: "kWh", spec: { formats: ["Packs"], chemistries: ["NMC"], price_floor: { amount: 40, currency: "EUR", unit: "kWh" } },
+    }));
+    const pack = (price: number, o: Partial<Candidate> = {}) => unit({ title: "NMC pack 60 kWh", chemistry: "NMC", kwh: 60, price, ...o });
+    expect(scoreCandidate(req, pack(7000))).toBeNull(); // 116/kWh, over
+    expect(scoreCandidate(req, pack(1800))).toBeNull(); // 30/kWh, under the floor
+    expect(scoreCandidate(req, pack(3600))).not.toBeNull(); // 60/kWh
+    expect(scoreCandidate(req, pack(null as unknown as number))).not.toBeNull(); // no stated price: Check
+    expect(scoreCandidate(req, pack(7000, { currencyAssumed: true }))).not.toBeNull(); // assumed currency is not a stated price
+  });
+
+  it("compares a per-unit ceiling only with lines of that unit", () => {
+    const req = requirementFor(demand({ wants: "NMC cells", max_price: 5, price_currency: "EUR", price_unit: "cell", spec: { formats: ["Cells", "Packs"], chemistries: ["NMC"] } }));
+    expect(scoreCandidate(req, cells({ price: 9 }))).toBeNull();
+    expect(scoreCandidate(req, unit({ format: "Packs", title: "NMC pack", chemistry: "NMC", kwh: 50, price: 3000 }))).not.toBeNull();
   });
 });

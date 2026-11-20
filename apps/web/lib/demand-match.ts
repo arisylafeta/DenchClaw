@@ -2,6 +2,7 @@
 // row, so the Suitable supply tab can answer "do we have it, at a price that leaves a deal?" at a glance.
 // Pure and deterministic: no model calls. The inbox check's AI matches for trades and supply feed in as evidence.
 import type { Demand } from "./bulk-demand";
+import { allowedSupplierCodes, countryCodeOf, countryInText, countryNameOf } from "./demand-regions";
 
 export type SourceKind = "marketplace" | "trade" | "supply";
 export type Format = "Packs" | "Modules" | "Cells" | "Systems";
@@ -57,7 +58,7 @@ export type Candidate = {
 
 export type CheckState = "pass" | "partial" | "unknown" | "fail";
 export type Check = { key: CheckKey; label: string; state: CheckState; detail: string };
-export type CheckKey = "product" | "model" | "capacity" | "chemistry" | "format" | "quantity" | "price";
+export type CheckKey = "product" | "model" | "capacity" | "chemistry" | "format" | "cellformat" | "quantity" | "price" | "origin";
 
 export type Economics = {
   /** Seller price in EUR per kWh, when price and kWh are known. */
@@ -197,9 +198,37 @@ export type Requirement = {
   partCodes: string[];
   /** Conditions the ask states (`spec.conditions`), for the condition mark. */
   conditions: string[];
+  /** Cell formats the ask rules out (`spec.excludes` words: pouch, prismatic, cylindrical, blade). */
+  excludedFormats: string[];
+  /** Our own floor: a lot whose stated total (units x kWh) is below this many kWh is dropped (`spec.min_lot_kwh`). */
+  minLotKwh: number | null;
+  /** Supplier countries we allow, as ISO codes: `spec.supplier_countries` plus every country of `spec.supplier_regions`. Empty = any. */
+  supplierCodes: string[];
+  /** Our own price floor in EUR, per kWh or per unit (`spec.price_floor`). */
+  priceFloor: { eurPerKwh: number | null; eurPerUnit: number | null; unit: string } | null;
+  /** The unit the buyer's ceiling is in ("kwh", "cell", "pack", "module"), for comparing like with like. */
+  ceilingUnit: string | null;
   /** Human summary of what the ask pins down, for the "What they want" card. */
   pinned: string[];
 };
+
+// What a cell format is called in text. A cylindrical size code names the format on its own.
+const FORMAT_WORDS: Record<string, RegExp> = {
+  prismatic: / prismatic /, pouch: / (pouch|pouches|pouch-cell|pouch-cells) /, blade: / blade /,
+  cylindrical: / (cylindrical|18650|21700|26650|32700|4680|2170) /,
+};
+const formatKey = (word: string): string | null => {
+  const w = word.toLowerCase();
+  return w.includes("prismatic") ? "prismatic" : w.includes("pouch") ? "pouch" : w.includes("blade") ? "blade" : w.includes("cylind") ? "cylindrical" : null;
+};
+/** The cell format a line states: its own `cellFormat`, else the format words in its text. Null when it says none, "mixed" when it says several. */
+export function statedCellFormat(c: Candidate): string | null {
+  const own = c.cellFormat ? formatKey(c.cellFormat) : null;
+  if (own) return own;
+  const text = candidateText(c);
+  const found = Object.entries(FORMAT_WORDS).filter(([, re]) => re.test(text)).map(([key]) => key);
+  return found.length === 0 ? null : found.length === 1 ? found[0] : "mixed";
+}
 
 const norm = (text: string) =>
   ` ${text.toLowerCase().replace(/[’']/g, "").replace(/[^a-z0-9.\-/ ]+/g, " ").replace(/\.(?![a-z0-9])|(?<![a-z0-9])\./g, " ")
@@ -347,6 +376,15 @@ export function makerWord(value: string | null | undefined): string | null {
 const NO_MAKER = new Set(["unknown", "n", "na", "n.a", "none", "other", "various", "generic", "mixed", "unbranded", "oem"]);
 
 
+function priceFloorFor(raw: unknown): Requirement["priceFloor"] {
+  const f = raw as { amount?: unknown; currency?: unknown; unit?: unknown } | null | undefined;
+  if (!f || typeof f.amount !== "number" || f.amount <= 0 || typeof f.currency !== "string" || typeof f.unit !== "string") return null;
+  const eur = toEur(f.amount, f.currency);
+  if (eur == null) return null;
+  const unit = f.unit.toLowerCase();
+  return { eurPerKwh: unit === "kwh" ? eur : null, eurPerUnit: unit === "kwh" ? null : eur, unit };
+}
+
 /** Reads what a demand row actually pins down: the structured spec first, then its words. A word only counts as a
  * product when some seller uses it in a make or model (`vocab`), so "homogeneous lots" never becomes a product. */
 export function requirementFor(demand: Demand, vocab?: Set<string>): Requirement {
@@ -422,6 +460,11 @@ export function requirementFor(demand: Demand, vocab?: Set<string>): Requirement
     buyerEurPerUnit,
     country: countryFromText(demand.location),
     minSoh: spec.min_soh ?? null,
+    excludedFormats: [...new Set((spec.excludes ?? []).map(formatKey).filter((key): key is string => !!key))],
+    minLotKwh: typeof spec.min_lot_kwh === "number" && spec.min_lot_kwh > 0 ? spec.min_lot_kwh : null,
+    supplierCodes: [...allowedSupplierCodes(spec.supplier_countries ?? [], spec.supplier_regions ?? [])],
+    priceFloor: priceFloorFor(spec.price_floor),
+    ceilingUnit: unit || null,
     evOnly: (spec.origins ?? []).some((o) => o === "Passenger EV" || o === "Bus or truck") || / (ev|traction|traction-battery|vehicle) /.test(t),
     wantsNew: (spec.conditions ?? []).length > 0 && (spec.conditions ?? []).every((c) => c === "New or surplus"),
     cellTokens,
@@ -518,7 +561,9 @@ function kwhFits(req: Requirement, kwh: number): CheckState {
 }
 
 const kwhLabel = (kwh: number) => `${Math.round(kwh * 10) / 10} kWh`;
-const PRODUCT_CHECKS = new Set<CheckKey>(["product", "model", "capacity", "chemistry", "format"]);
+const PRODUCT_CHECKS = new Set<CheckKey>(["product", "model", "capacity", "chemistry", "format", "cellformat", "origin"]);
+/** The line format each price unit is quoted for. */
+const UNIT_FORMAT: Record<string, Format> = { cell: "Cells", cells: "Cells", module: "Modules", modules: "Modules", pack: "Packs", packs: "Packs" };
 
 // Energy a cylindrical cell of each size can hold, in Wh. A "21700" listing at 340 Wh is a mislabelled prismatic.
 const CELL_WH: Record<string, [number, number]> = { "18650": [5, 13], "21700": [9, 26], "26650": [8, 22], "32700": [12, 25], "4680": [70, 110] };
@@ -593,6 +638,31 @@ export function scoreCandidate(req: Requirement, candidate: Candidate): Match | 
     checks.push({ key: "format", label: "Format", state: c.format ? "pass" : "unknown", detail: c.format ?? "Format not stated" });
   }
 
+  // Cell format. `excludes` words rule a stated format out on any line; `cell_formats` is judged on every cell and module
+  // line: a stated, different format is another product, and none stated stays a Check, never Exact.
+  const statedFormat = statedCellFormat(c);
+  if (statedFormat && statedFormat !== "mixed" && req.excludedFormats.includes(statedFormat)) return null;
+  const cellOrModule = c.format === "Cells" || c.format === "Modules"
+    || (!c.format && req.formats.length > 0 && req.formats.every((f) => f === "Cells" || f === "Modules"));
+  const wantedFormats = req.cellFormats.map(formatKey).filter((key): key is string => !!key);
+  if (wantedFormats.length && cellOrModule) {
+    if (statedFormat && statedFormat !== "mixed" && !wantedFormats.includes(statedFormat)) return null;
+    const known = !!statedFormat && statedFormat !== "mixed";
+    // A sized cell ask (21700) already carries its own Cell type check; the format only filters there.
+    if (!req.cellTokens.length) checks.push({ key: "cellformat", label: "Cell format", state: known ? "pass" : "unknown",
+      detail: known ? titleWord(statedFormat!) : statedFormat ? "Cell format unclear" : "Cell format not stated" });
+  }
+
+  // Supplier country: our own filter. A known country outside the allowed set is dropped; an unknown one stays as Check.
+  if (req.supplierCodes.length) {
+    const code = countryCodeOf(c.country) ?? countryInText(c.location) ?? countryInText(c.country);
+    if (code && !req.supplierCodes.includes(code)) return null;
+    checks.push({ key: "origin", label: "Supplier country", state: code ? "pass" : "unknown", detail: code ? countryNameOf(code) ?? code : "Country not stated" });
+  }
+
+  // Our floor per lot: the stated total (units x kWh) must reach it. A borrowed kWh figure or a missing one keeps the lot as Check.
+  if (req.minLotKwh != null && c.units != null && c.kwh != null && !c.kwhEstimated && c.units * c.kwh < req.minLotKwh) return null;
+
   // Chemistry: a stated, different chemistry rules the unit out; generic "Li-ion" is unknown.
   if (req.chemistries.length) {
     const chem = c.chemistry?.toUpperCase() ?? null;
@@ -628,6 +698,16 @@ export function scoreCandidate(req: Requirement, candidate: Candidate): Match | 
   // Under €5/kWh is a token price (1 NOK, a £1 auction start), and it would float to the top of a cheapest-first list.
   if (sellerEurPerUnit != null && c.kwh && (sellerEurPerUnit / c.kwh < 5 || (c.kwh >= 5 && sellerEurPerUnit / c.kwh > 600))) sellerEurPerUnit = null;
   const sellerEurPerKwh = sellerEurPerUnit != null && c.kwh ? sellerEurPerUnit / c.kwh : null;
+  // The buyer's ceiling and our floor, in the unit each is stated in. A stated seller price outside them is dropped; a
+  // price in a different unit than the line (a per-cell ceiling against a pack) or an assumed currency is not compared.
+  if (!c.currencyAssumed) {
+    const sameUnit = (unit: string | null) => !!unit && unit !== "kwh" && unit !== "mwh" && c.format === UNIT_FORMAT[unit];
+    if (req.buyerEurPerKwh != null && sellerEurPerKwh != null && sellerEurPerKwh > req.buyerEurPerKwh) return null;
+    if (req.buyerEurPerUnit != null && sellerEurPerUnit != null && sameUnit(req.ceilingUnit) && sellerEurPerUnit > req.buyerEurPerUnit) return null;
+    const floor = req.priceFloor;
+    if (floor?.eurPerKwh != null && sellerEurPerKwh != null && sellerEurPerKwh < floor.eurPerKwh) return null;
+    if (floor?.eurPerUnit != null && sellerEurPerUnit != null && sameUnit(floor.unit) && sellerEurPerUnit < floor.eurPerUnit) return null;
+  }
   const buyerEurPerUnit = req.buyerEurPerUnit ?? (req.buyerEurPerKwh != null && c.kwh ? req.buyerEurPerKwh * c.kwh : null);
   const marginPct = buyerEurPerUnit != null && sellerEurPerUnit != null && buyerEurPerUnit > 0
     ? (buyerEurPerUnit - sellerEurPerUnit) / buyerEurPerUnit : null;
@@ -656,6 +736,11 @@ export function scoreCandidate(req: Requirement, candidate: Candidate): Match | 
     const have = c.units * c.kwh;
     checks.push({ key: "quantity", label: "Quantity", state: have >= req.kwhNeeded ? "pass" : "partial",
       detail: `${Math.round(have)} of ${Math.round(req.kwhNeeded)} kWh` });
+  }
+  if (req.minLotKwh != null && !checks.some((x) => x.key === "quantity")) {
+    checks.push(c.units == null || c.kwh == null
+      ? { key: "quantity", label: "Lot size", state: "unknown", detail: c.units == null ? "Quantity not stated" : "kWh not stated" }
+      : { key: "quantity", label: "Lot size", state: "pass", detail: `${Math.round(c.units * c.kwh).toLocaleString("en-GB")} kWh in the lot` });
   }
   // Last, so a reader that shows the first open check (the supply tab's gap) keeps what it showed before.
   if (modelCheck) checks.push(modelCheck);
