@@ -377,6 +377,8 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
     </motion.div>;
   };
   const renderBot = ({ profile, config, main }: BotEntry) => {
+    const botPinned = !!main && serverPins.includes(main.key);
+    const BotPinIcon = botPinned ? PinOff : Pin;
     const status = main ? statusOf(main) : "idle";
     const selected = !!main && chats.selected?.key === main.key;
     const single = config.mode === "single";
@@ -386,12 +388,21 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
         <span className="block truncate text-[12px] font-medium">{botName(profile)}</span>
         {single && main && <span className="block truncate text-[9px] text-[var(--color-chat-sidebar-muted)]">{formatChatDate(main.updatedAt)}</span>}
       </button>
-      <span className="ml-1 mr-3 flex w-3 shrink-0 justify-center"><StatusDot status={status} /></span>
+      <span className={`ml-1 flex w-3 shrink-0 justify-center ${main ? "" : "mr-3"}`}><StatusDot status={status} /></span>
+      {main && <button type="button" aria-label={`${botPinned ? "Unpin" : "Pin"} ${botName(profile)}`} title={botPinned ? "Unpin bot" : "Pin bot"} aria-pressed={botPinned} onClick={() => togglePin(main.key)} className={`${styles.rowPin} flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[var(--color-chat-sidebar-muted)] focus-visible:outline focus-visible:outline-2`}><BotPinIcon size={15} aria-hidden="true" /></button>}
     </div>;
   };
   // Sections, top to bottom: Pinned, Bots, then the rest. My chats takes the remaining height; the others keep their own.
   const blocks = [...result.sections.map((section) => ({ key: section.key, label: section.label ?? "", count: section.rows.length, rows: section.rows }))];
-  if (bots.length) blocks.splice(blocks[0]?.key === "pinned" ? 1 : 0, 0, { key: "bots", label: "Bots", count: bots.length, rows: [] });
+  // A pinned bot moves from Bots to the Pinned section (its main chat is the pinned key).
+  const pinnedBots = bots.filter((entry) => entry.main && serverPins.includes(entry.main.key));
+  const unpinnedBots = bots.filter((entry) => !pinnedBots.includes(entry));
+  if (pinnedBots.length) {
+    const at = blocks.findIndex((b) => b.key === "pinned");
+    if (at >= 0) blocks[at] = { ...blocks[at], count: blocks[at].count + pinnedBots.length };
+    else blocks.unshift({ key: "pinned", label: "Pinned", count: pinnedBots.length, rows: [] });
+  }
+  if (unpinnedBots.length) blocks.splice(blocks[0]?.key === "pinned" ? 1 : 0, 0, { key: "bots", label: "Bots", count: unpinnedBots.length, rows: [] });
   const isOpen = (key: string) => !view.collapsed?.includes(key);
   // Only My chats flexes; when it is collapsed every section keeps its own height.
   const flexKey = blocks.some((b) => b.key === "mine") && isOpen("mine") ? "mine" : undefined;
@@ -460,7 +471,7 @@ export function HermesConversationList({ chats, workingKeys, awaitingKeys, backg
             </button></h3>
             {open && <motion.div layoutScroll ref={(node: HTMLDivElement | null) => { if (node) bodies.current.set(block.key, node); else bodies.current.delete(block.key); }} data-section-body={block.key}
               className={`no-scrollbar min-h-0 overflow-y-auto overflow-x-hidden ${flex ? "flex-1" : ""}`} style={flex ? undefined : { flex: "0 1 auto", maxHeight: heights[block.key] ?? DEFAULT_SECTION_HEIGHT }}>
-              {block.key === "bots" ? byActivity(bots, (entry) => entry.main).map(renderBot) : (view.sortBy === "project" ? block.rows : byActivity(block.rows, (row) => row)).map(renderRow)}
+              {block.key === "bots" ? byActivity(unpinnedBots, (entry) => entry.main).map(renderBot) : block.key === "pinned" ? <>{byActivity(pinnedBots, (entry) => entry.main).map(renderBot)}{(view.sortBy === "project" ? block.rows : byActivity(block.rows, (row) => row)).map(renderRow)}</> : (view.sortBy === "project" ? block.rows : byActivity(block.rows, (row) => row)).map(renderRow)}
             </motion.div>}
           </section>
           {target && <div role="separator" aria-orientation="horizontal" aria-label={`Resize ${blocks[target.sign === 1 ? index : index + 1].label}`} tabIndex={0}

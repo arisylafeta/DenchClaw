@@ -37,7 +37,7 @@ beforeEach(() => {
     }
     if (url === "/api/hermes/conversations") {
       if (init?.method === "POST") return Response.json({ conversation: created });
-      return Response.json({ userId: "user-a", backend: "hermes", profiles: ["default", "alpha", "other"], sessions, warnings: [], groupsAvailable: true });
+      return Response.json({ userId: "user-a", backend: "hermes", profiles: ["default", "alpha", "other", ...sessions.some((s) => s.profile === "auctions") ? ["auctions"] : []], sessions, warnings: [], groupsAvailable: true });
     }
     const identity = url.includes(encodeURIComponent(group.key)) ? group : solo;
     if (init?.method === "POST") {
@@ -410,5 +410,19 @@ describe("conversation privacy controls", () => {
     expect(result.current.filter).toBeNull();
     expect(result.current.listing?.userId).toBe("user-b");
     expect(localStorage.getItem("hermes-chats-profile-filter:user-b")).toBeNull();
+  });
+});
+describe("bot pins", () => {
+  it("pins a single bot through its main chat and moves it into Pinned", async () => {
+    const main: HermesConversation = { ...solo, key: conversationKey("solo", "auc-1", "auctions"), id: "auc-1", profile: "auctions", title: "Auctions chat", participants: [{ profile: "auctions", name: "Auctions" }] };
+    sessions = [main];
+    render(<Harness />);
+    await screen.findByRole("button", { name: "Pin Auctions" });
+    expect(document.querySelector("[data-section='bots'] [data-bot='auctions']")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Pin Auctions" }));
+    await screen.findByRole("button", { name: "Unpin Auctions" });
+    expect(serverPins).toEqual([main.key]);
+    expect(document.querySelector("[data-section='pinned'] [data-bot='auctions']")).not.toBeNull();
+    expect(document.querySelector("[data-section='bots']")).toBeNull();
   });
 });
