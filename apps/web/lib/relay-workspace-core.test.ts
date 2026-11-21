@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TalkDraft } from "./relay-talk";
 import type { PriceFill } from "./relay-price-types";
 import type { WaitingRow } from "./relay-rank-core";
-import { addressList, earlierRows, fromEditable, toEditable,
+import { addressList, dealLine, shortPlace, earlierRows, fromEditable, toEditable,
   bodyPieces, draftNeeds, gapSpans, listEntries, matchesRow, paragraphs, parsePrice, sendGate, tabNote, versionsOf, visibleRows, waitedDays, whenWords,
   type Bands,
 } from "./relay-workspace-core";
@@ -221,6 +221,45 @@ describe("toEditable / fromEditable", () => {
   });
   it("reads addresses however they're typed", () => {
     expect(addressList("Ben@x.com, sean@rebattery.io;  <tom@y.co.uk>")).toEqual(["ben@x.com", "sean@rebattery.io", "tom@y.co.uk"]);
+  });
+});
+
+describe("dealLine", () => {
+  it("names Fabiano's lot and gives the facts he'd reply with", () => {
+    expect(dealLine({ kind: "supply", summary: "120 new LG Energy Solution EM048128P6BA NMC battery modules", quantity: "120 modules", status: "open",
+      title: "120x LG EM048128P6BA 6.6kWh NMC Modules", location: "Dallas, USA", price: "Seller ask: 3,000 per module x 120; currency stated as EUR/USD, taken as EUR" }, "x"))
+      .toEqual({ type: "Bulk trade", name: "120x LG EM048128P6BA 6.6kWh NMC Modules", facts: ["selling", "792 kWh", "3,000 each", "Dallas, USA"], closed: false });
+  });
+  it("keeps the quantity when there's no title, and leaves out what it can't read", () => {
+    expect(dealLine({ kind: "demand", summary: "Faysal's sourcing matrix", quantity: "92-102 packs across 5 lines", status: "open", title: null, location: null, price: null }, "x"))
+      .toEqual({ type: "Bulk trade", name: "Faysal's sourcing matrix", facts: ["buying", "92-102 packs across 5 lines"], closed: false });
+  });
+  it("reads a price per kWh and a lot in MWh", () => {
+    const line = dealLine({ kind: "supply", summary: "s", quantity: "400 modules", status: "closed", title: "400x CATL 5.4 kWh modules", location: "Rotterdam", price: "Ask: €95 / kWh delivered" }, "x");
+    expect(line.facts).toEqual(["selling", "2.2 MWh", "€95/kWh", "Rotterdam"]);
+    expect(line.closed).toBe(true);
+  });
+  it("falls back to the stored label when the deal can't be read", () => {
+    expect(dealLine(null, "120 new LG Energy Solution EM048128P6BA NMC… · 120 modules").name).toBe("120 new LG Energy Solution EM048128P6BA NMC");
+  });
+});
+
+describe("shortPlace and lot energy", () => {
+  it("shortens an address to the town and country", () => {
+    expect(shortPlace("9528 W Interstate 40 Service Rd, Oklahoma City, OK, United States")).toBe("Oklahoma City, United States");
+    expect(shortPlace("Megavaux House, Station Road, Sandiacre, Nottingham, NG10 5AP, UK")).toBe("Sandiacre, UK");
+    expect(shortPlace("Delivery: STN Power Systems Ltd, Workshop 10, Washington Business Centre, 2 Turbine Way, Sunderland, SR5 3NZ")).toBe("Sunderland");
+    expect(shortPlace("Belfast, UK (BT3 9DT)")).toBe("Belfast, UK");
+    expect(shortPlace("Dallas, USA")).toBe("Dallas, USA");
+  });
+  it("gives no total for a capacity range, and counts MWh units", () => {
+    const d = (title: string, quantity: string) => dealLine({ kind: "supply", summary: "", quantity, status: "open", title }, "").facts;
+    expect(d("15x Renault Zoe 41-52kWh, Citroën e-c3 44kWh", "15 packs")).toEqual(["selling"]);
+    expect(d("2x BYD 1.26MWh BESS Containers (Unused)", "2 containers")).toEqual(["selling", "2.5 MWh"]);
+  });
+  it("keeps a long quantity to its first clause", () => {
+    expect(dealLine({ kind: "demand", summary: "Scrap batteries", quantity: "First order 20 tonnes; 150 tonnes a month once running", status: "open" }, "").facts)
+      .toEqual(["buying", "First order 20 tonnes"]);
   });
 });
 

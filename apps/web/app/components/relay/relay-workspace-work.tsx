@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type RefObject, type SetStateAction } from "react";
-import { ArrowUpRight, ChevronLeft, ChevronRight, Handshake, Plus } from "lucide-react";
+import { ArrowUpRight, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import type { RelayItem, RelayJob, RelayReviewItem } from "@/lib/relay";
 import type { SendOutcome, TalkDraft, TalkState } from "@/lib/relay-talk";
 import type { PriceFill, StockFit } from "@/lib/relay-price-types";
 import type { SendMode } from "@/lib/relay-talk-core";
 import { fillGaps } from "@/lib/relay-ways-core";
-import { draftNeeds, earlierRows, gapSpans, sendGate, versionsOf, type EarlierRow } from "@/lib/relay-workspace-core";
+import { dealLine, draftNeeds, earlierRows, gapSpans, sendGate, versionsOf, type EarlierRow } from "@/lib/relay-workspace-core";
 import { cleanEmail, emailParagraphs, firstLine, type ThreadEmail } from "@/lib/relay-email-clean";
 import { AUTO_NOTE } from "@/lib/relay-auto-note";
 import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
@@ -335,7 +335,7 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
             )}
           </div>
           {deal && item?.bulk_listing_id ? (
-            <DealChip label={deal} deal={"deal" in item ? item.deal ?? null : null} onOpen={onOpenDeal ? () => onOpenDeal(item.bulk_listing_id!, deal) : undefined} />
+            <DealLineView label={deal} deal={"deal" in item ? item.deal ?? null : null} onOpen={onOpenDeal ? () => onOpenDeal(item.bulk_listing_id!, deal) : undefined} />
           ) : (
             <button type="button" className={w.dealNew} onClick={() => void createDeal()} disabled={dealBusy}>
               <Plus size={14} aria-hidden />{dealBusy ? "Matcha is creating the deal…" : "Create deal"}
@@ -430,24 +430,18 @@ function Earlier({ rows, count, onOpenMail }: { rows: EarlierRow<ThreadEmail>[] 
   );
 }
 
-/** The linked deal, on its own line under the name: which side, what it is, how much and where it stands. A click opens
- * it in a new CRM tab. Falls back to the short label kept on the email when the deal can't be read. */
-function DealChip({ label, deal, onOpen }: { label: string; deal: RelayItem["deal"]; onOpen?: () => void }) {
-  const [shortWhat, ...rest] = label.split(" · ");
-  const what = deal?.summary?.trim() || shortWhat.replace(/…$/, "");
-  const much = deal ? deal.quantity?.trim() ?? "" : rest.join(" · ");
-  const side = deal?.kind === "supply" ? "Seller's lot" : deal?.kind === "demand" ? "Buyer's request" : "Deal";
-  const status = deal?.status === "qualifying" ? "Qualifying" : deal?.status === "closed" ? "Closed" : null;
+/**
+ * The linked deal, one quiet line under the name: the kind of trade as a tag, the deal's short name, and the facts Alex
+ * replies with (side, the lot's energy, the ask, where it is). The whole line opens the deal in a new CRM tab.
+ */
+function DealLineView({ label, deal, onOpen }: { label: string; deal: RelayItem["deal"]; onOpen?: () => void }) {
+  const line = dealLine(deal, label);
   return (
-    <button type="button" className={w.deal} onClick={onOpen} disabled={!onOpen} title={onOpen ? `Open the deal: ${what}` : what}>
-      <span className={w.dealIcon} aria-hidden><Handshake size={14} /></span>
-      <span className={w.dealText}>
-        <span className={w.dealKind}>{side}</span>
-        <span className={w.dealWhat}>{what}</span>
-        {much && <span className={w.dealMuch}>{much}</span>}
-      </span>
-      {status && <span className={status === "Closed" ? w.dealClosed : w.dealStatus}>{status}</span>}
-      {onOpen && <ArrowUpRight size={15} aria-hidden className={w.dealGo} />}
+    <button type="button" className={w.dealLine} onClick={onOpen} disabled={!onOpen} title={onOpen ? `Open the deal: ${deal?.summary ?? line.name}` : line.name}>
+      <span className={line.type === "Marketplace" ? w.typeMarket : w.typeBulk}><span className={w.typeDot} aria-hidden />{line.type}</span>
+      <span className={w.dealName}>{line.name}</span>
+      {(line.facts.length > 0 || line.closed) && <span className={w.dealFacts}>{[...line.facts, ...(line.closed ? ["closed"] : [])].join(" · ")}</span>}
+      {onOpen && <ArrowUpRight size={14} aria-hidden className={w.dealGo} />}
     </button>
   );
 }

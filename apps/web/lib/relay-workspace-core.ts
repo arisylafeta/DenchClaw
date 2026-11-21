@@ -314,3 +314,62 @@ export const addressList = (typed: string) => typed.split(/[\s,;]+/).map((a) => 
 /** An address Relay can send to. */
 export const isAddress = (a: string) => /^[^@\s,;<>()"']+@[^@\s,;<>()"']+\.[a-z]{2,}$/i.test(a);
 
+// ---------- the deal line under the name
+
+export type DealLine = { type: "Bulk trade" | "Marketplace"; name: string; facts: string[]; closed: boolean };
+type DealIn = { kind: string; summary: string | null; quantity: string | null; status: string; title?: string | null; location?: string | null; price?: string | null };
+
+const num = (text: string) => Number(text.replace(/,/g, ""));
+const energy = (kwh: number) => (kwh >= 1000 ? `${(kwh / 1000).toLocaleString("en-GB", { maximumFractionDigits: 1 })} MWh` : `${kwh.toLocaleString("en-GB", { maximumFractionDigits: 0 })} kWh`);
+
+/** The whole lot's energy when the title gives one per-unit capacity and a count ("120x … 6.6kWh", "2x … 1.26MWh"). */
+function lotEnergy(title: string, quantity: string | null): string | null {
+  const unit = title.match(/(?<![\d.\-–+])(\d+(?:\.\d+)?)\s*([km])wh\b/i);
+  const count = title.match(/^(\d[\d,]*)\s*x\b/i)?.[1] ?? quantity?.match(/^\s*(\d[\d,]*)\s+[a-z]/i)?.[1];
+  // A range ("41-52kWh", "92-102x") has no one total.
+  if (!unit || !count || /\d\s*[-–]\s*\d|\+\s*[km]wh/i.test(title) || /-|–|\bto\b/.test(quantity ?? "")) return null;
+  const each = num(unit[1]) * (unit[2].toLowerCase() === "m" ? 1000 : 1);
+  const n = num(count);
+  return n > 1 && each > 0 && each <= 5000 ? energy(n * each) : null;
+}
+
+const STREETISH = /\b(?:road|rd|street|st|lane|avenue|ave|way|house|unit|workshop|centre|center|park|estate|ltd|limited|gmbh|inc|llc|building|floor|suite)\b/i;
+
+/** Where a lot is, short: the town and the country, without street, postcode or notes in brackets. */
+export function shortPlace(place: string | null | undefined): string {
+  const parts = (place ?? "").replace(/\([^)]*\)/g, "").replace(/^\s*(?:delivery|collection|location)\s*:\s*/i, "")
+    .split(",").map((p) => p.trim()).filter((p) => p && !/\d/.test(p) && !STREETISH.test(p));
+  if (parts.length <= 2) return parts.join(", ");
+  return `${parts[0]}, ${parts[parts.length - 1]}`;
+}
+
+/** A quantity as a fact: its first clause, kept short. */
+const shortQuantity = (q: string | null | undefined) => {
+  const first = (q ?? "").split(/[;(]/)[0].trim();
+  return first.length > 40 ? `${first.slice(0, 39).trimEnd()}…` : first;
+};
+
+/** The asking price per unit from the deal's note, like "3,000 each" or "€120/kWh". Null when it isn't stated plainly. */
+function askPrice(note: string | null | undefined): string | null {
+  const m = (note ?? "").match(/(?:ask|asking|price|offer)[^:;]{0,20}:\s*([€$£]?\s?\d[\d,.]*\s?k?)\s*(?:per|\/)\s*(module|pack|unit|cell|battery|container|kwh)/i);
+  if (!m) return null;
+  const amount = m[1].replace(/\s+/g, "");
+  return /kwh/i.test(m[2]) ? `${amount}/kWh` : `${amount} each`;
+}
+
+/**
+ * What the line under the name says about the linked deal: the kind of trade as a tag, a short name, and the facts
+ * Alex replies with: which side, the lot's energy, the asking price and where it is.
+ */
+export function dealLine(deal: DealIn | null | undefined, fallbackLabel: string): DealLine {
+  const name = (deal?.title?.trim() || deal?.summary?.trim() || fallbackLabel.split(" · ")[0].replace(/…$/, "")).replace(/\s+/g, " ");
+  if (!deal) return { type: "Bulk trade", name, facts: [], closed: false };
+  const facts = [
+    deal.kind === "supply" ? "selling" : deal.kind === "demand" ? "buying" : "",
+    lotEnergy(name, deal.quantity) ?? (deal.title ? "" : shortQuantity(deal.quantity)),
+    askPrice(deal.price) ?? "",
+    shortPlace(deal.location),
+  ].filter(Boolean);
+  return { type: "Bulk trade", name, facts, closed: deal.status === "closed" };
+}
+

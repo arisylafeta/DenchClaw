@@ -56,7 +56,7 @@ export type RelayItem = {
   bulk_listing_id: string | null;
   deal_label: string | null;
   /** The linked deal as it is now (deal_label is a short copy taken when it was linked). */
-  deal?: { kind: string; summary: string | null; quantity: string | null; status: string } | null;
+  deal?: RelayDeal | null;
   waiting_since: string | null;
   note: string;
   mail_thread_id: string | null;
@@ -81,6 +81,9 @@ export type RelayItem = {
   /** Their newest email is an answer to a Jules email, and what the job that reads those made of it. Set on list views only. */
   jules?: JulesReply | null;
 };
+
+/** A linked bulk trade as Relay shows it under the name. price is the deal's note on the ask ("Seller ask: 3,000 per module x 120; …"). */
+export type RelayDeal = { kind: string; summary: string | null; quantity: string | null; status: string; title?: string | null; location?: string | null; price?: string | null; stage?: string | null };
 
 export type RelayDismantler = { phase: DismantlerPhase; company_id: string; name: string };
 /** An open deal "Link to deal" can pick. */
@@ -121,7 +124,8 @@ export type RelayReviewItem = RelayItem & { drafts: RelayDraftView[]; todos: Rel
 
 const ITEM_COLUMNS = `i.id,i.tab,i.status,i.priority,i.counterpart_name,i.counterpart_email,i.company,i.contact_type,i.headline,i.context,i.last_message,
   i.earlier,i.bulk_listing_id,i.deal_label,i.waiting_since,i.note,i.mail_thread_id,i.gmail_thread_id,i.updated_at,i.situation,
-  (select jsonb_build_object('kind', b.kind, 'summary', b.summary, 'quantity', b.quantity, 'status', b.status) from crm_bulk_listings b where b.id = i.bulk_listing_id) as deal,
+  (select jsonb_build_object('kind', b.kind, 'summary', b.summary, 'quantity', b.quantity, 'status', b.status, 'title', b.context->>'listing_title',
+     'location', b.location, 'price', b.spec->>'value_basis', 'stage', b.spec->>'trade_stage') from crm_bulk_listings b where b.id = i.bulk_listing_id) as deal,
   (select m.id from mail_message m where m.thread_id = i.mail_thread_id and m.direction = 'inbound' and m.has_attachments
      and ${mailboxScopeSql("m", "i.owner_id")} order by m.sent_at desc nulls last, m.created_at desc limit 1) as attachment_message_id`;
 

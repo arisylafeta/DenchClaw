@@ -85,19 +85,19 @@
 /* Snooze and No reply needed sit at the right end of the name's line. */
 .actions { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; align-self: center; }
 
-/* The linked deal: its own line under the name, one click to open it. */
-.deal { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; box-sizing: border-box; border: 1px solid var(--color-border); border-radius: 12px; padding: 6px 12px 6px 6px; background: var(--color-surface); text-align: left; color: var(--color-text); transition: border-color .15s, background .15s; }
-.deal:hover:not(:disabled) { border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border)); background: var(--color-main-bg); }
-.deal:disabled { cursor: default; }
-.dealIcon { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--color-accent-fill); color: var(--color-text); }
-.dealText { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
-.dealKind { flex: none; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--color-text-muted); }
-.dealWhat { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; }
-.dealMuch { flex: 0 0 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; color: var(--ws-soft); white-space: nowrap; }
-.dealStatus, .dealClosed { flex: none; border-radius: 999px; padding: 2px 8px; font-size: 11.5px; font-weight: 600; background: var(--color-surface-hover); color: var(--ws-soft); }
-.dealClosed { color: var(--color-error); }
+/* The linked deal: one quiet line under the name, the whole line opens it. */
+.dealLine { display: flex; flex-wrap: wrap; align-items: center; align-self: flex-start; gap: 4px 10px; max-width: 100%; min-height: 28px; border: 0; border-radius: 8px; margin-left: -6px; padding: 2px 6px; background: none; text-align: left; font-size: 13px; color: var(--color-text); }
+.dealLine:hover:not(:disabled) { background: var(--color-surface-hover); }
+.dealLine:disabled { cursor: default; }
+.typeBulk, .typeMarket { flex: none; display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 9px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.typeBulk { background: color-mix(in srgb, var(--color-accent-fill) 32%, var(--color-surface)); color: var(--color-accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 18%, transparent); }
+.typeMarket { background: color-mix(in srgb, #2f5be3 10%, var(--color-surface)); color: #1e3a8a; box-shadow: inset 0 0 0 1px color-mix(in srgb, #2f5be3 15%, transparent); }
+.typeDot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.dealName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; border-bottom: 1px solid var(--color-border); }
+.dealLine:hover:not(:disabled) .dealName { border-bottom-color: var(--color-text-muted); }
+.dealFacts { min-width: 0; color: var(--ws-soft); }
 .dealGo { flex: none; color: var(--color-text-muted); transition: color .15s, transform .15s; }
-.deal:hover:not(:disabled) .dealGo { color: var(--color-text); transform: translate(1px, -1px); }
+.dealLine:hover:not(:disabled) .dealGo { color: var(--color-text); transform: translate(1px, -1px); }
 .dealNew { display: inline-flex; align-self: flex-start; align-items: center; gap: 6px; min-height: 36px; border: 1px dashed var(--color-border); border-radius: 10px; padding: 4px 12px; background: none; font-size: 13px; font-weight: 600; color: var(--ws-soft); }
 .dealNew:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-text); }
 .actOn { background: var(--color-surface-hover); color: var(--color-text); }
@@ -312,7 +312,7 @@
 .toast.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
 .toast button { flex: none; min-height: 32px; border: 0; background: none; font-weight: 600; color: var(--color-accent-fill); }
 :global(.dark) .toast button { color: var(--color-accent-hover); }
-@media (prefers-reduced-motion: reduce) { .toast, .olderChevron, .deal, .dealGo { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .toast, .olderChevron, .dealGo { transition: none; } }
 
 /* ---------- narrower screens */
 @media (max-width: 1279px) {
@@ -342,7 +342,6 @@
   .main, .empty { padding: 8px 16px 24px; gap: 16px; }
   .person h1 { font-size: 22px; }
   .actions { margin-left: -10px; width: 100%; }
-  .dealMuch { display: none; }
   .email { padding-left: 12px; }
   .panel { padding: 14px 16px 16px; }
   .doc { grid-template-columns: minmax(0, 1fr); row-gap: 7px; font-size: 14px; }
