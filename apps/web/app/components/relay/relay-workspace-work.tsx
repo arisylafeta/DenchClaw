@@ -8,7 +8,7 @@ import type { PriceFill, StockFit } from "@/lib/relay-price-types";
 import type { SendMode } from "@/lib/relay-talk-core";
 import { fillGaps } from "@/lib/relay-ways-core";
 import { dealLine, draftNeeds, earlierRows, gapSpans, sendGate, versionsOf, type EarlierRow } from "@/lib/relay-workspace-core";
-import { cleanEmail, emailParagraphs, firstLine, type ThreadEmail } from "@/lib/relay-email-clean";
+import { boldSpans, cleanEmail, emailParagraphs, firstLine, type ThreadEmail } from "@/lib/relay-email-clean";
 import { AUTO_NOTE } from "@/lib/relay-auto-note";
 import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
 import { api, cx, failureText, firstName, firstOf } from "./relay-ui";
@@ -325,8 +325,7 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
         <button type="button" className={w.back} onClick={onBack}><ChevronLeft size={14} aria-hidden />Waiting on you</button>
         <section className={w.person} aria-label={name}>
           <div className={w.personTop}>
-            <h1>{name}</h1>
-            {waited && <span className={late ? w.lateText : w.waited}>{waited === "today" ? "Waiting since today" : `Waiting ${waited.replace(" d", waited === "1 d" ? " day" : " days")}`}</span>}
+            <h1 title={name}>{name}</h1>
             {(onSnooze || onDone) && (
               <span className={w.actions}>
                 {onSnooze && <SnoozeMenu onPick={onSnooze} />}
@@ -334,13 +333,16 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
               </span>
             )}
           </div>
-          {deal && item?.bulk_listing_id ? (
-            <DealLineView label={deal} deal={"deal" in item ? item.deal ?? null : null} onOpen={onOpenDeal ? () => onOpenDeal(item.bulk_listing_id!, deal) : undefined} />
-          ) : (
-            <button type="button" className={w.dealNew} onClick={() => void createDeal()} disabled={dealBusy}>
-              <Plus size={14} aria-hidden />{dealBusy ? "Matcha is creating the deal…" : "Create deal"}
-            </button>
-          )}
+          <div className={w.personMeta}>
+            {waited && <span className={late ? w.lateText : w.waited}>{waited === "today" ? "Waiting since today" : `Waiting ${waited.replace(" d", waited === "1 d" ? " day" : " days")}`}</span>}
+            {deal && item?.bulk_listing_id ? (
+              <DealLineView label={deal} deal={"deal" in item ? item.deal ?? null : null} onOpen={onOpenDeal ? () => onOpenDeal(item.bulk_listing_id!, deal) : undefined} />
+            ) : (
+              <button type="button" className={w.dealNew} onClick={() => void createDeal()} disabled={dealBusy}>
+                <Plus size={13} aria-hidden />{dealBusy ? "Matcha is creating the deal…" : "Create deal"}
+              </button>
+            )}
+          </div>
         </section>
 
         {msg && (
@@ -373,7 +375,11 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
 
 /** An email as Alex reads it: cleaned (no quotes, signature block or disclaimer), in tight paragraphs. */
 function EmailText({ text, className }: { text: string; className?: string }) {
-  return <div className={cx(w.mailText, className)}>{emailParagraphs(text).map((p, k) => <p key={k}>{p}</p>)}</div>;
+  return (
+    <div className={cx(w.mailText, className)}>
+      {emailParagraphs(text).map((p, k) => <p key={k}>{boldSpans(p).map((x, j) => (x.bold ? <b key={j}>{x.text}</b> : x.text))}</p>)}
+    </div>
+  );
 }
 
 function NewestEmail({ text, onOriginal }: { text: string; onOriginal?: () => void }) {

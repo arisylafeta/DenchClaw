@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanEmail, emailParagraphs, firstLine } from "./relay-email-clean";
+import { boldSpans, cleanEmail, emailParagraphs, firstLine } from "./relay-email-clean";
 
 const FABIANO = `Hi Alex,
 
@@ -65,6 +65,17 @@ describe("firstLine", () => {
   it("skips the greeting", () => {
     expect(firstLine("Hi Ben,\n\nGreat, the 82 kWh pack is yours. Collection on Friday works.\n\nBest,\nAlex")).toBe("Great, the 82 kWh pack is yours. Collection on Friday works.");
     expect(firstLine("Dear Mr Polglase,\nPlease find attached our offer.")).toBe("Please find attached our offer.");
+  });
+});
+
+describe("boldSpans", () => {
+  it("shows Gmail's *bold* as bold, without the stars", () => {
+    expect(boldSpans("- *Exact CALB model / part number:* L135F72")).toEqual([{ text: "- ", bold: false }, { text: "Exact CALB model / part number:", bold: true }, { text: " L135F72", bold: false }]);
+    expect(boldSpans("*1. Cell Data*")).toEqual([{ text: "1. Cell Data", bold: true }]);
+  });
+  it("leaves stars that aren't bold marks", () => {
+    expect(boldSpans("Price is 3 * 100 = 300, rated 5*")).toEqual([{ text: "Price is 3 * 100 = 300, rated 5*", bold: false }]);
+    expect(boldSpans("a*b*c")).toEqual([{ text: "a*b*c", bold: false }]);
   });
 });
 

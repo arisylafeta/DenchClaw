@@ -47,3 +47,17 @@ export function firstLine(raw: string): string {
   return line.length > 160 ? `${line.slice(0, 159).trimEnd()}…` : line;
 }
 
+/** Gmail's plain-text copy marks bold as *like this*: the page shows it bold, without the stars. */
+export function boldSpans(text: string): { text: string; bold: boolean }[] {
+  const out: { text: string; bold: boolean }[] = [];
+  let last = 0;
+  for (const m of text.matchAll(/(^|[\s(\-–])\*(?=\S)([^*\n]{1,200}?)(?<=\S)\*(?=$|[\s),.;:!?\-–])/gm)) {
+    const start = m.index! + m[1].length;
+    if (start > last) out.push({ text: text.slice(last, start), bold: false });
+    out.push({ text: m[2], bold: true });
+    last = start + m[2].length + 2;
+  }
+  if (last < text.length) out.push({ text: text.slice(last), bold: false });
+  return out.length ? out : [{ text, bold: false }];
+}
+
