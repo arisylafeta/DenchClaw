@@ -86,18 +86,20 @@
 .actions { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; align-self: center; }
 
 /* The linked deal: one quiet line under the name, the whole line opens it. */
-.dealLine { display: flex; flex-wrap: wrap; align-items: center; align-self: flex-start; gap: 4px 10px; max-width: 100%; min-height: 28px; border: 0; border-radius: 8px; margin-left: -6px; padding: 2px 6px; background: none; text-align: left; font-size: 13px; color: var(--color-text); }
-.dealLine:hover:not(:disabled) { background: var(--color-surface-hover); }
-.dealLine:disabled { cursor: default; }
+.dealLine { display: flex; flex-wrap: wrap; align-items: center; align-self: flex-start; gap: 4px 8px; max-width: 100%; font-size: 13px; color: var(--color-text); }
+.dealOpen { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-width: 0; max-width: 100%; min-height: 28px; border: 0; border-radius: 8px; padding: 2px 6px; background: none; text-align: left; font: inherit; color: inherit; }
+.dealOpen:hover:not(:disabled) { background: var(--color-surface-hover); }
+.dealOpen:disabled { cursor: default; }
 .typeBulk, .typeMarket { flex: none; display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 9px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
 .typeBulk { background: color-mix(in srgb, var(--color-accent-fill) 32%, var(--color-surface)); color: var(--color-accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 18%, transparent); }
-.typeMarket { background: color-mix(in srgb, #2f5be3 10%, var(--color-surface)); color: #1e3a8a; box-shadow: inset 0 0 0 1px color-mix(in srgb, #2f5be3 15%, transparent); }
+.typeMarket { background: color-mix(in srgb, #2f5be3 10%, var(--color-surface)); color: #1e3a8a; box-shadow: inset 0 0 0 1px color-mix(in srgb, #2f5be3 15%, transparent); text-decoration: none; }
+.typeMarket:hover { background: color-mix(in srgb, #2f5be3 18%, var(--color-surface)); }
 .typeDot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .dealName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; border-bottom: 1px solid var(--color-border); }
-.dealLine:hover:not(:disabled) .dealName { border-bottom-color: var(--color-text-muted); }
+.dealOpen:hover:not(:disabled) .dealName { border-bottom-color: var(--color-text-muted); }
 .dealFacts { min-width: 0; color: var(--ws-soft); }
 .dealGo { flex: none; color: var(--color-text-muted); transition: color .15s, transform .15s; }
-.dealLine:hover:not(:disabled) .dealGo { color: var(--color-text); transform: translate(1px, -1px); }
+.dealOpen:hover:not(:disabled) .dealGo { color: var(--color-text); transform: translate(1px, -1px); }
 .dealNew { display: inline-flex; align-self: flex-start; align-items: center; gap: 6px; min-height: 36px; border: 1px dashed var(--color-border); border-radius: 10px; padding: 4px 12px; background: none; font-size: 13px; font-weight: 600; color: var(--ws-soft); }
 .dealNew:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-text); }
 .actOn { background: var(--color-surface-hover); color: var(--color-text); }

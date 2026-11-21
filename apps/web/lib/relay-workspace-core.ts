@@ -316,8 +316,19 @@ export const isAddress = (a: string) => /^[^@\s,;<>()"']+@[^@\s,;<>()"']+\.[a-z]
 
 // ---------- the deal line under the name
 
-export type DealLine = { type: "Bulk trade" | "Marketplace"; name: string; facts: string[]; closed: boolean };
-type DealIn = { kind: string; summary: string | null; quantity: string | null; status: string; title?: string | null; location?: string | null; price?: string | null };
+/** market: the lot is also on the marketplace, with where to see it live. */
+export type DealLine = { type: "Bulk trade" | "Marketplace"; name: string; facts: string[]; closed: boolean; market: { label: string; url: string } | null };
+type DealIn = { kind: string; summary: string | null; quantity: string | null; status: string; title?: string | null; location?: string | null; price?: string | null;
+  auction_slug?: string | null; auction_status?: string | null; listing_id?: string | null };
+
+const SITE = "https://www.rebattery.io";
+
+/** Where a lot is live on the marketplace: its auction while that's published, else its listing. */
+function marketOf(deal: DealIn): DealLine["market"] {
+  if (deal.auction_slug && deal.auction_status === "published") return { label: "Marketplace auction", url: `${SITE}/marketplace/auctions/${encodeURIComponent(deal.auction_slug)}` };
+  if (deal.listing_id) return { label: "Marketplace", url: `${SITE}/marketplace/${encodeURIComponent(deal.listing_id)}` };
+  return null;
+}
 
 const num = (text: string) => Number(text.replace(/,/g, ""));
 const energy = (kwh: number) => (kwh >= 1000 ? `${(kwh / 1000).toLocaleString("en-GB", { maximumFractionDigits: 1 })} MWh` : `${kwh.toLocaleString("en-GB", { maximumFractionDigits: 0 })} kWh`);
@@ -363,13 +374,13 @@ function askPrice(note: string | null | undefined): string | null {
  */
 export function dealLine(deal: DealIn | null | undefined, fallbackLabel: string): DealLine {
   const name = (deal?.title?.trim() || deal?.summary?.trim() || fallbackLabel.split(" · ")[0].replace(/…$/, "")).replace(/\s+/g, " ");
-  if (!deal) return { type: "Bulk trade", name, facts: [], closed: false };
+  if (!deal) return { type: "Bulk trade", name, facts: [], closed: false, market: null };
   const facts = [
     deal.kind === "supply" ? "selling" : deal.kind === "demand" ? "buying" : "",
     lotEnergy(name, deal.quantity) ?? (deal.title ? "" : shortQuantity(deal.quantity)),
     askPrice(deal.price) ?? "",
     shortPlace(deal.location),
   ].filter(Boolean);
-  return { type: "Bulk trade", name, facts, closed: deal.status === "closed" };
+  return { type: "Bulk trade", name, facts, closed: deal.status === "closed", market: deal.status === "closed" ? null : marketOf(deal) };
 }
 

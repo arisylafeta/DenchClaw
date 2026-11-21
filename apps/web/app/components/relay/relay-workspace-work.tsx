@@ -437,11 +437,18 @@ function Earlier({ rows, count, onOpenMail }: { rows: EarlierRow<ThreadEmail>[] 
 function DealLineView({ label, deal, onOpen }: { label: string; deal: RelayItem["deal"]; onOpen?: () => void }) {
   const line = dealLine(deal, label);
   return (
-    <button type="button" className={w.dealLine} onClick={onOpen} disabled={!onOpen} title={onOpen ? `Open the deal: ${deal?.summary ?? line.name}` : line.name}>
-      <span className={line.type === "Marketplace" ? w.typeMarket : w.typeBulk}><span className={w.typeDot} aria-hidden />{line.type}</span>
-      <span className={w.dealName}>{line.name}</span>
-      {(line.facts.length > 0 || line.closed) && <span className={w.dealFacts}>{[...line.facts, ...(line.closed ? ["closed"] : [])].join(" · ")}</span>}
-      {onOpen && <ArrowUpRight size={14} aria-hidden className={w.dealGo} />}
-    </button>
+    <div className={w.dealLine}>
+      <span className={w.typeBulk} title="A bulk trade we're brokering"><span className={w.typeDot} aria-hidden />{line.type}</span>
+      {line.market && (
+        <a className={w.typeMarket} href={line.market.url} target="_blank" rel="noopener noreferrer" title="Open the live listing on rebattery.io">
+          <span className={w.typeDot} aria-hidden />{line.market.label}<ArrowUpRight size={12} aria-hidden />
+        </a>
+      )}
+      <button type="button" className={w.dealOpen} onClick={onOpen} disabled={!onOpen} title={onOpen ? `Open the deal: ${deal?.summary ?? line.name}` : line.name}>
+        <span className={w.dealName}>{line.name}</span>
+        {(line.facts.length > 0 || line.closed) && <span className={w.dealFacts}>{[...line.facts, ...(line.closed ? ["closed"] : [])].join(" · ")}</span>}
+        {onOpen && <ArrowUpRight size={14} aria-hidden className={w.dealGo} />}
+      </button>
+    </div>
   );
 }

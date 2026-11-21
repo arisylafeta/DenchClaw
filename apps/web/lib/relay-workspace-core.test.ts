@@ -228,11 +228,11 @@ describe("dealLine", () => {
   it("names Fabiano's lot and gives the facts he'd reply with", () => {
     expect(dealLine({ kind: "supply", summary: "120 new LG Energy Solution EM048128P6BA NMC battery modules", quantity: "120 modules", status: "open",
       title: "120x LG EM048128P6BA 6.6kWh NMC Modules", location: "Dallas, USA", price: "Seller ask: 3,000 per module x 120; currency stated as EUR/USD, taken as EUR" }, "x"))
-      .toEqual({ type: "Bulk trade", name: "120x LG EM048128P6BA 6.6kWh NMC Modules", facts: ["selling", "792 kWh", "3,000 each", "Dallas, USA"], closed: false });
+      .toEqual({ type: "Bulk trade", name: "120x LG EM048128P6BA 6.6kWh NMC Modules", facts: ["selling", "792 kWh", "3,000 each", "Dallas, USA"], closed: false, market: null });
   });
   it("keeps the quantity when there's no title, and leaves out what it can't read", () => {
     expect(dealLine({ kind: "demand", summary: "Faysal's sourcing matrix", quantity: "92-102 packs across 5 lines", status: "open", title: null, location: null, price: null }, "x"))
-      .toEqual({ type: "Bulk trade", name: "Faysal's sourcing matrix", facts: ["buying", "92-102 packs across 5 lines"], closed: false });
+      .toEqual({ type: "Bulk trade", name: "Faysal's sourcing matrix", facts: ["buying", "92-102 packs across 5 lines"], closed: false, market: null });
   });
   it("reads a price per kWh and a lot in MWh", () => {
     const line = dealLine({ kind: "supply", summary: "s", quantity: "400 modules", status: "closed", title: "400x CATL 5.4 kWh modules", location: "Rotterdam", price: "Ask: €95 / kWh delivered" }, "x");
@@ -260,6 +260,17 @@ describe("shortPlace and lot energy", () => {
   it("keeps a long quantity to its first clause", () => {
     expect(dealLine({ kind: "demand", summary: "Scrap batteries", quantity: "First order 20 tonnes; 150 tonnes a month once running", status: "open" }, "").facts)
       .toEqual(["buying", "First order 20 tonnes"]);
+  });
+});
+
+describe("dealLine on the marketplace", () => {
+  const lot = { kind: "supply", summary: "s", quantity: "120 modules", status: "open", title: "120x LG 6.6kWh Modules" };
+  it("links a published auction, else the listing, and nothing once closed", () => {
+    expect(dealLine({ ...lot, auction_slug: "lg-em048128p6ba-da48", auction_status: "published", listing_id: "f34b" }, "").market)
+      .toEqual({ label: "Marketplace auction", url: "https://www.rebattery.io/marketplace/auctions/lg-em048128p6ba-da48" });
+    expect(dealLine({ ...lot, auction_slug: "x", auction_status: "ended", listing_id: "f34b" }, "").market).toEqual({ label: "Marketplace", url: "https://www.rebattery.io/marketplace/f34b" });
+    expect(dealLine({ ...lot, status: "closed", listing_id: "f34b" }, "").market).toBeNull();
+    expect(dealLine(lot, "").market).toBeNull();
   });
 });
 
