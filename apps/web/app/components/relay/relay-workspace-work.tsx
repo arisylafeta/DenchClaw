@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type RefObject, type SetStateAction } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowUpRight, ChevronLeft, ChevronRight, Handshake, Plus } from "lucide-react";
 import type { RelayItem, RelayJob, RelayReviewItem } from "@/lib/relay";
 import type { SendOutcome, TalkDraft, TalkState } from "@/lib/relay-talk";
 import type { PriceFill, StockFit } from "@/lib/relay-price-types";
@@ -327,17 +327,20 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
           <div className={w.personTop}>
             <h1>{name}</h1>
             {waited && <span className={late ? w.lateText : w.waited}>{waited === "today" ? "Waiting since today" : `Waiting ${waited.replace(" d", waited === "1 d" ? " day" : " days")}`}</span>}
+            {(onSnooze || onDone) && (
+              <span className={w.actions}>
+                {onSnooze && <SnoozeMenu onPick={onSnooze} />}
+                {onDone && <button type="button" className={w.act} onClick={onDone}>No reply needed</button>}
+              </span>
+            )}
           </div>
-          <div className={w.actionRow}>
-            <span className={w.actions}>
-              {onSnooze && <SnoozeMenu onPick={onSnooze} />}
-              {onDone && <button type="button" className={w.act} onClick={onDone}>No reply needed</button>}
-            </span>
-            <span className={w.dealSlot}>
-              {deal && item?.bulk_listing_id ? <button type="button" className={w.dealChip} title={`Open the deal: ${deal}`} onClick={() => onOpenDeal?.(item.bulk_listing_id!, deal)} disabled={!onOpenDeal}><span>{deal}</span></button>
-                : <button type="button" className={`${w.act} ${w.strong}`} onClick={() => void createDeal()} disabled={dealBusy}>{dealBusy ? "Creating the deal…" : "+ Create deal"}</button>}
-            </span>
-          </div>
+          {deal && item?.bulk_listing_id ? (
+            <DealChip label={deal} deal={"deal" in item ? item.deal ?? null : null} onOpen={onOpenDeal ? () => onOpenDeal(item.bulk_listing_id!, deal) : undefined} />
+          ) : (
+            <button type="button" className={w.dealNew} onClick={() => void createDeal()} disabled={dealBusy}>
+              <Plus size={14} aria-hidden />{dealBusy ? "Matcha is creating the deal…" : "Create deal"}
+            </button>
+          )}
         </section>
 
         {msg && (
@@ -424,5 +427,27 @@ function Earlier({ rows, count, onOpenMail }: { rows: EarlierRow<ThreadEmail>[] 
         {open ? "Hide the earlier emails" : `${total} earlier ${total === 1 ? "email" : "emails"}`}
       </button></span>
     </>
+  );
+}
+
+/** The linked deal, on its own line under the name: which side, what it is, how much and where it stands. A click opens
+ * it in a new CRM tab. Falls back to the short label kept on the email when the deal can't be read. */
+function DealChip({ label, deal, onOpen }: { label: string; deal: RelayItem["deal"]; onOpen?: () => void }) {
+  const [shortWhat, ...rest] = label.split(" · ");
+  const what = deal?.summary?.trim() || shortWhat.replace(/…$/, "");
+  const much = deal ? deal.quantity?.trim() ?? "" : rest.join(" · ");
+  const side = deal?.kind === "supply" ? "Seller's lot" : deal?.kind === "demand" ? "Buyer's request" : "Deal";
+  const status = deal?.status === "qualifying" ? "Qualifying" : deal?.status === "closed" ? "Closed" : null;
+  return (
+    <button type="button" className={w.deal} onClick={onOpen} disabled={!onOpen} title={onOpen ? `Open the deal: ${what}` : what}>
+      <span className={w.dealIcon} aria-hidden><Handshake size={14} /></span>
+      <span className={w.dealText}>
+        <span className={w.dealKind}>{side}</span>
+        <span className={w.dealWhat}>{what}</span>
+        {much && <span className={w.dealMuch}>{much}</span>}
+      </span>
+      {status && <span className={status === "Closed" ? w.dealClosed : w.dealStatus}>{status}</span>}
+      {onOpen && <ArrowUpRight size={15} aria-hidden className={w.dealGo} />}
+    </button>
   );
 }
