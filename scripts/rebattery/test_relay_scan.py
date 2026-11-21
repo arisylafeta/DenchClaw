@@ -288,6 +288,16 @@ def test_plan_done_item_reopens_only_on_new_message():
     assert review_seen == []
 
 
+def test_plan_review_item_closes_when_alex_answered_elsewhere():
+    # Relay drafted a reply; Alex answered from Gmail instead. The item is done and its drafts are set aside.
+    # Alex's own send is newer than what the item saw, but not a new message from them.
+    ops = rs.plan_writes([row(tab=None, done_reason="replied", newest="m3", new_message=False, newer=True)], {"t1": item(status="review")}, NOW, {"t1"})
+    assert ops[0]["kind"] == "done_review" and ops[0]["values"]["status"] == "done" and ops[0]["values"]["done_reason"] == "replied"
+    assert ops[0]["values"]["last_seen_message_id"] == "m3"
+    # Nothing new since: the draft keeps waiting.
+    assert rs.plan_writes([row(tab=None, done_reason="replied", newest="m1", new_message=False, newer=False)], {"t1": item(status="review")}, NOW, {"t1"}) == []
+
+
 def test_plan_closed_item_with_unknown_last_seen_adopts_without_reopening():
     ops = rs.plan_writes([row(newest="m2", new_message=False, seen_known=False)], {"t1": item(status="review", last_seen=None)}, NOW, {"t1"})
     assert ops == [{"op": "update", "gmail_thread_id": "t1", "id": "i1", "kind": "adopt", "values": {"last_seen_message_id": "m2"}}]
@@ -554,6 +564,20 @@ def test_db_write_path(scratch, monkeypatch, tmp_path, capsys):
     assert q("select tab from relay_item where gmail_thread_id = 'p'") == "action"
     rs.apply_ops(conn, owner, [{"op": "update", "id": pid, "kind": "update", "gmail_thread_id": "p", "values": {"tab": "other", **rs.CLEAR_USER_TAB}}])
     assert q("select tab, coalesce(user_tab, '-') from relay_item where gmail_thread_id = 'p'") == "other|-"
+
+    # Relay drafted a reply (with a chase scheduled) and Alex answered from Gmail instead: done, drafts set aside, the
+    # chase cancelled. The same op for Relay's own send changes nothing (the CRM settles it and keeps the chase).
+    q(f"""insert into mail_message (id, direction, transport, purpose, mailbox_owner_id, thread_id, subject, body_text, from_email, to_emails, state, personalization)
+          values ('mpd1', 'outbound', 'gmail', 'personal', '{owner}', 'gmail_thread_p', 'Re: Price list', 'Thanks', 'alex@rebattery.io', '{{sales@newco.example}}', 'draft', '{{"scheduled_send": {{"at": "2030-01-01T08:00:00Z"}}}}');
+        update relay_item set status = 'review' where id = '{pid}';
+        insert into relay_draft (item_id, role, mail_message_id, state) values ('{pid}', 'primary', 'mpd1', 'draft')""")
+    done = {"op": "update", "id": pid, "kind": "done_review", "gmail_thread_id": "p", "values": {"status": "done", "done_reason": "replied", "last_seen_message_id": "mpd1"}}
+    rs.apply_ops(conn, owner, [done])
+    assert q(f"select status from relay_item where id = '{pid}'") == "review"
+    rs.apply_ops(conn, owner, [{**done, "values": {**done["values"], "last_seen_message_id": "mp9"}}])
+    assert q(f"select status, done_reason from relay_item where id = '{pid}'") == "done|replied"
+    assert q(f"select state from relay_draft where item_id = '{pid}'") == "skipped"
+    assert q("select personalization ? 'scheduled_send' from mail_message where id = 'mpd1'") == "f"
     conn.close()
     assert q("select errors::text from relay_scan_run") == "[]"
 

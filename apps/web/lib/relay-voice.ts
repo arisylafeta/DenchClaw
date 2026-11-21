@@ -36,5 +36,5 @@ export function voiceExamplesBlock(card: string | null, examples: VoiceExample[]
 
 /** With a voice, the greeting and sign-off follow it instead of the fixed "Best, Alex". */
 export const greetingRule = (hasVoice: boolean) => hasVoice
-  ? `- Greet by first name ("Hi Mark,"). Sign off the way "How Alex writes" describes, with "Alex" on its own line. Do not add a signature block; it is added automatically.`
-  : `- Greet by first name ("Hi Mark,"), sign off "Best,\\nAlex". Do not add a signature block; it is added automatically.`;
+  ? `- Greet by the name they sign with, or the one Alex used last ("Hi AJ," when Andrew signs "AJ"; otherwise first name, "Hi Mark,"). Sign off the way "How Alex writes" describes, with "Alex" on its own line. Do not add a signature block; it is added automatically.`
+  : `- Greet by the name they sign with, or the one Alex used last ("Hi AJ," when Andrew signs "AJ"; otherwise first name, "Hi Mark,"), sign off "Best,\\nAlex". Do not add a signature block; it is added automatically.`;

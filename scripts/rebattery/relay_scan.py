@@ -973,7 +973,7 @@ CLEAR_USER_TAB = {"user_tab": None, "user_tab_seen_id": None}
 def plan_writes(rows: list[dict], existing: dict[str, dict], now: dt.datetime, seen_threads: set[str]) -> list[dict]:
     """Turn classified rows into insert/update/done operations, respecting user state.
 
-    rows: {gmail_thread_id, tab (or None), done_reason, newest_message_id, summarised, new_message, seen_known, fields...}
+    rows: {gmail_thread_id, tab (or None), done_reason, newest_message_id, summarised, new_message, newer, seen_known, fields...}
       newest_message_id is the newest real message (last_seen_message_id records it); new_message says it was sent
       after the message the item last saw, and seen_known that Relay could find that message at all.
     seen_threads: gmail thread ids that were loaded this run (open items outside it are left alone).
@@ -1006,6 +1006,11 @@ def plan_writes(rows: list[dict], existing: dict[str, dict], now: dt.datetime, s
             if (new_message and row.get("tab")) or reopen_follow or reopen_unanswered:
                 ops.append({"op": "update", "gmail_thread_id": gid, "id": item["id"], "kind": "reopen",
                             "values": {**fields, **content, **CLEAR_USER_TAB, "status": "open", "done_reason": None}})
+            elif item["status"] == "review" and row.get("newer") and not row.get("tab") and row.get("done_reason") == "replied":
+                # Alex answered outside Relay (from Gmail) while a Relay draft waited: the thread is done, and the unused
+                # drafts are set aside with any send of them still pending, so nobody gets a second reply.
+                ops.append({"op": "update", "gmail_thread_id": gid, "id": item["id"], "kind": "done_review",
+                            "values": {"status": "done", "done_reason": "replied", "last_seen_message_id": row.get("newest_message_id"), **content}})
             elif not row.get("seen_known") and row.get("newest_message_id"):
                 # Relay can't place the message this item last saw (none recorded, e.g. "Draft in Relay" items):
                 # adopt the newest one so the next real message counts as new, without reopening it now.
@@ -1043,6 +1048,11 @@ def _db_value(key: str, value):
     return value
 
 
+# The drafts Relay wrote for an item, set aside, and any send of them still waiting cancelled (lib/relay.ts SKIP_DRAFTS_SQL).
+SKIP_DRAFTS_SQL = """with s as (update relay_draft set state = 'skipped', updated_at = now() where item_id = %s and state in ('draft','gmail') returning mail_message_id)
+  update mail_message set personalization = personalization - 'scheduled_send' where id in (select mail_message_id from s) and state = 'draft' and personalization ? 'scheduled_send'"""
+
+
 def apply_ops(conn, owner_id: str, ops: list[dict]) -> None:
     with conn.cursor() as cur:
         for op in ops:
@@ -1059,6 +1069,12 @@ def apply_ops(conn, owner_id: str, ops: list[dict]) -> None:
             else:
                 if not values:
                     continue
+                if op["kind"] == "done_review":
+                    # Relay's own send (the reply, or a linked email on the thread) is settled by the CRM, which keeps the
+                    # linked emails still scheduled. Only an answer sent outside Relay closes the item here.
+                    cur.execute("select 1 from relay_draft where item_id = %s and mail_message_id = %s", (op["id"], values.get("last_seen_message_id")))
+                    if cur.fetchone():
+                        continue
                 if values.get("headline") is None:
                     values.pop("headline", None)
                 if values.get("context") is None:
@@ -1070,6 +1086,8 @@ def apply_ops(conn, owner_id: str, ops: list[dict]) -> None:
                     sets += ", updated_at = now()"
                 cur.execute(f"update relay_item set {sets} where id = %s and owner_id = %s",
                             [*[_db_value(k, v) for k, v in values.items()], op["id"], owner_id])
+                if op["kind"] == "done_review":
+                    cur.execute(SKIP_DRAFTS_SQL, (op["id"],))
     conn.commit()
 
 
@@ -1137,7 +1155,7 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
                              "from_email": email_of(last.get("from_email")), "at": last["at"].isoformat(),
                              "direction": last["direction"], "text": last.get("text") or ""},
             "newest_message_id": last["id"], "last_seen_message_id": last["id"], "summary_message_id": None,
-            "new_message": new_message, "seen_known": seen_known, "clear_user_tab": clear_user_tab,
+            "new_message": new_message, "newer": newer, "seen_known": seen_known, "clear_user_tab": clear_user_tab,
             "subject": th.get("subject") or last.get("subject") or "", "summarised": False,
         }
         fb = fallback_summary(row["subject"], msgs)
