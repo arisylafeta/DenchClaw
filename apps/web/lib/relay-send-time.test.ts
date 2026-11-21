@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { londonInputValue, londonWallToUtc, sendAtProblem, sendLabel, sendSlots, undoSecondsLeft } from "./relay-send-time";
+import { londonInputValue, londonWallToUtc, sendAtProblem, sendLabel, sendSlots, snoozeSlots, undoSecondsLeft } from "./relay-send-time";
 
 describe("londonWallToUtc", () => {
   it("uses GMT in winter and BST in summer", () => {
@@ -65,5 +65,18 @@ describe("sendLabel and checks", () => {
   it("round-trips a datetime-local value", () => {
     const at = new Date("2026-07-06T07:00:00Z");
     expect(londonInputValue(at)).toBe("2026-07-06T08:00");
+  });
+});
+
+describe("snoozeSlots", () => {
+  const keys = (now: string) => snoozeSlots(new Date(now)).map((s) => `${s.key} ${s.when}`);
+  it("offers later today, tomorrow, next Monday and a week on a Wednesday morning", () => {
+    expect(keys("2026-11-18T10:10:00Z")).toEqual(["later Today 13:30", "tomorrow Tomorrow 8:00", "monday Mon 8:00", "week Wed 25 Nov, 8:00"]);
+  });
+  it("drops later today in the evening, and Monday when tomorrow is Monday", () => {
+    expect(keys("2026-11-22T18:00:00Z")).toEqual(["tomorrow Tomorrow 8:00", "week Sun 29 Nov, 8:00"]);
+  });
+  it("calls it Monday morning on a Friday", () => {
+    expect(snoozeSlots(new Date("2026-11-20T11:00:00Z")).find((s) => s.key === "monday")?.label).toBe("Monday morning");
   });
 });

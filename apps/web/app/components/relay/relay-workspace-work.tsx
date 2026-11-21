@@ -14,6 +14,7 @@ import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
 import { api, cx, failureText, firstName, firstOf } from "./relay-ui";
 import { DraftSheet, type SheetActions } from "./relay-workspace-draft";
 import { RelayChat } from "./relay-workspace-chat";
+import { SnoozeMenu } from "./relay-snooze";
 import w from "./relay-workspace.module.css";
 
 /** A message at the foot of the page, with an optional Undo, a second action and (until, ms) a countdown. */
@@ -35,7 +36,7 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
   /** Opens the linked deal, or an email as it was sent, in a new CRM tab. */
   onOpenDeal?: (id: string, title?: string) => void; onOpenMail?: (id: string, title?: string) => void;
   say: Say; text: string; setText: (next: SetStateAction<string>) => void; composer: RefObject<HTMLTextAreaElement | null>;
-  onDone?: () => void; onSnooze?: () => void; onOpen: (itemId: string) => void; onBack: () => void; refreshLists: () => Promise<void>;
+  onDone?: () => void; onSnooze?: (until: string) => void; onOpen: (itemId: string) => void; onBack: () => void; refreshLists: () => Promise<void>;
 }) {
   const [talk, setTalkState] = useState<TalkState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -326,9 +327,13 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
           <div className={w.personTop}>
             <h1>{name}</h1>
             {waited && <span className={late ? w.lateText : w.waited}>{waited === "today" ? "Waiting since today" : `Waiting ${waited.replace(" d", waited === "1 d" ? " day" : " days")}`}</span>}
+          </div>
+          <div className={w.actionRow}>
             <span className={w.actions}>
-              {onSnooze && <button type="button" className={w.act} onClick={onSnooze}>Snooze</button>}
+              {onSnooze && <SnoozeMenu onPick={onSnooze} />}
               {onDone && <button type="button" className={w.act} onClick={onDone}>No reply needed</button>}
+            </span>
+            <span className={w.dealSlot}>
               {deal && item?.bulk_listing_id ? <button type="button" className={w.dealChip} title={`Open the deal: ${deal}`} onClick={() => onOpenDeal?.(item.bulk_listing_id!, deal)} disabled={!onOpenDeal}><span>{deal}</span></button>
                 : <button type="button" className={`${w.act} ${w.strong}`} onClick={() => void createDeal()} disabled={dealBusy}>{dealBusy ? "Creating the deal…" : "+ Create deal"}</button>}
             </span>

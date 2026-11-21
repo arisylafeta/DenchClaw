@@ -7,11 +7,12 @@ import type { PriceFill } from "@/lib/relay-price-types";
 import { SEND_MODES, type SendMode } from "@/lib/relay-talk-core";
 import { londonInputValue, londonWallToUtc, sendAtProblem, sendLabel, sendSlots, undoSecondsLeft } from "@/lib/relay-send-time";
 import {
-  addressList, draftNeeds, fromEditable, paragraphs, parsePrice, priceText, SEND_MODE_WORDS, sendGate, tabNote, toEditable, whenWords, type Piece,
+  draftNeeds, fromEditable, isAddress, paragraphs, parsePrice, priceText, SEND_MODE_WORDS, sendGate, tabNote, toEditable, whenWords, type Piece,
 } from "@/lib/relay-workspace-core";
 import { Pencil } from "lucide-react";
 import { ThinkingIndicator } from "@/app/components/chat-native/thinking";
 import { cx, failureText, firstOf } from "./relay-ui";
+import { RecipientInput } from "./relay-recipients";
 import type { SendRun, StockView } from "./relay-workspace-work";
 import w from "./relay-workspace.module.css";
 
@@ -240,51 +241,71 @@ function Row({ notes, margin, children }: { notes: Note[]; margin: boolean; chil
 function EditDraft({ d, onCancel, onSave }: { d: TalkDraft; onCancel: () => void; onSave: (changes: Parameters<SheetActions["edit"]>[1]) => Promise<void> }) {
   const mail = d.mail!;
   const start = useRef(toEditable(mail.main));
-  const [to, setTo] = useState(mail.to_emails.join(", "));
-  const [cc, setCc] = useState(mail.cc_emails.join(", "));
-  const [bcc, setBcc] = useState((mail.bcc_emails ?? []).join(", "));
+  const [to, setTo] = useState(mail.to_emails);
+  const [cc, setCc] = useState(mail.cc_emails);
+  const [bcc, setBcc] = useState(mail.bcc_emails ?? []);
+  const [showCc, setShowCc] = useState(mail.cc_emails.length > 0);
+  const [showBcc, setShowBcc] = useState((mail.bcc_emails ?? []).length > 0);
   const [subject, setSubject] = useState(mail.subject ?? "");
   const [text, setText] = useState(start.current.text);
   const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   // The box grows with the email, so the whole draft is in view while he edits.
   useEffect(() => { const el = area.current; if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight + 2}px`; } }, [text]);
-  useEffect(() => { area.current?.focus(); }, []);
+  useEffect(() => { area.current?.focus(); area.current?.setSelectionRange(0, 0); }, []);
 
   const same = (a: string[], b: string[]) => a.join(",") === b.join(",");
   const save = async () => {
+    const bad = [...to, ...cc, ...bcc].find((a) => !isAddress(a));
+    if (bad) { setProblem(`“${bad}” isn't an email address. Take it out or fix it.`); return; }
+    if (!to.length) { setProblem("Add someone to send it to."); return; }
+    setProblem(null);
     const changes: Parameters<SheetActions["edit"]>[1] = {};
     const body = fromEditable(text, start.current.markers);
     if (body !== mail.main) changes.body = body;
     if (subject !== (mail.subject ?? "")) changes.subject = subject;
-    if (!same(addressList(to), mail.to_emails)) changes.to = addressList(to);
-    if (!same(addressList(cc), mail.cc_emails)) changes.cc = addressList(cc);
-    if (!same(addressList(bcc), mail.bcc_emails ?? [])) changes.bcc = addressList(bcc);
+    if (!same(to, mail.to_emails)) changes.to = to;
+    if (!same(cc, mail.cc_emails)) changes.cc = cc;
+    if (!same(bcc, mail.bcc_emails ?? [])) changes.bcc = bcc;
     if (!Object.keys(changes).length) { onCancel(); return; }
     setSaving(true);
     try { await onSave(changes); } finally { setSaving(false); }
   };
   const keys = (e: KeyboardEvent) => {
-    if (e.key === "Escape") onCancel();
+    if (e.key === "Escape" && !e.defaultPrevented) onCancel();
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void save(); }
   };
   const hasPrices = Object.keys(start.current.markers).length > 0;
 
   return (
     <div className={w.editor} onKeyDown={keys}>
-      <label className={w.field}><span>To</span><input value={to} onChange={(e) => setTo(e.target.value)} autoComplete="off" spellCheck={false} /></label>
-      <label className={w.field}><span>Cc</span><input value={cc} onChange={(e) => setCc(e.target.value)} autoComplete="off" spellCheck={false} placeholder="Nobody" /></label>
-      <label className={w.field}><span>Bcc</span><input value={bcc} onChange={(e) => setBcc(e.target.value)} autoComplete="off" spellCheck={false} placeholder="Nobody" /></label>
-      {d.role === "follow" && <label className={w.field}><span>Subject</span><input value={subject} onChange={(e) => setSubject(e.target.value)} /></label>}
+      <div className={w.heads}>
+        <div className={w.headRow}>
+          <RecipientInput label="To" value={to} onChange={setTo} />
+          {(!showCc || !showBcc) && (
+            <span className={w.ccLinks}>
+              {!showCc && <button type="button" onClick={() => setShowCc(true)}>Cc</button>}
+              {!showBcc && <button type="button" onClick={() => setShowBcc(true)}>Bcc</button>}
+            </span>
+          )}
+        </div>
+        {showCc && <div className={w.headRow}><RecipientInput label="Cc" value={cc} onChange={setCc} autoFocus={!mail.cc_emails.length} /></div>}
+        {showBcc && <div className={w.headRow}><RecipientInput label="Bcc" value={bcc} onChange={setBcc} autoFocus={!(mail.bcc_emails ?? []).length} /></div>}
+        {d.role === "follow" && (
+          <label className={w.headRow}><span className={w.rcptLabel}>Subject</span><input className={w.subject} value={subject} onChange={(e) => setSubject(e.target.value)} /></label>
+        )}
+      </div>
       <label className={w.bodyField}>
         <span className={w.srOnly}>The email</span>
         <textarea ref={area} value={text} onChange={(e) => setText(e.target.value)} rows={8} />
       </label>
-      {hasPrices && <span className={w.muted}>Relay's prices show as [price: …] and are filled in at Send. Type a figure over one to set your own.</span>}
+      {hasPrices && <span className={w.hint}>Relay&apos;s prices show as [price: …] and go in at Send. Type a figure over one to set your own.</span>}
+      {problem && <p className={w.error} role="alert">{problem}</p>}
       <span className={w.editBtns}>
-        <button type="button" className={w.save} disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button>
-        <button type="button" className={w.qchip} disabled={saving} onClick={onCancel}>Cancel</button>
-        <span className={w.muted}>⌘ Enter to save, Esc to cancel</span>
+        <button type="button" className={w.saveBtn} disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save"}</button>
+        <button type="button" className={w.cancelBtn} disabled={saving} onClick={onCancel}>Cancel</button>
+        <span className={w.hint}>⌘ Enter saves · Esc cancels</span>
       </span>
     </div>
   );

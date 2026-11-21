@@ -86,3 +86,21 @@ export function londonInputValue(at: Date): string {
   const p = londonParts(at);
   return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
 }
+
+export type SnoozeSlot = { key: string; label: string; at: string; when: string };
+
+/**
+ * Snooze picks, in London time: later today (three hours on, while that's still the working day), tomorrow morning,
+ * Monday morning when tomorrow isn't Monday, and a week today. Each says when, like "Tomorrow 8:00".
+ */
+export function snoozeSlots(now = new Date()): SnoozeSlot[] {
+  const p = londonParts(now);
+  const slots: { key: string; label: string; at: Date }[] = [];
+  const later = new Date(Math.ceil((now.getTime() + 3 * 3_600_000) / 1_800_000) * 1_800_000);
+  if (londonParts(later).hour < 19 && londonDate(later) === londonDate(now)) slots.push({ key: "later", label: "Later today", at: later });
+  slots.push({ key: "tomorrow", label: "Tomorrow morning", at: londonWallToUtc(londonDate(now, 1), "08:00") });
+  const toMonday = ((8 - p.weekday) % 7) || 7;
+  if (toMonday !== 1) slots.push({ key: "monday", label: p.weekday === 5 || p.weekday === 6 ? "Monday morning" : "Next Monday", at: londonWallToUtc(londonDate(now, toMonday), "08:00") });
+  slots.push({ key: "week", label: "In a week", at: londonWallToUtc(londonDate(now, 7), "08:00") });
+  return slots.map((s) => ({ key: s.key, label: s.label, at: s.at.toISOString(), when: sendLabel(s.at, now) }));
+}

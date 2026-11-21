@@ -20,7 +20,7 @@ import w from "./relay-workspace.module.css";
 type Summary = { counts: RelayCounts; items: RelayItem[]; review: RelayReviewItem[]; scannedAt: string | null; mailSyncedAt: string | null };
 type View = "waiting" | "chase" | "drafts" | "done";
 /** A person or an email in the list, whatever the view. */
-type Row = { key: string; itemId: string; name: string; ask: string; waited: string; tag: string | null; reviewIds: string[] };
+type Row = { key: string; itemId: string; name: string; ask: string; waited: string; tag: string | null; reviewIds: string[]; itemIds?: string[] };
 
 const daysLabel = (since: string | null | undefined) => {
   const days = since ? Math.floor((Date.now() - new Date(since).getTime()) / 86_400_000) : 0;
@@ -91,7 +91,7 @@ export function RelayWorkspace({ onBack, onOpenPage, onOpenListing, onOpenMailMe
   // ---- the list for the view on show
   const entries = useMemo(() => (waiting ? listEntries(waiting.bands, { open, query }) : []), [waiting, open, query]);
   const rows: Row[] = useMemo(() => {
-    if (view === "waiting") return visibleRows(entries).map((r) => ({ key: r.key, itemId: r.openId, name: r.name, ask: r.ask, waited: r.waited, tag: r.tag, reviewIds: r.reviewIds }));
+    if (view === "waiting") return visibleRows(entries).map((r) => ({ key: r.key, itemId: r.openId, name: r.name, ask: r.ask, waited: r.waited, tag: r.tag, reviewIds: r.reviewIds, itemIds: r.itemIds }));
     const list = view === "chase" ? (follow ?? []).map((i) => itemRow(i, null)) : view === "drafts" ? (summary?.review ?? []).map((i) => itemRow(i, "Draft ready")) : [];
     return query.trim() ? list.filter((r) => matchesRow({ name: r.name, company: null, ask: r.ask }, query)) : list;
   }, [view, entries, follow, summary, query]);
@@ -140,14 +140,16 @@ export function RelayWorkspace({ onBack, onOpenPage, onOpenListing, onOpenMailMe
       void reloadLists();
     } catch (err) { say(err instanceof Error ? err.message : "Couldn't mark it done."); }
   }, [leave, say, reloadLists]);
-  const snooze = useCallback(async (row: Row) => {
-    const until = sendSlots()[0].at;
+  /** Snoozes every email of the person's row until then: they all come back together. */
+  const snooze = useCallback(async (row: Row, until: string) => {
+    const ids = [...new Set([row.itemId, ...(row.itemIds ?? []), ...row.reviewIds])];
+    const set = (value: string | null) => Promise.all(ids.map((id) => api(`/api/relay/items/${id}`, { method: "PATCH", body: { snooze_until: value } })));
     try {
-      await api(`/api/relay/items/${row.itemId}`, { method: "PATCH", body: { snooze_until: until } });
+      await set(until);
       leave(row);
       say(`Snoozed ${row.name} until ${sendLabel(until)}.`, {
         undo: async () => {
-          try { await api(`/api/relay/items/${row.itemId}`, { method: "PATCH", body: { snooze_until: null } }); await reloadLists(); }
+          try { await set(null); await reloadLists(); }
           catch (err) { say(err instanceof Error ? err.message : "Couldn't undo that."); }
         },
       });
@@ -227,7 +229,7 @@ export function RelayWorkspace({ onBack, onOpenPage, onOpenListing, onOpenMailMe
           {picked ? (
             <Work key={picked.itemId} itemId={picked.itemId} name={picked.name} waited={view === "waiting" ? picked.waited : null} item={item} job={job}
               reviewIds={picked.reviewIds} autoDraft={view === "waiting"} onOpenDeal={onOpenListing} onOpenMail={onOpenMailMessage} say={say} text={textOf} setText={setText(picked.itemId)} composer={composer}
-              onDone={view === "waiting" ? () => void markDone(picked) : undefined} onSnooze={view === "waiting" ? () => void snooze(picked) : undefined}
+              onDone={view === "waiting" ? () => void markDone(picked) : undefined} onSnooze={view === "waiting" ? (until) => void snooze(picked, until) : undefined}
               onOpen={(itemId) => setPicked({ ...picked, key: itemId, itemId, reviewIds: [] })} onBack={() => setPane("list")} refreshLists={reloadLists} />
           ) : (
             <section className={w.empty}>
@@ -284,7 +286,7 @@ function WaitingList({ entries, picked, total, searching, onPick, onOpen }: {
             );
           }
           const r = e.row;
-          const row: Row = { key: r.key, itemId: r.openId, name: r.name, ask: r.ask, waited: r.waited, tag: r.tag, reviewIds: r.reviewIds };
+          const row: Row = { key: r.key, itemId: r.openId, name: r.name, ask: r.ask, waited: r.waited, tag: r.tag, reviewIds: r.reviewIds, itemIds: r.itemIds };
           return <li key={r.key}><RowButton row={row} current={picked === r.key} onPick={onPick} /></li>;
         })}
       </ol>

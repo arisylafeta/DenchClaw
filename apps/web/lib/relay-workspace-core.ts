@@ -311,3 +311,6 @@ export const fromEditable = (text: string, markers: Readonly<Record<string, stri
 /** Addresses typed in a To, Cc or Bcc box: commas, semicolons or spaces between them. */
 export const addressList = (typed: string) => typed.split(/[\s,;]+/).map((a) => a.trim().replace(/^<|>$/g, "").toLowerCase()).filter(Boolean);
 
+/** An address Relay can send to. */
+export const isAddress = (a: string) => /^[^@\s,;<>()"']+@[^@\s,;<>()"']+\.[a-z]{2,}$/i.test(a);
+
