@@ -9,7 +9,7 @@ import { londonInputValue, londonWallToUtc, sendAtProblem, sendLabel, sendSlots,
 import {
   draftNeeds, fromEditable, isAddress, paragraphs, parsePrice, priceText, SEND_MODE_WORDS, sendGate, tabNote, toEditable, whenWords, type Piece,
 } from "@/lib/relay-workspace-core";
-import { Pencil } from "lucide-react";
+import { ChevronDown, Pencil } from "lucide-react";
 import { ThinkingIndicator } from "@/app/components/chat-native/thinking";
 import { cx, failureText, firstOf } from "./relay-ui";
 import { RecipientInput } from "./relay-recipients";
@@ -475,7 +475,7 @@ function SendBar({ drafts, primary, current, typed, busy, run, actions }: {
           <button type="button" className={w.ghost} disabled={!gmailReady || !!busy} title={gmailReady ? undefined : "Fill the gaps first"} onClick={() => void actions.toGmail(current)}>
             {busy === "gmail" ? "Putting it in Gmail…" : current.state === "gmail" ? "Update in Gmail drafts" : "Put in Gmail drafts"}
           </button>
-          <button type="button" className={w.ghost} aria-expanded={later} disabled={!replyGate?.ready || !!busy} onClick={() => setLater(!later)}>Send later</button>
+          <button type="button" className={w.ghost} aria-expanded={later} disabled={!replyGate?.ready || !!busy} onClick={() => setLater(!later)}>Send later<ChevronDown size={13} aria-hidden className={w.laterChevron} /></button>
           {later && (
             <div className={w.menu} role="dialog" aria-label="Send the reply later">
               <span className={w.menuNote}>The reply only. Linked emails stay as drafts.</span>

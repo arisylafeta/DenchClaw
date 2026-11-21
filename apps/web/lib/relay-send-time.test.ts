@@ -9,34 +9,23 @@ describe("londonWallToUtc", () => {
 });
 
 describe("sendSlots", () => {
-  it("Sunday night offers Monday 8:00, 9:00 and 10:00", () => {
+  it("Sunday night offers tomorrow 8am, 11am and 2pm, and the day after at 8am", () => {
     const now = new Date("2026-11-08T22:30:00Z"); // Sun 22:30 London
     expect(sendSlots(now)).toEqual([
-      { at: "2026-11-09T08:00:00.000Z", label: "Tomorrow 8:00" },
-      { at: "2026-11-09T09:00:00.000Z", label: "Tomorrow 9:00" },
-      { at: "2026-11-09T10:00:00.000Z", label: "Tomorrow 10:00" },
+      { at: "2026-11-09T08:00:00.000Z", label: "Tomorrow 8am" },
+      { at: "2026-11-09T11:00:00.000Z", label: "Tomorrow 11am" },
+      { at: "2026-11-09T14:00:00.000Z", label: "Tomorrow 2pm" },
+      { at: "2026-11-10T08:00:00.000Z", label: "Tue 8am" },
     ]);
   });
 
   it("after midnight the next morning is today", () => {
     const now = new Date("2026-11-09T00:40:00Z"); // Mon 00:40 London
-    expect(sendSlots(now).map((s) => s.label)).toEqual(["Today 8:00", "Today 9:00", "Today 10:00"]);
-  });
-
-  it("Friday evening adds Monday 8:00", () => {
-    const now = new Date("2026-11-13T21:00:00Z"); // Fri
-    const slots = sendSlots(now);
-    expect(slots.map((s) => s.label)).toEqual(["Tomorrow 8:00", "Tomorrow 9:00", "Tomorrow 10:00", "Mon 8:00"]);
-    expect(slots[3].at).toBe("2026-11-16T08:00:00.000Z");
-  });
-
-  it("Saturday evening adds Monday 8:00 after Sunday", () => {
-    const slots = sendSlots(new Date("2026-11-14T21:00:00Z"));
-    expect(slots.map((s) => s.label)).toEqual(["Tomorrow 8:00", "Tomorrow 9:00", "Tomorrow 10:00", "Mon 8:00"]);
+    expect(sendSlots(now).map((s) => s.label)).toEqual(["Today 8am", "Today 11am", "Today 2pm", "Tomorrow 8am"]);
   });
 
   it("summer times are London times", () => {
-    expect(sendSlots(new Date("2026-07-05T21:00:00Z"))[0]).toEqual({ at: "2026-07-06T07:00:00.000Z", label: "Tomorrow 8:00" });
+    expect(sendSlots(new Date("2026-07-05T21:00:00Z"))[0]).toEqual({ at: "2026-07-06T07:00:00.000Z", label: "Tomorrow 8am" });
   });
 });
 

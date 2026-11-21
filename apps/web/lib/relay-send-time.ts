@@ -40,17 +40,24 @@ function londonDate(at: Date, days = 0): string {
 export type SendSlot = { at: string; label: string };
 
 /**
- * Quick send-later picks. The day is the next morning: today if it is still before 7:30 in London (replying after
- * midnight), else tomorrow. If that morning is a Saturday or Sunday, Monday 8:00 is offered as well.
+ * Quick send-later picks: the next morning at 8am, 11am and 2pm, and the morning after at 8am. The next morning is today
+ * if it is still before 7:30 in London (replying after midnight), else tomorrow.
  */
 export function sendSlots(now = new Date()): SendSlot[] {
   const p = londonParts(now);
-  const day = londonDate(now, p.hour * 60 + p.minute < 7 * 60 + 30 ? 0 : 1);
-  const slots = ["08:00", "09:00", "10:00"].map((t) => londonWallToUtc(day, t));
-  const weekday = londonParts(slots[0]).weekday;
-  if (weekday === 6 || weekday === 0) slots.push(londonWallToUtc(londonDate(slots[0], weekday === 6 ? 2 : 1), "08:00"));
-  return slots.map((at) => ({ at: at.toISOString(), label: sendLabel(at, now) }));
+  const ahead = p.hour * 60 + p.minute < 7 * 60 + 30 ? 0 : 1;
+  const day = londonDate(now, ahead);
+  const after = londonDate(now, ahead + 1);
+  return [[day, "08:00"], [day, "11:00"], [day, "14:00"], [after, "08:00"]]
+    .map(([d, t]) => londonWallToUtc(d, t))
+    .map((at) => ({ at: at.toISOString(), label: hourLabel(sendLabel(at, now)) }));
 }
+
+/** "Tomorrow 14:00" as people say it: "Tomorrow 2pm". Other minutes stay as they are. */
+const hourLabel = (label: string) => label.replace(/\b(\d{1,2}):00$/, (_, h: string) => {
+  const hour = Number(h);
+  return hour === 0 ? "midnight" : hour === 12 ? "noon" : hour < 12 ? `${hour}am` : `${hour - 12}pm`;
+});
 
 /** Short label: "Today 8:00", "Tomorrow 10:00", "Mon 8:00", or "Mon 16 Nov, 8:00" beyond a week. */
 export function sendLabel(at: Date | string, now = new Date()): string {
