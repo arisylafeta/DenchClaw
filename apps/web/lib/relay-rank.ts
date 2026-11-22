@@ -10,6 +10,8 @@ export type { RankBand, WaitingRow } from "./relay-rank-core";
 /** The list by band, best first in each, and the numbers on the view tabs. */
 export type WaitingView = {
   bands: Record<RankBand, WaitingRow[]>;
+  /** People whose reply Alex scheduled with Send later, soonest first. Not waiting on him: not in the bands or the count. */
+  scheduled: WaitingRow[];
   counts: { waiting: number; chase: number; drafts: number; done_today: number };
 };
 
@@ -64,12 +66,16 @@ const writtenTo = (emails: string[], domains: string[]) => queryPg<{ address: st
 
 /** The fields of a Relay email the ranking reads. */
 export type RankSource = Pick<RelayItem, "id" | "status" | "tab" | "priority" | "counterpart_name" | "counterpart_email" | "company" | "contact_type"
-  | "situation" | "headline" | "waiting_since" | "last_message">;
+  | "situation" | "headline" | "waiting_since" | "last_message"> & { scheduled_at?: string | null };
 
 /** The owner's emails in Review with a draft not yet sent: they join their person's row as "Draft ready". */
 export const reviewWithDrafts = (ownerId: string) => queryPg<RankSource>(
   `select i.id, i.status, i.tab, i.priority, i.counterpart_name, i.counterpart_email, i.company, i.contact_type, i.situation, i.headline,
-     i.waiting_since, i.last_message
+     i.waiting_since, i.last_message,
+     -- The reply Alex scheduled with Send later (not the 30-second hold of Send): the person moves to "Scheduled".
+     (select m.personalization->'scheduled_send'->>'at' from relay_draft d join mail_message m on m.id = d.mail_message_id
+       where d.item_id = i.id and d.role = 'primary' and d.state in ('draft','gmail') and m.state = 'draft' and m.personalization ? 'scheduled_send'
+         and not coalesce((m.personalization->'scheduled_send'->>'undo')::boolean, false) order by 1 limit 1) as scheduled_at
    from relay_item i where i.owner_id = $1::uuid and i.status = 'review' and i.tab = 'action' and (i.snooze_until is null or i.snooze_until <= now())
      and exists (select 1 from relay_draft d where d.item_id = i.id and d.state in ('draft','gmail'))`, [ownerId]);
 
@@ -113,6 +119,7 @@ export async function rankInputs(ownerId: string, items: RankSource[]): Promise<
       inboundEmails: s?.inbound ?? 0,
       firstInboundAt: iso(s?.first_inbound),
       hasDraft: f?.has_draft ?? false,
+      scheduledAt: iso(i.scheduled_at),
     };
   });
 }
@@ -120,8 +127,10 @@ export async function rankInputs(ownerId: string, items: RankSource[]): Promise<
 /** The ranked rows by band, with the view counts (relayCounts) beside them. */
 export function waitingView(rows: WaitingRow[], counts: Pick<RelayCounts, "follow" | "review" | "done_today">): WaitingView {
   const bands: WaitingView["bands"] = { now: [], today: [], week: [], later: [] };
-  for (const row of rows) bands[row.band].push(row);
-  return { bands, counts: { waiting: rows.length, chase: counts.follow, drafts: counts.review, done_today: counts.done_today } };
+  const scheduled = rows.filter((r) => r.scheduledAt).sort((a, b) => Date.parse(a.scheduledAt!) - Date.parse(b.scheduledAt!));
+  const waiting = rows.filter((r) => !r.scheduledAt);
+  for (const row of waiting) bands[row.band].push(row);
+  return { bands, scheduled, counts: { waiting: waiting.length, chase: counts.follow, drafts: counts.review, done_today: counts.done_today } };
 }
 
 /** "Waiting on you": the open emails that need a reply, one row per person, ranked at read time, by band. Snoozed

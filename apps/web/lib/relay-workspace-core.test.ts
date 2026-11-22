@@ -164,7 +164,7 @@ describe("the Send gate", () => {
 describe("the list", () => {
   const row = (name: string, band: WaitingRow["band"], ask = "Price for a pack"): WaitingRow => ({
     score: 50, band, tag: null, why: [], key: name, name, company: null, ask, waited: "2 d", waitingSince: null, itemIds: [name], openId: name, reviewIds: [],
-    emails: 1, hasDraft: false, contactType: null,
+    emails: 1, hasDraft: false, contactType: null, scheduledAt: null,
   });
   const bands: Bands = {
     now: [row("Ben Bament", "now")],
@@ -271,6 +271,21 @@ describe("dealLine on the marketplace", () => {
     expect(dealLine({ ...lot, auction_slug: "x", auction_status: "ended", listing_id: "f34b" }, "").market).toEqual({ label: "Marketplace", url: "https://www.rebattery.io/marketplace/f34b" });
     expect(dealLine({ ...lot, status: "closed", listing_id: "f34b" }, "").market).toBeNull();
     expect(dealLine(lot, "").market).toBeNull();
+  });
+});
+
+describe("the Scheduled section", () => {
+  const r = (name: string, scheduledAt: string | null = null) => ({
+    score: 50, band: "now" as const, tag: null, why: [], key: name, name, company: null, ask: "Price", waited: "2 d", waitingSince: null, itemIds: [name], openId: name,
+    reviewIds: [], emails: 1, hasDraft: true, contactType: null, scheduledAt,
+  });
+  const bands = { now: [r("Ben")], today: [], week: [], later: [] };
+  it("sits folded on top, opens on click, and a search looks inside it", () => {
+    const scheduled = [r("Fabiano", "2026-11-23T08:00:00Z"), r("Jason", "2026-11-23T08:00:00Z")];
+    expect(listEntries(bands, { scheduled }).slice(0, 2)).toEqual([{ kind: "fold", band: "scheduled", label: "Scheduled", n: 2, open: false }, { kind: "head", band: "now", label: "Now", n: 1 }]);
+    expect(listEntries(bands, { scheduled, open: { scheduled: true } }).filter((e) => e.kind === "row").map((e) => (e as { row: { name: string } }).row.name)).toEqual(["Fabiano", "Jason", "Ben"]);
+    expect(listEntries(bands, { scheduled, query: "fabiano" }).map((e) => e.kind)).toEqual(["fold", "row"]);
+    expect(listEntries(bands, {})[0].kind).toBe("head");
   });
 });
 

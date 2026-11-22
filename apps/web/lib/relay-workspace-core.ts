@@ -13,13 +13,15 @@ import { sendLabel, UNDO_SEND_SECONDS } from "./relay-send-time";
 
 // ---------- the list ----------
 
-export const BAND_LABEL: Record<RankBand, string> = { now: "Now", today: "Today", week: "This week", later: "Later" };
+/** The list's sections: the four bands, and "Scheduled" for replies waiting to go with Send later. */
+export type ListBand = RankBand | "scheduled";
+export const BAND_LABEL: Record<ListBand, string> = { scheduled: "Scheduled", now: "Now", today: "Today", week: "This week", later: "Later" };
 export type Bands = Record<RankBand, WaitingRow[]>;
 export type ListEntry =
-  | { kind: "head"; band: RankBand; label: string; n: number }
+  | { kind: "head"; band: ListBand; label: string; n: number }
   | { kind: "row"; row: WaitingRow }
-  | { kind: "more"; band: RankBand; n: number }
-  | { kind: "fold"; band: RankBand; label: string; n: number; open: boolean };
+  | { kind: "more"; band: ListBand; n: number }
+  | { kind: "fold"; band: ListBand; label: string; n: number; open: boolean };
 
 /** True when the row's name, company or ask holds every word of the search. */
 export function matchesRow(row: Pick<WaitingRow, "name" | "company" | "ask">, query: string): boolean {
@@ -29,13 +31,20 @@ export function matchesRow(row: Pick<WaitingRow, "name" | "company" | "ask">, qu
 }
 
 /**
- * The list as the page draws it: Now in full, Today up to `todayLimit` with "N more today", This week and Later folded
+ * The list as the page draws it: Scheduled folded on top (opened on click), Now in full, Today up to `todayLimit` with "N more today", This week and Later folded
  * until opened. A search shows every match in every band, unfolded.
  */
-export function listEntries(bands: Bands, { open = {}, query = "", todayLimit = 8 }: { open?: Partial<Record<RankBand, boolean>>; query?: string; todayLimit?: number } = {}): ListEntry[] {
+export function listEntries(bands: Bands, { open = {}, query = "", todayLimit = 8, scheduled = [] }: { open?: Partial<Record<ListBand, boolean>>; query?: string; todayLimit?: number; scheduled?: WaitingRow[] } = {}): ListEntry[] {
   const q = query.trim();
   const rows = (band: RankBand) => (q ? bands[band].filter((r) => matchesRow(r, q)) : bands[band]);
   const out: ListEntry[] = [];
+  // Replies already scheduled sit on top, folded: those people need nothing more until they write again.
+  const later = q ? scheduled.filter((r) => matchesRow(r, q)) : scheduled;
+  if (later.length) {
+    const isOpen = !!q || !!open.scheduled;
+    out.push({ kind: "fold", band: "scheduled", label: BAND_LABEL.scheduled, n: later.length, open: isOpen });
+    if (isOpen) for (const row of later) out.push({ kind: "row", row });
+  }
   for (const band of ["now", "today"] as const) {
     const all = rows(band);
     if (!all.length) continue;

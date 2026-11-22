@@ -202,3 +202,14 @@ describe("score", () => {
     for (const r of rows) expect(r.band).toBe(BANDS.find(([, min]) => r.score >= min)?.[0] ?? "later");
   });
 });
+
+describe("scheduled replies", () => {
+  it("puts a person whose every email has a scheduled reply in Scheduled, and back once they write again", () => {
+    const waiting = item({ id: "r", status: "review", hasDraft: true, scheduledAt: "2026-11-23T08:00:00Z" });
+    expect(rankItems([waiting], now)[0].scheduledAt).toBe("2026-11-23T08:00:00Z");
+    const wroteAgain = item({ id: "o", lastAt: "2026-11-22T09:00:00Z" });
+    expect(rankItems([waiting, wroteAgain], now)[0].scheduledAt).toBeNull();
+    expect(rankItems([item({ id: "x", status: "review", hasDraft: true })], now)[0].scheduledAt).toBeNull();
+  });
+});
+

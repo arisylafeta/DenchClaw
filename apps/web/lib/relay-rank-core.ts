@@ -49,6 +49,8 @@ export type RankItem = {
   firstInboundAt: string | null;
   /** An unsent Relay draft (not yet sent or skipped) is waiting on this email. */
   hasDraft: boolean;
+  /** Its reply is scheduled with Send later, for then. */
+  scheduledAt?: string | null;
 };
 
 export type RankScore = { score: number; band: RankBand; tag: string | null; why: string[] };
@@ -388,6 +390,8 @@ export type WaitingRow = RankScore & {
   emails: number;
   hasDraft: boolean;
   contactType: string | null;
+  /** Their reply is scheduled to go then, and they haven't written since: the row sits in "Scheduled", not in a band. */
+  scheduledAt: string | null;
 };
 
 /** The best display name of a group: a real name over one made from an address. */
@@ -422,6 +426,8 @@ export function rankItems(items: RankItem[], now = new Date()): WaitingRow[] {
       emails: Math.max(group.length, group.reduce((n, i) => n + i.waitingInbound.length, 0)),
       hasDraft: signals.hasDraft,
       contactType: signals.contactType,
+      // Scheduled only while every email of theirs is answered by a reply that's waiting to go: a new email puts them back.
+      scheduledAt: open.length ? null : review.map((i) => i.scheduledAt ?? null).filter((t): t is string => !!t).sort()[0] ?? null,
     }];
   }).sort((a, b) => b.score - a.score || at(a.waitingSince) - at(b.waitingSince));
 }

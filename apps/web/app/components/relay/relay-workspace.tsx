@@ -6,7 +6,7 @@ import type { RelayCounts, RelayItem, RelayReviewItem } from "@/lib/relay";
 import type { WaitingView } from "@/lib/relay-rank";
 import type { RankBand } from "@/lib/relay-rank-core";
 import { sendSlots, sendLabel, undoSecondsLeft } from "@/lib/relay-send-time";
-import { listEntries, matchesRow, tagTone, visibleRows, waitedDays } from "@/lib/relay-workspace-core";
+import { listEntries, matchesRow, tagTone, visibleRows, waitedDays, type ListBand } from "@/lib/relay-workspace-core";
 import { api, cx } from "./relay-ui";
 import { Work, type Say, type Toast } from "./relay-workspace-work";
 import w from "./relay-workspace.module.css";
@@ -20,7 +20,7 @@ import w from "./relay-workspace.module.css";
 type Summary = { counts: RelayCounts; items: RelayItem[]; review: RelayReviewItem[]; scannedAt: string | null; mailSyncedAt: string | null };
 type View = "waiting" | "chase" | "drafts" | "done";
 /** A person or an email in the list, whatever the view. */
-type Row = { key: string; itemId: string; name: string; ask: string; waited: string; tag: string | null; reviewIds: string[]; itemIds?: string[]; waitingSince?: string | null };
+type Row = { key: string; itemId: string; name: string; ask: string; waited: string; tag: string | null; reviewIds: string[]; itemIds?: string[]; waitingSince?: string | null; scheduledAt?: string | null };
 
 const daysLabel = (since: string | null | undefined) => {
   const days = since ? Math.floor((Date.now() - new Date(since).getTime()) / 86_400_000) : 0;
@@ -45,7 +45,7 @@ export function RelayWorkspace({ onBack, onOpenPage, onOpenListing, onOpenMailMe
   const [follow, setFollow] = useState<RelayItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [open, setOpen] = useState<Partial<Record<RankBand, boolean>>>({});
+  const [open, setOpen] = useState<Partial<Record<ListBand, boolean>>>({});
   const [picked, setPicked] = useState<Row | null>(null);
   /** On a phone the list and the email are separate views. */
   const [pane, setPane] = useState<"list" | "work">("list");
@@ -89,9 +89,9 @@ export function RelayWorkspace({ onBack, onOpenPage, onOpenListing, onOpenMailMe
   }, [reloadLists]);
 
   // ---- the list for the view on show
-  const entries = useMemo(() => (waiting ? listEntries(waiting.bands, { open, query }) : []), [waiting, open, query]);
+  const entries = useMemo(() => (waiting ? listEntries(waiting.bands, { open, query, scheduled: waiting.scheduled ?? [] }) : []), [waiting, open, query]);
   const rows: Row[] = useMemo(() => {
-    if (view === "waiting") return visibleRows(entries).map((r) => ({ key: r.key, itemId: r.openId, name: r.name, ask: r.ask, waited: r.waited, waitingSince: r.waitingSince, tag: r.tag, reviewIds: r.reviewIds, itemIds: r.itemIds }));
+    if (view === "waiting") return visibleRows(entries).map((r) => ({ key: r.key, itemId: r.openId, name: r.name, ask: r.ask, waited: r.scheduledAt ? sendLabel(r.scheduledAt) : r.waited, waitingSince: r.waitingSince, tag: r.scheduledAt ? "Scheduled" : r.tag, reviewIds: r.reviewIds, itemIds: r.itemIds, scheduledAt: r.scheduledAt }));
     const list = view === "chase" ? (follow ?? []).map((i) => itemRow(i, null)) : view === "drafts" ? (summary?.review ?? []).map((i) => itemRow(i, "Draft ready")) : [];
     return query.trim() ? list.filter((r) => matchesRow({ name: r.name, company: null, ask: r.ask }, query)) : list;
   }, [view, entries, follow, summary, query]);
@@ -122,7 +122,7 @@ export function RelayWorkspace({ onBack, onOpenPage, onOpenListing, onOpenMailMe
   const leave = useCallback((row: Row) => {
     const at = rows.findIndex((r) => r.key === row.key);
     const next = rows[at + 1] ?? rows[at - 1] ?? null;
-    setWaiting((v) => v && { ...v, bands: Object.fromEntries(Object.entries(v.bands).map(([b, list]) => [b, list.filter((r) => r.key !== row.key)])) as WaitingView["bands"] });
+    setWaiting((v) => v && { ...v, scheduled: (v.scheduled ?? []).filter((r) => r.key !== row.key), bands: Object.fromEntries(Object.entries(v.bands).map(([b, list]) => [b, list.filter((r) => r.key !== row.key)])) as WaitingView["bands"] });
     setPicked(next && next.key !== row.key ? next : null);
     if (!next) setPane("list");
   }, [rows]);
@@ -227,7 +227,7 @@ export function RelayWorkspace({ onBack, onOpenPage, onOpenListing, onOpenMailMe
 
         <div className={w.work} ref={workPane}>
           {picked ? (
-            <Work key={picked.itemId} itemId={picked.itemId} name={picked.name} waited={view === "waiting" ? picked.waited : null} waitingSince={view === "waiting" ? picked.waitingSince ?? null : null} item={item} job={job}
+            <Work key={picked.itemId} itemId={picked.itemId} name={picked.name} waited={view === "waiting" && !picked.scheduledAt ? picked.waited : null} waitingSince={view === "waiting" && !picked.scheduledAt ? picked.waitingSince ?? null : null} item={item} job={job}
               reviewIds={picked.reviewIds} autoDraft={view === "waiting"} onOpenDeal={onOpenListing} onOpenMail={onOpenMailMessage} say={say} text={textOf} setText={setText(picked.itemId)} composer={composer}
               onDone={view === "waiting" ? () => void markDone(picked) : undefined} onSnooze={view === "waiting" ? (until) => void snooze(picked, until) : undefined}
               onOpen={(itemId) => setPicked({ ...picked, key: itemId, itemId, reviewIds: [] })} onBack={() => setPane("list")} refreshLists={reloadLists} />
@@ -266,7 +266,7 @@ function RowButton({ row, current, onPick }: { row: Row; current: boolean; onPic
 
 /** "Waiting on you" by band: Now and Today open, the rest of today behind More, This week and Later folded. */
 function WaitingList({ entries, picked, total, searching, onPick, onOpen }: {
-  entries: ReturnType<typeof listEntries>; picked: string | null; total: number; searching: boolean; onPick: (row: Row) => void; onOpen: (band: RankBand) => void;
+  entries: ReturnType<typeof listEntries>; picked: string | null; total: number; searching: boolean; onPick: (row: Row) => void; onOpen: (band: ListBand) => void;
 }) {
   let folds = 0;
   return (
@@ -278,15 +278,17 @@ function WaitingList({ entries, picked, total, searching, onPick, onOpen }: {
           if (e.kind === "head") return <li key={`h-${e.band}`}><span className={w.band}>{e.label} <span>{e.n}</span></span></li>;
           if (e.kind === "more") return <li key={`m-${e.band}`}><button type="button" className={w.more} onClick={() => onOpen(e.band)}>{e.n} more today</button></li>;
           if (e.kind === "fold") {
-            const first = folds++ === 0;
+            const first = e.band !== "scheduled" && folds++ === 0;
             return (
-              <li key={`f-${e.band}`} className={cx(first && w.foldFirst)}>
+              <li key={`f-${e.band}`} className={cx(first && w.foldFirst, e.band === "scheduled" && w.foldScheduled)}>
                 <button type="button" className={w.fold} aria-expanded={e.open} onClick={() => onOpen(e.band)} disabled={searching}><span>{e.label}</span><span>{e.n}</span></button>
               </li>
             );
           }
           const r = e.row;
-          const row: Row = { key: r.key, itemId: r.openId, name: r.name, ask: r.ask, waited: r.waited, waitingSince: r.waitingSince, tag: r.tag, reviewIds: r.reviewIds, itemIds: r.itemIds };
+          // A scheduled reply shows when it goes instead of how long they've waited.
+          const row: Row = { key: r.key, itemId: r.openId, name: r.name, ask: r.ask, waited: r.scheduledAt ? sendLabel(r.scheduledAt) : r.waited, waitingSince: r.waitingSince,
+            tag: r.scheduledAt ? "Scheduled" : r.tag, reviewIds: r.reviewIds, itemIds: r.itemIds, scheduledAt: r.scheduledAt };
           return <li key={r.key}><RowButton row={row} current={picked === r.key} onPick={onPick} /></li>;
         })}
       </ol>

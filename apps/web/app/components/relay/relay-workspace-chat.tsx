@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type RefObject, type SetStateAction } from
 import { ArrowUp } from "lucide-react";
 import type { TalkApplied, TalkDraft, TalkState, TalkTurn, TraceApplied } from "@/lib/relay-talk";
 import { chatPieces, clock, openQuestion, workSummary, type DeskTalk } from "@/lib/relay-desk-view-core";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { ThinkingIndicator } from "@/app/components/chat-native/thinking";
 import { isAutoNote } from "@/lib/relay-auto-note";
 import { cx, firstOf } from "./relay-ui";
@@ -150,8 +152,8 @@ function RelaySays({ turn }: { turn: TalkTurn }) {
   ].filter((n): n is string => !!n);
   return (
     <div className={w.relayTurn}>
-      <div className={cx("chat-prose chat-message-font", w.prose)}>
-        {turn.text.split(/\n{2,}/).map((p, k) => <p key={k} className={cx(p.startsWith("I didn't save ") && w.blocked)}>{p}</p>)}
+      <div className={cx("chat-prose chat-message-font", w.prose, turn.text.startsWith("I didn't save ") && w.blocked)}>
+        <RelayMarkdown text={turn.text} />
       </div>
       {notes.map((n, k) => <span key={k} className={w.relayNote}>{n}</span>)}
     </div>
@@ -260,3 +262,17 @@ function ContinueInClaude({ command, say }: { command: string; say: Say }) {
     </>
   );
 }
+
+/**
+ * Relay's answer as the desk wrote it: Markdown (bold, lists, tables, links), like the CRM chat. Links open in a new tab;
+ * pictures show as their text only, since an answer can quote content from untrusted email.
+ */
+function RelayMarkdown({ text }: { text: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+      a: ({ href, children, node: _node, ...props }) => <a href={href} {...props} target="_blank" rel="noopener noreferrer">{children}</a>,
+      img: ({ alt }) => (alt ? <span>{alt}</span> : null),
+    }}>{text}</ReactMarkdown>
+  );
+}
+

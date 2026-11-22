@@ -27,3 +27,11 @@ describe("sameVersion", () => {
     expect(sameVersion("nope", "nope")).toBe(false);
   });
 });
+
+describe("splitCopy with an earlier signature", () => {
+  it("splits off the identity's previous signature too, so a draft pinned before it changed reads cleanly", () => {
+    const body = "Hi Fabiano,\n\nBest,\nAlex\n\nAlex Polglase\nFounder & CEO\nrebattery.io | alex@rebattery.io";
+    expect(splitCopy(body, "Alex Polglase\nFOUNDER & CEO\nrebattery.io  \u25cf  alex@rebattery.io")).toEqual({ main: "Hi Fabiano,\n\nBest,\nAlex", signed: true });
+  });
+});
+
