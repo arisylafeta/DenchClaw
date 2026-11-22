@@ -1006,9 +1006,11 @@ def plan_writes(rows: list[dict], existing: dict[str, dict], now: dt.datetime, s
             if (new_message and row.get("tab")) or reopen_follow or reopen_unanswered:
                 ops.append({"op": "update", "gmail_thread_id": gid, "id": item["id"], "kind": "reopen",
                             "values": {**fields, **content, **CLEAR_USER_TAB, "status": "open", "done_reason": None}})
-            elif item["status"] == "review" and row.get("newer") and not row.get("tab") and row.get("done_reason") == "replied":
-                # Alex answered outside Relay (from Gmail) while a Relay draft waited: the thread is done, and the unused
-                # drafts are set aside with any send of them still pending, so nobody gets a second reply.
+            elif item["status"] == "review" and not row.get("tab") and row.get("done_reason") == "replied" \
+                    and (row.get("newer") or row.get("reason") == "owner wrote to them since"):
+                # Alex answered outside Relay (from Gmail) while a Relay draft waited, on this thread or in one reply on
+                # another of their threads (several emails, one answer): this one is done too, and its unused drafts are
+                # set aside with any send of them still pending, so nobody gets a second reply.
                 ops.append({"op": "update", "gmail_thread_id": gid, "id": item["id"], "kind": "done_review",
                             "values": {"status": "done", "done_reason": "replied", "last_seen_message_id": row.get("newest_message_id"), **content}})
             elif not row.get("seen_known") and row.get("newest_message_id"):

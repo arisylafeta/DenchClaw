@@ -175,6 +175,7 @@ export async function deskState(item: RelayItem, ownerId: string): Promise<DeskS
       message_id: m.id, direction: m.direction ?? "", from: m.from_email, to: m.to_emails, cc: m.cc_emails, at: m.at, subject: m.subject,
       text: stripQuoted(m.body_text ?? "").slice(0, 4000), has_files: !!m.has_files,
     })),
+    others: await otherEmails(item, ownerId),
     drafts,
     stock: stock.map((s, i) => ({
       key: s.key, label: s.label, kind: s.kind, kwh: s.kwh, year: s.year, soh: s.soh, cost: s.cost, listed: s.listed,
@@ -183,6 +184,17 @@ export async function deskState(item: RelayItem, ownerId: string): Promise<DeskS
     })),
     rules: ctx.rules,
   };
+}
+
+/** The same person's other emails still waiting on Alex (open, or drafted and unsent), on other threads, newest first. */
+async function otherEmails(item: RelayItem, ownerId: string): Promise<NonNullable<DeskState["others"]>> {
+  if (!item.counterpart_email) return [];
+  const rows = await queryPg<{ id: string; last_message: RelayItem["last_message"]; headline: string }>(
+    `select id, last_message, headline from relay_item where owner_id = $1::uuid and id <> $2 and status in ('open', 'review')
+       and lower(counterpart_email) = lower($3) order by updated_at desc limit 5`, [ownerId, item.id, item.counterpart_email]);
+  return rows.filter((r) => r.last_message?.direction === "inbound").map((r) => ({
+    item_id: r.id, subject: r.headline, at: r.last_message?.at ?? null, text: stripQuoted(r.last_message?.text ?? "").slice(0, 3000),
+  }));
 }
 
 /** The brief (appended to the session's system prompt) and the prompt for one turn, both built fresh from the email now. */

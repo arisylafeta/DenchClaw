@@ -104,6 +104,10 @@ describe("the brief", () => {
   });
   it("marks a draft waiting to send as not changeable", () => {
     expect(stateText({ ...STATE, drafts: [{ ...STATE.drafts[0], waiting_to_send: true }] })).toContain("waiting to send (no changes)");
+    const withOthers = stateText({ ...STATE, others: [{ item_id: "i2", subject: "Battery in Belgium", at: "2026-11-12T20:43:00Z", text: "Kind regards, Muhammad Qasim" }] });
+    expect(withOthers).toContain("Their other emails still waiting, on other threads (answer them in this one reply too");
+    expect(withOthers).toContain("Muhammad Qasim");
+    expect(stateText(STATE)).not.toContain("Their other emails");
   });
 });
 

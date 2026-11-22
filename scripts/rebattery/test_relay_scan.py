@@ -294,6 +294,9 @@ def test_plan_review_item_closes_when_alex_answered_elsewhere():
     ops = rs.plan_writes([row(tab=None, done_reason="replied", newest="m3", new_message=False, newer=True)], {"t1": item(status="review")}, NOW, {"t1"})
     assert ops[0]["kind"] == "done_review" and ops[0]["values"]["status"] == "done" and ops[0]["values"]["done_reason"] == "replied"
     assert ops[0]["values"]["last_seen_message_id"] == "m3"
+    # Alex answered them in one reply on another of their threads: this thread's draft is done too.
+    other = rs.plan_writes([row(tab=None, done_reason="replied", reason="owner wrote to them since", newest="m1", new_message=False, newer=False)], {"t1": item(status="review")}, NOW, {"t1"})
+    assert other[0]["kind"] == "done_review"
     # Nothing new since: the draft keeps waiting.
     assert rs.plan_writes([row(tab=None, done_reason="replied", newest="m1", new_message=False, newer=False)], {"t1": item(status="review")}, NOW, {"t1"}) == []
 
