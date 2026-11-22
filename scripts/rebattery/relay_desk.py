@@ -179,7 +179,7 @@ def trace_line(name: str, args: dict | None) -> str | None:
             "relay_set_price": lambda: "Set a price",
             "relay_reprice": lambda: "Worked the prices out again",
             "relay_add_todo": lambda: f"Suggested a to-do: {_short(a.get('title'), 50)}",
-            "relay_suggest_rule": lambda: "Suggested a rule for your Rules page",
+            "relay_remember_lesson": lambda: "Added a lesson to your email-writing lessons",
             "relay_ask": lambda: None,  # the question itself shows in the chat
             "crm_query": lambda: "Looked in the CRM",
             "marketplace_account": lambda: f"Checked {_short(a.get('email'), 40)} on the marketplace" if a.get("email") else "Checked the marketplace",

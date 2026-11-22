@@ -67,7 +67,7 @@ describe("the brief", () => {
     expect(brief).toContain("change them only with the relay_* tools");
     expect(brief).toContain("Never create Gmail drafts and never send.");
     expect(brief).toContain("relay_ask");
-    expect(brief).toContain("relay_suggest_rule");
+    expect(brief).toContain("relay_remember_lesson");
     expect(brief).toContain("Today is 2026-11-22.");
   });
   it("carries the guards, the rules with reply-all, and the voice", () => {

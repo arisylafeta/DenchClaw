@@ -59,7 +59,7 @@ TOOLS: list[dict[str, Any]] = [
      "inputSchema": _schema({"draft_id": _S}, ["draft_id"])},
     {"name": "relay_add_todo", "description": "Suggest a to-do for Alex (something the reply promises he will do).",
      "inputSchema": _schema({"title": _S, "detail": _S}, ["title"])},
-    {"name": "relay_suggest_rule", "description": "Propose a writing rule for Alex's Rules page when his correction sounds general. A proposal only: it applies once he approves it.",
+    {"name": "relay_remember_lesson", "description": "Add one lesson to Alex's email-writing lessons (the file every draft and Claude session follows). Only after Alex has said yes to remembering it.",
      "inputSchema": _schema({"text": _S, "why": _S}, ["text"])},
     {"name": "relay_ask", "description": "Ask Alex a question only he can decide (buy, sell, list, price, pass), with two to four tap-to-answer options. End your turn after asking.",
      "inputSchema": _schema({"question": _S, "options": {"type": "array", "items": _S, "minItems": 2, "maxItems": 4}}, ["question", "options"])},

@@ -1,4 +1,5 @@
 import "server-only";
+import { addLesson, readLessons } from "./relay-lessons";
 import { spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -191,7 +192,7 @@ export async function deskBrief(itemId: string, mode: DeskMode, text: string): P
   const state = await deskState(item, ownerId);
   const theirs = state.thread.find((m) => m.direction === "inbound")?.text ?? item.last_message?.text ?? "";
   const voice = await voiceFor(ownerId, item, theirs);
-  return { brief: buildBrief({ mode, state, rules: state.rules, voice, now: new Date() }), prompt: deskPrompt(mode, text), timeoutSeconds: MODE_TIMEOUT[mode] };
+  return { brief: buildBrief({ mode, state, rules: state.rules, voice, lessons: await readLessons(), now: new Date() }), prompt: deskPrompt(mode, text), timeoutSeconds: MODE_TIMEOUT[mode] };
 }
 
 /** A write is only taken from the run that is working on this email right now, so a stray or stopped process can't change anything. */
@@ -222,7 +223,7 @@ export async function deskTool(input: { itemId: string; runId: string | null; dr
     case "relay_set_price": return setPrice(ctx, args as DeskArgs["relay_set_price"]);
     case "relay_reprice": return reprice(ctx, args as DeskArgs["relay_reprice"]);
     case "relay_add_todo": return addTodo(ctx, args as DeskArgs["relay_add_todo"]);
-    case "relay_suggest_rule": return suggestRule(ctx, args as DeskArgs["relay_suggest_rule"]);
+    case "relay_remember_lesson": return rememberLesson(ctx, args as DeskArgs["relay_remember_lesson"]);
     case "relay_ask": return ask(ctx, args as DeskArgs["relay_ask"]);
     case "crm_query": return crmQuery((args as DeskArgs["crm_query"]).sql);
     case "marketplace_account": {
@@ -392,13 +393,10 @@ async function addTodo(ctx: Ctx, a: DeskArgs["relay_add_todo"]): Promise<string>
   return todo ? `Suggested the to-do "${a.title}". Alex accepts it in Relay.` : "That to-do is already there.";
 }
 
-async function suggestRule(ctx: Ctx, a: DeskArgs["relay_suggest_rule"]): Promise<string> {
-  if (ctx.dryRun) return dry(`propose the rule "${a.text}" on Alex's Rules page.`);
-  // Like the learning run: a proposal, never a rule in force until Alex approves it.
-  const inserted = await queryPg(`insert into relay_rule (owner_id, text, position, source, state, action, why, evidence)
-    values ($1::uuid, $2, (select coalesce(max(position), 0) + 1 from relay_rule where owner_id = $1::uuid), 'learned', 'proposed', 'add', $3, $4::jsonb)
-    on conflict do nothing returning id`, [ctx.ownerId, a.text, a.why || "Suggested in Relay's chat", JSON.stringify([{ request: a.why || a.text }])]);
-  return inserted.length ? "Proposed the rule. Alex approves or rejects it on the Rules page." : "That rule is already proposed.";
+async function rememberLesson(ctx: Ctx, a: DeskArgs["relay_remember_lesson"]): Promise<string> {
+  if (ctx.dryRun) return dry(`add "${a.text}" to Alex's email-writing lessons.`);
+  // Only after Alex said yes in the chat (the brief says so): the lessons are his, in the one file every draft follows.
+  return (await addLesson(a.text)) === "added" ? "Added to Alex's email-writing lessons. Every draft follows it from now on." : "His lessons already say that.";
 }
 
 async function ask(ctx: Ctx, a: DeskArgs["relay_ask"]): Promise<string> {

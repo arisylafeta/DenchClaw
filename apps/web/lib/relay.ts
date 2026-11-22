@@ -28,6 +28,7 @@ import { draftLeaks } from "./relay-leak";
 import { leakSentence } from "./relay-leak-core";
 import { HISTORY_CAP, hasPriceMarker, priceMarker, stockBlock, type HistoryEntry } from "./relay-talk-core";
 import { priceDraft, stockFits } from "./relay-price";
+import { readLessons } from "./relay-lessons";
 
 const run = promisify(execFile);
 const MAIL_CLI = "/usr/local/bin/rebattery-mail";
@@ -397,7 +398,8 @@ export async function draftContext(item: RelayItem, ownerId: string, note: strin
   // The deal's own label stays out: it can name the buyer, and the reply may go to a supplier.
   const where = `Sending as: ${identity === "supply" ? "supply@rebattery.io, ReBattery's seller inbox" : identity === "buy" ? "buy@rebattery.io, ReBattery's buyer inbox" : "Alex's own address"}. Writing to: ${to || "unknown"}.\n`
     + (item.bulk_listing_id ? "This email is linked to a deal (record below).\n" : bulk ? "This email is not linked to a deal yet. If they are offering or asking for batteries, write the first reply the intake guide describes.\n" : "");
-  const prompt = `${voice ? voiceExamplesBlock(voice.card, voice.examples) : ""}${where}\n${intake ? `ReBattery's intake guide (follow it for what to ask, and for what never to share):\n${intake}\n\n` : ""}Alex's note (what he wants to say):\n${note}\n\n${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}${pack.block ? `${pack.block}\n\n` : ""}${offers}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
+  const lessons = await readLessons();
+  const prompt = `${voice ? voiceExamplesBlock(voice.card, voice.examples) : ""}${lessons ? `Alex's email-writing lessons (follow every one):\n${lessons}\n\n` : ""}${where}\n${intake ? `ReBattery's intake guide (follow it for what to ask, and for what never to share):\n${intake}\n\n` : ""}Alex's note (what he wants to say):\n${note}\n\n${item.tab === "follow" ? "This is a FOLLOW-UP: Alex wrote last and got no reply. Write a short, friendly chase.\n\n" : ""}Thread (oldest first):\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n\n${deal ? `Linked deal record:\n${deal}\n\n` : ""}${pack.block ? `${pack.block}\n\n` : ""}${offers}Reply to: ${lastInbound?.from_email ?? item.counterpart_email ?? ""}`;
   if (!to) throw new RelayError(400, "Relay couldn't find who to reply to on this thread.");
   // known: every fact the writer was given, for checking a reply's numbers against.
   const known = `${note}\n${transcript || `${item.headline}\n${item.context}\n${item.last_message?.text ?? ""}`}\n${deal ?? ""}\n${pack.block ?? ""}`;
