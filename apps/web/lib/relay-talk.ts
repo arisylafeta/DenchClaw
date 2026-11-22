@@ -3,7 +3,7 @@ import { queryPg } from "./postgres";
 import { readMailDraft } from "./crm-postgres/mail";
 import { DraftActionError, identitySignatures, editDraft, sameVersion, splitCopy } from "./mail-draft-actions";
 import {
-  acceptTodo, activeGuide, activeRules, askAgent, cancelScheduledSend, createMailDraft, draftContext, queueSend, readRelayItem, RelayError, saveDraftBody,
+  acceptTodo, activeGuide, activeRules, askAgent, cancelScheduledSend, claimsAttachment, createMailDraft, draftContext, queueSend, readRelayItem, RelayError, saveDraftBody,
   scheduleSend, startResearchJob, type RelayItem, type UnlessReply,
 } from "./relay";
 import { priceDraft, stockFits } from "./relay-price";
@@ -25,7 +25,7 @@ import {
  * runs only on Alex's confirm, through queueSend and scheduleSend and their gap and leak guards.
  */
 
-export type TalkTurn = { id: string; role: TalkRole; text: string; target: string; applied: TalkApplied | TraceApplied | null; created_at: string };
+export type TalkTurn = { id: string; role: TalkRole; text: string; target: string; applied: TalkApplied | TraceApplied | AskApplied | null; created_at: string };
 
 /** What a Relay turn did. blocked: a change that wasn't saved, and why (a leak, a scheduled send, the mail tool). */
 export type TalkApplied = {
@@ -40,7 +40,11 @@ export type TalkApplied = {
   guard: string | null;
 };
 /** A trace turn: what Relay read and how long it took. notes: what was dropped from the model's answer. */
-export type TraceApplied = { ms: number; read: ReadSummary; notes: string[]; failed?: boolean };
+export type TraceApplied = { ms: number; read: ReadSummary; notes: string[]; failed?: boolean;
+  /** A line the desk's runner wrote as it worked: the tool it used, in its run (relay_desk.py). */
+  desk?: { tool: string; run: string } };
+/** A question the desk asked (relay_ask), with the answers Alex can tap. Tapping one sends it as his next chat message. */
+export type AskApplied = { ask: { question: string; options: string[]; run: string | null } };
 
 /** One draft as the chat page shows it. change: the last change, which Undo takes back; undone: the one Redo puts back. */
 export type TalkDraft = {
@@ -62,7 +66,7 @@ export type TalkDraft = {
 };
 export type TalkState = { turns: TalkTurn[]; drafts: TalkDraft[]; read: ReadSummary };
 
-type Row = {
+export type TalkRow = {
   id: string; item_id: string; role: "primary" | "follow"; position: number; title: string; why: string; state: string; to_kind: ToKind | null;
   send_mode: SendMode; send_at: string | null; included: boolean; history: unknown; redo: unknown; background: unknown; fills: unknown; mail_message_id: string | null;
   mail_state: string | null; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null;
@@ -71,8 +75,8 @@ type Row = {
 };
 
 /** The item's drafts that are still in play (not dropped), the reply first, with their mail. */
-async function draftRows(itemId: string): Promise<Row[]> {
-  return queryPg<Row>(
+export async function draftRows(itemId: string): Promise<TalkRow[]> {
+  return queryPg<TalkRow>(
     `select d.id, d.item_id, d.role, d.position, d.title, d.why, d.state, d.to_kind, d.send_mode, d.send_at::text as send_at, d.included, d.history, d.redo,
        d.background, d.fills, d.mail_message_id, m.state as mail_state, m.identity_key, m.from_email, coalesce(m.to_emails, '{}') as to_emails,
        coalesce(m.cc_emails, '{}') as cc_emails, coalesce(m.bcc_emails, '{}') as bcc_emails, m.subject, m.body_text, m.updated_at, m.thread_id,
@@ -81,8 +85,8 @@ async function draftRows(itemId: string): Promise<Row[]> {
      where d.item_id = $1 and d.state <> 'skipped' order by d.role = 'primary' desc, d.position, d.created_at`, [itemId]);
 }
 
-const isSent = (r: Row) => r.state === "sent" || r.mail_state === "accepted" || (!!r.mail_state && r.mail_state !== "draft");
-const guardOf = (r: Row, body?: string): GuardDraft => ({ id: r.id, role: r.role, to_kind: r.to_kind, to: r.to_emails, body: body ?? r.body_text ?? "" });
+export const isSent = (r: TalkRow) => r.state === "sent" || r.mail_state === "accepted" || (!!r.mail_state && r.mail_state !== "draft");
+export const guardOf = (r: TalkRow, body?: string): GuardDraft => ({ id: r.id, role: r.role, to_kind: r.to_kind, to: r.to_emails, body: body ?? r.body_text ?? "" });
 
 async function ownItem(itemId: string, ownerId: string): Promise<RelayItem> {
   const item = await readRelayItem(itemId, ownerId);
@@ -91,7 +95,7 @@ async function ownItem(itemId: string, ownerId: string): Promise<RelayItem> {
 }
 
 /** The drafts as the page shows them, each checked by the leak guard against everything on the thread. */
-async function draftViews(item: RelayItem, ownerId: string, rows: Row[], stock: StockFit[]): Promise<TalkDraft[]> {
+async function draftViews(item: RelayItem, ownerId: string, rows: TalkRow[], stock: StockFit[]): Promise<TalkDraft[]> {
   const signatures = await identitySignatures();
   const withMail = rows.filter((r) => r.mail_message_id);
   const sides = await threadSides(item.id, ownerId, withMail.map((r) => guardOf(r)), stock);
@@ -129,13 +133,13 @@ async function listTurns(itemId: string): Promise<TalkTurn[]> {
      order by created_at`, [itemId]);
 }
 
-async function addTurn(itemId: string, ownerId: string, role: TalkRole, text: string, target: string, applied: TalkApplied | TraceApplied | null): Promise<void> {
+export async function addTurn(itemId: string, ownerId: string, role: TalkRole, text: string, target: string, applied: TalkApplied | TraceApplied | AskApplied | null): Promise<void> {
   await queryPg("insert into relay_talk (item_id, owner_id, role, text, target, applied) values ($1, $2::uuid, $3, $4, $5, $6::jsonb)",
     [itemId, ownerId, role, text.slice(0, 4000), target, applied ? JSON.stringify(applied) : null]);
 }
 
 /** What Relay read for this email: the last turn's look-up, else the background stored with the reply when it was drafted. */
-async function readFor(item: RelayItem, ownerId: string, rows: Row[], stock: StockFit[], sources?: PackSource[]): Promise<ReadSummary> {
+async function readFor(item: RelayItem, ownerId: string, rows: TalkRow[], stock: StockFit[], sources?: PackSource[]): Promise<ReadSummary> {
   if (!sources) {
     const [last] = await queryPg<{ read: ReadSummary | null }>(
       `select applied->'read' as read from relay_talk where item_id = $1 and role = 'trace' and applied ? 'read'
@@ -157,7 +161,6 @@ export async function talkState(itemId: string, ownerId: string): Promise<TalkSt
   return { turns, drafts: await draftViews(item, ownerId, rows, stock), read: await readFor(item, ownerId, rows, stock) };
 }
 
-const claimsAttachment = (text: string) => /\b(attached|enclosed|attaching|i've attached|please find)\b/i.test(text);
 /** The words for a change Relay couldn't make. Anything other than a refusal is a real fault and is thrown on. */
 const blockedWhy = (error: unknown) => {
   if (error instanceof RelayError || error instanceof DraftActionError) return error.message;
@@ -186,7 +189,7 @@ export async function talk(itemId: string, owner: { id: string; email: string },
   return talkState(itemId, owner.id);
 }
 
-async function answer(item: RelayItem, owner: { id: string; email: string }, rows: Row[], text: string, target: string, started: number): Promise<void> {
+async function answer(item: RelayItem, owner: { id: string; email: string }, rows: TalkRow[], text: string, target: string, started: number): Promise<void> {
   const signatures = await identitySignatures();
   const [ctx, stock, turns, asks] = await Promise.all([
     draftContext(item, owner.id, item.note.trim() || "(No note: Alex is working on the drafts with you in the chat.)", { offers: false }),
@@ -321,7 +324,7 @@ export async function undoDraft(draftId: string, ownerId: string, redo = false):
   return refreshed(item, ownerId);
 }
 
-async function ownDraft(draftId: string, ownerId: string): Promise<{ item: RelayItem; row: Row; rows: Row[] }> {
+async function ownDraft(draftId: string, ownerId: string): Promise<{ item: RelayItem; row: TalkRow; rows: TalkRow[] }> {
   const [found] = await queryPg<{ item_id: string }>("select d.item_id from relay_draft d join relay_item i on i.id = d.item_id where d.id = $1 and i.owner_id = $2::uuid", [draftId, ownerId]);
   if (!found) throw new RelayError(404, "Not found");
   const item = await ownItem(found.item_id, ownerId);

@@ -92,8 +92,8 @@ const whatsappWith = (counterpart: string) => quiet(queryPg<PackChat>(
 type Answer<T> = PromiseLike<{ data: T[] | null; error: unknown }>;
 
 /** The marketplace account under this address, read live (the CRM's copy of sign-ups can lag). Null when the read failed
- * or ran out of time: then nothing is said, rather than "no account". */
-async function marketplace(counterpart: string): Promise<PackMarket | null> {
+ * or ran out of time: then nothing is said, rather than "no account". Also the desk's marketplace_account tool. */
+export async function marketplace(counterpart: string): Promise<PackMarket | null> {
   try {
     // "*" is a wildcard to the API and can't be escaped: such an address is not looked up, and nothing is said.
     if (counterpart.includes("*")) return null;

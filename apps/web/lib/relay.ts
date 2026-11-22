@@ -342,11 +342,11 @@ export type DraftResult = { item: RelayItem };
 
 // ---------- voice ----------
 
-type Voice = { guide: string; card: string | null; examples: VoiceExample[] };
+export type Voice = { guide: string; card: string | null; examples: VoiceExample[] };
 
 /** The owner's active voice (relay_voice_study.py): the guide, this kind of email's card and his three closest real replies.
  * Null until a voice is published; drafting then works as before. */
-async function voiceFor(ownerId: string, item: Pick<RelayItem, "situation" | "contact_type">, theirText: string): Promise<Voice | null> {
+export async function voiceFor(ownerId: string, item: Pick<RelayItem, "situation" | "contact_type">, theirText: string): Promise<Voice | null> {
   try {
     const [voice] = await queryPg<{ id: string; guide: string }>("select id, guide from relay_voice where owner_id = $1::uuid and active", [ownerId]);
     if (!voice) return null;
@@ -706,8 +706,9 @@ async function mainCopies(mailIds: string[]): Promise<Map<string, string>> {
   return new Map(rows.map((r) => [r.id, splitCopy(r.body_text, signatures.get(r.identity_key ?? "") ?? null).main]));
 }
 
-/** Writes the drafts, attaches files and saves to-dos for one item, then puts it in Review. Shared by quick drafts and agent jobs. */
-async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, ctx: Awaited<ReturnType<typeof draftContext>>, parsed: Record<string, unknown>, files: string[], origin: "note" | "job" = "note", keepLinked = false): Promise<void> {
+/** Writes the drafts, attaches files and saves to-dos for one item, then puts it in Review. Shared by quick drafts, agent
+ * jobs and the desk. keepTodos: the desk may have suggested a to-do earlier in the same turn, so Relay's suggestions stay. */
+export async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, ctx: Awaited<ReturnType<typeof draftContext>>, parsed: Record<string, unknown>, files: string[], origin: "note" | "job" | "desk" = "note", keepLinked = false, opts: { keepTodos?: boolean } = {}): Promise<void> {
   const itemId = item.id;
   const rawSubject = String(parsed.subject || ctx.messages[0]?.subject || item.headline || "").trim();
   const subject = (rawSubject.replace(/^((re|aw|fw|fwd)\s*:\s*)+/i, (m) => (/^(re|aw)/i.test(m) ? "Re: " : m)).slice(0, 300)) || "Re:";
@@ -746,7 +747,7 @@ async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, 
       await tx.query(`insert into relay_draft (item_id, role, position, title, why, mail_message_id, source_note, original_body, origin) values ($1, 'follow', $2, $3, $4, $5, $6, $7, $8)`,
         [itemId, next + index, f.title, f.why, f.mailId, note, f.mailId ? originals.get(f.mailId) ?? null : null, origin]);
     }
-    await tx.query("delete from relay_todo where item_id = $1 and state = 'suggested'", [itemId]);
+    if (!opts.keepTodos) await tx.query("delete from relay_todo where item_id = $1 and state = 'suggested'", [itemId]);
     for (const t of todos) {
       const title = String(t.title ?? "").trim().slice(0, 160);
       if (!title) continue;
@@ -1221,7 +1222,8 @@ export async function rewriteDraft(draftId: string, ownerId: string, instruction
   return { body, note: wantTo?.length && !toOk ? `${note} I left To unchanged: I only change it to an address already on the draft or one you write out.` : note };
 }
 
-const claimsAttachment = (text: string) => /\b(attached|enclosed|attaching|i've attached|please find)\b/i.test(text);
+/** Says a file is attached; nothing can be attached from Relay's chat or desk, so such a change is refused. */
+export const claimsAttachment = (text: string) => /\b(attached|enclosed|attaching|i've attached|please find)\b/i.test(text);
 
 /**
  * Saves an AI change to a Relay draft through the mail CLI (editDraft), keeping the copy it replaced in the draft's
@@ -1247,10 +1249,11 @@ export type DraftEdit = { body?: string; subject?: string; to?: string[]; cc?: s
 const ADDRESS = /^[^@\s,;<>()"']+@[^@\s,;<>()"']+\.[a-z]{2,}$/i;
 
 /**
- * Alex's own edit of an unsent Relay draft, on the version he saw. A body change keeps the copy it replaced, so Undo puts
- * it back like any of Relay's changes. Not while a send is held or scheduled: that version is pinned, so he cancels first.
+ * The checks before a change to an unsent Relay draft, on the version the editor saw: it is still a draft, nobody changed
+ * it since, no send is held or scheduled (that version is pinned, so it is cancelled first), and the addresses, subject and
+ * text are usable. Returns the mail to change. Shared by Alex's own edit and the desk, whose dry run stops here.
  */
-export async function editRelayDraft(draftId: string, ownerId: string, updatedAt: string, edit: DraftEdit): Promise<void> {
+export async function checkRelayEdit(draftId: string, ownerId: string, updatedAt: string, edit: DraftEdit): Promise<MailDraft> {
   const relayDraft = await relayDraftForOwner(draftId, ownerId);
   if (!relayDraft?.mail_message_id) throw new RelayError(404, "Not found");
   const mail = await readMailDraft(relayDraft.mail_message_id, ownerId);
@@ -1266,8 +1269,18 @@ export async function editRelayDraft(draftId: string, ownerId: string, updatedAt
   if (edit.to && !edit.to.length) throw new RelayError(400, "Add someone to send it to.");
   if (edit.subject !== undefined && (!edit.subject.trim() || edit.subject.length > 300)) throw new RelayError(400, "The subject must be 1 to 300 characters.");
   if (edit.body !== undefined && !edit.body.trim()) throw new RelayError(400, "The email is empty.");
+  return mail;
+}
+
+/**
+ * An edit of an unsent Relay draft, on the version the editor saw: Alex's own by default, or the desk's (change.by
+ * "relay"). A body change keeps the copy it replaced, so Undo puts it back like any of Relay's changes.
+ */
+export async function editRelayDraft(draftId: string, ownerId: string, updatedAt: string, edit: DraftEdit,
+  change: { reason: string; by: HistoryEntry["by"] } = { reason: "Your edit", by: "alex" }): Promise<void> {
+  const mail = await checkRelayEdit(draftId, ownerId, updatedAt, edit);
   const changes = { subject: edit.subject, to: edit.to, cc: edit.cc, bcc: edit.bcc, body: edit.body };
-  if (edit.body !== undefined && edit.body !== (await editableCopy(mail)).main) await saveDraftBody(draftId, mail, changes, { reason: "Your edit", by: "alex" });
+  if (edit.body !== undefined && edit.body !== (await editableCopy(mail)).main) await saveDraftBody(draftId, mail, changes, change);
   else await editDraft(mail, { ...changes, body: undefined });
 }
 

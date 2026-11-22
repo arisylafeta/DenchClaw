@@ -11,6 +11,7 @@ import type { MailDraft } from "./mail-types";
 import { queryPg, withPgTransaction } from "./postgres";
 import { readRelayItem, relayDraftForOwner, RelayError, type RelayItem } from "./relay";
 import { ownText } from "./relay-context-core";
+import { matchesQuery } from "./relay-desk-core";
 import {
   alexFill, fitLabel, fitTier, isUk, MAX_FITS, shellOnly, mergeFills, missingFill, parseFills, pennyCardFor, priceFor, priceGaps, rankFits, readAsk, yearFrom,
   type Ask, type Fx, type PennyCard, type RankedFit,
@@ -324,17 +325,34 @@ export async function priceDraft(draftId: string, ownerId: string, now = new Dat
   return changeFills(draftId, (current) => mergeFills(current, fresh));
 }
 
-/** Alex's price for one gap (whole pounds), or null to clear it and leave the gap open. Marks the fill his. */
-export async function setFill(draftId: string, ownerId: string, key: string, value: number | null): Promise<PriceFill[]> {
+/**
+ * Alex's price for one gap (whole pounds), or null to clear it and leave the gap open. Marks the fill his. by "relay":
+ * the desk set it in the chat, so it stays Relay's (yellow) until Alex accepts or changes it, and a re-price may replace it.
+ */
+export async function setFill(draftId: string, ownerId: string, key: string, value: number | null, by: PriceFill["by"] = "alex"): Promise<PriceFill[]> {
   const { gaps } = await openDraft(draftId, ownerId);
   return changeFills(draftId, (current) => {
     const gap = gaps.find((g) => g.key === key);
     if (!gap) throw new RelayError(404, "That price is no longer in the draft.");
     const known = current.find((f) => f.key === key);
     // A gap Relay has not priced yet takes Alex's price with nothing worked out beside it.
-    const mine = alexFill(known ?? { ...missingFill(key, gap.label, false), working: ["Alex's price."] }, value);
-    return known ? current.map((f) => (f.key === key ? mine : f)) : [...current, mine];
+    const base = known ?? { ...missingFill(key, gap.label, false), working: [by === "alex" ? "Alex's price." : "Relay's price, set in the chat."] };
+    const mine = alexFill(by === "relay" && known ? { ...base, working: [...base.working, "Changed by Relay in the chat."] } : base, value);
+    const fill = { ...mine, by };
+    return known ? current.map((f) => (f.key === key ? fill : f)) : [...current, fill];
   });
+}
+
+/** The price gaps in a draft that can still be changed, for the desk's dry run: what setFill would check, without writing. */
+export async function draftPriceGaps(draftId: string, ownerId: string): Promise<{ key: string; label: string }[]> {
+  return (await openDraft(draftId, ownerId)).gaps;
+}
+
+/** Published marketplace listings whose title has every word of the query, newest reader first (the desk's marketplace_listings). */
+export async function marketplaceListings(query: string, limit: number): Promise<{ listings: Candidate[]; errors: string[] }> {
+  const errors: string[] = [];
+  const hit = (await marketplace(errors)).filter((c) => matchesQuery(`${c.title} ${c.make ?? ""} ${c.model ?? ""}`, query));
+  return { listings: hit.slice(0, limit), errors };
 }
 
 /** Alex accepts Relay's price for one gap as it is: the fill becomes his, so a re-price leaves it. */
