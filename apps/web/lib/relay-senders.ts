@@ -11,6 +11,22 @@ export type SenderKey = (typeof SENDERS)[number]["key"];
 
 export const isSenderKey = (value: unknown): value is SenderKey => SENDERS.some((sender) => sender.key === value);
 
+/** supply@ and buy@ are team inboxes: their emails come from "The ReBattery team", never from Alex by name. */
+export const isTeamSender = (identity: string | null | undefined): boolean => identity === "supply" || identity === "buy";
+
+export const TEAM_NAME = "The ReBattery team";
+
+/**
+ * Swaps the name under a draft's closing line ("Best,\nAlex") for the team's, or back, when the draft moves between
+ * Alex's address and a team inbox. Anything else at the end of the copy is left alone.
+ */
+export function swapSignOff(main: string, toTeam: boolean): string {
+  const [from, to] = toTeam ? ["Alex", TEAM_NAME] : [TEAM_NAME, "Alex"];
+  const close = main.trimEnd().match(/(^|\n)([^\n]{1,30},)\n([^\n]+)$/);
+  if (!close || close[3].trim() !== from) return main;
+  return `${main.trimEnd().slice(0, close.index! + close[1].length)}${close[2]}\n${to}`;
+}
+
 /** Why the mail tool would not hand a draft to another sender, in plain words. Null when it has no better words. */
 export function senderRefusal(refused: string, address: string): string | null {
   const words: Record<string, string> = {

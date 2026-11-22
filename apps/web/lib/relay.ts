@@ -15,7 +15,7 @@ import { sendAtProblem, UNDO_SEND_SECONDS } from "./relay-send-time";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
 import { dealResultFits, dealSummaryText, isPersonalDomain, ownsDeal, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
-import { SENDERS, senderRefusal, type SenderKey } from "./relay-senders";
+import { isTeamSender, SENDERS, senderRefusal, swapSignOff, type SenderKey } from "./relay-senders";
 import { contextPack, HAS_FILES_SQL } from "./relay-context";
 import { knownBackground, NO_PACK, SINCE_NOTE, sinceFrom, stripQuoted, type Pack, type PackSource } from "./relay-context-core";
 import { julesReplies } from "./relay-jules";
@@ -322,7 +322,7 @@ export class RelayError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
 }
 
-const DRAFT_SYSTEM = (rules: string[], guide?: string | null) => `You are Relay, drafting emails for Alex Polglase, founder of ReBattery (a UK marketplace and broker for used EV and storage batteries).
+const DRAFT_SYSTEM = (rules: string[], guide?: string | null, identity?: string | null) => `You are Relay, drafting emails for Alex Polglase, founder of ReBattery (a UK marketplace and broker for used EV and storage batteries).
 Write exactly what Alex asked for in his note, in his voice.${voiceGuideBlock(guide)} Follow these writing rules strictly:
 ${rules.map((r) => `- ${r}`).join("\n")}
 - Never invent facts: prices, quantities, dates, tests, partners, logistics or availability must come from the thread, the deal, Alex's note or the background Relay looked up. Where something only Alex knows is missing, leave [BLANK: what is needed] in its place, for example [BLANK: your price per kWh]. He fills it in before it goes.
@@ -331,7 +331,7 @@ ${rules.map((r) => `- ${r}`).join("\n")}
 - If Alex already promised something on the thread and it hasn't happened yet, don't repeat the promise in vaguer words: say sorry in a few words and give the next step, with [BLANK: when] for a date only Alex knows.
 - Don't repeat what Alex already told them in his last email. Say what's new, or what's needed from them.
 - Nothing is attached to this draft. Never write that something is attached, enclosed or included as a file. If a file is needed, say you will send it, and add a to-do.
-${greetingRule(!!guide)}
+${greetingRule(!!guide, identity)}
 - No em dashes. British English.
 Return ONLY JSON:
 {"subject": "Re: …" (keep the thread's subject, unless it is a calendar invitation or a newsletter they replied to: then a short subject about what this email is about), "body": "the reply text",
@@ -646,7 +646,7 @@ export async function draftAsk(itemId: string, ownerId: string): Promise<RelayIt
   if (!item) throw new RelayError(404, "Not found");
   // Drafted straight from the checklist: Alex's own note on the email is left as it is.
   const ctx = await draftContext(item, ownerId, instruction);
-  const parsed = parseJson(await askAgent(DRAFT_SYSTEM(ctx.rules, ctx.guide), ctx.prompt));
+  const parsed = parseJson(await askAgent(DRAFT_SYSTEM(ctx.rules, ctx.guide, ctx.identity), ctx.prompt));
   await saveDraftOutputs(item, ownerId, askLabel(view.checklist), ctx, parsed, []);
   return (await readRelayItem(itemId, ownerId))!;
 }
@@ -695,7 +695,7 @@ export async function draftFromNote(itemId: string, ownerId: string, note: strin
     return (await readRelayItem(itemId, ownerId))!;
   }
   const ctx = await draftContext(item, ownerId, note);
-  const parsed = parseJson(await askAgent(DRAFT_SYSTEM(ctx.rules, ctx.guide), ctx.prompt));
+  const parsed = parseJson(await askAgent(DRAFT_SYSTEM(ctx.rules, ctx.guide, ctx.identity), ctx.prompt));
   await saveDraftOutputs(item, ownerId, note, ctx, parsed, []);
   return (await readRelayItem(itemId, ownerId))!;
 }
@@ -1164,6 +1164,12 @@ export async function changeSender(draftId: string, ownerId: string, identity: S
   if (held) throw new RelayError(409, "Undo or cancel the send before changing who it is from.");
   try {
     await changeDraftIdentity(mail, identity);
+    if (isTeamSender(mail.identity_key) !== isTeamSender(identity)) {
+      const moved = await readMailDraft(mail.id, ownerId);
+      const main = moved && (await editableCopy(moved)).main;
+      const swapped = main && swapSignOff(main, isTeamSender(identity));
+      if (moved && swapped && swapped !== main) await editDraft(moved, { body: swapped });
+    }
   } catch (error) {
     const address = SENDERS.find((sender) => sender.key === identity)?.address ?? identity;
     const words = error instanceof DraftActionError ? senderRefusal(error.message.split(":")[0], address) : null;

@@ -43,7 +43,11 @@ export function textToHtml(body: string, signatureHtml = ""): string {
 
 /** Signatures an identity used before its current one. A draft written earlier (one pinned to a send time can't be
  * re-signed) still ends with one; it is split off the same way, so it never shows as part of the copy. */
-const RETIRED_SIGNATURES = ["Alex Polglase\nFounder & CEO\nrebattery.io | alex@rebattery.io"];
+const RETIRED_SIGNATURES = [
+  "Alex Polglase\nFounder & CEO\nrebattery.io | alex@rebattery.io",
+  "Alex Polglase\nSupply\nrebattery.io | supply@rebattery.io",
+  "Alex Polglase\nSourcing\nrebattery.io | buy@rebattery.io",
+];
 
 /** Splits a draft's text into the copy a person writes and the identity signature frozen at its end. */
 export function splitCopy(bodyText: string | null, signatureText: string | null): { main: string; signed: boolean } {

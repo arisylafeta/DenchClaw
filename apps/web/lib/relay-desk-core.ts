@@ -1,5 +1,5 @@
 import type { PriceFill, StockFit } from "./relay-price-types";
-import { voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
+import { teamVoiceRule, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { SEND_MODES, type SendMode, type ToKind } from "./relay-talk-core";
 
 /**
@@ -104,6 +104,8 @@ export type DeskState = {
   item: {
     id: string; who: { name: string | null; email: string | null; company: string | null }; contact_type: string | null; situation: string | null;
     headline: string; tab: string; waiting_since: string | null; sending_as: string; reply_to: string | null;
+    /** The reply goes from a team inbox (supply@, buy@): it is written and signed as the team. */
+    team_inbox?: string | null;
     deal: { label: string | null; summary: string | null; quantity: string | null; status: string | null; price: string | null; stage: string | null } | null;
   };
   thread: DeskMessage[];
@@ -206,7 +208,7 @@ ${rules.map((r) => `- ${r}`).join("\n")}
 
 ${input.lessons ? `## Alex's email-writing lessons (follow every one)\n${input.lessons}\n\n` : ""}## Style
 - British English, no em dashes, no signature block (it is added automatically).
-${voice || "- Greet by the name they sign with; sign off \"Best,\" then \"Alex\" on its own line.\n"}
+${input.state.item.team_inbox ? `${teamVoiceRule(input.state.item.team_inbox)}\n` : ""}${voice || (input.state.item.team_inbox ? "- Greet by the name they sign with.\n" : "- Greet by the name they sign with; sign off \"Best,\" then \"Alex\" on its own line.\n")}
 ## The email (as it is now; relay_state has the full detail)
 ${stateText(input.state)}
 

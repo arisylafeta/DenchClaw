@@ -34,4 +34,14 @@ describe("voice blocks", () => {
     expect(block).toContain("Alex replied:\nHi Tom,");
     expect(greetingRule(true)).toContain("How Alex writes");
   });
+  it("signs a team inbox's email as the team, whatever the voice says", () => {
+    for (const hasVoice of [true, false]) {
+      const rule = greetingRule(hasVoice, "buy");
+      expect(rule).toContain("buy@rebattery.io");
+      expect(rule).toContain('"The ReBattery team"');
+      expect(rule).toContain("never use Alex's name");
+      expect(rule).not.toContain('"Best,\\nAlex"');
+    }
+    expect(greetingRule(false, "alex")).toContain('sign off "Best,\\nAlex"');
+  });
 });

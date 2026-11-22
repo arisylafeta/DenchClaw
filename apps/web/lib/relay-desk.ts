@@ -6,6 +6,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { queryPg, withPgTransaction } from "./postgres";
 import { readMailDraft } from "./crm-postgres/mail";
 import { identitySignatures, splitCopy } from "./mail-draft-actions";
+import { isTeamSender } from "./relay-senders";
 import { mailboxScopeSql } from "./mail-scope";
 import { getSupabaseAdminClient } from "./platform-admin/supabase";
 import {
@@ -163,12 +164,15 @@ export async function deskState(item: RelayItem, ownerId: string): Promise<DeskS
     fills: parseFills(r.fills).map(({ key, label, value, by, basis, working, warnings }) => ({ key, label, value, by, basis, working, warnings })),
   }));
   const deal = item.deal ?? null;
+  // Who the reply goes from: the draft's sender once there is one (Alex may have switched it), else Relay's pick.
+  const from = rows.find((r) => r.role === "primary" && r.mail_message_id)?.identity_key ?? ctx.identity;
   return {
     item: {
       id: item.id, who: { name: item.counterpart_name, email: item.counterpart_email, company: item.company }, contact_type: item.contact_type,
       situation: item.situation, headline: item.headline, tab: item.tab, waiting_since: item.waiting_since,
       sending_as: ctx.identity === "supply" ? "supply@rebattery.io (ReBattery's seller inbox)" : ctx.identity === "buy" ? "buy@rebattery.io (ReBattery's buyer inbox)" : "Alex's own address",
       reply_to: ctx.to || null,
+      team_inbox: isTeamSender(from) ? `${from}@rebattery.io` : null,
       deal: item.bulk_listing_id ? { label: item.deal_label, summary: deal?.summary ?? null, quantity: deal?.quantity ?? null, status: deal?.status ?? null, price: deal?.price ?? null, stage: deal?.stage ?? null } : null,
     },
     thread: ctx.messages.map((m) => ({

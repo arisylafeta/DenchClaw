@@ -177,4 +177,13 @@ describe("marketplace search words", () => {
     expect(matchesQuery("VW ID.3 62 kWh pack 2020", "tesla")).toBe(false);
     expect(matchesQuery("anything", "")).toBe(true);
   });
+  it("writes a team inbox's reply as the team, not as Alex", () => {
+    const team = buildBrief({ mode: "quick", state: { ...STATE, item: { ...STATE.item, team_inbox: "supply@rebattery.io" } }, rules: [], voice: null, now: new Date("2026-11-22T09:00:00Z") });
+    expect(team).toContain("goes from supply@rebattery.io, a ReBattery team inbox");
+    expect(team).toContain('"The ReBattery team"');
+    expect(team).not.toContain('then \\"Alex\\" on its own line');
+    const own = buildBrief({ mode: "quick", state: STATE, rules: [], voice: null, now: new Date("2026-11-22T09:00:00Z") });
+    expect(own).not.toContain("team inbox");
+    expect(own).toContain('"Alex" on its own line');
+  });
 });

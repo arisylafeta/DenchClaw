@@ -1,5 +1,7 @@
 /** How Relay puts the owner's voice into a draft prompt. Pure, shared by the server and its tests; mirrors relay_voice_study.py. */
 
+import { isTeamSender, TEAM_NAME } from "./relay-senders";
+
 export type VoiceExample = { inbound: string; reply: string; contact_type: string | null; sent_at: string };
 
 const WORD = /[a-z]{4,}/g;
@@ -34,7 +36,15 @@ export function voiceExamplesBlock(card: string | null, examples: VoiceExample[]
   return `${parts.join("\n\n")}\n\n`;
 }
 
-/** With a voice, the greeting and sign-off follow it instead of the fixed "Best, Alex". */
-export const greetingRule = (hasVoice: boolean) => hasVoice
+const GREET = `- Greet by the name they sign with, or the one Alex used last ("Hi AJ," when Andrew signs "AJ"; otherwise first name, "Hi Mark,").`;
+
+/** How a team inbox (supply@, buy@) writes: as the team, never as Alex. Overrides any sign-off in his voice guide. */
+export const teamVoiceRule = (address: string) =>
+  `- This email goes from ${address}, a ReBattery team inbox, not from Alex: write as the team ("we", "our", never "I"), never use Alex's name, and sign off "Best," then "${TEAM_NAME}" on its own line. This overrides any sign-off in the voice guide.`;
+
+/** With a voice, the greeting and sign-off follow it instead of the fixed "Best, Alex". A team inbox signs as the team. */
+export const greetingRule = (hasVoice: boolean, identity?: string | null) => isTeamSender(identity)
+  ? `${GREET}\n${teamVoiceRule(`${identity}@rebattery.io`)} Do not add a signature block; it is added automatically.`
+  : hasVoice
   ? `- Greet by the name they sign with, or the one Alex used last ("Hi AJ," when Andrew signs "AJ"; otherwise first name, "Hi Mark,"). Sign off the way "How Alex writes" describes, with "Alex" on its own line. Do not add a signature block; it is added automatically.`
   : `- Greet by the name they sign with, or the one Alex used last ("Hi AJ," when Andrew signs "AJ"; otherwise first name, "Hi Mark,"), sign off "Best,\\nAlex". Do not add a signature block; it is added automatically.`;
