@@ -40,9 +40,11 @@ const isLocked = (d: TalkDraft) => d.state === "sent" || !d.mail || !!d.mail.sch
  * marks on Relay's last change, price fields and other gaps in the sentence, and the working in the margin only he sees.
  * Under it: the linked emails that go with the reply, and Send.
  */
-export function DraftSheet({ drafts, current, onTab, name, typed, stock, busy, run, actions, job, jobNote, pendingFirst }: {
+export function DraftSheet({ drafts, current, onTab, name, typed, stock, busy, run, actions, job, jobNote, pendingFirst, hold }: {
   drafts: TalkDraft[]; current: TalkDraft | null; onTab: (id: string) => void; name: string; typed: Typed; stock: StockView | { error: string } | null;
   busy: "send" | "gmail" | "later" | "undo" | null; run: SendRun | null; actions: SheetActions; job: RelayJob | null; jobNote: string; pendingFirst: boolean;
+  /** Relay's desk is changing these emails: Send, the prices, the gaps, Edit and Undo wait, and this says why. */
+  hold: string | null;
 }) {
   const shown = drafts.filter((d) => d.mail);
   const [marksOn, setMarksOn] = useState(true);
@@ -63,9 +65,9 @@ export function DraftSheet({ drafts, current, onTab, name, typed, stock, busy, r
         })}
       </div>
       <Panel key={current.id} d={current} name={name} typed={typed[current.id] ?? {}} stock={current.role === "primary" && current.to_kind === "buyer" ? stock : null}
-        marksOn={marksOn} onMarks={() => setMarksOn(!marksOn)} actions={actions} busy={busy} />
+        marksOn={marksOn} onMarks={() => setMarksOn(!marksOn)} actions={actions} busy={busy} hold={hold} />
       {linked.length > 0 && <Linked drafts={linked} actions={actions} />}
-      {(run || (primary && !isLocked(primary))) && <SendBar drafts={drafts} primary={primary} current={current} typed={typed} busy={busy} run={run} actions={actions} />}
+      {(run || (primary && !isLocked(primary))) && <SendBar drafts={drafts} primary={primary} current={current} typed={typed} busy={busy} run={run} actions={actions} hold={hold} />}
     </section>
   );
 }
@@ -98,9 +100,9 @@ function NoReply({ job, note, writing, name }: { job: RelayJob | null; note: str
 
 // ---------------------------------------------------------------- one email
 
-function Panel({ d, name, typed, stock, marksOn, onMarks, actions, busy }: {
+function Panel({ d, name, typed, stock, marksOn, onMarks, actions, busy, hold }: {
   d: TalkDraft; name: string; typed: Record<number, string>; stock: StockView | { error: string } | null; marksOn: boolean; onMarks: () => void; actions: SheetActions;
-  busy: string | null;
+  busy: string | null; hold: string | null;
 }) {
   const mail = d.mail!;
   const locked = isLocked(d);
@@ -126,7 +128,7 @@ function Panel({ d, name, typed, stock, marksOn, onMarks, actions, busy }: {
     <div className={w.panel} role="tabpanel" id="relay-draft-panel" aria-labelledby={`relay-tab-${d.id}`}>
       <span className={w.toRow}>
         <span className={w.to}>{head}{d.role === "follow" && d.why ? ` ${d.why}` : ""}</span>
-        {!locked && <button type="button" className={w.editBtn} onClick={() => setEditing(true)}><Pencil size={12} aria-hidden />Edit</button>}
+        {!locked && <button type="button" className={w.editBtn} disabled={!!hold} title={hold ?? undefined} onClick={() => setEditing(true)}><Pencil size={12} aria-hidden />Edit</button>}
       </span>
       {d.state === "sent" && <p className={w.status}>Sent.</p>}
       {scheduled && (
@@ -137,7 +139,7 @@ function Panel({ d, name, typed, stock, marksOn, onMarks, actions, busy }: {
         </p>
       )}
       {mail.failure && mail.state === "draft" && <p className={w.error} role="alert">The last try didn't go: {failureText(mail.failure, mail.state)}</p>}
-      <Body d={d} typed={typed} stock={stock} locked={locked} marksOn={marksOn} onMarks={onMarks} actions={actions} />
+      <Body d={d} typed={typed} stock={stock} locked={locked} hold={hold} marksOn={marksOn} onMarks={onMarks} actions={actions} />
       {d.leaks.map((leak, k) => <p key={k} className={w.error} role="alert">Can't go like this: {leak.text.replace(/^./, (c) => c.toLowerCase())} Ask Relay to take it out.</p>)}
       {guard && <span className={w.guard}>{guard}</span>}
     </div>
@@ -147,8 +149,8 @@ function Panel({ d, name, typed, stock, marksOn, onMarks, actions, busy }: {
 type Note = { key: string; body: ReactNode };
 
 /** The body in paragraphs, each with its notes in the margin: the last change with Undo, and each price's working. */
-function Body({ d, typed, stock, locked, marksOn, onMarks, actions }: {
-  d: TalkDraft; typed: Record<number, string>; stock: StockView | { error: string } | null; locked: boolean; marksOn: boolean; onMarks: () => void; actions: SheetActions;
+function Body({ d, typed, stock, locked, hold, marksOn, onMarks, actions }: {
+  d: TalkDraft; typed: Record<number, string>; stock: StockView | { error: string } | null; locked: boolean; hold: string | null; marksOn: boolean; onMarks: () => void; actions: SheetActions;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const paras = paragraphs(d.mail!.main, marksOn && !locked ? d.marks : []);
@@ -167,8 +169,8 @@ function Body({ d, typed, stock, locked, marksOn, onMarks, actions }: {
         <span className={w.note}>
           <span>{why}</span>
           <span className={w.noteBtns}>
-            {d.change && !back && <button type="button" className={w.linkbtn} onClick={() => void actions.undo(d.id, false)}>Undo</button>}
-            {d.undone && <button type="button" className={w.linkbtn} onClick={() => void actions.undo(d.id, true)}>Redo</button>}
+            {d.change && !back && <button type="button" className={w.linkbtn} disabled={!!hold} onClick={() => void actions.undo(d.id, false)}>Undo</button>}
+            {d.undone && <button type="button" className={w.linkbtn} disabled={!!hold} onClick={() => void actions.undo(d.id, true)}>Redo</button>}
             {d.marks.length > 0 && <button type="button" className={w.linkbtn} aria-pressed={!marksOn} onClick={onMarks}>{marksOn ? "Hide marks" : "Show marks"}</button>}
           </span>
         </span>
@@ -182,7 +184,7 @@ function Body({ d, typed, stock, locked, marksOn, onMarks, actions }: {
     for (const piece of p) {
       if (piece.kind !== "price") continue;
       if (firstPrice < 0) firstPrice = k;
-      notes[k].push({ key: `price-${piece.key}`, body: <PriceNote fill={fillOf(piece.key)} locked={locked} onUse={() => void actions.acceptPrice(d.id, piece.key)} /> });
+      notes[k].push({ key: `price-${piece.key}`, body: <PriceNote fill={fillOf(piece.key)} locked={locked || !!hold} onUse={() => void actions.acceptPrice(d.id, piece.key)} /> });
     }
   });
   if (firstPrice >= 0) {
@@ -218,7 +220,7 @@ function Body({ d, typed, stock, locked, marksOn, onMarks, actions }: {
     <div className={cx(w.doc, !margin && w.docSolo)} ref={root}>
       {paras.map((p, k) => (
         <Row key={k} notes={notes[k]} margin={margin}>
-          {p.map((piece, j) => <PieceView key={j} piece={piece} d={d} typed={typed} locked={locked} fill={piece.kind === "price" ? fillOf(piece.key) : undefined} actions={actions} onNext={next} />)}
+          {p.map((piece, j) => <PieceView key={j} piece={piece} d={d} typed={typed} locked={locked} hold={hold} fill={piece.kind === "price" ? fillOf(piece.key) : undefined} actions={actions} onNext={next} />)}
         </Row>
       ))}
     </div>
@@ -311,13 +313,13 @@ function EditDraft({ d, onCancel, onSave }: { d: TalkDraft; onCancel: () => void
   );
 }
 
-function PieceView({ piece, d, typed, locked, fill, actions, onNext }: {
-  piece: Piece; d: TalkDraft; typed: Record<number, string>; locked: boolean; fill: PriceFill | undefined; actions: SheetActions; onNext: (from: HTMLInputElement) => void;
+function PieceView({ piece, d, typed, locked, hold, fill, actions, onNext }: {
+  piece: Piece; d: TalkDraft; typed: Record<number, string>; locked: boolean; hold: string | null; fill: PriceFill | undefined; actions: SheetActions; onNext: (from: HTMLInputElement) => void;
 }) {
   if (piece.kind === "text") return piece.marked ? <span className={w.mark}>{piece.text}</span> : <>{piece.text}</>;
   if (piece.kind === "price") {
     if (locked) return <span className={piece.marked ? w.mark : undefined}>{fill?.value != null ? `£${priceText(fill.value)}` : "[price]"}</span>;
-    return <PriceField key={`${piece.key}:${fill?.value ?? ""}:${fill?.by ?? ""}`} label={piece.label} fill={fill} marked={piece.marked}
+    return <PriceField key={`${piece.key}:${fill?.value ?? ""}:${fill?.by ?? ""}`} label={piece.label} fill={fill} marked={piece.marked} hold={hold}
       onSave={(value) => actions.setPrice(d.id, piece.key, value)} onNext={onNext} />;
   }
   const value = typed[piece.index] ?? "";
@@ -325,6 +327,7 @@ function PieceView({ piece, d, typed, locked, fill, actions, onNext }: {
   const label = piece.label || "fill in";
   return (
     <input className={cx(w.field, w.gap, value.trim() && w.filled, piece.marked && w.fieldMarked)} value={value} placeholder={label} aria-label={`Fill in: ${label}`}
+      disabled={!!hold} title={hold ?? undefined}
       style={{ width: `${Math.min(44, Math.max(7, (value || label).length + 2))}ch` }}
       onChange={(e) => actions.typeGap(d.id, piece.index, e.target.value)} onBlur={() => void actions.saveGaps(d.id)}
       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onNext(e.currentTarget); } }} />
@@ -332,8 +335,8 @@ function PieceView({ piece, d, typed, locked, fill, actions, onNext }: {
 }
 
 /** A price in the sentence: Relay's in yellow until Alex changes or keeps it, his own plain, an empty one dashed. */
-function PriceField({ label, fill, marked, onSave, onNext }: {
-  label: string; fill: PriceFill | undefined; marked: boolean; onSave: (value: number | null) => Promise<boolean>; onNext: (from: HTMLInputElement) => void;
+function PriceField({ label, fill, marked, hold, onSave, onNext }: {
+  label: string; fill: PriceFill | undefined; marked: boolean; hold: string | null; onSave: (value: number | null) => Promise<boolean>; onNext: (from: HTMLInputElement) => void;
 }) {
   const [text, setText] = useState<string | null>(null);
   const [bad, setBad] = useState<string | null>(null);
@@ -358,8 +361,8 @@ function PriceField({ label, fill, marked, onSave, onNext }: {
     if (e.key === "Escape") { setText(null); setBad(null); }
   };
   return (
-    <span className={cx(w.price, state, marked && w.fieldMarked)} title={bad ?? undefined}>
-      £<input value={shown} inputMode="decimal" placeholder="price" aria-label={`Price for ${label}${fill?.basis ? `, ${fill.basis}` : ""}`} aria-invalid={!!bad || undefined}
+    <span className={cx(w.price, state, marked && w.fieldMarked)} title={bad ?? hold ?? undefined}>
+      £<input value={shown} disabled={!!hold} inputMode="decimal" placeholder="price" aria-label={`Price for ${label}${fill?.basis ? `, ${fill.basis}` : ""}`} aria-invalid={!!bad || undefined}
         style={{ width: `${Math.max(5, shown.length + 1)}ch` }} onChange={(e) => setText(e.target.value)} onBlur={() => void commit()} onKeyDown={onKey} />
     </span>
   );
@@ -439,8 +442,8 @@ function LinkedRow({ d, actions }: { d: TalkDraft; actions: SheetActions }) {
 
 // ---------------------------------------------------------------- Send
 
-function SendBar({ drafts, primary, current, typed, busy, run, actions }: {
-  drafts: TalkDraft[]; primary: TalkDraft | null; current: TalkDraft; typed: Typed; busy: string | null; run: SendRun | null; actions: SheetActions;
+function SendBar({ drafts, primary, current, typed, busy, run, actions, hold }: {
+  drafts: TalkDraft[]; primary: TalkDraft | null; current: TalkDraft; typed: Typed; busy: string | null; run: SendRun | null; actions: SheetActions; hold: string | null;
 }) {
   const gate = sendGate(drafts, typed);
   const [later, setLater] = useState(false);
@@ -467,15 +470,15 @@ function SendBar({ drafts, primary, current, typed, busy, run, actions }: {
   return (
     <>
       {primary && !isLocked(primary) && <div className={w.sendbar}>
-        <button type="button" className={w.send} disabled={!gate.ready || !!busy} aria-describedby="relay-gate" onClick={() => void actions.sendAll()}>
+        <button type="button" className={w.send} disabled={!gate.ready || !!busy || !!hold} aria-describedby="relay-gate" onClick={() => void actions.sendAll()}>
           {busy === "send" ? "Sending…" : gate.label}
         </button>
-        <span id="relay-gate" className={cx(w.gate, gate.tone === "ok" && w.ok, gate.tone === "danger" && w.danger)}>{gate.line}</span>
+        <span id="relay-gate" className={cx(w.gate, (!!hold || gate.tone === "ok") && w.ok, !hold && gate.tone === "danger" && w.danger)}>{hold ?? gate.line}</span>
         <span className={w.secondary}>
-          <button type="button" className={w.ghost} disabled={!gmailReady || !!busy} title={gmailReady ? undefined : "Fill the gaps first"} onClick={() => void actions.toGmail(current)}>
+          <button type="button" className={w.ghost} disabled={!gmailReady || !!busy || !!hold} title={gmailReady ? undefined : "Fill the gaps first"} onClick={() => void actions.toGmail(current)}>
             {busy === "gmail" ? "Putting it in Gmail…" : current.state === "gmail" ? "Update in Gmail drafts" : "Put in Gmail drafts"}
           </button>
-          <button type="button" className={w.ghost} aria-expanded={later} disabled={!replyGate?.ready || !!busy} onClick={() => setLater(!later)}>Send later<ChevronDown size={13} aria-hidden className={w.laterChevron} /></button>
+          <button type="button" className={w.ghost} aria-expanded={later} disabled={!replyGate?.ready || !!busy || !!hold} onClick={() => setLater(!later)}>Send later<ChevronDown size={13} aria-hidden className={w.laterChevron} /></button>
           {later && (
             <div className={w.menu} role="dialog" aria-label="Send the reply later">
               <span className={w.menuNote}>The reply only. Linked emails stay as drafts.</span>

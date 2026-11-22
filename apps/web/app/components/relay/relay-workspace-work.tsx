@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState, type RefObject, type SetState
 import { ArrowUpRight, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import type { RelayItem, RelayJob, RelayReviewItem } from "@/lib/relay";
 import type { SendOutcome, TalkDraft, TalkState } from "@/lib/relay-talk";
+import type { DeskMode } from "@/lib/relay-desk-core";
+import { foundRun, keepPolling, runState, type DeskTalk, type Following } from "@/lib/relay-desk-view-core";
 import type { PriceFill, StockFit } from "@/lib/relay-price-types";
 import type { SendMode } from "@/lib/relay-talk-core";
 import { fillGaps } from "@/lib/relay-ways-core";
@@ -11,7 +13,7 @@ import { dealLine, draftNeeds, earlierRows, gapSpans, sendGate, versionsOf, type
 import { boldSpans, cleanEmail, emailParagraphs, firstLine, type ThreadEmail } from "@/lib/relay-email-clean";
 import { AUTO_NOTE } from "@/lib/relay-auto-note";
 import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
-import { api, cx, failureText, firstName, firstOf } from "./relay-ui";
+import { api, cx, failureText, firstName, firstOf, statusOf } from "./relay-ui";
 import { DraftSheet, type SheetActions } from "./relay-workspace-draft";
 import { RelayChat } from "./relay-workspace-chat";
 import { SnoozeMenu } from "./relay-snooze";
@@ -25,6 +27,10 @@ export type StockView = { fits: StockFit[]; prices: PriceFill[] };
 export type SendRun = { results: SendOutcome[]; until: number };
 
 const JOB_BUSY = new Set<RelayJob["status"]>(["queued", "running", "ready", "finalising"]);
+/** How often the page reads the chat while Relay's desk works on this email. */
+const DESK_POLL_MS = 1500;
+/** Why Send, the prices and the gaps wait while the desk works: its changes and Alex's would race. */
+const DESK_HOLD = "Relay is changing these emails. Send waits until it finishes, or press Stop.";
 const message = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback);
 const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
 
@@ -38,18 +44,27 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
   say: Say; text: string; setText: (next: SetStateAction<string>) => void; composer: RefObject<HTMLTextAreaElement | null>;
   onDone?: () => void; onSnooze?: (until: string) => void; onOpen: (itemId: string) => void; onBack: () => void; refreshLists: () => Promise<void>;
 }) {
-  const [talk, setTalkState] = useState<TalkState | null>(null);
+  const [talk, setTalkState] = useState<DeskTalk | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const talkRef = useRef<TalkState | null>(null);
+  const talkRef = useRef<DeskTalk | null>(null);
   /** Every change to the talk state goes through here, so an action that awaits sees the latest drafts at once. */
-  const setTalk = useCallback((next: TalkState | null) => { talkRef.current = next; setTalkState(next); }, []);
-  const update = useCallback((fn: (t: TalkState) => TalkState) => { if (talkRef.current) setTalk(fn(talkRef.current)); }, [setTalk]);
+  const setTalk = useCallback((next: DeskTalk | null) => { talkRef.current = next; setTalkState(next); }, []);
+  const update = useCallback((fn: (t: DeskTalk) => DeskTalk) => { if (talkRef.current) setTalk(fn(talkRef.current)); }, [setTalk]);
+  // Loads are numbered as they start; `fresh` is the number of the one the page shows. An answer that started earlier than
+  // the one shown is dropped, and a desk turn only counts as ended on a load that started after it was known.
+  const loads = useRef(0);
+  const freshRef = useRef(0);
+  const [fresh, setFresh] = useState(0);
   const setDrafts = useCallback((drafts: TalkDraft[]) => update((t) => ({ ...t, drafts })), [update]);
   const patchDraft = useCallback((id: string, fn: (d: TalkDraft) => TalkDraft) => update((t) => ({ ...t, drafts: t.drafts.map((d) => (d.id === id ? fn(d) : d)) })), [update]);
 
   const load = useCallback(async () => {
+    const mine = ++loads.current;
     try {
-      const next = await api<TalkState>(`/api/relay/items/${itemId}/talk`);
+      const next = await api<DeskTalk>(`/api/relay/items/${itemId}/talk`);
+      if (mine < freshRef.current) return talkRef.current;
+      freshRef.current = mine;
+      setFresh(mine);
       setTalk(next);
       setLoadError(null);
       return next;
@@ -78,6 +93,14 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
   const [all, setAll] = useState(false);
   const current = drafts.find((d) => d.id === tab) ?? drafts[0] ?? null;
   const pickTab = (id: string) => { setTab(id); setAll(false); };
+
+  // The desk turn the page follows (see the chat below), and whether it is still working: while it is, nothing else
+  // changes the drafts.
+  const [following, setFollowingState] = useState<Following | null>(null);
+  const followingRef = useRef<Following | null>(null);
+  const setFollowing = (next: Following | null) => { followingRef.current = next; setFollowingState(next); };
+  const run = following ? runState(following, talk, fresh) : null;
+  const deskBusy = run?.kind === "running";
 
   /** The draft with these fills, and whether a gap is still open (the server's reading, worked out again here). */
   const withFills = (d: TalkDraft, fills: PriceFill[]): TalkDraft => {
@@ -131,6 +154,7 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
   };
   const [repricing, setRepricing] = useState(false);
   const reprice = async () => {
+    if (deskBusy) { say(DESK_HOLD); return; }
     const targets = (talkRef.current?.drafts ?? []).filter((d) => d.mail && d.state !== "sent" && !d.mail.scheduled && d.to_kind !== "supplier" && gapSpans(d.mail.main).some((g) => g.priceKey));
     if (!targets.length) { say("There's no price to work out in these emails."); return; }
     setRepricing(true);
@@ -155,7 +179,7 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
 
   // ---- sending
   const [busy, setBusy] = useState<"send" | "gmail" | "later" | "undo" | null>(null);
-  const [run, setRun] = useState<SendRun | null>(null);
+  const [sendRun, setRun] = useState<SendRun | null>(null);
   const toLabel = (d: TalkDraft | undefined) => {
     const to = d?.mail?.to_emails[0] ?? "";
     return item?.counterpart_email && to.toLowerCase() === item.counterpart_email.toLowerCase() && item.counterpart_name ? firstName(item.counterpart_name) : to || name;
@@ -171,6 +195,7 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
     } catch (err) { say(message(err, "Couldn't stop it.")); } finally { setBusy(null); }
   };
   const sendAll = async () => {
+    if (deskBusy) { say(DESK_HOLD); return; }
     await saves.current;
     const now = talkRef.current?.drafts ?? [];
     const gate = sendGate(now, typedRef.current);
@@ -188,10 +213,10 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
   };
   // After the hold, watch the reply until it has gone or says why not.
   useEffect(() => {
-    if (!run) return;
+    if (!sendRun) return;
     let tries = 0;
     const t = setInterval(async () => {
-      if (Date.now() < run.until || tries++ > 20) { if (tries > 20) clearInterval(t); return; }
+      if (Date.now() < sendRun.until || tries++ > 20) { if (tries > 20) clearInterval(t); return; }
       const next = await load();
       const reply = next?.drafts.find((d) => d.role === "primary");
       if (!reply) return;
@@ -199,7 +224,7 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
       else if (reply.mail?.failure || reply.mail?.state === "failed" || reply.mail?.state === "unknown") { say(`Not sent: ${failureText(reply.mail.failure, reply.mail.state)}`); clearInterval(t); }
     }, 4000);
     return () => clearInterval(t);
-  }, [run]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sendRun]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const seen = (d: TalkDraft) => d.fills.map((f) => ({ key: f.key, value: f.value }));
   const toGmail = async (d: TalkDraft) => {
@@ -230,19 +255,45 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
   };
 
   // ---- the chat
+  // Each message, and the first draft on opening, is one turn of the email's desk (a Claude Code session, lib/relay-desk.ts).
+  // The page follows the turn by reading the chat every second and a half: its work lines, its words and the drafts it
+  // changed arrive together. The one-shot paths (talk, /draft) are only used when the desk can't start (503).
   const [pending, setPending] = useState<{ text: string; started: number; first: boolean; auto?: boolean } | null>(null);
-  const [chatError, setChatError] = useState<{ text: string; message: string } | null>(null);
+  const [chatError, setChatError] = useState<{ text: string; mode: DeskMode; line: string; quiet?: boolean } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const draftsAtStart = useRef<Set<string>>(new Set());
+  const [stopAsked, setStopAsked] = useState<string | null>(null);
   const hasReply = drafts.some((d) => d.mail);
   const jobBusy = !!job && JOB_BUSY.has(job.status);
+
+  /** Starts a desk turn and follows it. "unavailable": the desk can't start here (503), so the caller uses the one-shot path. */
+  const startDesk = async (mode: DeskMode, said: string, started: number): Promise<"started" | "unavailable"> => {
+    const before = talkRef.current?.turns.map((t) => t.id) ?? [];
+    draftsAtStart.current = new Set(talkRef.current?.drafts.filter((d) => d.mail).map((d) => d.id));
+    try {
+      const out = await api<{ run: { id: string } }>(`/api/relay/items/${itemId}/desk`, { method: "POST", body: mode === "chat" ? { text: said, mode } : { mode } });
+      setFollowing({ runId: out.run.id, mode, text: said, startedAt: started, before, fromLoad: loads.current });
+      void load();
+      return "started";
+    } catch (err) {
+      if (statusOf(err) === 503) return "unavailable";
+      throw err;
+    }
+  };
+
   const ask = async (raw: string) => {
     const said = raw.trim();
-    if (!said || pending) return;
+    if (!said || pending || deskBusy) return;
     const first = !talkRef.current?.drafts.some((d) => d.mail);
     if (first && jobBusy) { say("Relay is still working on the first reply."); return; }
-    setPending({ text: said, started: Date.now(), first });
+    const started = Date.now();
+    setPending({ text: said, started, first });
     setChatError(null);
+    setNotice(null);
     setText("");
     try {
+      if (await startDesk("chat", said, started) === "started") return;
+      setNotice("The drafting session couldn't start, so Relay answered quickly instead.");
       if (first) {
         // The first message writes the reply and any follow-ons; a note that needs research starts a job instead.
         await api(`/api/relay/items/${itemId}/draft`, { method: "POST", body: { note: said } });
@@ -251,33 +302,96 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
         const target = all ? "all" : current?.id ?? "all";
         const before = new Set(talkRef.current?.drafts.map((d) => d.id));
         const next = await api<TalkState>(`/api/relay/items/${itemId}/talk`, { method: "POST", body: { text: said, target } });
-        setTalk(next);
+        setTalk({ ...next, desk: null, claudeSession: talkRef.current?.claudeSession ?? null });
         // A new email Relay added opens in its tab, so Alex sees it at once.
         const added = next.drafts.find((d) => d.mail && !before.has(d.id));
         if (added) pickTab(added.id);
       }
     } catch (err) {
-      setChatError({ text: said, message: message(err, "Something went wrong. Try again.") });
+      setChatError({ text: said, mode: "chat", line: `That didn't go through: ${message(err, "Something went wrong. Try again.")}` });
       // Never lose what Alex wrote: it goes back in the box unless he has started something new.
       setText((t) => (t.trim() ? t : said));
       void load();
     } finally { setPending(null); }
   };
+
+  /** Relay's first reply, written by the desk in quick mode (the one-shot /draft when the desk can't start). Shown as Relay's own work. */
+  const firstDraft = () => {
+    const started = Date.now();
+    setPending({ text: "", started, first: true, auto: true });
+    setChatError(null);
+    startDesk("quick", "", started)
+      .then(async (out) => {
+        if (out === "started") return;
+        await api(`/api/relay/items/${itemId}/draft`, { method: "POST", body: { note: AUTO_NOTE, mode: "quick" } });
+        await Promise.all([load(), refreshLists()]);
+      })
+      // 409: a turn is already working on it (the background draft); the next load finds it and follows it.
+      .catch((err) => (statusOf(err) === 409 ? void load() : say(message(err, "Relay couldn't write a first reply. Tell it how to answer instead."))))
+      .finally(() => setPending(null));
+  };
   // An email with no reply gets Relay's first draft as soon as it opens (once per visit), unless Alex has started typing.
   // The top of the list is usually drafted ahead of time (relay-prepare.ts); this covers the rest.
   const autoTried = useRef<string | null>(null);
   useEffect(() => {
-    if (!autoDraft || !talk || hasReply || jobBusy || pending || autoTried.current === itemId || text.trim()) return;
+    if (!autoDraft || !talk || hasReply || jobBusy || pending || talk.desk || following || autoTried.current === itemId || text.trim()) return;
     // A draft already waits on another of their emails: that one is the reply.
     if (reviewIds.some((id) => id !== itemId)) return;
     autoTried.current = itemId;
-    setPending({ text: "", started: Date.now(), first: true, auto: true });
-    setChatError(null);
-    api(`/api/relay/items/${itemId}/draft`, { method: "POST", body: { note: AUTO_NOTE, mode: "quick" } })
-      .then(() => Promise.all([load(), refreshLists()]))
-      .catch((err) => say(message(err, "Relay couldn't write a first reply. Tell it how to answer instead.")))
-      .finally(() => setPending(null));
-  }, [autoDraft, talk, hasReply, jobBusy, pending, itemId, text]); // eslint-disable-line react-hooks/exhaustive-deps
+    firstDraft();
+  }, [autoDraft, talk, hasReply, jobBusy, pending, following, itemId, text]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A turn already running when the email opens (the background draft, or one started before a reload) is followed too.
+  useEffect(() => {
+    if (followingRef.current || !talk) return;
+    const found = foundRun(talk, fresh);
+    if (!found) return;
+    draftsAtStart.current = new Set(talk.drafts.filter((d) => d.mail).map((d) => d.id));
+    setFollowing(found);
+  }, [talk, fresh]);
+
+  // While a turn runs, read the chat every second and a half: work lines, words and the drafts arrive together.
+  const polling = keepPolling(following, talk, fresh);
+  useEffect(() => {
+    if (!polling) return;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => { await load(); if (live) timer = setTimeout(tick, DESK_POLL_MS); };
+    timer = setTimeout(tick, DESK_POLL_MS);
+    return () => { live = false; clearTimeout(timer); };
+  }, [polling, load]);
+
+  // When the turn ends: a new email opens in its tab; a stopped or failed turn says so, and Alex's words go back in the box.
+  useEffect(() => {
+    const f = followingRef.current;
+    if (!f || !run || run.kind === "running") return;
+    setFollowing(null);
+    setStopAsked(null);
+    if (run.kind === "done") {
+      const added = talkRef.current?.drafts.find((d) => d.mail && d.role === "follow" && !draftsAtStart.current.has(d.id));
+      if (added) pickTab(added.id);
+      void refreshLists();
+      return;
+    }
+    setChatError({
+      text: f.text, mode: f.mode, quiet: run.kind === "stopped",
+      line: run.kind === "stopped" ? "Stopped. Anything Relay had already changed stays in the drafts, with Undo." : "Relay couldn't finish that. Anything it changed is in the drafts, with Undo.",
+    });
+    if (f.mode === "chat" && f.text) setText((t) => (t.trim() ? t : f.text));
+  }, [run?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const stopDesk = async () => {
+    if (!following) return;
+    setStopAsked(following.runId);
+    try { await api(`/api/relay/items/${itemId}/desk/stop`, { method: "POST" }); }
+    catch (err) { if (statusOf(err) !== 409) { setStopAsked(null); say(message(err, "Couldn't stop Relay.")); } }
+    void load();
+  };
+  const retry = () => {
+    if (!chatError) return;
+    if (chatError.mode === "chat") void ask(chatError.text);
+    else firstDraft();
+  };
 
   // While a first-reply job researches, check on it every few seconds; when it finishes, bring the drafts in.
   useEffect(() => {
@@ -360,12 +474,14 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
         {loadError && !talk && <p className={w.error} role="alert">{loadError} <button type="button" className={w.linkbtn} onClick={() => void load()}>Try again</button></p>}
         {!talk && !loadError && <p className={w.muted} role="status">Loading the reply…</p>}
         {talk && (
-          <DraftSheet drafts={drafts} current={current} onTab={pickTab} name={name} typed={typed} stock={stock} busy={busy} run={run} actions={actions}
-            job={hasReply ? null : job} jobNote={item?.note ?? ""} pendingFirst={!!pending?.first} />
+          <DraftSheet drafts={drafts} current={current} onTab={pickTab} name={name} typed={typed} stock={stock} busy={busy} run={sendRun} actions={actions}
+            job={hasReply ? null : job} jobNote={item?.note ?? ""} pendingFirst={!!pending?.first || (deskBusy && !hasReply)} hold={deskBusy ? DESK_HOLD : null} />
         )}
       </main>
       <RelayChat talk={talk} name={name} drafts={drafts} current={current} all={all} onTarget={(id) => (id === "all" ? setAll(true) : pickTab(id))}
-        pending={pending} error={chatError} onRetry={() => chatError && void ask(chatError.text)} text={text} setText={setText} onAsk={(t) => void ask(t)} composer={composer}
+        pending={pending} error={chatError} onRetry={chatError && (chatError.mode !== "chat" || chatError.text) ? retry : null} text={text} setText={setText} onAsk={(t) => void ask(t)} composer={composer}
+        desk={following && deskBusy ? { run: following.runId, startedAt: following.startedAt, stopping: run.kind === "running" && run.stopping || stopAsked === following.runId, onStop: () => void stopDesk() } : null}
+        echo={following?.mode === "chat" && fresh <= following.fromLoad ? following.text : null} notice={notice} say={say}
         firstNote={hasReply || jobBusy ? item?.note ?? "" : ""} repricing={repricing}
         quick={{ followUp: () => prompt("Also email "), style: () => prompt("Change the style: "), reprice: () => void reprice(), deal: deal ? null : () => void createDeal() }}
         saveRule={saveRule} />

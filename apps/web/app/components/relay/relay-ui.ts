@@ -10,10 +10,16 @@ export const firstName = (name: string | null | undefined) => (name ?? "").split
 /** firstName without the comma of "Abhishek, R3 Robotics". */
 export const firstOf = (name: string | null | undefined) => firstName(name).replace(/[,;:]+$/, "") || "them";
 
+/** A refused API call: the server's words, and its status so a caller can tell "busy" (409) from "can't start" (503). */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+export const statusOf = (err: unknown) => (err instanceof ApiError ? err.status : null);
+
 export async function api<T>(url: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const res = await fetch(url, { method: init?.method ?? "GET", headers: init?.body ? { "content-type": "application/json" } : undefined, body: init?.body ? JSON.stringify(init.body) : undefined, cache: "no-store" });
   const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error((data as { error?: string } | null)?.error ?? "Something went wrong. Try again.");
+  if (!res.ok) throw new ApiError((data as { error?: string } | null)?.error ?? "Something went wrong. Try again.", res.status);
   return data as T;
 }
 

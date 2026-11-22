@@ -3,10 +3,15 @@
 import { useEffect, useRef, useState, type RefObject, type SetStateAction } from "react";
 import { ArrowUp } from "lucide-react";
 import type { TalkApplied, TalkDraft, TalkState, TalkTurn, TraceApplied } from "@/lib/relay-talk";
+import { chatPieces, clock, openQuestion, workSummary, type DeskTalk } from "@/lib/relay-desk-view-core";
 import { ThinkingIndicator } from "@/app/components/chat-native/thinking";
 import { isAutoNote } from "@/lib/relay-auto-note";
 import { cx, firstOf } from "./relay-ui";
+import type { Say } from "./relay-workspace-work";
 import w from "./relay-workspace.module.css";
+
+/** The desk turn in progress: when it started (this browser's clock), whether Stop was pressed, and Stop. */
+type DeskNow = { run: string; startedAt: number; stopping: boolean; onStop: () => void };
 
 type Quick = { followUp: () => void; style: () => void; reprice: () => void; deal: (() => void) | null };
 const NUMBER = ["", "one", "two", "three", "four", "five", "six"];
@@ -15,13 +20,21 @@ const short = (text: string, max = 24) => (text.length > max ? `${text.slice(0, 
 
 /**
  * Relay's chat about this email, full height on the right: what Relay read before Alex opened it, the turns (his
- * bubbles, Relay's prose, the work as one quiet line each) and the composer pill with which email he means.
+ * bubbles, Relay's prose, the work as one quiet line each) and the composer pill with which email he means. While the
+ * desk works, its lines arrive under the last turn with a running clock and Stop; a question it asks docks its answers
+ * in the composer.
  */
-export function RelayChat({ talk, name, drafts, current, all, onTarget, pending, error, onRetry, text, setText, onAsk, composer, firstNote, repricing, quick, saveRule }: {
-  talk: TalkState | null; name: string; drafts: TalkDraft[]; current: TalkDraft | null; all: boolean; onTarget: (id: string) => void;
-  pending: { text: string; started: number; first: boolean; auto?: boolean } | null; error: { text: string; message: string } | null; onRetry: () => void;
+export function RelayChat({ talk, name, drafts, current, all, onTarget, pending, error, onRetry, text, setText, onAsk, composer, firstNote, repricing, quick, saveRule, desk, echo, notice, say }: {
+  talk: DeskTalk | null; name: string; drafts: TalkDraft[]; current: TalkDraft | null; all: boolean; onTarget: (id: string) => void;
+  pending: { text: string; started: number; first: boolean; auto?: boolean } | null; error: { text: string; line: string; quiet?: boolean } | null; onRetry: (() => void) | null;
   text: string; setText: (next: SetStateAction<string>) => void; onAsk: (text: string) => void; composer: RefObject<HTMLTextAreaElement | null>;
   firstNote: string; repricing: boolean; quick: Quick; saveRule: (rule: string) => Promise<boolean>;
+  desk: DeskNow | null;
+  /** What Alex just sent to the desk, shown until the chat has it. */
+  echo: string | null;
+  /** A quiet line under the turns, e.g. that the one-shot answered because the desk couldn't start. */
+  notice: string | null;
+  say: Say;
 }) {
   const live = drafts.filter((d) => d.mail);
   const first = firstOf(name);
@@ -29,7 +42,11 @@ export function RelayChat({ talk, name, drafts, current, all, onTarget, pending,
   const target = !live.length ? `${first}’s email` : all ? (live.length === 2 ? "both emails" : `all ${count} emails`) : current?.role === "primary" ? `your reply to ${first}` : current ? `the email “${current.title}”` : `${first}’s email`;
   const turns = talk?.turns ?? [];
   const scroller = useRef<HTMLDivElement>(null);
-  useEffect(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }, [turns.length, !!pending, !!error]);
+  useEffect(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }, [turns.length, !!pending, !!error, !!desk, !!echo]);
+  const busy = !!pending || !!desk;
+
+  // The newest question the desk asked, until Alex answers it: its options dock in the composer.
+  const question = openQuestion(turns);
 
   // The newest rule Relay offered, until Alex saves it or says not now.
   const [ruleDone, setRuleDone] = useState<Record<string, "saved" | "skipped">>({});
@@ -39,39 +56,50 @@ export function RelayChat({ talk, name, drafts, current, all, onTarget, pending,
 
   const auto = isAutoNote(firstNote);
   const showNote = !auto && !!firstNote.trim() && !turns.some((t) => t.role === "alex" && t.text.trim() === firstNote.trim());
-  const placeholder = !live.length ? `Say how to answer ${first}, like “offer the 62 kWh, and say we can get the mileage from the VIN”`
+  const placeholder = desk ? "Relay is working. Type your next message and send it when it finishes."
+    : !live.length ? `Say how to answer ${first}, like “offer the 62 kWh, and say we can get the mileage from the VIN”`
     : all ? `Change ${live.length === 2 ? "both" : `all ${count}`} at once, like “sign off as Alex and the team”`
     : `Change ${target}, or ask for another email: “also email Broekhuis”, “price the 62 kWh at 5k”`;
-  const submit = () => { if (text.trim() && !pending) onAsk(text); };
+  const submit = () => { if (text.trim() && !busy) onAsk(text); };
 
   return (
     <aside className={w.chat} aria-label="Talk to Relay">
       <div className={w.chatScroll} ref={scroller}>
-        <span className={w.chatHead}>Relay <span>on {target}</span></span>
+        <div className={w.chatTop}>
+          <span className={w.chatHead}>Relay <span>on {target}</span></span>
+          {talk?.claudeSession && <ContinueInClaude command={talk.claudeSession} say={say} />}
+        </div>
         {talk && talk.read.items.length > 0 && <ReadLine read={talk.read} />}
         {auto && live.length > 0 && <p className={w.chatEmpty}>Relay wrote this reply before you opened it. Ask for any change, or another email to go with it.</p>}
         {showNote && <Mine text={firstNote} />}
-        {turns.map((t) => (t.role === "alex" ? <Mine key={t.id} text={t.text} /> : isTrace(t) ? <Trace key={t.id} turn={t} /> : <RelaySays key={t.id} turn={t} />))}
-        {pending && (
-          <>
-            {!pending.auto && <Mine text={pending.text} />}
-            <Working started={pending.started} first={pending.first} />
-          </>
-        )}
+        {chatPieces(turns).map((p) => (p.kind === "work" ? <DeskWork key={p.lines[0].id} lines={p.lines} running={desk?.run === p.run} />
+          : p.turn.role === "alex" ? <Mine key={p.turn.id} text={p.turn.text} /> : isTrace(p.turn) ? <Trace key={p.turn.id} turn={p.turn} /> : <RelaySays key={p.turn.id} turn={p.turn} />))}
+        {pending && !pending.auto && <Mine text={pending.text} />}
+        {!pending && echo && <Mine text={echo} />}
+        {notice && <span className={w.relayNote}>{notice}</span>}
+        {(desk || pending) && <Working started={desk?.startedAt ?? pending!.started} desk={desk} />}
         {error && (
-          <div className={w.chatError} role="alert">
-            <span>That didn't go through: {error.message}</span>
-            <button type="button" className={w.linkbtn} onClick={onRetry}>Try again</button>
+          <div className={cx(w.chatError, error.quiet && w.chatQuiet)} role={error.quiet ? "status" : "alert"}>
+            <span>{error.line}</span>
+            {onRetry && <button type="button" className={w.linkbtn} onClick={onRetry}>Try again</button>}
           </div>
         )}
-        {!turns.length && !pending && !showNote && !(auto && live.length) && !error && talk && (
+        {!turns.length && !busy && !echo && !showNote && !(auto && live.length) && !error && talk && (
           <p className={w.chatEmpty}>{live.length ? "Ask for any change, or another email to go with the reply." : `Tell Relay how to answer ${first}. It has read the thread and their history first.`}</p>
         )}
       </div>
 
       <div className={w.dockWrap}>
-        <div className={cx(w.pill, rule && !ruleState && w.asking)}>
-          {rule && !ruleState && offer && (
+        <div className={cx(w.pill, (question || (rule && !ruleState)) && w.asking)}>
+          {question && (
+            <div className={w.dock} role="group" aria-label={`Answer Relay: ${question.applied.ask.question}`}>
+              <span className={w.muted}>{busy ? "Answer when Relay has finished." : "Tap an answer, or type your own."}</span>
+              <span className={w.options}>
+                {question.applied.ask.options.map((o) => <button key={o} type="button" className={w.option} disabled={busy} onClick={() => onAsk(o)}>{o}</button>)}
+              </span>
+            </div>
+          )}
+          {!question && rule && !ruleState && offer && (
             <div className={w.dock}>
               <span>{rule.why ? `${rule.why}. ` : ""}Save a rule: <b>{rule.text}</b>?</span>
               <span className={w.dockBtns}>
@@ -98,9 +126,9 @@ export function RelayChat({ talk, name, drafts, current, all, onTarget, pending,
           <div className={w.chips}>
             {live.length > 0 && <button type="button" className={cx(w.qchip, live.length === 1 && w.lead)} onClick={quick.followUp}>Add a follow-up email</button>}
             {live.length > 0 && <button type="button" className={w.qchip} onClick={quick.style}>Change the style</button>}
-            {live.length > 0 && <button type="button" className={w.qchip} disabled={repricing} onClick={quick.reprice}>{repricing ? "Re-pricing…" : "Re-price"}</button>}
+            {live.length > 0 && <button type="button" className={w.qchip} disabled={repricing || !!desk} onClick={quick.reprice}>{repricing ? "Re-pricing…" : "Re-price"}</button>}
             {quick.deal && <button type="button" className={w.qchip} onClick={quick.deal}>Create the deal</button>}
-            <button type="button" className={w.go} aria-label="Ask Relay" disabled={!text.trim() || !!pending} onClick={submit}><ArrowUp size={15} aria-hidden /></button>
+            <button type="button" className={w.go} aria-label="Ask Relay" title={desk ? "Relay is working. Send when it finishes." : undefined} disabled={!text.trim() || busy} onClick={submit}><ArrowUp size={15} aria-hidden /></button>
           </div>
         </div>
       </div>
@@ -159,15 +187,76 @@ function ReadLine({ read }: { read: TalkState["read"] }) {
   );
 }
 
-/** A model turn takes up to a minute: say so, and count. */
-function Working({ started, first }: { started: number; first: boolean }) {
+/**
+ * Relay at work: a running clock, and Stop while a desk turn runs. A turn can take a few minutes; past twenty seconds
+ * the line says Alex can carry on with another email.
+ */
+function Working({ started, desk }: { started: number; desk: DeskNow | null }) {
   const [, tick] = useState(0);
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, []);
-  const secs = Math.round((Date.now() - started) / 1000);
+  const ms = Date.now() - started;
   return (
     <div className={w.working}>
-      <ThinkingIndicator>{first ? "Writing the reply" : "Reading and changing the drafts"} {secs}s</ThinkingIndicator>
-      {secs >= 20 && <span className={w.muted}>This can take a minute. You can carry on with another email; the answer waits here.</span>}
+      <span className={w.workingRow}>
+        <ThinkingIndicator>{desk?.stopping ? "Stopping…" : "Working…"} {clock(ms)}</ThinkingIndicator>
+        {desk && <button type="button" className={w.stop} disabled={desk.stopping} onClick={desk.onStop}>Stop</button>}
+      </span>
+      {ms >= 20_000 && !desk?.stopping && <span className={w.muted}>You can carry on with another email; the answer waits here.</span>}
     </div>
+  );
+}
+
+/**
+ * One desk turn's work: a quiet line per step while it runs, newest at the bottom; once it has finished, folded to how
+ * long it took, with the steps one click away.
+ */
+function DeskWork({ lines, running }: { lines: (TalkTurn & { applied: TraceApplied })[]; running: boolean }) {
+  const [open, setOpen] = useState(false);
+  const sum = workSummary(lines);
+  if (running) {
+    return (
+      <ol className={w.deskLines} aria-label="What Relay is doing" aria-live="polite">
+        {lines.map((l) => <li key={l.id} className={cx(l.applied?.failed && w.blocked)}>{l.text}</li>)}
+      </ol>
+    );
+  }
+  return (
+    <div className={cx(w.trace, sum.failed && w.failed)}>
+      <button type="button" className={w.traceBtn} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span>{sum.text}</span><b className={w.traceMore}>{open ? "Hide" : "Show"}</b>
+      </button>
+      {open && <ol className={w.traceBody}>{lines.map((l) => <li key={l.id} className={cx(l.applied?.failed && w.blocked)}>{l.text}</li>)}</ol>}
+    </div>
+  );
+}
+
+/**
+ * "Continue in Claude": the command that opens this email's desk session in Claude Code on the server. Copied to the
+ * clipboard; when the browser refuses, the command shows to select by hand.
+ */
+function ContinueInClaude({ command, say }: { command: string; say: Say }) {
+  const [shown, setShown] = useState(false);
+  const copy = async () => {
+    try {
+      if (!navigator.clipboard) throw new Error("No clipboard");
+      await navigator.clipboard.writeText(command);
+      setShown(false);
+      say("Copied. Run it in a terminal on the server to carry on this conversation in Claude Code.");
+    } catch {
+      // The browser said no (permissions, an insecure page): the command is still there to select.
+      setShown(true);
+    }
+  };
+  return (
+    <>
+      <button type="button" className={w.quietLink} onClick={() => void copy()}>Continue in Claude</button>
+      {shown && (
+        <div className={w.command}>
+          <label htmlFor="relay-claude-command">Copy this and run it in a terminal on the server:</label>
+          <textarea id="relay-claude-command" readOnly rows={3} value={command} autoFocus onFocus={(e) => e.currentTarget.select()} />
+          <button type="button" className={w.linkbtn} onClick={() => setShown(false)}>Done</button>
+        </div>
+      )}
+    </>
   );
 }

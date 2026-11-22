@@ -157,7 +157,8 @@
 .to { font-size: 12px; color: var(--color-text-muted); }
 .toRow { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
 .editBtn { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; border: 1px solid var(--color-border); border-radius: 8px; padding: 3px 10px; background: var(--color-surface); font-size: 12px; font-weight: 600; color: var(--color-text); }
-.editBtn:hover { background: var(--color-surface-hover); }
+.editBtn:hover:not(:disabled) { background: var(--color-surface-hover); }
+.editBtn:disabled { color: var(--color-text-muted); }
 
 /* Alex editing the email himself: Gmail-like header lines, then the text */
 .editor { display: flex; flex-direction: column; gap: 10px; }
@@ -230,6 +231,7 @@
 .gap:placeholder-shown { font-weight: 500; }
 .gap.filled { border-style: solid; border-color: var(--color-border-strong); }
 .fieldMarked { box-shadow: 0 0 0 3px var(--ws-mark); }
+.price:has(input:disabled), .field:disabled { opacity: .6; cursor: not-allowed; }
 .price input[aria-invalid="true"] { text-decoration: underline wavy var(--color-error); }
 
 /* "Goes with this reply" */
@@ -269,7 +271,11 @@
 /* ---------- Relay's chat */
 .chat { flex: none; width: var(--ws-chat); box-sizing: border-box; min-height: 0; border-left: 1px solid var(--color-border); background: var(--color-main-bg); display: flex; flex-direction: column; }
 .chatScroll { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 20px 12px; display: flex; flex-direction: column; gap: 16px; }
+.chatTop { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; }
 .chatHead { font-size: 13px; font-weight: 600; }
+.command { flex: 1 1 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--ws-soft); }
+.command textarea { width: 100%; box-sizing: border-box; resize: none; border: 1px solid var(--color-border); border-radius: 8px; padding: 6px 8px; background: var(--color-surface);
+  font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; line-height: 1.45; color: var(--color-text); }
 .chatHead span { font-weight: 400; color: var(--ws-soft); }
 .chatEmpty { font-size: 12.5px; color: var(--color-text-muted); }
 .read, .trace { display: flex; flex-direction: column; gap: 6px; padding-left: 10px; border-left: 1px solid var(--color-border); }
@@ -283,6 +289,9 @@
 .chip { flex: none; font-family: ui-monospace, Menlo, monospace; font-size: 10px; color: var(--color-text-muted); background: var(--color-surface-hover); border-radius: 4px; padding: 1px 5px; }
 .traceBody { padding-left: 14px; font-size: 12px; color: var(--color-text-muted); display: flex; flex-direction: column; gap: 2px; }
 .failed .traceBtn { color: var(--color-error); }
+.traceMore { flex: none; font-weight: 600; color: var(--color-accent); }
+/* a desk turn's steps while it runs: one quiet line each on the hairline rail, newest at the bottom */
+.deskLines { display: flex; flex-direction: column; gap: 5px; padding-left: 10px; border-left: 1px solid var(--color-border); font-size: 12px; line-height: 1.4; color: var(--ws-soft); }
 .me { display: flex; justify-content: flex-end; }
 .me span { max-width: 80%; background: var(--color-user-bubble); color: var(--color-user-bubble-text); border-radius: 16px 16px 4px 16px; padding: 9px 13px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .relayTurn { display: flex; flex-direction: column; gap: 4px; }
@@ -290,7 +299,12 @@
 .blocked { color: var(--color-error); }
 .relayNote { font-size: 12px; color: var(--ws-soft); }
 .chatError { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 12.5px; color: var(--color-error); }
+.chatQuiet { color: var(--ws-soft); }
 .working { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.workingRow { display: flex; align-items: center; gap: 10px; }
+.stop { min-height: 28px; border: 1px solid var(--color-border); border-radius: 999px; padding: 2px 12px; background: var(--color-surface); font-size: 12px; font-weight: 600; color: var(--color-text); }
+.stop:hover:not(:disabled) { background: var(--color-surface-hover); }
+.stop:disabled { color: var(--color-text-muted); }
 
 /* the composer pill */
 .dockWrap { flex: none; padding: 0 20px 20px; }
@@ -301,6 +315,10 @@
 .dock { display: flex; flex-direction: column; gap: 8px; padding: 4px 6px 10px; font-size: 12.5px; }
 .dock b { font-weight: 600; }
 .dockBtns { display: flex; gap: 6px; }
+.options { display: flex; flex-wrap: wrap; gap: 6px; }
+.option { min-height: 32px; border: 0; border-radius: 8px; padding: 5px 12px; text-align: left; font-size: 12.5px; font-weight: 600; background: var(--color-surface); color: var(--color-text); }
+.option:hover:not(:disabled) { background: var(--color-accent-fill); color: var(--color-accent-foreground); }
+.option:disabled { color: var(--color-text-muted); }
 .save { min-height: 32px; border: 0; border-radius: 8px; padding: 5px 12px; font-weight: 600; background: var(--color-accent-fill); color: var(--color-accent-foreground); }
 .dockDone { display: block; padding: 4px 6px 10px; font-size: 12.5px; font-weight: 600; color: var(--color-accent); }
 .targets { display: flex; gap: 4px; padding: 0 2px 4px; overflow-x: auto; scrollbar-width: none; }
@@ -368,7 +386,7 @@
   .dockWrap { padding: 8px 12px 12px; }
   .say { font-size: 16px; min-height: 96px; }
   .row, .act, .ghost, .qchip, .target, .tab, .views button, .fold, .more, .links button, .toast button, .menu > button, .lrow, .lwhenBtn { min-height: 44px; }
-  .linkbtn { min-height: 44px; }
+  .linkbtn, .option, .stop, .quietLink { min-height: 44px; }
   .go { width: 44px; height: 44px; }
   .lwhenBtn { margin-left: 20px; }
   .keys { display: none; }
