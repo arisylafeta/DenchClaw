@@ -5,7 +5,16 @@
 import { moneyIn, normaliseAmount } from "./relay-checks";
 
 /** An email's own text, without the quoted thread under it. */
-export const stripQuoted = (text: string) => text.split(/\n(?:On .{5,120}wrote:|-{2,} ?Original Message|From: .+\nSent: )/)[0].replace(/\n>.*$/gm, "").trim();
+/** Where a quoted earlier email starts, in the languages Alex's mail comes in: the "On … wrote:" line (Gmail wraps it
+ * over two lines), Outlook's header block, or "Original Message". */
+const QUOTE_START = new RegExp([
+  String.raw`\nOn .{5,120}wrote:`,
+  String.raw`\n[^\n]{0,200}(?:\n[^\n]{0,120})?(?:\bwrote|\bschrieb|\ba écrit|\bescribió|\bha scritto|\bschreef|\bnapisał(?:\(a\))?|\bnapsal(?:\(a\))?|\bnapísal|\bskrev|\bkirjoitti|님이 작성|写道|寫道)[^\n]{0,80}[:：][ \t\r]*(?=\n|$)`,
+  String.raw`\n-{2,} ?(?:Original Message|Ursprüngliche Nachricht|Message d'origine|Messaggio originale|Oorspronkelijk bericht|Mensaje original)`,
+  String.raw`\n(?:From|Von|De|Da|Van|Od)\s?: .+\r?\n(?:Sent|Gesendet|Envoyé|Inviato|Verzonden|Enviado|Wysłano|Odesláno)\s?: `,
+].join("|"));
+
+export const stripQuoted = (text: string) => text.split(QUOTE_START)[0].replace(/\n>.*$/gm, "").trim();
 
 const REPLY_CHAIN = /\n(?:On [^\n]{5,200}(?:\n[^\n]{0,120})?wrote:|_{20,}\n|(?:From|Da|Von|De|Van): [^\n]+\n(?:Sent|Inviato|Gesendet|Envoyé|Verzonden|Enviado): )/;
 const FORWARD = /^\s*(?:fwd?|wg|tr|i|rv|enc)\s*:/i;

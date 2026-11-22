@@ -53,6 +53,13 @@ Fabiano Solari`);
   it("leaves an email with no sign-off whole, with the gaps squeezed", () => {
     expect(cleanEmail("Line one.\n\n\n\nLine two.")).toBe("Line one.\n\nLine two.");
   });
+  it("drops a quoted reply whatever language the attribution line is in", () => {
+    expect(cleanEmail("Pls refer to the attached photos.\n\nDaniel Han\n\n2026년 11월 13일 (금) 오후 9:22, Alex Polglase <alex@rebattery.io>님이 작성:\n> Hi Daniel")).toBe("Pls refer to the attached photos.\n\nDaniel Han");
+    expect(cleanEmail("Hello Alex, do you have some news please?\nLubomír\n\nDne pá 13. 11. 2026 11:45 uživatel Lubomír Vojta <vojtalubomir@gmail.com>\nnapsal:\n> Yes")).toBe("Hello Alex, do you have some news please?\nLubomír");
+    expect(cleanEmail("Danke!\n\nAm Mo., 2. Nov. 2026 um 10:00 Uhr schrieb Alex <alex@rebattery.io>:\n> Hallo")).toBe("Danke!");
+    expect(cleanEmail("Ok\n\nDa: Alex Polglase <alex@rebattery.io>\nInviato: venerdì 20 novembre 2026 12:37\nA: Nicolò")).toBe("Ok");
+    expect(cleanEmail("He wrote: the packs are fine.")).toBe("He wrote: the packs are fine.");
+  });
   it("drops inline picture placeholders", () => {
     expect(cleanEmail("[image]\nThe modules are ready.\n[cid:logo.png@01D]\n\nKind regards,\nFabiano")).toBe("The modules are ready.\n\nKind regards,\nFabiano");
   });

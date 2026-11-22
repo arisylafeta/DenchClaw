@@ -20,14 +20,14 @@ import w from "./relay-workspace.module.css";
 type Summary = { counts: RelayCounts; items: RelayItem[]; review: RelayReviewItem[]; scannedAt: string | null; mailSyncedAt: string | null };
 type View = "waiting" | "chase" | "drafts" | "done";
 /** A person or an email in the list, whatever the view. */
-type Row = { key: string; itemId: string; name: string; ask: string; waited: string; tag: string | null; reviewIds: string[]; itemIds?: string[] };
+type Row = { key: string; itemId: string; name: string; ask: string; waited: string; tag: string | null; reviewIds: string[]; itemIds?: string[]; waitingSince?: string | null };
 
 const daysLabel = (since: string | null | undefined) => {
   const days = since ? Math.floor((Date.now() - new Date(since).getTime()) / 86_400_000) : 0;
   return days <= 0 ? "today" : `${days} d`;
 };
 const itemRow = (i: RelayItem, tag: string | null): Row => ({
-  key: i.id, itemId: i.id, name: i.counterpart_name || i.counterpart_email || "Unknown", ask: i.headline, waited: daysLabel(i.waiting_since), tag, reviewIds: [],
+  key: i.id, itemId: i.id, name: i.counterpart_name || i.counterpart_email || "Unknown", ask: i.headline, waited: daysLabel(i.waiting_since), waitingSince: i.waiting_since, tag, reviewIds: [],
 });
 const typing = (e: KeyboardEvent) => {
   const el = e.target as HTMLElement | null;
@@ -91,7 +91,7 @@ export function RelayWorkspace({ onBack, onOpenPage, onOpenListing, onOpenMailMe
   // ---- the list for the view on show
   const entries = useMemo(() => (waiting ? listEntries(waiting.bands, { open, query }) : []), [waiting, open, query]);
   const rows: Row[] = useMemo(() => {
-    if (view === "waiting") return visibleRows(entries).map((r) => ({ key: r.key, itemId: r.openId, name: r.name, ask: r.ask, waited: r.waited, tag: r.tag, reviewIds: r.reviewIds, itemIds: r.itemIds }));
+    if (view === "waiting") return visibleRows(entries).map((r) => ({ key: r.key, itemId: r.openId, name: r.name, ask: r.ask, waited: r.waited, waitingSince: r.waitingSince, tag: r.tag, reviewIds: r.reviewIds, itemIds: r.itemIds }));
     const list = view === "chase" ? (follow ?? []).map((i) => itemRow(i, null)) : view === "drafts" ? (summary?.review ?? []).map((i) => itemRow(i, "Draft ready")) : [];
     return query.trim() ? list.filter((r) => matchesRow({ name: r.name, company: null, ask: r.ask }, query)) : list;
   }, [view, entries, follow, summary, query]);
@@ -227,7 +227,7 @@ export function RelayWorkspace({ onBack, onOpenPage, onOpenListing, onOpenMailMe
 
         <div className={w.work} ref={workPane}>
           {picked ? (
-            <Work key={picked.itemId} itemId={picked.itemId} name={picked.name} waited={view === "waiting" ? picked.waited : null} item={item} job={job}
+            <Work key={picked.itemId} itemId={picked.itemId} name={picked.name} waited={view === "waiting" ? picked.waited : null} waitingSince={view === "waiting" ? picked.waitingSince ?? null : null} item={item} job={job}
               reviewIds={picked.reviewIds} autoDraft={view === "waiting"} onOpenDeal={onOpenListing} onOpenMail={onOpenMailMessage} say={say} text={textOf} setText={setText(picked.itemId)} composer={composer}
               onDone={view === "waiting" ? () => void markDone(picked) : undefined} onSnooze={view === "waiting" ? (until) => void snooze(picked, until) : undefined}
               onOpen={(itemId) => setPicked({ ...picked, key: itemId, itemId, reviewIds: [] })} onBack={() => setPane("list")} refreshLists={reloadLists} />
@@ -286,7 +286,7 @@ function WaitingList({ entries, picked, total, searching, onPick, onOpen }: {
             );
           }
           const r = e.row;
-          const row: Row = { key: r.key, itemId: r.openId, name: r.name, ask: r.ask, waited: r.waited, tag: r.tag, reviewIds: r.reviewIds, itemIds: r.itemIds };
+          const row: Row = { key: r.key, itemId: r.openId, name: r.name, ask: r.ask, waited: r.waited, waitingSince: r.waitingSince, tag: r.tag, reviewIds: r.reviewIds, itemIds: r.itemIds };
           return <li key={r.key}><RowButton row={row} current={picked === r.key} onPick={onPick} /></li>;
         })}
       </ol>

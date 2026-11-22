@@ -35,8 +35,11 @@ const message = (err: unknown, fallback: string) => (err instanceof Error ? err.
 const when = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
 
 /** One person's email: who they are, what they wrote, the reply with its linked emails, and Relay's chat about them. */
-export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, onOpenDeal, onOpenMail, say, text, setText, composer, onDone, onSnooze, onOpen, onBack, refreshLists }: {
-  itemId: string; name: string; waited: string | null; item: RelayItem | RelayReviewItem | null; job: RelayJob | null; reviewIds: string[];
+export function Work({ itemId, name, waited, waitingSince, item, job, reviewIds, autoDraft, onOpenDeal, onOpenMail, say, text, setText, composer, onDone, onSnooze, onOpen, onBack, refreshLists }: {
+  itemId: string; name: string; waited: string | null;
+  /** When their first unanswered email came: the waiting time counts from it. */
+  waitingSince?: string | null;
+  item: RelayItem | RelayReviewItem | null; job: RelayJob | null; reviewIds: string[];
   /** Write Relay's first reply on opening when there is none ("Waiting on you" only). */
   autoDraft: boolean;
   /** Opens the linked deal, or an email as it was sent, in a new CRM tab. */
@@ -448,7 +451,12 @@ export function Work({ itemId, name, waited, item, job, reviewIds, autoDraft, on
             )}
           </div>
           <div className={w.personMeta}>
-            {waited && <span className={late ? w.lateText : w.waited}>{waited === "today" ? "Waiting since today" : `Waiting ${waited.replace(" d", waited === "1 d" ? " day" : " days")}`}</span>}
+            {waited && (
+              <span className={late ? w.lateText : w.waited} title="Counted from their first email you haven't answered">
+                {waited === "today" ? "Waiting since today" : `Waiting ${waited.replace(" d", waited === "1 d" ? " day" : " days")}`}
+                {waited !== "today" && waitingSince && <span className={w.since}> · since {sinceLabel(waitingSince)}</span>}
+              </span>
+            )}
             {deal && item?.bulk_listing_id ? (
               <DealLineView label={deal} deal={"deal" in item ? item.deal ?? null : null} onOpen={onOpenDeal ? () => onOpenDeal(item.bulk_listing_id!, deal) : undefined} />
             ) : (
@@ -574,3 +582,7 @@ function DealLineView({ label, deal, onOpen }: { label: string; deal: RelayItem[
     </div>
   );
 }
+
+/** "13 Nov" in London time, for "Waiting 9 days · since 13 Nov". */
+const sinceLabel = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Europe/London" });
+
