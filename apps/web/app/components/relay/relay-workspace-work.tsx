@@ -12,6 +12,7 @@ import { fillGaps } from "@/lib/relay-ways-core";
 import { dealLine, draftNeeds, earlierRows, gapSpans, sendGate, versionsOf, type EarlierRow } from "@/lib/relay-workspace-core";
 import { boldSpans, cleanEmail, emailParagraphs, firstLine, type ThreadEmail } from "@/lib/relay-email-clean";
 import { AUTO_NOTE } from "@/lib/relay-auto-note";
+import type { SenderKey } from "@/lib/relay-senders";
 import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
 import { api, cx, failureText, firstName, firstOf, statusOf } from "./relay-ui";
 import { DraftSheet, type SheetActions } from "./relay-workspace-draft";
@@ -428,7 +429,17 @@ export function Work({ itemId, name, waited, waitingSince, item, job, reviewIds,
       return true;
     } catch (err) { say(message(err, "Couldn't save your edit.")); return false; }
   };
-  const actions: SheetActions = { setPrice, acceptPrice, undo, setLinked, sendAll, undoAll, toGmail, sendLater, cancelLater, saveGaps, edit,
+  const setSender = async (d: TalkDraft, key: SenderKey) => {
+    await saves.current;
+    const latest = talkRef.current?.drafts.find((x) => x.id === d.id) ?? d;
+    if (!latest.mail) return;
+    try {
+      await api(`/api/relay/drafts/${d.id}/sender`, { method: "POST", body: { identity: key, updated_at: latest.mail.updated_at } });
+      await load();
+      say(`Now from ${key}@rebattery.io, signed as that address.`);
+    } catch (err) { say(message(err, "Couldn't change who it's from.")); }
+  };
+  const actions: SheetActions = { setPrice, acceptPrice, undo, setLinked, sendAll, undoAll, toGmail, sendLater, cancelLater, saveGaps, edit, setSender,
     typeGap: (draftId, index, value) => setTyped((t) => ({ ...t, [draftId]: { ...t[draftId], [index]: value } })) };
 
   const msg = item?.last_message;

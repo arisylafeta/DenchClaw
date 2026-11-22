@@ -157,6 +157,9 @@
 .noReply b { color: var(--color-text); font-weight: 600; }
 .steps { padding-left: 18px; font-size: 12px; color: var(--ws-soft); }
 .to { font-size: 12px; color: var(--color-text-muted); }
+.fromPick { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.fromPick select { min-height: 26px; border: 1px solid var(--color-border); border-radius: 7px; padding: 1px 6px; background: var(--color-surface); font: inherit; font-size: 12px; color: var(--color-text); cursor: pointer; }
+.fromPick select:hover { border-color: var(--color-text-muted); }
 .toRow { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
 .editBtn { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; border: 1px solid var(--color-border); border-radius: 8px; padding: 3px 10px; background: var(--color-surface); font-size: 12px; font-weight: 600; color: var(--color-text); }
 .editBtn:hover:not(:disabled) { background: var(--color-surface-hover); }

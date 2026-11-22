@@ -13,6 +13,7 @@ import { ChevronDown, Pencil } from "lucide-react";
 import { ThinkingIndicator } from "@/app/components/chat-native/thinking";
 import { cx, failureText, firstOf } from "./relay-ui";
 import { RecipientInput } from "./relay-recipients";
+import type { SenderKey } from "@/lib/relay-senders";
 import type { SendRun, StockView } from "./relay-workspace-work";
 import w from "./relay-workspace.module.css";
 
@@ -28,6 +29,8 @@ export type SheetActions = {
   cancelLater: (d: TalkDraft) => Promise<void>;
   saveGaps: (draftId: string) => Promise<unknown>;
   typeGap: (draftId: string, index: number, value: string) => void;
+  /** Who the email is from: alex, buy or supply. Re-signs it as that sender. */
+  setSender: (d: TalkDraft, key: SenderKey) => Promise<void>;
   /** Alex's own edit of the text, subject or recipients; true when it saved. */
   edit: (d: TalkDraft, changes: { body?: string; subject?: string; to?: string[]; cc?: string[]; bcc?: string[] }) => Promise<boolean>;
 };
@@ -113,7 +116,7 @@ function Panel({ d, name, typed, stock, marksOn, onMarks, actions, busy, hold }:
 
   const to = mail.to_emails.join(", ") || "nobody yet";
   const cc = mail.cc_emails.length ? `, copying ${mail.cc_emails.join(", ")}` : "";
-  const head = d.role === "primary" ? `To ${to}${cc}. From ${mail.from_email ?? "alex@rebattery.io"}.` : `To ${to}. ${whenWords(d)}.`;
+  const head = d.role === "primary" ? `To ${to}${cc}.` : `To ${to}. ${whenWords(d)}.`;
   // Only a linked email to the other side of the deal needs the reminder: the reply goes to the person it's about.
   const guard = d.leaks.length || d.role !== "follow" ? null : d.to_kind === "supplier" ? `Never mentions ${firstOf(name)} or what we charge.` : d.to_kind === "buyer" ? "Never names the supplier or their cost." : null;
   const [editing, setEditing] = useState(false);
@@ -127,7 +130,10 @@ function Panel({ d, name, typed, stock, marksOn, onMarks, actions, busy, hold }:
   return (
     <div className={w.panel} role="tabpanel" id="relay-draft-panel" aria-labelledby={`relay-tab-${d.id}`}>
       <span className={w.toRow}>
-        <span className={w.to}>{head}{d.role === "follow" && d.why ? ` ${d.why}` : ""}</span>
+        <span className={w.to}>
+          {head}{d.role === "follow" && d.why ? ` ${d.why}` : ""}{" "}
+          <FromPicker from={mail.from_email} locked={locked || !!busy} onPick={(key) => void actions.setSender(d, key)} />
+        </span>
         {!locked && <button type="button" className={w.editBtn} disabled={!!hold} title={hold ?? undefined} onClick={() => setEditing(true)}><Pencil size={12} aria-hidden />Edit</button>}
       </span>
       {d.state === "sent" && <p className={w.status}>Sent.</p>}
@@ -510,3 +516,27 @@ const outcomeWords = (r: SendOutcome, left: number) => {
   if (r.outcome === "cancelled") return "stopped";
   return `not sent. ${r.why ?? "Try it on its own."}`;
 };
+
+/** Who can reply, in the order Alex uses them. Each is a "Send mail as" address of his Gmail. */
+const FROM: { key: SenderKey; address: string }[] = [
+  { key: "alex", address: "alex@rebattery.io" },
+  { key: "buy", address: "buy@rebattery.io" },
+  { key: "supply", address: "supply@rebattery.io" },
+];
+
+/** "From alex@rebattery.io ⌄": changes who the email is from, re-signed as that sender. Plain text once it can't change. */
+function FromPicker({ from, locked, onPick }: { from: string | null; locked: boolean; onPick: (key: SenderKey) => void }) {
+  const current = (from ?? "alex@rebattery.io").toLowerCase();
+  const known = FROM.some((f) => f.address === current);
+  if (locked) return <span>From {current}.</span>;
+  return (
+    <label className={w.fromPick}>
+      <span>From</span>
+      <select value={current} aria-label="Send from" onChange={(e) => { const f = FROM.find((x) => x.address === e.target.value); if (f && f.address !== current) onPick(f.key); }}>
+        {!known && <option value={current}>{current}</option>}
+        {FROM.map((f) => <option key={f.key} value={f.address}>{f.address}</option>)}
+      </select>
+    </label>
+  );
+}
+
