@@ -61,11 +61,16 @@ async function ownItem(itemId: string, ownerId: string): Promise<RelayItem> {
  * One turn per email at a time: the database's unique index refuses a second (409). Throws 503 when the runner can't be
  * started, so the caller can fall back to the one-shot paths (talk, draftFromNote).
  */
+/** The desk runs only while this file exists. The one-shot drafting answers instead when it doesn't (every caller falls back on a 503). */
+const DESK_ON_FLAG = process.env.RELAY_DESK_FLAG || "/root/.hermes/workspace/relay/desk-on";
+
 export async function startDesk(itemId: string, ownerId: string, mode: DeskMode, text: string): Promise<DeskRun> {
   await ownItem(itemId, ownerId);
   const said = text.trim();
   if (mode === "chat" && !said) throw new RelayError(400, "Say what you want Relay to do.");
   try { accessSync(RUNNER, constants.R_OK); } catch { throw new RelayError(503, "Relay's desk isn't installed here."); }
+  // Switched on by a flag file, so the desk can go live dark and be turned on (or off) without a deploy.
+  try { accessSync(DESK_ON_FLAG, constants.R_OK); } catch { throw new RelayError(503, "Relay's desk is switched off."); }
   await settleStale(itemId);
   let run: DeskRun;
   try {
