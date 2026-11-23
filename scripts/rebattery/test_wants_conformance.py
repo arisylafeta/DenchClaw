@@ -207,6 +207,25 @@ class R15(unittest.TestCase):
         lines = [line("a", demand_id="d1", make="Kokam", format="cell", product_key="broad:kokam-pouch-cells")]
         self.assertEqual(wc.r15(ctx(lines, [demand])), [])
 
+    COLVERT = {"id": "d2", "company_id": "c1", "status": "open",
+               "summary": "Complete packs, NMC preferred. Focus: Renault Zoe Gen 2 52kWh; open to almost any pack from any brand",
+               "spec": {"formats": ["Packs"], "product_family": "Renault Zoe 41/52kWh packs"}}
+
+    def test_any_pack_with_only_make_and_model_lines_is_flagged(self):
+        lines = [line("a", demand_id="d2", make="Renault", format="pack", product_key="model:renault-zoe-52kwh"),
+                 line("b", demand_id="d2", make="Tesla", format="pack", product_key="broad:tesla-any-packs")]
+        self.assertEqual([v["rule"] for v in wc.r15(ctx(lines, [self.COLVERT]))], ["R15"])
+
+    def test_any_pack_with_the_broad_pack_line_is_clean(self):
+        lines = [line("a", demand_id="d2", make="Renault", format="pack", product_key="model:renault-zoe-52kwh"),
+                 line("b", demand_id="d2", format="pack", product_key="broad:any-packs")]
+        self.assertEqual(wc.r15(ctx(lines, [self.COLVERT])), [])
+
+    def test_any_pack_type_in_the_summary_is_read(self):
+        demand = dict(self.COLVERT, id="d3", summary="100-200 packs. Any pack type available in batches of 8 is welcome.")
+        lines = [line("a", demand_id="d3", make="Nissan", format="pack", product_key="model:nissan-leaf-40kwh")]
+        self.assertEqual([v["rule"] for v in wc.r15(ctx(lines, [demand]))], ["R15"])
+
 
 class R5(unittest.TestCase):
     def test_vehicle_make_with_systems(self):

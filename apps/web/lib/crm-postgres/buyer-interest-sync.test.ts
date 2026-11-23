@@ -881,6 +881,32 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       expect(await keysOf(only)).toEqual(["broad:kokam-pouch-nmc-cells"]);
     });
 
+    it("writes the broad pack line next to the make and model lines when the text says any pack (migration 132)", async () => {
+      const did = id("m132_colvert");
+      await listing(did, "demand", id("buyer1"), { intent: "request", makes: ["Renault", "Tesla"], models: ["Renault Zoe Gen 2 52kWh"],
+        formats: ["Packs"], chemistries: ["NMC", "LFP", "NCA"], kwh_min: 30, product_family: "Renault Zoe packs" });
+      await withSummary(did, "NMC preferred (LFP/NCA also). Focus: Renault Zoe 52kWh; open to almost any pack from any brand");
+      await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [did]);
+      expect(await keysOf(did)).toEqual(["broad:any-packs", "broad:tesla-any-packs", "model:renault-zoe-52kwh"]);
+      await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [did]);
+      expect(await keysOf(did)).toEqual(["broad:any-packs", "broad:tesla-any-packs", "model:renault-zoe-52kwh"]);
+      const one = id("m132_one");
+      await listing(one, "demand", id("buyer1"), { intent: "request", makes: ["Tesla"], formats: ["Packs"], chemistries: ["LFP"], product_family: "Tesla LFP packs" });
+      await withSummary(one, "Tesla packs; any pack with LFP chemistry is fine");
+      await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [one]);
+      expect(await keysOf(one)).toEqual(["broad:lfp-packs", "broad:tesla-lfp-packs"]);
+      const pref = id("m132_pref");
+      await listing(pref, "demand", id("buyer1"), { intent: "request", makes: ["Tesla"], formats: ["Packs"], chemistries: ["LFP"], product_family: "Tesla packs" });
+      await withSummary(pref, "Tesla packs, LFP preferred; any pack considered");
+      await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [pref]);
+      expect((await keysOf(pref)).includes("broad:any-packs")).toBe(true);
+      const narrow = id("m132_narrow");
+      await listing(narrow, "demand", id("buyer1"), { intent: "request", makes: ["Tesla"], formats: ["Packs"], models: ["Model 3"], product_family: "Tesla Model 3 packs" });
+      await withSummary(narrow, "Tesla Model 3 packs, any questions welcome");
+      await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [narrow]);
+      expect((await keysOf(narrow)).some((key) => key === "broad:any-packs")).toBe(false);
+    });
+
     it("writes a line for a containerised BESS request whose spec states no product", async () => {
       const bare = id("m125_byd_bare");
       await listing(bare, "demand", id("buyer1"), { intent: "standing" }, { context: { listing_title: "BYD CS40HN 1.26MWh Container (exploratory)" } });
