@@ -575,7 +575,7 @@ class R11(unittest.TestCase):
         d["spec"]["excludes"] = ["Pouch cells"]
         self.assertEqual(wc._cell_formats_stated(d), ["prismatic"])
         self.assertEqual(wc.r11(ctx([self.cell("a", "broad:prismatic-nmc-cells")], [d])), [])
-        wanted = self.demand([], "Not 18650, pouch wanted")
+        wanted = self.demand([], "Not prismatic, pouch wanted")
         self.assertEqual(wc._cell_formats_stated(wanted), ["pouch"])
 
 
