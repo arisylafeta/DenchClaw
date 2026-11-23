@@ -8,6 +8,7 @@
 // A missing fact never rules anyone out. A disputed fact (a `conflict` field in the product key) is treated as
 // missing, because a disputed figure must not decide who is ruled out.
 import type { KeyFormat, ProductKey, ProductLine } from "./product-key";
+import { activityFit, RESEARCH_POLICY } from "./research-policy";
 import { broaderKeysFor, CELL_FORMATS, CYLINDRICAL_SIZES, normalCellFormat, productKeyLevel, type CellFormat, type ProductFacts } from "./product-key-for";
 
 export type SupplyFacts = {
@@ -1127,7 +1128,71 @@ export type RuledOutRow = {
   text?: string; seen?: string; src?: string;
 };
 
-export type RankBuyersResult = { ranked: RankedBuyerRow[]; ruledOut: RuledOutRow[]; evaluated: number };
+/** A research-only buyer in the separate band: never filtered, ordered by fit. */
+export type ResearchBuyerRow = {
+  companyId: string; name: string; rank: number;
+  /** Policy weight of the lot's format over their activities, plus make and chemistry overlap. Always above 0 here. */
+  fit: number;
+  fits: string;
+  checks: string[];
+  stage: string | null; basis: string | null; lastTouch: string; isLead: boolean;
+  userVerdict: "shortlist" | null;
+};
+
+export type RankBuyersResult = {
+  ranked: RankedBuyerRow[]; ruledOut: RuledOutRow[]; evaluated: number;
+  /** Research-only buyers (no dossier, no live stated Want), after every stated-demand buyer, never interleaved. */
+  research: ResearchBuyerRow[]; researchTotal: number;
+};
+
+/** What a research-only buyer's site says they do: `profile.activities`, else the older `formats` field. */
+function researchActivities(buyer: BuyerFacts): { activities: string[]; legacyFormats: string[] } {
+  const activities = list(buyer.profile.activities);
+  return { activities, legacyFormats: activities.length ? [] : list(buyer.profile.formats).map((value) => value.toLowerCase()) };
+}
+
+const OVERLAP_MODEL = 3;
+const OVERLAP_MAKE = 2;
+const OVERLAP_CHEMISTRY = 1;
+
+/** Fit of one lot for a research-only buyer. Nothing filters; 0 means no evidence at all. */
+function researchFit(supply: SupplyFacts, buyer: BuyerFacts): { fit: number; reasons: string[]; chemDiffers: string[] | null } {
+  const { activities, legacyFormats } = researchActivities(buyer);
+  const reasons: string[] = [];
+  let fit = 0;
+  const fmt = String(supply.format ?? "").toLowerCase();
+  if (activities.length) {
+    const hit = activityFit(activities, fmt);
+    if (hit.activity) {
+      fit += hit.weight;
+      reasons.push(`Research: ${RESEARCH_POLICY[hit.activity].label} (site)`);
+    }
+  } else if (fmt && legacyFormats.includes(fmt)) {
+    fit += STRONG_LEGACY;
+    reasons.push(`Research: buys ${fmt} (site)`);
+  }
+  const supplyModels = [...tokens(supply.model), ...(supply.platform ? [norm(supply.platform)] : [])].filter(Boolean);
+  const modelHit = profileModels(buyer).some((model) => supplyModels.length > 0 && supplyModels.some((token) => ` ${norm(model)} `.includes(` ${token} `)));
+  const supplyMakes = tokens(supply.make).filter((token) => token !== "group");
+  const makeHit = [...list(buyer.profile.makes), ...list(buyer.profile.cell_makers)]
+    .find((make) => supplyMakes.some((token) => ` ${norm(make)} `.includes(` ${token} `)));
+  if (modelHit) {
+    fit += OVERLAP_MODEL;
+    reasons.push(`names ${supply.model ?? supply.platform}`);
+  } else if (makeHit) {
+    fit += OVERLAP_MAKE;
+    reasons.push(`works on ${makeHit}`);
+  }
+  const chem = String(supply.chemistry ?? "").toUpperCase();
+  const stated = list(buyer.profile.chemistries).map((value) => value.toUpperCase());
+  if (chem && stated.includes(chem)) {
+    fit += OVERLAP_CHEMISTRY;
+    reasons.push(chem);
+  }
+  const differs = chem && stated.length && !stated.includes(chem) ? stated : null;
+  return { fit, reasons, chemDiffers: differs };
+}
+const STRONG_LEGACY = 3;
 
 function priceBand(key: ProductKey, supply: SupplyFacts, buyer: BuyerFacts): string | null {
   const row = dossierPrice(buyer);
@@ -1209,6 +1274,7 @@ const lastDays = (value: string) => Math.round((Date.now() - new Date(value).get
 export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], options: {
   asOf?: string;
   top?: number;
+  researchTop?: number;
   verdicts?: Map<string, "shortlist" | "not_a_fit">;
   key?: ProductKey;
 } = {}): RankBuyersResult {
@@ -1216,6 +1282,7 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
   const verdicts = options.verdicts ?? new Map<string, "shortlist" | "not_a_fit">();
   const rows = new Map<string, RankedBuyerRow>();
   const ruledOut: RuledOutRow[] = [];
+  const researchRows: Omit<ResearchBuyerRow, "rank">[] = [];
   let evaluated = 0;
 
   for (const buyer of buyers) {
@@ -1223,6 +1290,28 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
     const verdict = verdicts.get(buyer.id) ?? null;
     if (verdict === "not_a_fit") {
       ruledOut.push({ companyId: buyer.id, name: buyer.name, code: "not_a_fit", detail: "Marked not a fit", kind: "verdict" });
+      continue;
+    }
+    if (researchOnly(buyer, asOf)) {
+      // Inferred demand ranks, it never filters; only the seller's own company is left out.
+      if (supplies.some((supply) => norm(supply.seller) && norm(buyer.name) === norm(supply.seller))) {
+        continue;
+      }
+      let top: ReturnType<typeof researchFit> | null = null;
+      for (const supply of supplies) {
+        const found = researchFit(supply, buyer);
+        if (!top || found.fit > top.fit) { top = found; }
+      }
+      if (top && top.fit > 0) {
+        const fits = top.reasons.join("; ");
+        researchRows.push({
+          companyId: buyer.id, name: buyer.name, fit: top.fit,
+          fits: top.chemDiffers ? `${fits}; Chemistry differs: their site lists ${top.chemDiffers.join("/")}` : fits,
+          checks: top.chemDiffers ? [`Chemistry differs: their site lists ${top.chemDiffers.join("/")}`] : [],
+          stage: buyer.stage, basis: buyer.basis, lastTouch: lastTouch(buyer, asOf), isLead: isLead(buyer),
+          userVerdict: verdict === "shortlist" ? "shortlist" : null,
+        });
+      }
       continue;
     }
     let best: { row: RankedBuyer; line: number } | null = null;
@@ -1308,10 +1397,18 @@ export function rankBuyers(supplies: SupplyFacts[], buyers: BuyerFacts[], option
     || lastTouchKey(a.lastTouch) - lastTouchKey(b.lastTouch)
     || compareText(a.companyId, b.companyId));
   const top = options.top ?? 30;
+  const researchOrdered = researchRows.toSorted((a, b) =>
+    Number(b.userVerdict === "shortlist") - Number(a.userVerdict === "shortlist")
+    || b.fit - a.fit
+    || (STAGE_RANK[b.stage ?? ""] ?? 0) - (STAGE_RANK[a.stage ?? ""] ?? 0)
+    || lastTouchKey(a.lastTouch) - lastTouchKey(b.lastTouch)
+    || compareText(a.companyId, b.companyId));
   return {
     ranked: ordered.slice(0, top).map((row, index) => ({ ...row, rank: index + 1 })),
     ruledOut,
     evaluated,
+    research: researchOrdered.slice(0, options.researchTop ?? 50).map((row, index) => ({ ...row, rank: index + 1 })),
+    researchTotal: researchOrdered.length,
   };
 }
 
