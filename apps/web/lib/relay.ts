@@ -15,6 +15,7 @@ import { sendAtProblem, UNDO_SEND_SECONDS } from "./relay-send-time";
 import { greetingRule, pickExamples, voiceExamplesBlock, voiceGuideBlock, type VoiceExample } from "./relay-voice";
 import { MAX_LEARNED, type Evidence } from "./relay-learn-core";
 import { dealResultFits, dealSummaryText, isPersonalDomain, ownsDeal, replyIdentity, suggestDealAction, threadInbox, type ReplyIdentity } from "./relay-identity";
+import { EARLIER_ROUND_SQL } from "./relay-round";
 import { isTeamSender, SENDERS, senderRefusal, swapSignOff, type SenderKey } from "./relay-senders";
 import { contextPack, HAS_FILES_SQL } from "./relay-context";
 import { knownBackground, NO_PACK, SINCE_NOTE, sinceFrom, stripQuoted, type Pack, type PackSource } from "./relay-context-core";
@@ -946,7 +947,7 @@ export async function listReview(ownerId: string): Promise<RelayReviewItem[]> {
   const ids = items.map((i) => i.id);
   // fills is read through to_jsonb so the list still loads before migration 125 adds the column.
   const drafts = await queryPg<DraftRow>(`select id,item_id,role,position,title,why,state,source_note,agent_log,background,ways,mail_message_id,gmail_draft_id,to_jsonb(d)->'fills' as fills
-    from relay_draft d where item_id = any($1) and state <> 'skipped' order by position`, [ids]);
+    from relay_draft d where item_id = any($1) and state <> 'skipped' and not ${EARLIER_ROUND_SQL} order by position`, [ids]);
   const mailIds = drafts.map((d) => d.mail_message_id).filter((id): id is string => !!id);
   const mails = mailIds.length ? await queryPg<{ id: string; state: string; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null; body_text: string | null; updated_at: string; personalization: { attachments?: unknown; send_failure?: { reason: string; detail?: unknown }; scheduled_send?: { at?: string; undo?: boolean } } | null; transport: string | null; schedule_changed: boolean }>(
     `select id,state,identity_key,from_email,coalesce(to_emails,'{}') as to_emails,coalesce(cc_emails,'{}') as cc_emails,coalesce(bcc_emails,'{}') as bcc_emails,subject,body_text,updated_at,personalization,transport,
