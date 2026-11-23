@@ -878,6 +878,9 @@ def r8(ctx):
 KWH_FIGURE = re.compile(r"(?<![\w.])(\d{1,3}(?:\.\d+)?)\s?kwh\b", re.IGNORECASE)
 CELL_FORMAT_NUMBERS = ("18650", "21700", "4680", "26650", "46800")
 CELL_FORMAT_WORDS = ("prismatic", "pouch", "cylindrical")
+NEGATED_CELL_FORMAT = re.compile(
+    r"\b(?:no|not|non|without|excluding|excludes?|except|never|rejects?)\s+(?:(?!pouch|prismatic|cylindrical)[a-z0-9/-]+\s+){0,2}"
+    r"(?:pouch|prismatic|cylindrical)\b")
 OPEN_STATUSES = ("open", "qualifying")
 
 
@@ -916,8 +919,11 @@ def _line_has_kwh(line, value):
 def _cell_formats_stated(demand):
     spec = demand.get("spec") or {}
     text = " ".join(str(t or "") for t in [demand.get("summary"), spec.get("product_family")] + as_list(spec.get("cell_formats")))
-    low = text.lower()
-    return [f for f in CELL_FORMAT_NUMBERS + CELL_FORMAT_WORDS if re.search(rf"\b{f}\b", low)]
+    # "No pouch cells" or an excluded format is a stated no, not a wanted format (Phoenix BS, 23 Nov 2026).
+    low = NEGATED_CELL_FORMAT.sub(" ", text.lower())
+    excluded = " ".join(str(t) for t in as_list(spec.get("excludes"))).lower()
+    return [f for f in CELL_FORMAT_NUMBERS + CELL_FORMAT_WORDS
+            if re.search(rf"\b{f}\b", low) and not re.search(rf"\b{f}\b", excluded)]
 
 
 def _cell_makers_stated(demand):

@@ -570,6 +570,14 @@ class R11(unittest.TestCase):
         single = self.demand(["Pouch"], "Pouch cells")
         self.assertEqual(wc.r11(ctx([self.cell("a", "broad:pouch-nmc-cells")], [single])), [])
 
+    def test_a_negated_format_is_not_a_stated_format(self):
+        d = self.demand(["Prismatic"], "Prismatic cells rejected by the automotive industry. No pouch cells.")
+        d["spec"]["excludes"] = ["Pouch cells"]
+        self.assertEqual(wc._cell_formats_stated(d), ["prismatic"])
+        self.assertEqual(wc.r11(ctx([self.cell("a", "broad:prismatic-nmc-cells")], [d])), [])
+        wanted = self.demand([], "Not 18650, pouch wanted")
+        self.assertEqual(wc._cell_formats_stated(wanted), ["pouch"])
+
 
 class R12(unittest.TestCase):
     products = [{"make": "Connected Energy", "format": "packs", "note": "Wants 30+ kWh second-life packs"}]
