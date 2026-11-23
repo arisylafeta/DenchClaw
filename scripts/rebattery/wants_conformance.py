@@ -52,6 +52,11 @@ A line from a dossier is judged against the dossier's products as well as the re
       and never appears on its own in the request text (summary, spec.product_family, spec.model, note), e.g.
       'Ioniq' next to 'Ioniq 5' when the text only says 'Ioniq 5'.
 
+  R15 narrowed despite any: an open request whose text (summary, spec.product_family) says "any" for the product family
+      (any / beliebige + cells, packs, modules, a chemistry or a format) but whose lines all carry a make, cell maker or
+      cell format. The maker or format the text names is an example; the broad line (broad:nmc-cells) must be there.
+      Extra specific lines next to the broad one are fine.
+
 The rule functions take plain dicts (see `check`), so they need no database. `main` reads one database in a
 read-only session and writes nothing to it.
 
@@ -86,6 +91,7 @@ RULES = {
     "R12": "Exact kWh written for a stated minimum",
     "R13": "Non-canonical model key (make spelling or near-identical kWh)",
     "R14": "Request model listed but not stated on its own (prefix of another listed model)",
+    "R15": "Request text says any, but every line carries a make, cell maker or cell format (narrowed despite any)",
 }
 EXAMPLES_PER_RULE = 20
 LEVEL_RANK = {"broad": 0, "model": 1, "cell": 1, "pack": 1, "part": 2}
@@ -1240,9 +1246,40 @@ def r14(ctx):
     return found
 
 
+# ---------------------------------------------------------------------------------------------- R15
+
+# Mirrors buyer_interest_text_says_any() of migration 131.
+SAYS_ANY = re.compile(r"\b(?:any|beliebige[rnms]?|jede[rnms]?)\s+(?:(?:nmc|nca|lfp|lto|lmo|li-ion|lithium|pouch|prismatic|cylindrical|[0-9][0-9./-]*\s*(?:ah|kwh)?)\s+){0,3}"
+                      r"(?:cells?|packs?|modules?|zellen|nmc|nca|lfp|lto|lmo|pouch|prismatic|cylindrical)\b", re.IGNORECASE)
+
+
+def _line_narrow(line):
+    return bool(line.get("make")) or key_has_cell_format(line)
+
+
+def r15(ctx):
+    found = []
+    by_demand = collections.defaultdict(list)
+    for line in ctx["lines"]:
+        if line.get("demand_id"):
+            by_demand[line["demand_id"]].append(line)
+    for demand_id, demand in sorted(ctx["demands"].items()):
+        spec = demand.get("spec") if isinstance(demand.get("spec"), dict) else {}
+        if demand.get("status") not in OPEN_STATUSES:
+            continue
+        text = " ".join(_flat_strings([demand.get("summary"), spec.get("product_family")]))
+        match = SAYS_ANY.search(text)
+        lines = [l for l in by_demand.get(demand_id, []) if l.get("kind") == "ask"]
+        if not match or not lines or not all(_line_narrow(l) for l in lines):
+            continue
+        found.append(_violation(ctx, "R15", lines[0], f"the request text says '{match.group(0)}' but every line carries a make, cell maker or cell format "
+                                f"({', '.join(sorted(l['product_key'] for l in lines))}); the broad line is missing", f"demand {demand_id}"))
+    return found
+
+
 # ---------------------------------------------------------------------------------------------- run and report
 
-RULE_FUNCTIONS = {"R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5, "R6": r6, "R7": r7, "R8": r8, "R9": r9, "R10": r10, "R11": r11, "R12": r12, "R13": r13, "R14": r14}
+RULE_FUNCTIONS = {"R1": r1, "R2": r2, "R3": r3, "R4": r4, "R5": r5, "R6": r6, "R7": r7, "R8": r8, "R9": r9, "R10": r10, "R11": r11, "R12": r12, "R13": r13, "R14": r14, "R15": r15}
 
 
 def check(ctx):

@@ -860,8 +860,25 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
     it("keeps the pouch format and the Kokam cell maker a cells request states only in its text", async () => {
       const did = id("m125_kokam");
       await listing(did, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], chemistries: ["NMC"],
-        product_family: "Kokam KCL255103EN1 103Ah pouch cells; any NMC cells 43-110Ah" });
+        product_family: "Kokam KCL255103EN1 103Ah pouch cells" });
       expect(await keysOf(did)).toEqual(["broad:kokam-pouch-nmc-cells"]);
+    });
+
+    it("keeps the broad Want when the text says any (migration 131), with the stated example as an extra", async () => {
+      const did = id("m131_any");
+      await listing(did, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], chemistries: ["NMC"],
+        product_family: "Kokam KCL255103EN1 103Ah pouch cells; any NMC cells 43-110Ah" });
+      expect([...(await keysOf(did))].sort()).toEqual(["broad:kokam-pouch-nmc-cells", "broad:nmc-cells"]);
+      const open = id("m131_open");
+      await listing(open, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], chemistries: ["NMC"], product_family: "NMC cells" });
+      await withSummary(open, "Wants Kokam pouch cells. 22 Nov: open to any NMC cells of 43-110Ah.");
+      await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [open]);
+      expect([...(await keysOf(open))].sort()).toEqual(["broad:kokam-pouch-nmc-cells", "broad:nmc-cells"]);
+      const only = id("m131_only");
+      await listing(only, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], chemistries: ["NMC"], product_family: "Kokam 103Ah pouch cells" });
+      await withSummary(only, "Wants Kokam pouch cells for a repair job");
+      await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [only]);
+      expect(await keysOf(only)).toEqual(["broad:kokam-pouch-nmc-cells"]);
     });
 
     it("writes a line for a containerised BESS request whose spec states no product", async () => {

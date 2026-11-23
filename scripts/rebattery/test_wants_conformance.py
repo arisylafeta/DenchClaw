@@ -182,6 +182,32 @@ class R14(unittest.TestCase):
         self.assertEqual(wc.r14(ctx([], [self.demand(["Zoe", "Leaf"], summary="Zoe Leaf")])), [])
 
 
+class R15(unittest.TestCase):
+    SERKONT = {"id": "d1", "company_id": "c1", "status": "open",
+               "summary": "Wants 5,000 Kokam cells. 22 Nov: open to any NMC cells of 43-110Ah for its own battery packs.",
+               "spec": {"formats": ["Cells"], "chemistries": ["NMC"], "product_family": "Kokam KCL255103EN1 103Ah pouch cells; any NMC cells 43-110Ah"}}
+
+    def test_only_the_specific_line_is_flagged(self):
+        lines = [line("a", demand_id="d1", make="Kokam", format="cell", product_key="broad:kokam-pouch-nmc-cells")]
+        out = wc.r15(ctx(lines, [self.SERKONT]))
+        self.assertEqual([v["rule"] for v in out], ["R15"])
+
+    def test_broad_line_next_to_the_specific_one_is_clean(self):
+        lines = [line("a", demand_id="d1", make="Kokam", format="cell", product_key="broad:kokam-pouch-nmc-cells"),
+                 line("b", demand_id="d1", format="cell", chemistry="NMC", product_key="broad:nmc-cells")]
+        self.assertEqual(wc.r15(ctx(lines, [self.SERKONT])), [])
+
+    def test_a_request_without_any_is_clean(self):
+        demand = dict(self.SERKONT, summary="Kokam pouch cells", spec={"product_family": "Kokam 103Ah pouch cells"})
+        lines = [line("a", demand_id="d1", make="Kokam", format="cell", product_key="broad:kokam-pouch-nmc-cells")]
+        self.assertEqual(wc.r15(ctx(lines, [demand])), [])
+
+    def test_any_question_is_not_any_cells(self):
+        demand = dict(self.SERKONT, summary="Any questions: Kokam pouch cells", spec={"product_family": "Kokam pouch cells"})
+        lines = [line("a", demand_id="d1", make="Kokam", format="cell", product_key="broad:kokam-pouch-cells")]
+        self.assertEqual(wc.r15(ctx(lines, [demand])), [])
+
+
 class R5(unittest.TestCase):
     def test_vehicle_make_with_systems(self):
         lines = [line("a", make="Nissan", format="system", product_key="broad:nissan-any-systems"),
