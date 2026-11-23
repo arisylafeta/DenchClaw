@@ -97,8 +97,7 @@ quantity:
 logistics:
   collects: own_haulier
   notes: "Own ADR transport from anywhere in the EU."
-capability:
-  notes: "Dismantles packs to modules in house."
+capability: [disassembly]
 decision_speed: fast
 timing:
   max_lead_days: 30

@@ -255,6 +255,29 @@ class ValidateTests(unittest.TestCase):
         )
         self.assertEqual(bd.validate(frontmatter), [])
 
+    def test_capability_is_a_fixed_list_of_plain_or_dated_entries(self):
+        ok = parse_valid(capability=["bms_unlock", {"value": "cell_testing", "seen": "2026-05-01", "src": "x"}])
+        self.assertEqual(bd.validate(ok), [])
+        errors = bd.validate(parse_valid(capability=["bms_reverse_engineering"]))
+        self.assertTrue(any(e.startswith("capability[0]") for e in errors), errors)
+
+    def test_activities_signals_and_opportunities_validate(self):
+        good = parse_valid(
+            activities=[{"value": "repairs_ev_packs", "src": "site", "quote": "we repair packs"}],
+            signals=[{"what": "adds storage", "direction": "new_line", "seen": "2026-10-01", "src": "s", "quote": "q"}],
+            opportunities=[{"product": "modules", "why": "w", "rests_on": ["site"], "angle": "a", "strength": "strong"}],
+        )
+        self.assertEqual(bd.validate(good), [])
+        bad = parse_valid(
+            activities=[{"value": "makes_tea", "src": "site"}],
+            signals=[{"what": "x", "direction": "up", "seen": "soon", "src": "s", "quote": "q"}],
+            opportunities=[{"product": "p", "why": "w", "rests_on": [], "strength": "huge"}],
+        )
+        errors = bd.validate(bad)
+        for prefix in ("activities[0]", "activities[0].quote", "signals[0].direction", "signals[0].seen",
+                       "opportunities[0].rests_on", "opportunities[0].strength"):
+            self.assertTrue(any(e.startswith(prefix) for e in errors), (prefix, errors))
+
     def test_rules_out_cell_formats_and_product_cell_format_validate(self):
         ok = parse_valid(rules_out={"cell_formats": ["pouch", {"value": "4680", "seen": "2026-05-01"}]})
         self.assertEqual(bd.validate(ok), [])
@@ -616,6 +639,7 @@ class MergeFixtureTests(unittest.TestCase):
             "the kwh range comes from the asks, not an older smaller purchase",
             "with no capacity in the asks the range falls back to what they bought",
             "origins is the application origin and source countries stay in the dossier",
+            "dossier activities union with research activities; signals and opportunities stay in the dossier",
         ])
 
     def test_merge_matches_the_expected_profile(self):

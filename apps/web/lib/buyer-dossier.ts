@@ -53,6 +53,7 @@ const EVIDENCE_REQUIRED = [
 export const TOP_LEVEL_KEYS = [
   "company_id", "company", "buyer_type", "intent", "countries", "products", "rules_out",
   "substitution", "price", "evidence_required", "quantity", "logistics", "capability",
+  "activities", "signals", "opportunities",
   "decision_speed", "last_verified", "conflicts", "alerts",
   "needs_continuity", "timing", "origins", "source_countries", "min_soh", "min_pack_voltage",
 ];
@@ -64,6 +65,20 @@ const PRICE_KEYS = ["eur_per_kwh", "eur_per_unit", "currency_original", "basis",
 const RULES_OUT_KEYS = ["chemistries", "formats", "damaged", "bess_systems", "other", "part_numbers"];
 const ALERT_KEYS = ["label", "filters", "status", "seen", "src"];
 const TIMING_KEYS = ["max_lead_days", "notes"];
+export const CAPABILITIES = [
+  "bms_unlock", "disassembly", "cell_testing", "damaged_handling", "aluminium_terminals",
+  "hv_certified", "adr_shipping", "waste_permit",
+];
+export const ACTIVITIES = [
+  "repairs_ev_packs", "repairs_hybrid_packs", "replaces_modules", "replaces_cells", "builds_packs_from_cells",
+  "sells_loose_cells", "sells_finished_batteries", "integrates_storage", "converts_vehicles", "recycles",
+  "trades_used_batteries", "manufactures_batteries",
+];
+const ACTIVITY_KEYS = ["value", "src", "quote"];
+const SIGNAL_DIRECTIONS = ["growth", "new_line", "decline", "neutral"];
+const SIGNAL_KEYS = ["what", "direction", "seen", "src", "quote"];
+const OPPORTUNITY_STRENGTHS = ["strong", "moderate", "speculative"];
+const OPPORTUNITY_KEYS = ["product", "why", "rests_on", "angle", "strength"];
 // A list entry is a plain value, or a mapping that dates the evidence for it.
 const ENTRY_KEYS = ["value", "seen", "src"];
 
@@ -341,6 +356,58 @@ function checkEntryList(errors: string[], where: string, value: unknown, allowed
   });
 }
 
+const isText = (value: unknown) => typeof value === "string" && value.trim() !== "";
+
+function checkObjectList(errors: string[], name: string, value: unknown, keys: string[], check: (where: string, item: Json) => void): void {
+  if (value === null || value === undefined) {return;}
+  if (!Array.isArray(value)) {
+    errors.push(`${name}: must be a list, got ${pyTypeOf(value)}`);
+    return;
+  }
+  value.forEach((item, index) => {
+    const where = `${name}[${index}]`;
+    if (!isRecord(item)) {
+      errors.push(`${where}: must be a mapping`);
+      return;
+    }
+    for (const key of Object.keys(item).filter((key) => !keys.includes(key)).toSorted()) {
+      errors.push(`${where}.${key}: unknown key (allowed: ${keys.join(", ")})`);
+    }
+    check(where, item);
+  });
+}
+
+function checkText(errors: string[], where: string, value: unknown, required = true): void {
+  if (!required && (value === null || value === undefined)) {return;}
+  if (!isText(value)) {errors.push(`${where}: required text`);}
+}
+
+function checkActivitiesSignalsOpportunities(errors: string[], fm: Json): void {
+  checkObjectList(errors, "activities", fm.activities, ACTIVITY_KEYS, (where, item) => {
+    checkEnum(errors, where, item.value, ACTIVITIES, "activity");
+    for (const key of ACTIVITY_KEYS) {checkText(errors, `${where}.${key}`, item[key]);}
+  });
+  checkObjectList(errors, "signals", fm.signals, SIGNAL_KEYS, (where, item) => {
+    checkText(errors, `${where}.what`, item.what);
+    if (!item.direction) {errors.push(`${where}.direction: required (one of ${SIGNAL_DIRECTIONS.join(", ")})`);}
+    checkEnum(errors, `${where}.direction`, item.direction, SIGNAL_DIRECTIONS, "direction");
+    const reason = "seen" in item ? dateError(item.seen) : "required (YYYY-MM-DD)";
+    if (reason) {errors.push(`${where}.seen: ${reason}`);}
+    checkText(errors, `${where}.src`, item.src);
+    checkText(errors, `${where}.quote`, item.quote);
+  });
+  checkObjectList(errors, "opportunities", fm.opportunities, OPPORTUNITY_KEYS, (where, item) => {
+    checkText(errors, `${where}.product`, item.product);
+    checkText(errors, `${where}.why`, item.why);
+    checkText(errors, `${where}.angle`, item.angle, false);
+    if (!Array.isArray(item.rests_on) || !item.rests_on.length || !item.rests_on.every(isText)) {
+      errors.push(`${where}.rests_on: required list of source references`);
+    }
+    if (!item.strength) {errors.push(`${where}.strength: required (one of ${OPPORTUNITY_STRENGTHS.join(", ")})`);}
+    checkEnum(errors, `${where}.strength`, item.strength, OPPORTUNITY_STRENGTHS, "strength");
+  });
+}
+
 /** Human-readable errors; an empty list means the dossier can be synced. */
 export function validateDossier(frontmatter: unknown): string[] {
   if (!isRecord(frontmatter)) {
@@ -361,6 +428,8 @@ export function validateDossier(frontmatter: unknown): string[] {
   checkEnum(errors, "buyer_type", fm.buyer_type, BUYER_TYPES, "buyer_type");
   checkList(errors, "intent", fm.intent, INTENTS, "intent");
   checkEntryList(errors, "evidence_required", fm.evidence_required, EVIDENCE_REQUIRED, "evidence_required");
+  checkEntryList(errors, "capability", fm.capability, CAPABILITIES, "capability");
+  checkActivitiesSignalsOpportunities(errors, fm);
   checkEnum(errors, "decision_speed", fm.decision_speed, DECISION_SPEEDS, "decision_speed");
   if ("last_verified" in fm) {
     const reason = dateError(fm.last_verified);
@@ -889,6 +958,14 @@ export function deriveProfile(frontmatter: unknown): Json {
   };
   if (Object.keys(byFormat).length) {profile.kwh_by_format = byFormat;}
 
+  // What the business does feeds matching's research policy; signals and opportunities stay in the dossier copy.
+  const activities: string[] = [];
+  for (const item of Array.isArray(fm.activities) ? fm.activities : []) {
+    const value = isRecord(item) ? item.value : null;
+    if (typeof value === "string" && ACTIVITIES.includes(value) && !activities.includes(value)) {activities.push(value);}
+  }
+  if (activities.length) {profile.activities = activities;}
+
   // Application origin and a minimum SoH have flat names the readers already look for.
   // Only registry values survive; anything else is a validation error before a save.
   const origins: string[] = [];
@@ -936,6 +1013,11 @@ export function mergeDerivedProfile(existing: unknown, frontmatter: unknown): De
     passedThrough.push(key);
   }
   for (const [key, value] of Object.entries(derivedProfile)) {profile[key] = value;}
+  // Activities union with what research already stored; a dossier never removes one.
+  if (Array.isArray(derivedProfile.activities)) {
+    const stored = Array.isArray(current.activities) ? current.activities.filter((a): a is string => typeof a === "string") : [];
+    profile.activities = [...stored, ...derivedProfile.activities.filter((a) => !stored.includes(a as string))];
+  }
   return { profile, derived: Object.keys(derivedProfile), passedThrough };
 }
 

@@ -475,6 +475,110 @@
         "min_soh": 60
       },
       "changed": true
+    },
+    {
+      "name": "dossier activities union with research activities; signals and opportunities stay in the dossier",
+      "existing": {
+        "activities": [
+          "recycles",
+          "sells_loose_cells"
+        ],
+        "evidence_url": "u",
+        "chemistries": [
+          "LFP"
+        ]
+      },
+      "frontmatter": {
+        "company_id": "co-act",
+        "products": [],
+        "activities": [
+          {
+            "value": "repairs_ev_packs",
+            "src": "site:home",
+            "quote": "We repair EV battery packs"
+          },
+          {
+            "value": "recycles",
+            "src": "site:home",
+            "quote": "recycling"
+          }
+        ],
+        "signals": [
+          {
+            "what": "new line",
+            "direction": "new_line",
+            "seen": "2026-10-01",
+            "src": "site",
+            "quote": "q"
+          }
+        ],
+        "opportunities": [
+          {
+            "product": "modules",
+            "why": "w",
+            "rests_on": [
+              "site"
+            ],
+            "strength": "moderate"
+          }
+        ]
+      },
+      "expected_passed_through": [
+        "activities",
+        "evidence_url"
+      ],
+      "expected_profile": {
+        "activities": [
+          "recycles",
+          "sells_loose_cells",
+          "repairs_ev_packs"
+        ],
+        "evidence_url": "u",
+        "chemistries": [],
+        "formats": [],
+        "makes": [],
+        "cell_makers": [],
+        "part_numbers": [],
+        "kwh_min": null,
+        "kwh_max": null,
+        "wants": "",
+        "dossier": {
+          "company_id": "co-act",
+          "products": [],
+          "activities": [
+            {
+              "value": "repairs_ev_packs",
+              "src": "site:home",
+              "quote": "We repair EV battery packs"
+            },
+            {
+              "value": "recycles",
+              "src": "site:home",
+              "quote": "recycling"
+            }
+          ],
+          "signals": [
+            {
+              "what": "new line",
+              "direction": "new_line",
+              "seen": "2026-10-01",
+              "src": "site",
+              "quote": "q"
+            }
+          ],
+          "opportunities": [
+            {
+              "product": "modules",
+              "why": "w",
+              "rests_on": [
+                "site"
+              ],
+              "strength": "moderate"
+            }
+          ]
+        }
+      },
+      "changed": true
     }
   ]
 }

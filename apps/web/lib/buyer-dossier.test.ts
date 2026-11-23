@@ -126,6 +126,7 @@ describe("merge parity with scripts/rebattery/buyer_dossier.py", () => {
       "the kwh range comes from the asks, not an older smaller purchase",
       "with no capacity in the asks the range falls back to what they bought",
       "origins is the application origin and source countries stay in the dossier",
+      "dossier activities union with research activities; signals and opportunities stay in the dossier",
     ]);
   });
 
@@ -230,6 +231,24 @@ describe("dossier validation", () => {
     expect(errors.some((error) => error.startsWith("origins[0]:"))).toBe(true);
     expect(errors.some((error) => error.startsWith("source_countries[0]:"))).toBe(true);
     expect(errors.some((error) => error.startsWith("source_countries[1]:"))).toBe(false);
+  });
+
+  it("limits capability to the fixed list and validates activities, signals and opportunities", () => {
+    const check = (yaml: string) => validateDossier(parseDossier(`---\ncompany_id: x\n${yaml}\n---\n`).frontmatter);
+    expect(check("capability: [bms_unlock, {value: cell_testing, seen: '2026-05-01'}]")).toEqual([]);
+    expect(check("capability: [bms_reverse_engineering]").some((e) => e.startsWith("capability[0]"))).toBe(true);
+    expect(check(
+      "activities: [{value: repairs_ev_packs, src: site, quote: q}]\n" +
+      "signals: [{what: w, direction: growth, seen: '2026-10-01', src: s, quote: q}]\n" +
+      "opportunities: [{product: p, why: w, rests_on: [s], strength: strong}]",
+    )).toEqual([]);
+    const bad = check(
+      "activities: [{value: makes_tea, src: s}]\nsignals: [{what: w, direction: up, seen: soon, src: s, quote: q}]\n" +
+      "opportunities: [{product: p, why: w, rests_on: [], strength: huge}]",
+    );
+    for (const prefix of ["activities[0]", "activities[0].quote", "signals[0].direction", "signals[0].seen", "opportunities[0].rests_on", "opportunities[0].strength"]) {
+      expect(bad.some((e) => e.startsWith(prefix)), prefix).toBe(true);
+    }
   });
 
   it("accepts one_off on a product and requires it to be true or false", () => {

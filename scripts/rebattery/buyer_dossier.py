@@ -65,6 +65,7 @@ EVIDENCE_REQUIRED = [
 TOP_LEVEL_KEYS = [
     "company_id", "company", "buyer_type", "intent", "countries", "products", "rules_out",
     "substitution", "price", "evidence_required", "quantity", "logistics", "capability",
+    "activities", "signals", "opportunities",
     "decision_speed", "last_verified", "conflicts", "alerts",
     "needs_continuity", "timing", "origins", "source_countries", "min_soh", "min_pack_voltage",
 ]
@@ -84,6 +85,23 @@ DERIVED_KEYS = [
     "chemistries", "formats", "makes", "cell_makers", "part_numbers", "kwh_min", "kwh_max", "kwh_by_format",
     "wants", "dossier", "origins", "min_soh", "min_pack_voltage",
 ]
+
+# What it can technically handle (decides whether a hard lot is workable). Plain value or {value, seen, src}.
+CAPABILITIES = [
+    "bms_unlock", "disassembly", "cell_testing", "damaged_handling", "aluminium_terminals",
+    "hv_certified", "adr_shipping", "waste_permit",
+]
+# What the business does (drives which lots). Same values as RESEARCH_POLICY in apps/web/lib/match/research-policy.ts.
+ACTIVITIES = [
+    "repairs_ev_packs", "repairs_hybrid_packs", "replaces_modules", "replaces_cells", "builds_packs_from_cells",
+    "sells_loose_cells", "sells_finished_batteries", "integrates_storage", "converts_vehicles", "recycles",
+    "trades_used_batteries", "manufactures_batteries",
+]
+ACTIVITY_KEYS = ["value", "src", "quote"]
+SIGNAL_DIRECTIONS = ["growth", "new_line", "decline", "neutral"]
+SIGNAL_KEYS = ["what", "direction", "seen", "src", "quote"]
+OPPORTUNITY_STRENGTHS = ["strong", "moderate", "speculative"]
+OPPORTUNITY_KEYS = ["product", "why", "rests_on", "angle", "strength"]
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _SPLIT_RE = re.compile(r"[/,;|]|\band\b", re.IGNORECASE)
@@ -233,6 +251,81 @@ def _check_entry_list(errors, where, value, allowed=None, label="value"):
             _check_enum(errors, item_where, item, allowed, label)
 
 
+def _check_text(errors, where, value, required=True):
+    if value is None and not required:
+        return
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{where}: required text")
+
+
+def _check_keys(errors, where, item, allowed):
+    for key in sorted(set(item) - set(allowed)):
+        errors.append(f"{where}.{key}: unknown key (allowed: {', '.join(allowed)})")
+
+
+def _check_activities(errors, value):
+    if value is None:
+        return
+    if not isinstance(value, list):
+        errors.append(f"activities: must be a list, got {type(value).__name__}")
+        return
+    for i, item in enumerate(value):
+        where = f"activities[{i}]"
+        if not isinstance(item, dict):
+            errors.append(f"{where}: must be a mapping with value, src, quote")
+            continue
+        _check_keys(errors, where, item, ACTIVITY_KEYS)
+        _check_enum(errors, where, item.get("value"), ACTIVITIES, "activity")
+        for key in ("value", "src", "quote"):
+            _check_text(errors, f"{where}.{key}", item.get(key))
+
+
+def _check_signals(errors, value):
+    if value is None:
+        return
+    if not isinstance(value, list):
+        errors.append(f"signals: must be a list, got {type(value).__name__}")
+        return
+    for i, item in enumerate(value):
+        where = f"signals[{i}]"
+        if not isinstance(item, dict):
+            errors.append(f"{where}: must be a mapping")
+            continue
+        _check_keys(errors, where, item, SIGNAL_KEYS)
+        _check_text(errors, f"{where}.what", item.get("what"))
+        if not item.get("direction"):
+            errors.append(f"{where}.direction: required (one of {', '.join(SIGNAL_DIRECTIONS)})")
+        _check_enum(errors, f"{where}.direction", item.get("direction"), SIGNAL_DIRECTIONS, "direction")
+        reason = _date_error(item.get("seen")) if "seen" in item else "required (YYYY-MM-DD)"
+        if reason:
+            errors.append(f"{where}.seen: {reason}")
+        for key in ("src", "quote"):
+            _check_text(errors, f"{where}.{key}", item.get(key))
+
+
+def _check_opportunities(errors, value):
+    if value is None:
+        return
+    if not isinstance(value, list):
+        errors.append(f"opportunities: must be a list, got {type(value).__name__}")
+        return
+    for i, item in enumerate(value):
+        where = f"opportunities[{i}]"
+        if not isinstance(item, dict):
+            errors.append(f"{where}: must be a mapping")
+            continue
+        _check_keys(errors, where, item, OPPORTUNITY_KEYS)
+        for key in ("product", "why"):
+            _check_text(errors, f"{where}.{key}", item.get(key))
+        _check_text(errors, f"{where}.angle", item.get("angle"), required=False)
+        rests = item.get("rests_on")
+        if not isinstance(rests, list) or not rests or not all(isinstance(r, str) and r.strip() for r in rests):
+            errors.append(f"{where}.rests_on: required list of source references")
+        if not item.get("strength"):
+            errors.append(f"{where}.strength: required (one of {', '.join(OPPORTUNITY_STRENGTHS)})")
+        _check_enum(errors, f"{where}.strength", item.get("strength"), OPPORTUNITY_STRENGTHS, "strength")
+
+
 def validate(frontmatter):
     """Human-readable errors; an empty list means the dossier can be synced."""
     if not isinstance(frontmatter, dict):
@@ -251,6 +344,10 @@ def validate(frontmatter):
     _check_list(errors, "intent", frontmatter.get("intent"), INTENTS, "intent")
     _check_entry_list(errors, "evidence_required", frontmatter.get("evidence_required"), EVIDENCE_REQUIRED,
                       "evidence_required")
+    _check_entry_list(errors, "capability", frontmatter.get("capability"), CAPABILITIES, "capability")
+    _check_activities(errors, frontmatter.get("activities"))
+    _check_signals(errors, frontmatter.get("signals"))
+    _check_opportunities(errors, frontmatter.get("opportunities"))
     _check_enum(errors, "decision_speed", frontmatter.get("decision_speed"), DECISION_SPEEDS,
                 "decision_speed")
     if "last_verified" in frontmatter:
@@ -734,6 +831,15 @@ def to_buyer_profile(frontmatter):
     if by_format:
         profile["kwh_by_format"] = by_format
 
+    # What the business does feeds matching's research policy. Signals and opportunities stay in the dossier copy.
+    activities = []
+    for item in frontmatter.get("activities") or []:
+        value = item.get("value") if isinstance(item, dict) else None
+        if isinstance(value, str) and value in ACTIVITIES and value not in activities:
+            activities.append(value)
+    if activities:
+        profile["activities"] = activities
+
     # Application origin and a minimum SoH have flat names the readers already look for.
     # Only registry values survive; anything else is a validation error before a save.
     origins = []
@@ -764,6 +870,11 @@ def merge_profile(existing, frontmatter):
     passed_through = sorted(key for key in (existing or {}) if key not in DERIVED_KEYS)
     profile = {key: (existing or {})[key] for key in passed_through}
     profile.update(derived)
+    # Activities union with what research already stored; a dossier never removes one.
+    if "activities" in derived:
+        stored = (existing or {}).get("activities")
+        stored = [a for a in stored if isinstance(a, str)] if isinstance(stored, list) else []
+        profile["activities"] = stored + [a for a in derived["activities"] if a not in stored]
     return profile, passed_through, sorted(derived)
 
 

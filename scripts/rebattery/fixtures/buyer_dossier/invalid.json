@@ -50,7 +50,7 @@
   },
   "body": "Body text.\n",
   "errors": [
-    "colour: unknown top-level key (allowed: company_id, company, buyer_type, intent, countries, products, rules_out, substitution, price, evidence_required, quantity, logistics, capability, decision_speed, last_verified, conflicts, alerts, needs_continuity, timing, origins, source_countries, min_soh, min_pack_voltage)",
+    "colour: unknown top-level key (allowed: company_id, company, buyer_type, intent, countries, products, rules_out, substitution, price, evidence_required, quantity, logistics, capability, activities, signals, opportunities, decision_speed, last_verified, conflicts, alerts, needs_continuity, timing, origins, source_countries, min_soh, min_pack_voltage)",
     "buyer_type: 'reseller' is not a valid buyer_type (integrator, trader, recycler, module_builder, rnd, oem, other)",
     "needs_continuity: must be true, false or null, got 'yes'",
     "timing.window: unknown key (allowed: max_lead_days, notes)",
