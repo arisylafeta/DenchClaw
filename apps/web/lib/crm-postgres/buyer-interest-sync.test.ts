@@ -834,7 +834,7 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
       const rows = await pg.queryPg<{ product_key: string; kwh_min: string | null; kwh_max: string | null }>(
         `select product_key, kwh_min, kwh_max from buyer_interest where demand_id = $1 order by product_key`, [did]);
       expect(rows.map((row) => [row.product_key, row.kwh_min === null ? null : Number(row.kwh_min)])).toEqual([
-        ["broad:lfp-cells", null], ["broad:lfp-modules", null], ["broad:lfp-packs", 50]]);
+        ["broad:lfp-modules", null], ["broad:lfp-packs", 50], ["broad:prismatic-lfp-cells", null]]);
     });
 
     it("gives SQL and TypeScript the same key for a cell maker", async () => {
@@ -849,6 +849,49 @@ describe.skipIf(!TEST_URL)("buyer interest sync", () => {
         if (row.key !== ts) {mismatches.push(`${JSON.stringify(facts)}: sql ${row.key} ts ${ts}`);}
       }
       expect(mismatches).toEqual([]);
+    });
+  });
+
+  describe("facts only the request text states (migration 125)", () => {
+    const keysOf = async (did: string) => (await lines("demand_id = $1", [did])).map((row) => row.product_key);
+    const withSummary = (did: string, summary: string) =>
+      pg.queryPg(`update crm_bulk_listings set summary = $2 where id = $1`, [did, summary]);
+
+    it("keeps the pouch format and the Kokam cell maker a cells request states only in its text", async () => {
+      const did = id("m125_kokam");
+      await listing(did, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], chemistries: ["NMC"],
+        product_family: "Kokam KCL255103EN1 103Ah pouch cells; any NMC cells 43-110Ah" });
+      expect(await keysOf(did)).toEqual(["broad:kokam-pouch-nmc-cells"]);
+    });
+
+    it("writes a line for a containerised BESS request whose spec states no product", async () => {
+      const bare = id("m125_byd_bare");
+      await listing(bare, "demand", id("buyer1"), { intent: "standing" }, { context: { listing_title: "BYD CS40HN 1.26MWh Container (exploratory)" } });
+      await withSummary(bare, "BYD CS40HN 1.26 MWh containerised BESS as plug-and-play storage for East Africa camps");
+      await pg.queryPg(`select buyer_interest_sync_demand_row($1)`, [bare]);
+      expect(await keysOf(bare)).toEqual(["broad:byd-any-systems"]);
+      const family = id("m125_byd_family");
+      await listing(family, "demand", id("buyer2"), { intent: "standing", volume: 2, volume_unit: "systems", product_family: "BYD CS40HN 1.26MWh BESS container" });
+      expect(await keysOf(family)).toEqual(["broad:byd-any-systems"]);
+    });
+
+    it("does not read a negated or excluded format as stated, and lets the spec win", async () => {
+      const no = id("m125_negated");
+      await listing(no, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], cell_formats: ["Prismatic"], excludes: ["Pouch cells"],
+        product_family: "Prismatic cells, no pouch cells" });
+      expect(await keysOf(no)).toEqual(["broad:prismatic-any-cells"]);
+      const text = id("m125_negated_text");
+      await listing(text, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], product_family: "Prismatic cells, no pouch cells" });
+      expect(await keysOf(text)).toEqual(["broad:prismatic-any-cells"]);
+      const all = id("m125_all_families");
+      await listing(all, "demand", id("buyer1"), { intent: "request", formats: ["Cells"], product_family: "prismatic, cylindrical and pouch cells" });
+      expect(await keysOf(all)).toEqual(["broad:any-cells"]);
+    });
+
+    it("leaves a request with a make or a stated product on its own facts", async () => {
+      const did = id("m125_own");
+      await listing(did, "demand", id("buyer1"), { intent: "request", formats: ["Packs"], chemistries: ["LFP"], product_family: "BYD containerised BESS" });
+      expect(await keysOf(did)).toEqual(["broad:lfp-packs"]);
     });
   });
 
