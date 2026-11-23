@@ -62,10 +62,10 @@ const TRADE = {
   auction_status: null, auction_closes_at: null, hold_until: null, hold_reason: null, hold_from_stage: null, updated_at: "2026-09-28T09:00:00Z",
 };
 
-type Api = { inbox?: unknown; sheet?: SheetRow[]; hangInbox?: boolean };
-function mockApi({ inbox, sheet = ROWS, hangInbox }: Api = {}) {
+type Api = { inbox?: unknown; sheet?: SheetRow[]; closed?: SheetRow[]; hangInbox?: boolean };
+function mockApi({ inbox, sheet = ROWS, closed = [], hangInbox }: Api = {}) {
   return vi.fn(async (url: string, init?: RequestInit) => {
-    if (url === "/api/bulk-trades/sheet") return new Response(JSON.stringify({ rows: sheet }));
+    if (url === "/api/bulk-trades/sheet") return new Response(JSON.stringify({ rows: sheet, closed }));
     if ((url.startsWith("/api/bulk-trades?") || url === "/api/bulk-trades" || url === "/api/bulk-trades/demand") && hangInbox) return new Promise<Response>(() => {});
     if (url === "/api/bulk-trades/demand") return new Response(JSON.stringify({ demand: [], possible: [], accepted: [] }));
     if (url === "/api/bulk-trades?inbox=1") return new Response(JSON.stringify(inbox ?? { trades: [], owners: [] }));
@@ -335,6 +335,18 @@ describe("Trades Preview sheet", () => {
     render(<TradesPreviewView />);
     await userEvent.click(await screen.findByRole("button", { name: /12 Ioniq packs/ }));
     expect(params().get("listing")).toBe("d1");
+  });
+
+  it("shows what was closed in the last 30 days in a Closed column at the end of the Board, and nowhere else", async () => {
+    const closed = row({ key: "z", id: "z", kind: "demand", side: "buyer", company: "Gone Buyer", title: "Dropped 24 packs", progress: "New", closed_at: "2026-11-23T17:47:00Z", closed_reason: "no_longer_needed" });
+    vi.stubGlobal("fetch", mockApi({ closed: [closed] }));
+    go("&tab=board");
+    render(<TradesPreviewView />);
+    const region = await screen.findByRole("region", { name: "Closed" });
+    expect(within(region).getByText("Dropped 24 packs")).toBeInTheDocument();
+    expect(within(region).getByText("Dropped")).toBeInTheDocument();
+    const names = screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"));
+    expect(names[names.length - 1]).toBe("Closed");
   });
 
   it("puts only deals on the Board, and the Today nudge for unsized deals opens it", async () => {

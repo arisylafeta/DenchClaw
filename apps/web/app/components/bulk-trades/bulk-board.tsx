@@ -2,6 +2,7 @@
 
 import { FEE_RATE, formatEurCompact, type SheetRow, type SheetTone } from "@/lib/bulk-sheet";
 import { dealTotals } from "@/lib/bulk-desk";
+import { CLOSED_REASON_LABEL, type ClosedReason } from "@/lib/bulk-demand";
 import type { ListingStage } from "@/lib/bulk-listing";
 import { BusyRegion } from "./bt-shimmer";
 import { ScoreCircle, SideChip, WaitingBadge } from "./opportunities-sheet";
@@ -25,6 +26,32 @@ function Stat({ label, value, gap, title, data }: { label: string; value: string
       <span className="text-[11px]" style={{ color: "var(--bt-muted)" }}>{label}</span>
       <span className="truncate text-[12px] font-semibold tabular-nums">{value ?? <Gap>{gap}</Gap>}</span>
     </span>
+  );
+}
+
+/** How long a closed listing stays in the Closed column. Matches CLOSED_VISIBLE_DAYS in the sheet query. */
+const CLOSED_DAYS = 30;
+const closedLabel = (reason: string | null | undefined) => reason ? CLOSED_REASON_LABEL[reason as ClosedReason] ?? reason.replace(/_/g, " ") : "Closed";
+const closedOn = (iso: string | null | undefined) => iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Europe/London" }) : "";
+
+/** A closed listing: who, what, why and when. No next action, value or chance: the work is finished. */
+function ClosedCard({ row, onOpen }: { row: SheetRow; onOpen: (row: SheetRow) => void }) {
+  return (
+    <li>
+      <button type="button" onClick={() => onOpen(row)}
+        className="flex w-full flex-col gap-1.5 rounded-[10px] border p-3 text-left transition-colors hover:border-[var(--bt-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bt-text-2)]"
+        style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border)" }}>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <SideChip side={row.side} />
+          {row.company && <span className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight">{row.company}</span>}
+        </span>
+        <span className="text-[12px] font-medium leading-snug [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden" style={{ color: "var(--bt-muted)" }}>{row.title}</span>
+        <span data-closed-meta className="flex items-center justify-between gap-2 border-t pt-2 text-[12px]" style={{ borderColor: "var(--bt-divider)", color: "var(--bt-text-2)" }}>
+          <span>{closedLabel(row.closed_reason)}</span>
+          <span className="tabular-nums" style={{ color: "var(--bt-muted)" }}>{closedOn(row.closed_at)}</span>
+        </span>
+      </button>
+    </li>
   );
 }
 
@@ -67,7 +94,7 @@ function Card({ row, today, onOpen }: { row: SheetRow; today: string; onOpen: (r
   );
 }
 
-export function BulkBoard({ shown, loading, error, today, onOpen }: { shown: SheetRow[]; loading: boolean; error: string | null; today: string; onOpen: (row: SheetRow) => void }) {
+export function BulkBoard({ shown, closed, loading, error, today, onOpen }: { shown: SheetRow[]; /** Listings closed in the last 30 days; the Closed column is shown only when this is passed. */ closed?: SheetRow[]; loading: boolean; error: string | null; today: string; onOpen: (row: SheetRow) => void }) {
   return (
     <BusyRegion busy={loading} label="Loading…">
       {error && <p className="text-[13px]" role="alert" style={{ color: "var(--bt-red)" }}>{error}</p>}
@@ -98,6 +125,25 @@ export function BulkBoard({ shown, loading, error, today, onOpen }: { shown: She
             </section>
           );
         })}
+        {closed && (() => {
+          const cards = [...closed].sort((a, b) => (b.closed_at ?? "").localeCompare(a.closed_at ?? ""));
+          return (
+            <section aria-label="Closed" title={`Closed in the last ${CLOSED_DAYS} days`} className="flex w-[17.5rem] shrink-0 flex-col gap-2 rounded-xl p-2.5" style={{ background: "var(--bt-segment)" }}>
+              <header className="flex flex-col gap-0.5 px-1.5 pb-1 pt-1">
+                <span className="flex items-baseline gap-2">
+                  <span aria-hidden="true" className="h-2 w-2 shrink-0 self-center rounded-full" style={{ background: "var(--bt-muted)" }} />
+                  <h2 className="text-[14px] font-semibold">Closed</h2>
+                  <span className="text-[12px] tabular-nums" style={{ color: "var(--bt-muted)" }}>({cards.length})</span>
+                </span>
+                <span className="pl-4 text-[11px]" style={{ color: "var(--bt-muted)" }}>Last {CLOSED_DAYS} days</span>
+              </header>
+              <ul className="flex flex-col gap-2">
+                {cards.map((row) => <ClosedCard key={row.key} row={row} onOpen={onOpen} />)}
+              </ul>
+              {!cards.length && <p className="px-1.5 pb-2 text-[12px]" style={{ color: "var(--bt-muted)" }}>Nothing closed in the last {CLOSED_DAYS} days</p>}
+            </section>
+          );
+        })()}
       </div>
     </BusyRegion>
   );

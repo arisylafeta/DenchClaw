@@ -51,6 +51,7 @@ type Props = {
 export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
   const { route, navigate } = useBulkTradesRoute(TRADES_PREVIEW_PATH);
   const [rows, setRows] = useState<SheetRow[]>([]);
+  const [closedRows, setClosedRows] = useState<SheetRow[]>([]);
   const [sheetLoaded, setSheetLoaded] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
   const [inboxLoaded, setInboxLoaded] = useState(false);
@@ -68,8 +69,9 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
   // The sheet and the inbox load side by side: the rows never wait on the inbox, nor the inbox on the rows.
   const loadSheet = useCallback(async () => {
     try {
-      const data = await sharedGet<{ rows: SheetRow[] }>("/api/bulk-trades/sheet");
+      const data = await sharedGet<{ rows: SheetRow[]; closed?: SheetRow[] }>("/api/bulk-trades/sheet");
       setRows(data.rows);
+      setClosedRows(data.closed ?? []);
       setSheetError(null);
       setSheetLoaded(true);
     } catch (err) {
@@ -246,7 +248,7 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
             onOpen={open} onUpdate={updateNext} onOpenBoard={() => setTab("board")}
             onOpenCompany={onOpenEntry ? (id) => onOpenEntry("company", id) : undefined} />
         ) : tab === "board" ? (
-          <BulkBoard shown={shown} loading={!sheetLoaded && !sheetError} error={sheetError} today={today} onOpen={open} />
+          <BulkBoard shown={shown} closed={filterSheet(closedRows, { ...filters, progress: "all" })} loading={!sheetLoaded && !sheetError} error={sheetError} today={today} onOpen={open} />
         ) : (
           <OverviewList key={tab} rows={shown} loading={!sheetLoaded && !sheetError} error={sheetError} today={today} owner={filters.owner} sort={sort}
             filtered={searching || filterCount > 0} onOpen={open} onUpdate={updateRow} />

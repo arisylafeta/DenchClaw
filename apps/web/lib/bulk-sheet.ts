@@ -69,6 +69,9 @@ export type SheetRow = {
   review?: boolean;
   /** Date used to order the sheet, newest first. */
   touched: string | null;
+  /** Only on rows of the Board's Closed column: when the listing was closed (ISO timestamp) and why (closed_reason). */
+  closed_at?: string | null;
+  closed_reason?: string | null;
 };
 
 export type SheetFilters = {
@@ -107,6 +110,9 @@ export type ListingSheetInput = {
   paired_listing_id?: string | null;
   /** From bulk_listing_stage(): one of LISTING_STAGES. */
   stage: ListingStage;
+  /** Set only for closed listings. */
+  closed_at?: string | null;
+  closed_reason?: string | null;
 };
 
 const positive = (value: unknown): number | null => {
@@ -168,6 +174,7 @@ export function listingRow(input: ListingSheetInput): SheetRow {
     contact: text(input.contact),
     review: ((input.context as Record<string, unknown> | null)?.review as { state?: unknown } | undefined)?.state === "needs_review",
     touched: input.latest_at ?? input.observed_on ?? input.updated_at,
+    ...(input.closed_at ? { closed_at: input.closed_at, closed_reason: input.closed_reason ?? null } : {}),
   };
 }
 

@@ -61,4 +61,25 @@ describe("Bulk Trades board", () => {
     expect(paid.querySelector("[data-stage-weighted]")).toHaveTextContent("€1k weighted");
     expect(paid.querySelector("[data-stage-unsized]")).toBeNull();
   });
+
+  it("adds a Closed column at the end with the reason and close date, newest first", () => {
+    const onOpen = vi.fn();
+    render(<BulkBoard loading={false} error={null} today="2026-11-23" onOpen={onOpen} shown={[row({})]}
+      closed={[row({ key: "x", id: "x", title: "Older", side: "buyer", progress: "New", closed_at: "2026-11-10T09:00:00Z", closed_reason: "bought_elsewhere" }),
+        row({ key: "y", id: "y", title: "Newest", side: "buyer", progress: "New", next_action: null, closed_at: "2026-11-23T17:47:00Z", closed_reason: "no_longer_needed" })]} />);
+    const labels = screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"));
+    expect(labels[labels.length - 1]).toBe("Closed");
+    const closed = within(screen.getByRole("region", { name: "Closed" }));
+    expect(closed.getAllByRole("button").map((b) => b.textContent)).toEqual([expect.stringContaining("Newest"), expect.stringContaining("Older")]);
+    expect(closed.getByText("Dropped")).toBeTruthy();
+    expect(closed.getByText("23 Nov")).toBeTruthy();
+    expect(closed.queryByText("No next action")).toBeNull();
+    fireEvent.click(closed.getByText("Newest"));
+    expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: "y" }));
+  });
+
+  it("says so when nothing was closed in the window", () => {
+    render(<BulkBoard loading={false} error={null} today="2026-11-23" onOpen={vi.fn()} shown={[]} closed={[]} />);
+    expect(within(screen.getByRole("region", { name: "Closed" })).getByText(/Nothing closed in the last 30 days/)).toBeTruthy();
+  });
 });

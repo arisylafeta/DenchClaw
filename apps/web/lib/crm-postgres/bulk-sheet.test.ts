@@ -68,4 +68,30 @@ describe.skipIf(!TEST_URL)("sheet list", () => {
     expect(rows.find((row) => row.id === "btl_sheet_dec")).toMatchObject({ paired_listing_id: null, is_trade: false });
     expect(rows.find((row) => row.id === "btd_sheet_worked")?.paired_listing_id).toBeNull();
   });
+
+  it("lists listings closed in the last 30 days, newest first, and leaves housekeeping closures out", async () => {
+    await pg.queryPg(`
+      delete from crm_bulk_listings where id like 'btl_closed_%';
+      insert into crm_bulk_listings (id, kind, party, summary, status) values
+        ('btl_closed_new', 'demand', 'Quiet Buyer', 'Packs', 'open'), ('btl_closed_recent', 'demand', 'Recent Buyer', 'Packs', 'open'),
+        ('btl_closed_old', 'demand', 'Old Buyer', 'Packs', 'open'), ('btl_closed_dup', 'demand', 'Dup Buyer', 'Packs', 'open'),
+        ('btl_closed_open', 'demand', 'Open Buyer', 'Packs', 'open');
+      update crm_bulk_listings set status = 'closed', closed_reason = 'no_longer_needed' where id = 'btl_closed_new';
+      update crm_bulk_listings set status = 'closed', closed_reason = 'expired' where id in ('btl_closed_recent', 'btl_closed_old');
+      update crm_bulk_listings set status = 'closed', closed_reason = 'duplicate' where id = 'btl_closed_dup';
+      -- Closing logs a "Closed" story entry; back-date them. An edit made today must not bring an old closure back.
+      update crm_bulk_listing_activity set occurred_at = now() - interval '2 days' where bulk_listing_id = 'btl_closed_new' and kind = 'status';
+      update crm_bulk_listing_activity set occurred_at = now() - interval '5 days' where bulk_listing_id = 'btl_closed_recent' and kind = 'status';
+      update crm_bulk_listing_activity set occurred_at = now() - interval '35 days' where bulk_listing_id = 'btl_closed_old' and kind = 'status';
+      update crm_bulk_listings set updated_at = now() where id = 'btl_closed_old';
+    `);
+    const closed = (await sheet.listClosed()).filter((row) => row.id.startsWith("btl_closed_"));
+    // The story's Closed entry wins over updated_at: "old" was closed 35 days ago even though it was edited today.
+    expect(closed.map((row) => row.id)).toEqual(["btl_closed_new", "btl_closed_recent"]);
+    expect(closed[0]).toMatchObject({ closed_reason: "no_longer_needed" });
+    expect(closed[0].closed_at).toBeTruthy();
+    // Closed listings never reach the working sheet.
+    expect((await sheet.listSheet()).filter((row) => row.id.startsWith("btl_closed_")).map((row) => row.id)).toEqual(["btl_closed_open"]);
+    await pg.queryPg("delete from crm_bulk_listings where id like 'btl_closed_%'");
+  });
 });
