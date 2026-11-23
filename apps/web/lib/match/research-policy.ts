@@ -24,6 +24,7 @@ export const RESEARCH_POLICY: Record<string, ResearchActivity> = {
   sells_loose_cells: { label: "sells loose cells", formats: { cells: STRONG } },
   sells_finished_batteries: { label: "sells finished batteries", formats: {} },
   integrates_storage: { label: "integrates storage systems", formats: { modules: STRONG, packs: STRONG, systems: STRONG } },
+  // converts_vehicles = converting cars, vans, buses or boats to electric drive; golf carts, e-bikes, scooters and lithium upgrades of golf carts/RVs/marine are sells_finished_batteries or builds_packs_from_cells.
   converts_vehicles: { label: "converts vehicles", formats: { packs: STRONG, modules: STRONG } },
   recycles: { label: "recycles", formats: { cells: MEDIUM, modules: MEDIUM, packs: MEDIUM, systems: MEDIUM } },
   trades_used_batteries: { label: "trades used batteries", formats: { cells: STRONG, modules: STRONG, packs: STRONG } },
