@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Mark CRM companies that transacted on the marketplace as customers; dry-run unless --apply.
 
-Reads production `deals` (GET only) and sets crm_companies.customer = true for both parties of every deal that
-completed or whose payment was confirmed: buyers, sellers and recyclers alike. Platform accounts map to CRM
+Reads production `deals` (GET only) and sets crm_companies.customer = true for our customers on every deal that
+completed or whose payment was confirmed: the buyer of a marketplace sale and the supplier of a recycling deal.
+Marketplace sellers and recyclers are suppliers to us, not customers (Alex, 23 Nov 2026), so they are not marked. Platform accounts map to CRM
 companies through crm_platform_accounts -> crm_people.company_id (kept current by platform_account_sync).
 Test traffic is skipped: deals under 50 in value and companies named as tests or ReBattery itself.
 Never clears the flag. Output is aggregate counts plus the company names newly marked.
@@ -35,7 +36,9 @@ def paid_accounts(deals):
         if deal['status'] == 'cancelled' or float(deal.get('agreed_amount') or 0) < MIN_VALUE:
             continue
         if deal['status'] == 'completed' or deal['workflow_step'] in PAID_STEPS:
-            accounts.update(a for a in (deal['supplier_account_id'], deal['counterparty_account_id']) if a)
+            customer = deal['supplier_account_id'] if deal['source_type'] == 'recycling_offer' else deal['counterparty_account_id']
+            if customer:
+                accounts.add(customer)
     return sorted(accounts)
 
 
@@ -45,7 +48,7 @@ def main():
     args = parser.parse_args()
     try:
         reader = PlatformReader(*platform_credentials())
-        deals = reader.table('deals', 'id,status,workflow_step,agreed_amount,supplier_account_id,counterparty_account_id',
+        deals = reader.table('deals', 'id,source_type,status,workflow_step,agreed_amount,supplier_account_id,counterparty_account_id',
                              'created_at.asc')
         accounts = paid_accounts(deals)
         with psycopg2.connect(dbname='denchclaw') as conn, conn.cursor() as cursor:
