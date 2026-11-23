@@ -11,9 +11,9 @@ const applyChatView = (...args: Parameters<typeof applyView>) => applyView(args[
 const access = { visibility: "private" as const, ownerId: "user-a", canShare: true, canDelete: true, canWrite: true, canApprove: true };
 const solo: HermesConversation = { access, key: conversationKey("solo", "same-id", "alpha"), id: "same-id", kind: "solo", profile: "alpha", title: "Alpha solo", participants: [{ profile: "alpha", name: "Alpha" }], updatedAt: 100, working: null };
 const group: HermesConversation = { access: { ...access, visibility: "team", ownerId: "other", canShare: false, canDelete: false }, key: conversationKey("group", "native-room"), id: "native-room", kind: "group", title: "Shared room", participants: [{ profile: "alpha", name: "Alpha", memberId: "a" }, { profile: "default", name: "Sol", memberId: "b" }], updatedAt: 200, working: false };
-function Harness() {
+function Harness({ onDelete }: { onDelete?: (key: string) => void } = {}) {
   const chats = useHermesConversations();
-  return <><ProfileSwitcher conversationFilter={{ value: chats.filter, profiles: chats.listing?.profiles ?? [], onChange: chats.setFilter }} /><button type="button" onClick={() => chats.newChat("solo")}>new solo</button><button type="button" onClick={() => chats.newChat("group")}>new group</button><HermesConversationList chats={chats} /><HermesNewChatDialog chats={chats} /></>;
+  return <><ProfileSwitcher conversationFilter={{ value: chats.filter, profiles: chats.listing?.profiles ?? [], onChange: chats.setFilter }} /><button type="button" onClick={() => chats.newChat("solo")}>new solo</button><button type="button" onClick={() => chats.newChat("group")}>new group</button><HermesConversationList chats={chats} onDelete={onDelete} /><HermesNewChatDialog chats={chats} /></>;
 }
 let messages: { id: string; role: string; text: string }[];
 let created: HermesConversation;
@@ -116,6 +116,19 @@ describe("Hermes unified chat UI", () => {
     await user.click(await screen.findByRole("button", { name: "More options for Alpha solo" }));
     await user.click(await screen.findByRole("menuitem", { name: "Copy ID" }));
     expect(writeText).toHaveBeenCalledWith(solo.id);
+  });
+  it("offers Delete only to the owner, after confirmation", async () => {
+    const user = userEvent.setup(); const onDelete = vi.fn(); const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    render(<Harness onDelete={onDelete} />);
+    await user.click(await screen.findByRole("button", { name: "More options for Alpha solo" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    expect(onDelete).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole("button", { name: "More options for Alpha solo" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    expect(onDelete).toHaveBeenCalledWith(solo.key); expect(confirm).toHaveBeenCalledTimes(2);
+    await user.click(await screen.findByRole("button", { name: "More options for Shared room" }));
+    expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
+    confirm.mockRestore();
   });
   it("renames a chat in place and sends the new title", async () => {
     const user = userEvent.setup(); render(<Harness />);

@@ -159,15 +159,16 @@ const TerminalDrawer = dynamic(
 );
 
 /** Only the visible panel has a current subscription; hidden panels use the server listing. */
-export function WorkspaceHermesConversationList({ chats, snapshots, visibleTabId, onOpen }: {
+export function WorkspaceHermesConversationList({ chats, snapshots, visibleTabId, onOpen, onDelete }: {
   chats: HermesChatsController;
   snapshots: Record<string, ChatTabRuntimeSnapshot>;
   visibleTabId: string | null;
   /** Called when a chat is clicked, so a hidden chat pane is shown again. */
   onOpen?: () => void;
+  onDelete?: (sessionId: string) => void | Promise<void>;
 }) {
   const visible = Object.values(snapshots).filter(snapshot => snapshot.tabId === visibleTabId && snapshot.sessionId);
-  return <HermesConversationList chats={chats} onOpen={onOpen}
+  return <HermesConversationList chats={chats} onOpen={onOpen} onDelete={onDelete}
     workingKeys={new Set(visible.filter(snapshot => snapshot.isStreaming && !snapshot.background).map(snapshot => snapshot.sessionId!))}
     backgroundKeys={new Set(visible.filter(snapshot => snapshot.background).map(snapshot => snapshot.sessionId!))}
     awaitingKeys={new Set(visible.filter(snapshot => snapshot.awaiting).map(snapshot => snapshot.sessionId!))} />;
@@ -1364,7 +1365,8 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
         const res = await fetch(`/api/hermes/conversations/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
         if (!res.ok) return;
         dispatch({ type: "closeChatsForSession", sessionId });
-        hermesChats.forget(sessionId);
+        setActiveSessionId((current) => current === sessionId ? null : current);
+        hermesChats.revoke(sessionId);
         return;
       }
       const res = await fetch(`/api/web-sessions/${sessionId}`, { method: "DELETE" });
@@ -2599,7 +2601,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
     onNewChatSession: () => { showChat(); return hermesChats.enabled ? hermesChats.newChat() : openPermanentBlankChatTab(); },
     chatsLoading: !hermesChats.ready,
     chatsPanel: (
-      !hermesChats.ready ? <ChatListSkeleton /> : hermesChats.enabled || hermesChats.error ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} onOpen={showChat} /> : <ChatSessionsSidebar
+      !hermesChats.ready ? <ChatListSkeleton /> : hermesChats.enabled || hermesChats.error ? <WorkspaceHermesConversationList chats={hermesChats} snapshots={chatRuntimeSnapshots} visibleTabId={visibleMainChatTabId} onOpen={showChat} onDelete={handleDeleteSession} /> : <ChatSessionsSidebar
         embedded
         sessions={sessions}
         activeSessionId={activeSessionId}
