@@ -682,3 +682,22 @@ class R9PrefixModel(unittest.TestCase):
     def test_bare_family_inside_longer_model_is_not_missing(self):
         named = {("Ioniq", "ioniq"), ("Ioniq 5", "ioniq5")}
         self.assertTrue(any(o != "ioniq" and o.startswith("ioniq") for _, o in named))
+
+
+class AnyPackExemptions(unittest.TestCase):
+    def setUp(self):
+        self.d = {"id": "d1", "company_id": "c1", "status": "open", "summary": "Kona and Niro packs; open to almost any pack from any brand",
+                  "spec": {"formats": ["Packs"], "makes": ["Hyundai or Kia"], "models": ["Kona"]}}
+
+    def test_broad_any_pack_line_not_redundant_or_broader(self):
+        broad = line("a", product_key="broad:any-packs", kind="ask", demand_id="d1", company_id="c1", format="Packs")
+        kona = line("b", product_key="model:hyundai-kona", kind="ask", demand_id="d1", company_id="c1", make="Hyundai", model="Kona", format="Packs", product_key_level="model")
+        c = ctx([broad, kona], demands=[self.d])
+        self.assertEqual([v for v in wc.r4(c) if v["line_id"] == "a"], [])
+        self.assertEqual([v for v in wc.r8(c) if v["line_id"] == "a"], [])
+
+    def test_without_any_the_broad_line_is_still_flagged(self):
+        d = dict(self.d, summary="Kona packs only")
+        broad = line("a", product_key="broad:any-packs", kind="ask", demand_id="d1", company_id="c1", format="Packs")
+        kona = line("b", product_key="model:hyundai-kona", kind="ask", demand_id="d1", company_id="c1", make="Hyundai", model="Kona", format="Packs", product_key_level="model")
+        self.assertTrue(any(v["line_id"] == "a" for v in wc.r4(ctx([broad, kona], demands=[d]))))

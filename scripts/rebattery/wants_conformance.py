@@ -448,6 +448,12 @@ def r4(ctx):
         for a in items:
             for b in items:
                 if a is not b and _less_specific(a, b):
+                    if a.get("demand_id") and _plain_model_with_kwh_siblings(a, items):
+                        break  # migration 121 writes the plain model line beside its kWh lines on purpose
+                    demand = ctx["demands"].get(a.get("demand_id")) or {}
+                    dspec = demand.get("spec") if isinstance(demand.get("spec"), dict) else {}
+                    if demand and not a.get("make") and SAYS_ANY.search(" ".join(_flat_strings([demand.get("summary"), dspec.get("product_family")]))):
+                        break  # migration 132: 'any pack' writes the make-less broad line beside the named ones on purpose
                     if _is_dossier_line(a) and _dossier_states_line(a, (ctx["companies"].get(a.get("company_id")) or {}).get("dossier_products")):
                         break  # the dossier lists this broader product itself
                     found.append(_violation(ctx, "R4", a, f"redundant: {b['product_key']} ({b['id']}) from the same source is more specific"))
@@ -844,6 +850,10 @@ def r8(ctx):
             multi = (len(makes) >= 2 or len(models) >= 2) and len(chemistries) >= 2
             drops = _dropped(line, makes, chemistries, as_list(spec.get("formats")), models, exempt_chemistry=multi,
                              exempt_chem_format=_plain_model_with_kwh_siblings(line, by_demand[line["demand_id"]]))
+            # Migration 132: a request whose text says 'any pack' (etc.) also writes the make-less broad line on purpose.
+            text = " ".join(_flat_strings([demand.get("summary"), spec.get("product_family")]))
+            if drops and SAYS_ANY.search(text) and not line.get("make") and not key_has_cell_format(line):
+                drops = [d for d in drops if not (d.startswith("make") or d.startswith("model"))]
             if drops:
                 found.append(_violation(ctx, "R8", line, f"line is broader than the request: dropped {'; '.join(drops)}", f"demand {demand['id']}"))
         elif _is_profile_line(line) and _is_box_checked(line):
