@@ -5,7 +5,7 @@ import "server-only";
 // Read only, except the Not a fit verdicts the route records.
 import { queryPg } from "../postgres";
 import { buildProductKey, keyLine, type FieldFact, type ProductKey } from "../match/product-key";
-import { rankBuyers, shortDate, supplyFactsFromKey, type BuyerLine, type RankedBuyerRow, type RuledOutRow } from "../match/rules";
+import { rankBuyers, shortDate, supplyFactsFromKey, type BuyerLine, type RankedBuyerRow, type ResearchBuyerRow, type RuledOutRow } from "../match/rules";
 import { countryFromText, requirementFor, scoreCandidate, vocabulary, type Candidate, type Check } from "../demand-match";
 import { priceLabel } from "../bulk-demand";
 import { matchVerdicts, verdictKey, type FeedRow } from "./demand-match-supply";
@@ -313,6 +313,19 @@ export async function supplyMatchesV2(listingId: string): Promise<MatchesResult 
     rows.push(buyerRow(buyer, contactOf.get(buyer.companyId) ?? null, touch.get(buyer.companyId) ?? null, offers));
   }
   const listed = rows.map((row, index) => ({ ...row, rank: index + 1 }));
+  const researchContacts = await queryPg<{ company_id: string; person_id: string; email: string | null }>(
+    `select distinct on (p.company_id) p.company_id, p.id as person_id, p.email
+     from crm_people p join crm_companies c on c.id = p.company_id
+     where p.company_id = any($1::text[])
+     order by p.company_id,
+       (p.email is not null and not coalesce(p.email_opted_out, false)) desc,
+       (p.id = c.buyer_main_contact_id) desc, p.full_name`,
+    [ranked.research.map((row) => row.companyId)],
+  );
+  const researchContactOf = new Map(researchContacts.map((row) => [row.company_id, row]));
+  const research = ranked.research.map((row, index) => researchRow(
+    row, index + 1, researchContactOf.get(row.companyId) ?? null, touch.get(row.companyId) ?? null, offers,
+  ));
   // A dossier rule excludes a buyer from the ranking, never from sight. "Marked not a fit" stays hidden: that is our own call.
   const ruledOut = shownNoGos
     .map((row, index) => ruledOutRow(row, index + 1, asOf, contactOf.get(row.companyId) ?? null, touch.get(row.companyId) ?? null, offers));
@@ -324,8 +337,10 @@ export async function supplyMatchesV2(listingId: string): Promise<MatchesResult 
     rows: listed,
     ruledOut,
     ruledOutTotal: noGos.length,
+    research,
+    researchTotal: ranked.researchTotal,
     considered: demand.length + ranked.evaluated,
-    blocked: listed.length ? null : "Nothing fits yet. Add a dossier or a listing field to widen the match.",
+    blocked: listed.length || research.length ? null : "Nothing fits yet. Add a dossier or a listing field to widen the match.",
     errors: [],
   };
 }
@@ -340,6 +355,27 @@ function buyerRow(buyer: RankedBuyerRow, contact: { person_id: string; email: st
     reason: buyer.fits,
     checks: buyer.checks,
     price: buyer.priceBand,
+    offer: offers.find(buyer.companyId, contact?.person_id ?? null, buyer.name),
+    companyId: buyer.companyId,
+    personId: contact?.person_id ?? null,
+    contact: contact?.email ?? null,
+    stockId: null,
+  };
+}
+
+function researchRow(
+  buyer: ResearchBuyerRow, rank: number, contact: { person_id: string; email: string | null } | null,
+  lastTouch: string | null, offers: Awaited<ReturnType<typeof offersForListing>>,
+): MatchRow {
+  return {
+    key: verdictKey.company(buyer.companyId),
+    rank,
+    name: buyer.name,
+    detail: lastTouch ? `Last contact ${day(lastTouch)}` : "No contact yet",
+    tags: buyer.isLead ? ["lead"] : [],
+    reason: buyer.fits,
+    checks: buyer.checks,
+    price: null,
     offer: offers.find(buyer.companyId, contact?.person_id ?? null, buyer.name),
     companyId: buyer.companyId,
     personId: contact?.person_id ?? null,

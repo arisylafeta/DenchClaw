@@ -141,6 +141,10 @@ export type MatchesResult = {
   ruledOut?: MatchRow[];
   /** How many dossier no-gos there are; the list shows the first 25. */
   ruledOutTotal?: number;
+  /** Supply tab: research-only buyers (no dossier, no stated Want) in their own collapsed band, after every known buyer. Never filtered, ordered by fit. */
+  research?: MatchRow[];
+  /** How many research buyers there are; the band lists the first 50. */
+  researchTotal?: number;
   /** How many candidates were scored, for the quiet line under the header. */
   considered: number;
   blocked: string | null;

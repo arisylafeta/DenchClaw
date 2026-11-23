@@ -74,6 +74,31 @@ describe("Matches tab", () => {
     expect(JSON.parse(String(post[1]!.body)).data.match).toMatchObject({ reason: "Added despite: No loose cells", rank: null, ruled_out_override: true });
   });
 
+  it("shows research-only buyers in a collapsed band below known buyers, rows like the others", async () => {
+    const possible = row({ key: "company:c7", name: "Packfix", companyId: "c7", personId: null, contact: null, tags: ["lead"], reason: "Research: repairs EV packs (site)", checks: [], price: null });
+    vi.stubGlobal("fetch", vi.fn(async () => json(result([row()], { research: [possible], researchTotal: 60 }))));
+    render(<SupplyMatchesTab listingId="bts_1" active />);
+    const toggle = await screen.findByRole("button", { name: /Possible buyers \(research\) \(60\)/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Packfix")).toBeNull();
+    expect(screen.getByText(/1 match · 34 checked/)).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(screen.getByText("Packfix")).toBeTruthy();
+    expect(screen.getByText("Research: repairs EV packs (site)")).toBeTruthy();
+    expect(screen.getByText("Showing 1 of 60.")).toBeTruthy();
+    const item = within(screen.getByText("Packfix").closest("li")!);
+    expect(item.getByRole("button", { name: "Add to offers" })).toBeTruthy();
+    expect(item.getByRole("button", { name: "Not a fit" })).toBeTruthy();
+  });
+
+  it("explains an empty known list when only research buyers exist", async () => {
+    const possible = row({ key: "company:c7", name: "Packfix", reason: "Research: repairs EV packs (site)" });
+    vi.stubGlobal("fetch", vi.fn(async () => json(result([], { research: [possible], researchTotal: 1 }))));
+    render(<SupplyMatchesTab listingId="bts_1" active />);
+    expect(await screen.findByText("No known buyer fits this lot yet.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Possible buyers \(research\) \(1\)/ })).toBeTruthy();
+  });
+
   it("counts every dossier no-go but lists the first rows the server sent", async () => {
     const ruled = row({ key: "company:c9", name: "Cellco", companyId: "c9", reason: "No loose cells", checks: [], price: null, ruledOut: { text: "No loose cells", seen: null, source: null } });
     vi.stubGlobal("fetch", vi.fn(async () => json(result([row()], { ruledOut: [ruled], ruledOutTotal: 31 }))));

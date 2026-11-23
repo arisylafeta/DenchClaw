@@ -43,6 +43,7 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
   const [open, setOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [showRuledOut, setShowRuledOut] = useState(false);
+  const [showResearch, setShowResearch] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
@@ -55,6 +56,7 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
     setOpen(!!result?.lotKey.open);
     setShowAll(false);
     setShowRuledOut(false);
+    setShowResearch(false);
   }, [result?.id, result?.lotKey?.open]);
 
   if (loading && !result) {
@@ -83,6 +85,8 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
   const hidden = result.rows.length - rows.length;
   const ruledOut = result.ruledOut ?? [];
   const ruledOutTotal = Math.max(result.ruledOutTotal ?? 0, ruledOut.length);
+  const research = result.research ?? [];
+  const researchTotal = Math.max(result.researchTotal ?? 0, research.length);
 
   /**
    * Adds one offer. `batch`: a supplier from Group matches, whose offer records every stock line on the buyer's pack
@@ -193,6 +197,54 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
 
   const askNotAFit = (row: MatchRow) => { setAsking(asking === row.key ? null : row.key); setQuick(null); setNote(""); };
 
+  const renderRow = (row: MatchRow) => (
+        <li key={row.key} className="border-t py-3 first:border-t-0 first:pt-0" style={{ borderColor: "var(--color-border)" }}>
+          <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+            <span className="w-5 shrink-0 pt-0.5 text-right text-[12px] tabular-nums" style={{ color: "var(--color-text-muted)" }}>{row.rank}</span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="truncate text-[14px] font-semibold">{row.name}</span>
+                {row.tags.map((tag) => <Chip key={tag} tone={TAG_TONE[tag]}>{tag}</Chip>)}
+                {row.price && <span className="ml-auto shrink-0 text-[12px] font-medium tabular-nums">{row.price}</span>}
+              </div>
+              <p className="mt-0.5 text-[13px]">{row.reason}</p>
+              {row.detail && <p className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>{row.detail}</p>}
+              {row.checks.length > 0 && (
+                <p className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>Check: {row.checks.join(" · ")}</p>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-2 pl-8 sm:pl-0">
+              {row.offer ? (
+                <button
+                  type="button"
+                  className={`${rowFocus} inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[12px] font-medium underline-offset-2 hover:underline`}
+                  style={{ color: "var(--color-accent)" }}
+                  onClick={onOpenOffers}
+                  disabled={!onOpenOffers}
+                >
+                  <StatusDot tone={row.offer.stage === "declined" || row.offer.stage === "lost" ? "red" : "green"} />
+                  In offers · {STAGE_LABEL[row.offer.stage as OfferStage] ?? row.offer.stage} {offerDate(row.offer.date)}
+                </button>
+              ) : (
+                <Button variant="secondary" size="small" disabled={adding === row.key} onClick={() => void add(row)}>
+                  {adding === row.key ? "Adding…" : "Add to offers"}
+                </Button>
+              )}
+              <LinkButton
+                variant="secondary"
+                size="xs"
+                aria-expanded={asking === row.key}
+                onClick={() => { setAsking(asking === row.key ? null : row.key); setQuick(null); setNote(""); }}
+              >
+                Not a fit
+              </LinkButton>
+            </div>
+          </div>
+
+          {asking === row.key && notAFitForm(row)}
+        </li>
+  );
+
   // A request lays its matches out as the v4 mockup (summary card, ranked rows that open); a supply listing keeps v3's list.
   if (result.kind === "demand") {
     return (
@@ -254,57 +306,11 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
 
       <ErrorText error={actionError} />
 
-      {!result.rows.length && <p className={css.empty}>{result.blocked ?? "Nothing fits yet. Add a dossier or a listing field to widen the match."}</p>}
+      {!result.rows.length && <p className={css.empty}>{research.length ? "No known buyer fits this lot yet." : result.blocked ?? "Nothing fits yet. Add a dossier or a listing field to widen the match."}</p>}
 
       {rows.length > 0 && (
         <ul className="flex flex-col">
-          {rows.map((row) => (
-            <li key={row.key} className="border-t py-3 first:border-t-0 first:pt-0" style={{ borderColor: "var(--color-border)" }}>
-              <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-                <span className="w-5 shrink-0 pt-0.5 text-right text-[12px] tabular-nums" style={{ color: "var(--color-text-muted)" }}>{row.rank}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="truncate text-[14px] font-semibold">{row.name}</span>
-                    {row.tags.map((tag) => <Chip key={tag} tone={TAG_TONE[tag]}>{tag}</Chip>)}
-                    {row.price && <span className="ml-auto shrink-0 text-[12px] font-medium tabular-nums">{row.price}</span>}
-                  </div>
-                  <p className="mt-0.5 text-[13px]">{row.reason}</p>
-                  {row.detail && <p className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>{row.detail}</p>}
-                  {row.checks.length > 0 && (
-                    <p className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>Check: {row.checks.join(" · ")}</p>
-                  )}
-                </div>
-                <div className="flex shrink-0 items-center gap-2 pl-8 sm:pl-0">
-                  {row.offer ? (
-                    <button
-                      type="button"
-                      className={`${rowFocus} inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[12px] font-medium underline-offset-2 hover:underline`}
-                      style={{ color: "var(--color-accent)" }}
-                      onClick={onOpenOffers}
-                      disabled={!onOpenOffers}
-                    >
-                      <StatusDot tone={row.offer.stage === "declined" || row.offer.stage === "lost" ? "red" : "green"} />
-                      In offers · {STAGE_LABEL[row.offer.stage as OfferStage] ?? row.offer.stage} {offerDate(row.offer.date)}
-                    </button>
-                  ) : (
-                    <Button variant="secondary" size="small" disabled={adding === row.key} onClick={() => void add(row)}>
-                      {adding === row.key ? "Adding…" : "Add to offers"}
-                    </Button>
-                  )}
-                  <LinkButton
-                    variant="secondary"
-                    size="xs"
-                    aria-expanded={asking === row.key}
-                    onClick={() => { setAsking(asking === row.key ? null : row.key); setQuick(null); setNote(""); }}
-                  >
-                    Not a fit
-                  </LinkButton>
-                </div>
-              </div>
-
-              {asking === row.key && notAFitForm(row)}
-            </li>
-          ))}
+          {rows.map(renderRow)}
         </ul>
       )}
 
@@ -312,6 +318,28 @@ export function MatchesList({ result, loading, error, onRetry, offersEndpoint, o
         <LinkButton variant="secondary" size="small" onClick={() => setShowAll(true)}>
           Show {Math.min(10, hidden)} more of {hidden}
         </LinkButton>
+      )}
+
+      {research.length > 0 && (
+        <div className="border-t pt-2" style={{ borderColor: "var(--color-border)" }}>
+          <button
+            type="button"
+            aria-expanded={showResearch}
+            aria-controls="matches-research"
+            className={`${rowFocus} flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-[13px] font-medium`}
+            style={{ color: "var(--color-text-secondary)" }}
+            onClick={() => setShowResearch(!showResearch)}
+          >
+            {showResearch ? <ChevronDown size={14} className="shrink-0" aria-hidden /> : <ChevronRight size={14} className="shrink-0" aria-hidden />}
+            Possible buyers (research) ({researchTotal})
+          </button>
+          {showResearch && <ul id="matches-research" className="flex flex-col">{research.map(renderRow)}</ul>}
+          {showResearch && researchTotal > research.length && (
+            <p className="px-1 pt-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+              Showing {research.length} of {researchTotal}.
+            </p>
+          )}
+        </div>
       )}
 
       {ruledOut.length > 0 && (
@@ -425,11 +453,12 @@ export function MatchesTab({ kind, id, active, onOpenOffers, onOpenDetails }: { 
         ...current,
         rows: current.rows.map((item) => (item.key === row.key ? { ...item, offer } : item)),
         ruledOut: current.ruledOut?.map((item) => (item.key === row.key ? { ...item, offer } : item)),
+        research: current.research?.map((item) => (item.key === row.key ? { ...item, offer } : item)),
         suppliers: current.suppliers?.map((s) => (s.rowKeys.includes(row.key) ? { ...s, offer } : s)) ?? current.suppliers,
       })}
       onNotAFit={async (row, reason) => {
         await request(base, { method: "POST", body: JSON.stringify({ key: row.key, label: row.name, reason }) });
-        setData((current) => current && { ...current, rows: current.rows.filter((item) => item.key !== row.key) });
+        setData((current) => current && { ...current, rows: current.rows.filter((item) => item.key !== row.key), research: current.research?.filter((item) => item.key !== row.key) });
         // The supplier view's counts change with it: read them again.
         if (data?.suppliers?.length) void load();
       }}
