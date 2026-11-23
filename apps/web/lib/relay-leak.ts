@@ -4,6 +4,7 @@ import { stockFits } from "./relay-price";
 import type { StockFit } from "./relay-price-types";
 import { replyIdentity } from "./relay-identity";
 import { draftSide, leakFacts, leaks, moneyMentions, type Leak, type LeakFacts, type Party, type Side } from "./relay-leak-core";
+import { EARLIER_ROUND_SQL } from "./relay-round";
 
 /**
  * The leak guard, the I/O part: gathers who is on each side of an email's thread (the counterpart, the linked deal's
@@ -66,7 +67,7 @@ export async function threadSides(itemId: string, ownerId: string, drafts: Guard
 export async function guardDrafts(itemId: string): Promise<GuardDraft[]> {
   return queryPg<GuardDraft>(
     `select d.id, d.role, d.to_kind, coalesce(m.to_emails, '{}') as to, coalesce(m.body_text, '') as body
-       from relay_draft d join mail_message m on m.id = d.mail_message_id where d.item_id = $1 and d.state <> 'skipped'`, [itemId]);
+       from relay_draft d join mail_message m on m.id = d.mail_message_id where d.item_id = $1 and d.state <> 'skipped' and not ${EARLIER_ROUND_SQL}`, [itemId]);
 }
 
 /** What one Relay email, as it is now, would leak: checked against everything on its thread. */

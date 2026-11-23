@@ -255,3 +255,17 @@ def test_free_mail_domain_never_resolves_a_company():
     with psycopg2.connect(DSN) as db, db.cursor(cursor_factory=__import__('psycopg2.extras').extras.RealDictCursor) as cur:
         cur.execute("insert into crm_companies (id, name, domain) values ('gm-co','Gmail yard','gmail.com') on conflict do nothing")
         assert owner.sender_company(cur, None, 'someone@gmail.com') is None
+
+
+def test_a_thread_alex_answered_himself_never_wakes_its_agent(monkeypatch):
+    calls = []
+    monkeypatch.setattr(owner, 'deliver', lambda *a: calls.append(a))
+    monkeypatch.setattr(owner, 'ensure_session', lambda cur, o, subject, apply: ('s', False))
+    owner.rules(Namespace(action='add', kind='mailbox', value='supply', profile='sorcerer', session=None, priority=100, note=None, apply=True))
+    with psycopg2.connect(DSN) as db, db.cursor() as cur:
+        cur.execute("""insert into mail_message (id, direction, transport, purpose, state, thread_id, subject, from_email, to_emails, identity_key, sent_at, created_at)
+                       values ('gmail_msg_mine','outbound','gmail','personal','accepted','t1','Re: offer','alex@rebattery.io','{buyer@real.co}','alex', now() - interval '1 hour', now() - interval '1 hour')""")
+    inbound('m1', 't1', 'buyer@real.co')
+    inbound('m2', 't2', 'buyer@real.co')
+    result = run_dispatch()
+    assert result['skipped'] == 1 and result['queued'] == 1

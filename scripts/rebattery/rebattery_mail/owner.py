@@ -178,6 +178,19 @@ def automated(message):
     return None
 
 
+def answered_by_hand(cur, thread_id):
+    """Alex has answered this thread himself, from Gmail or by sending a Relay draft: the conversation is his now, so
+    no agent is woken to draft on it (their draft would sit beside Relay's). Campaign mail doesn't count."""
+    if not thread_id:
+        return False
+    cur.execute("select to_regclass('public.relay_draft') is not null as relay")
+    relay = cur.fetchone()['relay']
+    cur.execute(f"""select 1 from mail_message m where m.thread_id = %s and m.direction = 'outbound' and m.campaign_id is null
+                      and (m.id like 'gmail_msg_%%'{" or (m.state = 'accepted' and exists (select 1 from relay_draft d where d.mail_message_id = m.id))" if relay else ""})
+                    limit 1""", (thread_id,))
+    return cur.fetchone() is not None
+
+
 def header_addresses(message):
     """Raw To/CC/Delivered-To addresses from the stored provider headers. The Gmail sync stores to_emails without
     +tags, so a tag is only visible here."""
@@ -410,6 +423,8 @@ def dispatch(args):
                 state, why = 'skipped', 'old mail (backfill)'
             elif automated(message):
                 state, why = 'skipped', automated(message)
+            elif answered_by_hand(cur, message['thread_id']):
+                state, why = 'skipped', 'Alex answers this thread himself'
             else:
                 hit = route(cur, message)
                 state = 'pending' if hit and message['thread_id'] else 'unassigned'

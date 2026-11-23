@@ -12,6 +12,7 @@ import type { PriceFill, StockFit } from "./relay-price-types";
 import { threadSides, type GuardDraft } from "./relay-leak";
 import { leaks, leakSentence, type Leak } from "./relay-leak-core";
 import { sendAtProblem } from "./relay-send-time";
+import { EARLIER_ROUND_SQL } from "./relay-round";
 import type { PackSource } from "./relay-context-core";
 import {
   hasPriceMarker, marks, parseTalk, pushHistory, readHistory, readSummary, SEND_MODES, stockBlock, TALK_ALL, talkPrompt, toKindOf,
@@ -74,7 +75,7 @@ export type TalkRow = {
   scheduled: { at?: string; undo?: boolean; unless_reply?: unknown } | null; failure: { reason: string; detail?: unknown } | null;
 };
 
-/** The item's drafts that are still in play (not dropped), the reply first, with their mail. */
+/** The item's drafts that are still in play (not dropped, not sent in an earlier round), the reply first, with their mail. */
 export async function draftRows(itemId: string): Promise<TalkRow[]> {
   return queryPg<TalkRow>(
     `select d.id, d.item_id, d.role, d.position, d.title, d.why, d.state, d.to_kind, d.send_mode, d.send_at::text as send_at, d.included, d.history, d.redo,
@@ -82,7 +83,7 @@ export async function draftRows(itemId: string): Promise<TalkRow[]> {
        coalesce(m.cc_emails, '{}') as cc_emails, coalesce(m.bcc_emails, '{}') as bcc_emails, m.subject, m.body_text, m.updated_at, m.thread_id,
        m.personalization->'scheduled_send' as scheduled, m.personalization->'send_failure' as failure
      from relay_draft d left join mail_message m on m.id = d.mail_message_id
-     where d.item_id = $1 and d.state <> 'skipped' order by d.role = 'primary' desc, d.position, d.created_at`, [itemId]);
+     where d.item_id = $1 and d.state <> 'skipped' and not ${EARLIER_ROUND_SQL} order by d.role = 'primary' desc, d.position, d.created_at`, [itemId]);
 }
 
 export const isSent = (r: TalkRow) => r.state === "sent" || r.mail_state === "accepted" || (!!r.mail_state && r.mail_state !== "draft");

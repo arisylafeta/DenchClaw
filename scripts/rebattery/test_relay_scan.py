@@ -426,7 +426,7 @@ def test_plan_clears_user_tab_on_new_message():
 
 TEST_DB = os.environ.get("RELAY_TEST_DB", "stock_test_9e426f3f65c340ea8fbd892fd0fabf84")
 SCHEMA = "relay_scan_t"
-MIGRATIONS = [Path(__file__).resolve().parents[2] / f"apps/web/lib/crm-postgres/migrations/{name}" for name in ("089_relay.sql", "098_relay_sticky_fresh.sql", "099_relay_voice.sql")]
+MIGRATIONS = [Path(__file__).resolve().parents[2] / f"apps/web/lib/crm-postgres/migrations/{name}" for name in ("089_relay.sql", "098_relay_sticky_fresh.sql", "099_relay_voice.sql", "100_relay_learning.sql")]
 TABLES = ["crm_users", "mail_thread", "mail_message", "work_tasks", "crm_bulk_listings", "crm_bulk_thread_links", "crm_people", "crm_companies"]
 
 
@@ -581,6 +581,14 @@ def test_db_write_path(scratch, monkeypatch, tmp_path, capsys):
     assert q(f"select status, done_reason from relay_item where id = '{pid}'") == "done|replied"
     assert q(f"select state from relay_draft where item_id = '{pid}'") == "skipped"
     assert q("select personalization ? 'scheduled_send' from mail_message where id = 'mpd1'") == "f"
+
+    # Alex sent Relay's reply from Gmail, then they wrote again: the reopen settles it as sent (not set aside), so the
+    # next reply starts fresh instead of showing the one that went out.
+    q(f"""insert into mail_message (id, direction, transport, purpose, mailbox_owner_id, thread_id, subject, body_text, from_email, to_emails, state, accepted_at)
+          values ('mpd2', 'outbound', 'gmail', 'personal', '{owner}', 'gmail_thread_p', 'Re: Price list', 'Here you go', 'alex@rebattery.io', '{{sales@newco.example}}', 'accepted', now() - interval '1 hour');
+        insert into relay_draft (item_id, role, mail_message_id, state) values ('{pid}', 'primary', 'mpd2', 'draft')""")
+    rs.apply_ops(conn, owner, [{"op": "update", "id": pid, "kind": "reopen", "gmail_thread_id": "p", "values": {"status": "open", "tab": "action"}}])
+    assert q(f"select state, sent_at is not null from relay_draft where mail_message_id = 'mpd2'") == "sent|t"
     conn.close()
     assert q("select errors::text from relay_scan_run") == "[]"
 

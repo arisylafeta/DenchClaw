@@ -1050,6 +1050,11 @@ def _db_value(key: str, value):
     return value
 
 
+# Relay drafts that went out from Gmail (Alex sent them there, not from Relay) are sent, not set aside. Run before the
+# skip, and when they write again: the next reply then starts fresh instead of showing the one that went out.
+SETTLE_SENT_SQL = """update relay_draft d set state = 'sent', sent_at = coalesce(d.sent_at, m.accepted_at, m.sent_at, now()), updated_at = now()
+  from mail_message m where m.id = d.mail_message_id and d.item_id = %s and d.state in ('draft','gmail') and m.state = 'accepted'"""
+
 # The drafts Relay wrote for an item, set aside, and any send of them still waiting cancelled (lib/relay.ts SKIP_DRAFTS_SQL).
 SKIP_DRAFTS_SQL = """with s as (update relay_draft set state = 'skipped', updated_at = now() where item_id = %s and state in ('draft','gmail') returning mail_message_id)
   update mail_message set personalization = personalization - 'scheduled_send' where id in (select mail_message_id from s) and state = 'draft' and personalization ? 'scheduled_send'"""
@@ -1088,6 +1093,8 @@ def apply_ops(conn, owner_id: str, ops: list[dict]) -> None:
                     sets += ", updated_at = now()"
                 cur.execute(f"update relay_item set {sets} where id = %s and owner_id = %s",
                             [*[_db_value(k, v) for k, v in values.items()], op["id"], owner_id])
+                if op["kind"] in ("done_review", "reopen"):
+                    cur.execute(SETTLE_SENT_SQL, (op["id"],))
                 if op["kind"] == "done_review":
                     cur.execute(SKIP_DRAFTS_SQL, (op["id"],))
     conn.commit()

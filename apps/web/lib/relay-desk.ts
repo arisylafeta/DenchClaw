@@ -170,7 +170,7 @@ export async function deskState(item: RelayItem, ownerId: string): Promise<DeskS
     item: {
       id: item.id, who: { name: item.counterpart_name, email: item.counterpart_email, company: item.company }, contact_type: item.contact_type,
       situation: item.situation, headline: item.headline, tab: item.tab, waiting_since: item.waiting_since,
-      sending_as: ctx.identity === "supply" ? "supply@rebattery.io (ReBattery's seller inbox)" : ctx.identity === "buy" ? "buy@rebattery.io (ReBattery's buyer inbox)" : "Alex's own address",
+      sending_as: from === "supply" ? "supply@rebattery.io (ReBattery's seller inbox)" : from === "buy" ? "buy@rebattery.io (ReBattery's buyer inbox)" : "Alex's own address",
       reply_to: ctx.to || null,
       team_inbox: isTeamSender(from) ? `${from}@rebattery.io` : null,
       deal: item.bulk_listing_id ? { label: item.deal_label, summary: deal?.summary ?? null, quantity: deal?.quantity ?? null, status: deal?.status ?? null, price: deal?.price ?? null, stage: deal?.stage ?? null } : null,
