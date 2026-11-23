@@ -329,6 +329,7 @@ async function writeReply(ctx: Ctx, a: DeskArgs["relay_write_reply"]): Promise<s
 }
 
 async function updateDraft(ctx: Ctx, a: DeskArgs["relay_update_draft"]): Promise<string> {
+  await knownAddresses(ctx, [...(a.to ?? []), ...(a.cc ?? []), ...(a.bcc ?? [])]);
   const rows = await draftRows(ctx.item.id);
   const row = rows.find((r) => r.id === a.draft_id && r.mail_message_id);
   if (!row) throw new RelayError(404, "That draft isn't on this email. Call relay_state for the ids.");
@@ -350,8 +351,30 @@ async function updateDraft(ctx: Ctx, a: DeskArgs["relay_update_draft"]): Promise
   return after(row.id, `Updated "${row.title}".${await priceIfMarked(ctx, row.id, kind, body)}`);
 }
 
+/**
+ * Refuses an address Relay has never seen: not a CRM contact, never a sender, not copied on an email they sent on this
+ * thread (our own sends don't count: a wrong address would vouch for itself). Gmail search results drop the dots in
+ * addresses (rickimayhew@ for ricki.mayhew@), and a made-up address bounces.
+ */
+async function knownAddresses(ctx: Ctx, addresses: string[]): Promise<void> {
+  const wanted = [...new Set(addresses.map((a) => a.trim().toLowerCase()).filter(Boolean))];
+  if (!wanted.length) return;
+  const known = new Set((await queryPg<{ a: string }>(
+    `select a from unnest($1::text[]) a where exists (select 1 from crm_people p where lower(p.email) = a)
+       or exists (select 1 from mail_message m where m.direction = 'inbound' and lower(m.from_email) = a)
+       or exists (select 1 from mail_message m where m.thread_id = $2 and m.direction = 'inbound' and (lower(m.from_email) = a or a = any(select lower(x) from unnest(m.to_emails || m.cc_emails) x)))`,
+    [wanted, ctx.item.mail_thread_id ?? ""])).map((r) => r.a));
+  const unknown = wanted.filter((a) => !known.has(a));
+  if (!unknown.length) return;
+  const domains = [...new Set(unknown.map((a) => a.split("@")[1]).filter(Boolean))];
+  const near = (await queryPg<{ a: string }>(
+    `select distinct lower(email) as a from crm_people where split_part(lower(email), '@', 2) = any($1) limit 6`, [domains])).map((r) => r.a);
+  throw new RelayError(422, `Relay has never had an email from ${unknown.join(", ")}, and it isn't a CRM contact, so it may bounce. Gmail search drops the dots in addresses: take the address from the CRM (crm_people) or from the From line of an email they sent.${near.length ? ` Known addresses there: ${near.join(", ")}.` : ""} If none fits, ask Alex.`);
+}
+
 async function addEmail(ctx: Ctx, a: DeskArgs["relay_add_email"]): Promise<string> {
   if (claimsAttachment(a.body)) throw new RelayError(422, "Nothing can be attached from here. Don't say a file is attached.");
+  await knownAddresses(ctx, [a.to]);
   if (a.send_at) {
     const problem = sendAtProblem(new Date(a.send_at));
     if (problem) throw new RelayError(400, problem);
