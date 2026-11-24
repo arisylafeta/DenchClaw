@@ -8,7 +8,7 @@ import { visibleBody } from "./crm-postgres/whatsapp";
 import { getSupabaseAdminClient } from "./platform-admin/supabase";
 import { queryPg } from "./postgres";
 import { isPersonalDomain } from "./relay-identity";
-import { buildPack, callBefore, callFromNote, callsWith, day, NO_PACK, othersOnThread, sentBy, type Pack, type PackCall, type PackChat, type PackDeal, type PackDismantler, type PackFile, type PackMarket, type PackMessage, type PackNote, type PackParties, type PackPerson } from "./relay-context-core";
+import { buildPack, callBefore, callFromNote, callsWith, day, NO_PACK, othersOnThread, sentBy, type Pack, type PackCall, type PackChat, type PackDeal, type PackDismantler, type PackFile, type PackListingActivity, type PackMarket, type PackMessage, type PackSellerSetup, type PackNote, type PackParties, type PackPerson } from "./relay-context-core";
 
 const run = promisify(execFile);
 const ATTACHMENT_READER = process.env.RELAY_ATTACHMENT_READER || "/root/denchclaw/scripts-live/scripts/rebattery/relay_attachments.py";
@@ -93,6 +93,50 @@ type Answer<T> = PromiseLike<{ data: T[] | null; error: unknown }>;
 
 /** The marketplace account under this address, read live (the CRM's copy of sign-ups can lag). Null when the read failed
  * or ran out of time: then nothing is said, rather than "no account". Also the desk's marketplace_account tool. */
+export type ListingRow = { id: string; title: string; listing_status: string; reference: string | null; created_at: string; seo_slug: string | null; buy_now_price: number | string | null; currency: string | null };
+
+const MARKET_URL = "https://www.rebattery.io/marketplace/";
+
+/** For each listing: price and link, the offers on it, checkouts and orders by state, and views. Read-only. */
+export async function listingActivity(db: SupabaseClient, listings: ListingRow[], signal: AbortSignal): Promise<Map<string, PackListingActivity>> {
+  const ids = listings.map((l) => l.id);
+  if (!ids.length) return new Map();
+  const read = async <T>(answer: Answer<T>) => { const { data, error } = await answer; if (error) throw error; return data ?? []; };
+  const [offers, checkouts, orders, views] = await Promise.all([
+    read<{ listing_id: string; amount: number | string; quantity_requested: number | null; status: string; expires_at: string | null }>(
+      db.from("purchase_offers").select("listing_id,amount,quantity_requested,status,expires_at").in("listing_id", ids).order("submitted_at", { ascending: false }).limit(100).abortSignal(signal)),
+    read<{ listing_id: string; state: string }>(db.from("marketplace_checkouts").select("listing_id,state").in("listing_id", ids).limit(200).abortSignal(signal)),
+    read<{ listing_id: string; status: string }>(db.from("deals").select("listing_id,status").in("listing_id", ids).limit(200).abortSignal(signal)),
+    Promise.all(ids.map(async (id) => {
+      const { count, error } = await db.from("listing_views").select("id", { count: "exact", head: true }).eq("listing_id", id).abortSignal(signal);
+      if (error) throw error;
+      return [id, count ?? 0] as const;
+    })),
+  ]);
+  const tally = (rows: { listing_id: string }[], id: string, key: "state" | "status") => {
+    const counts: Record<string, number> = {};
+    for (const r of rows) if (r.listing_id === id) { const k = String((r as Record<string, unknown>)[key]); counts[k] = (counts[k] ?? 0) + 1; }
+    return counts;
+  };
+  const seen = new Map(views);
+  return new Map(listings.map((l) => [l.id, {
+    price: l.buy_now_price == null ? null : Number(l.buy_now_price), currency: l.currency, link: l.seo_slug ? `${MARKET_URL}${l.seo_slug}` : null, views: seen.get(l.id) ?? 0,
+    offers: offers.filter((o) => o.listing_id === l.id).map((o) => ({ amount: Number(o.amount), quantity: o.quantity_requested, status: o.status, expires: o.expires_at })),
+    checkouts: tally(checkouts, l.id, "state"), orders: tally(orders, l.id, "status"),
+  }]));
+}
+
+/** A seller's setup: whether they accepted the seller terms, and their payout profile's status ("none" when they have none). */
+export async function sellerSetup(db: SupabaseClient, accountId: string, connect: string | null, signal: AbortSignal): Promise<PackSellerSetup> {
+  const [terms, payout] = await Promise.all([
+    db.from("resale_terms_acceptances").select("id", { count: "exact", head: true }).eq("account_id", accountId).eq("scope", "seller_account").abortSignal(signal),
+    db.from("account_payout_profiles").select("status").eq("account_id", accountId).order("updated_at", { ascending: false }).limit(1).abortSignal(signal),
+  ]);
+  if (terms.error || payout.error) throw terms.error ?? payout.error;
+  const status = (payout.data?.[0] as { status?: string } | undefined)?.status ?? (connect && connect !== "not_connected" ? connect : "none");
+  return { sellerTerms: (terms.count ?? 0) > 0, payouts: status };
+}
+
 export async function marketplace(counterpart: string): Promise<PackMarket | null> {
   try {
     // "*" is a wildcard to the API and can't be escaped: such an address is not looked up, and nothing is said.
@@ -113,8 +157,8 @@ export async function marketplace(counterpart: string): Promise<PackMarket | nul
     const ids = [...new Set(members.map((m) => m.account_id))].slice(0, 3);
     if (!ids.length) return { registered: true, signedUp: users[0].created_at, accounts: [] };
     const [accounts, deals] = await Promise.all([
-      rows<{ id: string; name: string; role: string; status: string; account_type: string | null; created_at: string }>(
-        db.from("accounts").select("id,name,role,status,account_type,created_at").in("id", ids).abortSignal(signal)),
+      rows<{ id: string; name: string; role: string; status: string; account_type: string | null; created_at: string; stripe_connect_status: string | null }>(
+        db.from("accounts").select("id,name,role,status,account_type,created_at,stripe_connect_status").in("id", ids).abortSignal(signal)),
       rows<{ status: string; supplier_account_id: string; counterparty_account_id: string }>(
         db.from("deals").select("status,supplier_account_id,counterparty_account_id").or(`supplier_account_id.in.(${ids.join(",")}),counterparty_account_id.in.(${ids.join(",")})`).limit(1000).abortSignal(signal)),
     ]);
@@ -123,15 +167,20 @@ export async function marketplace(counterpart: string): Promise<PackMarket | nul
       accounts: await Promise.all(accounts.map(async (a) => {
         // The newest few listings with the true total, and the number of offers, for each account.
         const [listings, offers] = await Promise.all([
-          db.from("listings").select("title,listing_status,reference,created_at", { count: "exact" }).eq("supplier_account_id", a.id).order("created_at", { ascending: false }).limit(5).abortSignal(signal),
+          db.from("listings").select("id,title,listing_status,reference,created_at,seo_slug,buy_now_price,currency", { count: "exact" }).eq("supplier_account_id", a.id).order("created_at", { ascending: false }).limit(5).abortSignal(signal),
           db.from("purchase_offers").select("buyer_account_id", { count: "exact", head: true }).eq("buyer_account_id", a.id).abortSignal(signal),
         ]);
         if (listings.error || offers.error) throw listings.error ?? offers.error;
-        const newest = (listings.data ?? []) as { title: string; listing_status: string; reference: string | null; created_at: string }[];
+        const newest = (listings.data ?? []) as ListingRow[];
+        // What happened on their listings, and what's left of their seller setup: so a reply never asks Alex for either.
+        const [activity, setup] = await Promise.all([
+          listingActivity(db, newest, signal).catch(() => new Map<string, PackListingActivity>()),
+          newest.length || a.role === "supplier" ? sellerSetup(db, a.id, a.stripe_connect_status, signal).catch(() => undefined) : Promise.resolve(undefined),
+        ]);
         const counts: Record<string, number> = {};
         for (const d of deals) if (d.supplier_account_id === a.id || d.counterparty_account_id === a.id) counts[d.status] = (counts[d.status] ?? 0) + 1;
         return { name: a.name, role: a.role, status: a.status, kind: a.account_type, since: a.created_at, listingCount: listings.count ?? newest.length,
-          listings: newest.map((l) => ({ title: l.title, status: l.listing_status, reference: l.reference, at: l.created_at })), deals: counts, offers: offers.count ?? 0 };
+          listings: newest.map((l) => ({ title: l.title, status: l.listing_status, reference: l.reference, at: l.created_at, activity: activity.get(l.id) })), deals: counts, offers: offers.count ?? 0, setup };
       })),
     };
   } catch {

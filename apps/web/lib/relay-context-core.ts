@@ -42,8 +42,14 @@ export type PackFile = { filename: string; read: boolean; text?: string; truncat
 export type PackCall = { id: string; title: string | null; at: string; people: string[]; summary: string; unheard: string[] };
 /** A WhatsApp message in a chat linked to the counterpart. attachment: "image", "document"… when a file was sent. */
 export type PackChat = { direction: string; at: string; body: string | null; attachment: string | null };
+/** What has happened on one of their listings: price, link, offers on it, checkouts and orders, and views. */
+export type PackListingActivity = { price: number | null; currency: string | null; link: string | null; views: number;
+  offers: { amount: number; quantity: number | null; status: string; expires: string | null }[]; checkouts: Record<string, number>; orders: Record<string, number> };
+/** A seller's account setup: seller terms accepted, and payout details (needed to be paid for a sale). */
+export type PackSellerSetup = { sellerTerms: boolean; payouts: string };
 export type PackMarketAccount = { name: string; role: string; status: string; kind: string | null; since: string | null;
-  listings: { title: string; status: string; reference: string | null; at: string | null }[]; listingCount: number; deals: Record<string, number>; offers: number };
+  listings: { title: string; status: string; reference: string | null; at: string | null; activity?: PackListingActivity }[]; listingCount: number; deals: Record<string, number>; offers: number;
+  setup?: PackSellerSetup };
 /** What the marketplace holds under the counterpart's address. registered false: nobody has signed up with it. */
 export type PackMarket = { registered: boolean; signedUp?: string | null; accounts: PackMarketAccount[] };
 /** Who a thread message was from and to, as far as the pack needs it. */
@@ -354,15 +360,29 @@ export function marketText(market: PackMarket | null | undefined, counterpart: s
   if (!market.registered) return `Nobody has signed up to the marketplace with ${counterpart}. They may have an account under another address, so never tell them they have none.`;
   if (!market.accounts.length) return `They signed up to the marketplace${market.signedUp ? ` on ${day(market.signedUp)}` : ""} and have no account set up on it yet.`;
   return market.accounts.slice(0, 3).map((a) => {
-    const listings = a.listings.slice(0, 5).map((l) => `- Listing: ${cut(l.title, 140)} (${[cut(l.status, 20), cut(l.reference, 40), day(l.at)].filter(Boolean).join(", ")})`);
+    const listings = a.listings.slice(0, 5).map((l) => `- Listing: ${cut(l.title, 140)} (${[cut(l.status, 20), cut(l.reference, 40), day(l.at)].filter(Boolean).join(", ")})${l.activity ? `\n  ${activityText(l.activity)}` : ""}`);
     const more = a.listingCount - listings.length;
     const deals = Object.entries(a.deals).filter(([, count]) => count > 0).map(([status, count]) => `${count} ${cut(status, 20)}`).join(", ");
     return [
       `Account: ${[cut(a.name, 120), `${cut(a.role, 20)}${a.kind ? ` (${cut(a.kind, 20)})` : ""}`, cut(a.status, 20), a.since ? `since ${day(a.since)}` : ""].filter(Boolean).join(" · ")}`,
       ...listings, more > 0 ? `- and ${plural(more, "more listing")}` : "",
       [a.listingCount ? "" : "No listings.", deals ? `Deals: ${deals}.` : "No deals.", a.offers ? `They have made ${plural(a.offers, "offer")} on listings.` : ""].filter(Boolean).join(" "),
+      a.setup ? `Seller setup: seller terms ${a.setup.sellerTerms ? "accepted" : "not accepted yet"}; payout details ${a.setup.payouts === "active" ? "added" : a.setup.payouts === "none" ? "not added yet (they add them in their account under Settings, Payouts, to be paid for a sale)" : `${cut(a.setup.payouts, 30)} (not active yet: they finish it under Settings, Payouts)`}.` : "",
     ].filter(Boolean).join("\n");
   }).join("\n\n");
+}
+
+const counted = (c: Record<string, number>) => Object.entries(c).filter(([, n]) => n > 0).map(([state, n]) => `${n} ${cut(state, 20)}`).join(", ");
+
+/** One listing's activity in a line: price and link, offers (each with its status and expiry), checkouts, orders, views. */
+export function activityText(a: PackListingActivity): string {
+  const money = (n: number) => `${a.currency ? `${cut(a.currency, 4)} ` : ""}${n.toLocaleString("en-GB")}`;
+  const offers = a.offers.length
+    ? `${plural(a.offers.length, "offer")}: ${a.offers.slice(0, 4).map((o) => `${money(o.amount)}${o.quantity ? ` x ${o.quantity}` : ""} ${cut(o.status, 20)}${o.expires && o.status === "awaiting" ? ` (expires ${day(o.expires)})` : ""}`).join("; ")}`
+    : "no offers";
+  return [a.price != null ? `buy now ${money(a.price)}` : "", a.link ? cut(a.link, 200) : "", offers,
+    counted(a.checkouts) ? `checkouts: ${counted(a.checkouts)}` : "no checkouts", counted(a.orders) ? `orders: ${counted(a.orders)}` : "no orders",
+    plural(a.views, "view")].filter(Boolean).join(" · ");
 }
 
 /** Contact with the counterpart on other channels after the thread's newest email, one short line each: the thread may

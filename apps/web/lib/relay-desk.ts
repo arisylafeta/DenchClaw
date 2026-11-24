@@ -13,8 +13,8 @@ import {
   checkRelayEdit, claimsAttachment, createMailDraft, draftContext, editRelayDraft, readRelayItem, RELAY_OWNER_EMAIL, RelayError, replyAllPeople,
   saveDraftBody, saveDraftOutputs, voiceFor, type RelayItem,
 } from "./relay";
-import { marketplace as marketplaceAccount, threadFiles } from "./relay-context";
-import { stripQuoted } from "./relay-context-core";
+import { listingActivity, marketplace as marketplaceAccount, sellerSetup, threadFiles, type ListingRow } from "./relay-context";
+import { activityText, stripQuoted } from "./relay-context-core";
 import { draftPriceGaps, marketplaceListings, pennyCards, priceDraft, priceStock, setFill, stockFits } from "./relay-price";
 import { parseFills } from "./relay-price-core";
 import type { StockFit } from "./relay-price-types";
@@ -475,7 +475,19 @@ async function marketplaceRecord(id: string): Promise<string> {
       if (/invalid input syntax/i.test(error.message)) continue;
       throw new RelayError(502, `Couldn't read the marketplace: ${error.message}`);
     }
-    if (data?.length) return JSON.stringify({ kind: table === "listings" ? "listing" : "deal", record: data[0] });
+    if (!data?.length) continue;
+    if (table === "deals") return JSON.stringify({ kind: "deal", record: data[0] });
+    // A listing comes with what has happened on it and its seller's setup, so a reply never asks Alex for either.
+    const row = data[0] as ListingRow & { supplier_account_id: string | null };
+    const signal = AbortSignal.timeout(5000);
+    const [activity, seller] = await Promise.all([
+      listingActivity(db, [row], signal).then((m) => m.get(row.id) ?? null).catch(() => null),
+      row.supplier_account_id ? (async () => {
+        const { data: acct } = await db.from("accounts").select("stripe_connect_status").eq("id", row.supplier_account_id!).limit(1).abortSignal(signal);
+        return sellerSetup(db, row.supplier_account_id!, (acct?.[0] as { stripe_connect_status?: string } | undefined)?.stripe_connect_status ?? null, signal);
+      })().catch(() => null) : Promise.resolve(null),
+    ]);
+    return JSON.stringify({ kind: "listing", record: row, activity, activity_text: activity ? activityText(activity) : "couldn't read activity", seller_setup: seller });
   }
   return `No marketplace listing or deal has the id ${id}.`;
 }

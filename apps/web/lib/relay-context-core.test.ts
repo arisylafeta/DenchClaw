@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { callBefore,
   buildPack, callFromNote, callsText, callsWith, chatText, contactSince, crmText, day, dealsText, earlierEmails, filesText, knownBackground, marketText, NO_PACK, othersOnThread, ownText,
-  sentBy, sinceFrom, sound, stripQuoted, type PackCall, type PackChat, type PackInput, type PackMarket, type PackMessage,
+  activityText, sentBy, sinceFrom, sound, stripQuoted, type PackCall, type PackChat, type PackInput, type PackMarket, type PackMessage,
 } from "./relay-context-core";
 
 const mail = (id: string, over: Partial<PackMessage> = {}): PackMessage => ({
@@ -350,6 +350,19 @@ describe("marketText", () => {
       "- and 55 more listings", "Deals: 2 open, 1 cancelled. They have made 1 offer on listings.", "",
       "Account: Dave Best · buyer · approved", "No listings. No deals.",
     ].join("\n"));
+  });
+});
+
+describe("activityText and seller setup", () => {
+  it("gives a listing's price, link, offers, checkouts, orders and views, and the seller's setup", () => {
+    const activity = { price: 21500, currency: "USD", link: "https://www.rebattery.io/marketplace/powerwall-7eee", views: 9, offers: [], checkouts: {}, orders: {} };
+    expect(activityText(activity)).toBe("buy now USD 21,500 · https://www.rebattery.io/marketplace/powerwall-7eee · no offers · no checkouts · no orders · 9 views");
+    expect(activityText({ ...activity, offers: [{ amount: 60, quantity: 3, status: "awaiting", expires: "2026-11-23T08:09:00Z" }, { amount: 47, quantity: 21, status: "expired", expires: "2026-11-13T05:21:00Z" }], checkouts: { paid: 1 }, views: 1 }))
+      .toBe("buy now USD 21,500 · https://www.rebattery.io/marketplace/powerwall-7eee · 2 offers: USD 60 x 3 awaiting (expires 23 Nov 2026); USD 47 x 21 expired · checkouts: 1 paid · no orders · 1 view");
+    const market: PackMarket = { registered: true, accounts: [{ ...account, listings: [{ title: "Powerwall 3", status: "published", reference: null, at: "2026-11-02T18:47:00Z", activity }], listingCount: 1, deals: {}, offers: 0, setup: { sellerTerms: true, payouts: "none" } }] };
+    const text = marketText(market, "antonio@example.com");
+    expect(text).toContain("- Listing: Powerwall 3 (published, 2 Nov 2026)\n  buy now USD 21,500");
+    expect(text).toContain("Seller setup: seller terms accepted; payout details not added yet");
   });
 });
 
