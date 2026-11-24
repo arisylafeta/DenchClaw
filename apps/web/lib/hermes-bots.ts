@@ -13,6 +13,7 @@ const BOTS: Record<string, BotConfig> = {
   papajules: { mode: "single", scope: "personal", name: "Jules Watcher" },
   dismantlercampaigns: { mode: "single", scope: "personal", name: "Dismantler Campaigns" },
   auctions: { mode: "single", scope: "personal", name: "Auctions" },
+  enricho: { mode: "single", scope: "shared", name: "Enricho" },
   recyclops: { mode: "single", scope: "personal", name: "Recycling Requests" },
 };
 const MULTI: BotConfig = { mode: "multi", scope: "personal" };
