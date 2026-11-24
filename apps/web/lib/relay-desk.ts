@@ -7,6 +7,7 @@ import { queryPg, withPgTransaction } from "./postgres";
 import { readMailDraft } from "./crm-postgres/mail";
 import { identitySignatures, splitCopy } from "./mail-draft-actions";
 import { isTeamSender } from "./relay-senders";
+import { listingProposal, proposeListings, settleStaleListings } from "./relay-listings";
 import { mailboxScopeSql } from "./mail-scope";
 import { getSupabaseAdminClient } from "./platform-admin/supabase";
 import {
@@ -147,11 +148,13 @@ type Ctx = { item: RelayItem; ownerId: string; runId: string | null; dryRun: boo
 
 /** The email's facts, thread, drafts (with versions and prices), the stock that fits with Relay's prices, and the rules. */
 export async function deskState(item: RelayItem, ownerId: string): Promise<DeskState> {
-  const [ctx, rows, stock, signatures] = await Promise.all([
+  await settleStaleListings(item.id).catch(() => undefined);
+  const [ctx, rows, stock, signatures, listings] = await Promise.all([
     draftContext(item, ownerId, "(desk)", { background: false, offers: false }),
     draftRows(item.id),
     stockFits(item.id, ownerId).catch((error) => { console.error("relay desk stock", error); return [] as StockFit[]; }),
     identitySignatures(),
+    listingProposal(item.id).catch(() => null),
   ]);
   const priced = await priceStock(stock, { askedDelivered: false }).catch(() => []);
   const sides = await threadSides(item.id, ownerId, rows.filter((r) => r.mail_message_id).map((r) => guardOf(r)), stock);
@@ -181,6 +184,7 @@ export async function deskState(item: RelayItem, ownerId: string): Promise<DeskS
     })),
     others: await otherEmails(item, ownerId),
     drafts,
+    listings,
     stock: stock.map((s, i) => ({
       key: s.key, label: s.label, kind: s.kind, kwh: s.kwh, year: s.year, soh: s.soh, cost: s.cost, listed: s.listed,
       supplier: { name: s.supplier.name, country: s.supplier.country },
@@ -241,6 +245,10 @@ export async function deskTool(input: { itemId: string; runId: string | null; dr
     case "relay_add_todo": return addTodo(ctx, args as DeskArgs["relay_add_todo"]);
     case "relay_remember_lesson": return rememberLesson(ctx, args as DeskArgs["relay_remember_lesson"]);
     case "relay_ask": return ask(ctx, args as DeskArgs["relay_ask"]);
+    case "relay_propose_listings": {
+      const a = args as DeskArgs["relay_propose_listings"];
+      return proposeListings(ctx.item, ctx.ownerId, a.groups, a.why, ctx.dryRun);
+    }
     case "crm_query": return crmQuery((args as DeskArgs["crm_query"]).sql);
     case "marketplace_account": {
       const found = await marketplaceAccount((args as DeskArgs["marketplace_account"]).email);

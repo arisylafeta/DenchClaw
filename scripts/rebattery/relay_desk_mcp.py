@@ -63,6 +63,21 @@ TOOLS: list[dict[str, Any]] = [
      "inputSchema": _schema({"text": _S, "why": _S}, ["text"])},
     {"name": "relay_ask", "description": "Ask Alex a question only he can decide (buy, sell, list, price, pass), with two to four tap-to-answer options. End your turn after asking.",
      "inputSchema": _schema({"question": _S, "options": {"type": "array", "items": _S, "minItems": 2, "maxItems": 4}}, ["question", "options"])},
+    {"name": "relay_propose_listings", "description": "Propose draft marketplace listings for a seller who has agreed to list and sent their details: one group per battery "
+     "type they named, from what they stated only (no condition grade, SoH, or a price they didn't give). Alex approves on the card; Relay then creates the drafts "
+     "under ReBattery Sales with their photos, issues the one-click link (set a password, accept the seller terms, add price and quantity) and puts it in the reply "
+     "where you wrote [BLANK: listing link]. Not for a dismantler with listing permission or a seller who already lists (refused with the reason).",
+     "inputSchema": _schema({"groups": {"type": "array", "minItems": 1, "maxItems": 6, "items": {"type": "object", "properties": {
+         "label": {"type": "string", "description": "How the group is named, e.g. Samsung 35E e-bike packs"},
+         "format": {"type": "string", "enum": ["Pack", "Module", "Cell"]},
+         "description": {"type": "string", "description": "The listing description, from the seller's own facts"},
+         "manufacturer": _S, "model": _S, "chemistry": _S, "quantity": {"type": "number"}, "packKwh": {"type": "number", "description": "kWh per unit, nominal"},
+         "voltageNominal": {"type": "number"}, "numCells": _S, "cellFormat": _S,
+         "originalApplication": {"type": "string", "enum": ["EV / automotive", "Home energy storage", "Commercial / grid storage", "Forklift / material handling", "Telecom / UPS", "E-mobility", "New / never used", "Other"]},
+         "conditionDeclaration": {"type": "string", "enum": ["none_damaged", "some_damaged"]}, "damageDetails": _S,
+         "buyItNowPrice": {"type": "number", "description": "Only a price the seller stated"}, "currency": {"type": "string", "enum": ["GBP", "EUR", "USD"]},
+         "location": {"type": "object", "properties": {"country": _S, "countryCode": _S, "region": _S, "city": _S}, "required": ["country", "countryCode"]}},
+         "required": ["label", "format", "description", "location"]}}, "why": _S}, ["groups"])},
     {"name": "crm_query", "description": "Read the CRM database (Postgres): ONE statement starting with SELECT or WITH, read only, 10 second limit, at most 200 rows. "
      "Useful tables: crm_people, crm_companies, crm_bulk_listings (deals), crm_stock_opportunities (supplier stock), mail_message, whatsapp_message, crm_price_cards.",
      "inputSchema": _schema({"sql": _S}, ["sql"]), "annotations": {"readOnlyHint": True}},

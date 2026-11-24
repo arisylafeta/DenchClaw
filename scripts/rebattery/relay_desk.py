@@ -181,6 +181,7 @@ def trace_line(name: str, args: dict | None) -> str | None:
             "relay_add_todo": lambda: f"Suggested a to-do: {_short(a.get('title'), 50)}",
             "relay_remember_lesson": lambda: "Added a lesson to your email-writing lessons",
             "relay_ask": lambda: None,  # the question itself shows in the chat
+            "relay_propose_listings": lambda: "Proposed draft listings for you to approve",
             "crm_query": lambda: "Looked in the CRM",
             "marketplace_account": lambda: f"Checked {_short(a.get('email'), 40)} on the marketplace" if a.get("email") else "Checked the marketplace",
             "marketplace_listings": lambda: f"Searched the marketplace for {_short(a.get('query'), 40)}" if a.get("query") else "Looked at the marketplace listings",

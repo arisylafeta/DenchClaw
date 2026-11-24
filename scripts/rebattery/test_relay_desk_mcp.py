@@ -37,7 +37,7 @@ def test_tools_list_has_every_relay_tool_with_a_schema():
     tools = s.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})["result"]["tools"]
     names = [t["name"] for t in tools]
     assert names == ["relay_state", "relay_write_reply", "relay_update_draft", "relay_add_email", "relay_set_price", "relay_reprice", "relay_add_todo",
-                     "relay_remember_lesson", "relay_ask", "crm_query", "marketplace_account", "marketplace_listings", "marketplace_deal", "attachment_text", "penny_price"]
+                     "relay_remember_lesson", "relay_ask", "relay_propose_listings", "crm_query", "marketplace_account", "marketplace_listings", "marketplace_deal", "attachment_text", "penny_price"]
     for t in tools:
         assert t["inputSchema"]["type"] == "object" and t["description"]
     assert not any("send" in n or "gmail" in n for n in names)

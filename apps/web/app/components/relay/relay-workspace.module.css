@@ -404,3 +404,9 @@
   .lwhenBtn { margin-left: 20px; }
   .keys { display: none; }
 }
+
+/* "Prepare listings and link": Relay's proposal for a seller who has agreed to list, above the reply. */
+.listings { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--color-border); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; background: var(--color-surface); }
+.listingsHead { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
+.listingsGroups { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.listingsActs { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

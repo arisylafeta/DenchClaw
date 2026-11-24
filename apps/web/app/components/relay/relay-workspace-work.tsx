@@ -16,6 +16,7 @@ import type { SenderKey } from "@/lib/relay-senders";
 import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
 import { api, cx, failureText, firstName, firstOf, statusOf } from "./relay-ui";
 import { DraftSheet, type SheetActions } from "./relay-workspace-draft";
+import { ListingsCard } from "./relay-listings-card";
 import { RelayChat } from "./relay-workspace-chat";
 import { SnoozeMenu } from "./relay-snooze";
 import w from "./relay-workspace.module.css";
@@ -306,7 +307,7 @@ export function Work({ itemId, name, waited, waitingSince, item, job, reviewIds,
         const target = all ? "all" : current?.id ?? "all";
         const before = new Set(talkRef.current?.drafts.map((d) => d.id));
         const next = await api<TalkState>(`/api/relay/items/${itemId}/talk`, { method: "POST", body: { text: said, target } });
-        setTalk({ ...next, desk: null, claudeSession: talkRef.current?.claudeSession ?? null });
+        setTalk({ ...next, desk: null, claudeSession: talkRef.current?.claudeSession ?? null, listings: talkRef.current?.listings ?? null });
         // A new email Relay added opens in its tab, so Alex sees it at once.
         const added = next.drafts.find((d) => d.mail && !before.has(d.id));
         if (added) pickTab(added.id);
@@ -492,6 +493,7 @@ export function Work({ itemId, name, waited, waitingSince, item, job, reviewIds,
 
         {loadError && !talk && <p className={w.error} role="alert">{loadError} <button type="button" className={w.linkbtn} onClick={() => void load()}>Try again</button></p>}
         {!talk && !loadError && <p className={w.muted} role="status">Loading the reply…</p>}
+        {talk?.listings && <ListingsCard itemId={itemId} proposal={talk.listings} say={say} onChanged={load} />}
         {talk && (
           <DraftSheet drafts={drafts} current={current} onTab={pickTab} name={name} typed={typed} stock={stock} busy={busy} run={sendRun} actions={actions}
             job={hasReply ? null : job} jobNote={item?.note ?? ""} pendingFirst={!!pending?.first || (deskBusy && !hasReply)} hold={deskBusy ? DESK_HOLD : null} />

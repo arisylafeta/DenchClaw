@@ -1,6 +1,7 @@
 import type { AskApplied, TalkState, TalkTurn, TraceApplied } from "./relay-talk";
 import type { DeskView } from "./relay-desk";
 import { ACTIVE_STATUSES, type DeskMode } from "./relay-desk-core";
+import type { ListingProposalView } from "./relay-listings-core";
 
 /**
  * Relay's chat while the desk works, the pure part. The page starts a desk turn, then reads GET .../talk every second and a
@@ -9,7 +10,7 @@ import { ACTIVE_STATUSES, type DeskMode } from "./relay-desk-core";
  */
 
 /** GET .../talk: the chat and drafts, plus the desk turn in progress and the "Continue in Claude" command. */
-export type DeskTalk = TalkState & { desk?: DeskView["run"]; claudeSession?: string | null };
+export type DeskTalk = TalkState & { desk?: DeskView["run"]; claudeSession?: string | null; listings?: ListingProposalView | null };
 
 /** The desk turn the page is following: one it started, or one it found running when the email opened. */
 export type Following = {

@@ -2,6 +2,7 @@ import { guardRelay, readBody, relayError } from "@/lib/relay-route";
 import { talk, talkState } from "@/lib/relay-talk";
 import { TALK_ALL } from "@/lib/relay-talk-core";
 import { deskView } from "@/lib/relay-desk";
+import { listingProposal, settleStaleListings } from "@/lib/relay-listings";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -9,7 +10,8 @@ export const maxDuration = 240;
 type Context = { params: Promise<{ id: string }> };
 
 /** Relay's chat on this email: the turns so far, the drafts (with marks, history and the leak guard's findings), what Relay read,
- * the desk turn in progress (`desk`: status, mode, started_at) and `claudeSession`, the command for "Continue in Claude". */
+ * the desk turn in progress (`desk`: status, mode, started_at), `claudeSession`, the command for "Continue in Claude", and
+ * `listings`, the latest "Prepare listings and link" proposal. */
 export async function GET(_req: Request, { params }: Context) {
   const guard = await guardRelay();
   if ("response" in guard) return guard.response;
@@ -17,7 +19,9 @@ export async function GET(_req: Request, { params }: Context) {
   try {
     const state = await talkState(id, guard.user.id);
     const desk = await deskView(id);
-    return Response.json({ ...state, desk: desk.run, claudeSession: desk.claudeSession });
+    await settleStaleListings(id).catch(() => undefined);
+    const listings = await listingProposal(id).catch(() => null);
+    return Response.json({ ...state, desk: desk.run, claudeSession: desk.claudeSession, listings });
   } catch (error) {
     return relayError(error);
   }
