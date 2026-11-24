@@ -60,6 +60,12 @@ describe("the link in the reply", () => {
       .toBe("35E packs: https://www.rebattery.io/join/abc\n50E packs: https://www.rebattery.io/supplier/listings/new?invitation=1 (once you've set your password)");
   });
 
+  it("starts several links on their own line when the marker ends a sentence", () => {
+    const inline = `I've set up two draft listings from what you sent: ${LISTING_LINK_MARKER}\n\nBest,\nAlex`;
+    expect(placeLink(inline, "A: https://x\nB: https://y")).toBe("I've set up two draft listings from what you sent:\nA: https://x\nB: https://y\n\nBest,\nAlex");
+    expect(placeLink(inline, "https://x")).toBe("I've set up two draft listings from what you sent: https://x\n\nBest,\nAlex");
+  });
+
   it("goes before the sign-off when the marker was taken out", () => {
     expect(placeLink("Hi there,\n\nHere you go.\n\nBest,\nAlex", "LINK")).toBe("Hi there,\n\nHere you go.\n\nLINK\n\nBest,\nAlex");
     expect(placeLink("Hi there,\n\nHere you go.", "LINK")).toBe("Hi there,\n\nHere you go.\n\nLINK");

@@ -139,7 +139,8 @@ const SIGN_OFF = /\n\n(best|thanks|kind regards|regards|cheers|many thanks)[^\n]
 
 /** Puts the link where the desk left the marker; if Alex took the marker out, as its own paragraph before the sign-off. */
 export function placeLink(body: string, block: string): string {
-  if (body.includes(LISTING_LINK_MARKER)) return body.split(LISTING_LINK_MARKER).join(block);
+  // Several labelled links read as a list, so they start on a line of their own even when the marker ends a sentence.
+  if (body.includes(LISTING_LINK_MARKER)) return body.replace(/[ \t]*\[BLANK: listing link\]/g, (m, at: number) => (block.includes("\n") && at > 0 && body[at - 1] !== "\n" ? `\n${block}` : m.startsWith(" ") || m.startsWith("\t") ? ` ${block}` : block));
   const close = SIGN_OFF.exec(body);
   return close ? `${body.slice(0, close.index)}\n\n${block}${body.slice(close.index)}` : `${body.trimEnd()}\n\n${block}`;
 }

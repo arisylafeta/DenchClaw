@@ -146,7 +146,8 @@ def photos(cur, thread_id: str, seller: str) -> list[bytes]:
                    order by coalesce(sent_at, created_at) desc limit 10""", (thread_id, seller))
     out: list[bytes] = []
     with tempfile.TemporaryDirectory(prefix="relay-listing-") as folder:
-        for (message_id,) in cur.fetchall():
+        for row in cur.fetchall():
+            message_id = row["id"] if isinstance(row, dict) else row[0]
             listed = subprocess.run([CLI, "attachment", "list", "--", message_id], capture_output=True, text=True, timeout=60)
             if listed.returncode != 0:
                 continue
@@ -277,7 +278,7 @@ def run(proposal_id: str) -> None:
         print(json.dumps({"dry_run": True, "env": ENV, "seller": seller, "photos": [len(x) for x in pictures],
                           "drafts": [{"label": g["group"]["label"], "payload": g["payload"]} for g in groups],
                           "keys_found": True, "platform_head": subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=platform, capture_output=True, text=True).stdout.strip(),
-                          "invitation_script_loads": "Usage:" in loads.stderr}, indent=1))
+                          "invitation_script_loads": "are required" in loads.stderr or "Usage:" in loads.stderr}, indent=1))
         return
     created = [create_draft(origin, api_key, proposal_id, i, g["payload"], pictures) for i, g in enumerate(groups)]
     listing_ids = [c["id"] for c in created]
