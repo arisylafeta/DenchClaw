@@ -62,6 +62,7 @@ export class EventConnection {
     const item: Delivery = {event,payload,id}; sub.pending.add(item);
     this.delivery = this.delivery.then(async () => {
       if (await this.check(key,sub)) {this.emit(item.event,item.payload,item.id,sub.version);}
+      else if (item.event === "request") {console.warn("[hermes-events] server request dropped: access check failed");}
       item.payload=undefined; sub.pending.delete(item);
     }).catch(() => this.revoke(key,sub));
   }

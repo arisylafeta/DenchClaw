@@ -1,0 +1,117 @@
+[
+ {
+  "gw": {
+   "type": "session.info",
+   "seq": 1,
+   "payload": {
+    "running": true,
+    "stored_session_id": "20261124_145655_55112c",
+    "model": "claude-sonnet-5-5",
+    "provider": "anthropic"
+   }
+  }
+ },
+ {
+  "gw": {
+   "type": "message.start",
+   "seq": 2,
+   "payload": {
+    "turn_id": "2231e7cda0764f218e739549bee52d7e"
+   }
+  }
+ },
+ {
+  "gw": {
+   "type": "tool.start",
+   "seq": 21,
+   "payload": {
+    "tool_id": "toolu_01BaBvTBfwtuGKDvuQWjiDcd",
+    "name": "read_file"
+   }
+  }
+ },
+ {
+  "gw": {
+   "type": "tool.complete",
+   "seq": 22,
+   "payload": {
+    "tool_id": "toolu_01BaBvTBfwtuGKDvuQWjiDcd",
+    "name": "read_file"
+   }
+  }
+ },
+ {
+  "gw": {
+   "type": "tool.start",
+   "seq": 28,
+   "payload": {
+    "tool_id": "toolu_01MmB2SRhQYYyk6xdHBR2vzQ",
+    "name": "patch"
+   }
+  }
+ },
+ {
+  "request": {
+   "id": "srq-9834afbea29d",
+   "method": "approval",
+   "params": {
+    "session_id": "43f8d9a4",
+    "command": "<write to SOUL.md>",
+    "pattern_key": "protected_instruction_file",
+    "pattern_keys": [
+     "protected_instruction_file"
+    ],
+    "description": "Write to protected agent-instruction file(s): SOUL.md. These files steer future agent behavior; approval is always required (not bypassed by auto-approve).",
+    "allow_permanent": false,
+    "allow_session": false,
+    "request_id": "9dde63125ed34da08a90a977ef8d0a2d",
+    "timeout_s": 60,
+    "choices": [
+     "once",
+     "deny"
+    ]
+   }
+  }
+ },
+ {
+  "gw": {
+   "type": "request.cancel",
+   "seq": 30,
+   "payload": {
+    "id": "srq-9834afbea29d"
+   }
+  }
+ },
+ {
+  "gw": {
+   "type": "tool.complete",
+   "seq": 31,
+   "payload": {
+    "tool_id": "toolu_01MmB2SRhQYYyk6xdHBR2vzQ",
+    "name": "patch"
+   }
+  }
+ },
+ {
+  "gw": {
+   "type": "message.complete",
+   "seq": 65,
+   "payload": {
+    "status": "complete",
+    "text": "blocked"
+   }
+  }
+ },
+ {
+  "gw": {
+   "type": "session.info",
+   "seq": 66,
+   "payload": {
+    "running": false,
+    "stored_session_id": "20261124_145655_55112c",
+    "model": "claude-sonnet-5-5",
+    "provider": "anthropic"
+   }
+  }
+ }
+]

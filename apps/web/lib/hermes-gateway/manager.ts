@@ -474,10 +474,15 @@ export class HermesGatewayManager {
       return true;
     }
     this.openRequests.set(request.id, request);
+    let matched = 0;
     for (const session of this.sessions.values()) {
       if (session.runtimeId !== request.params.session_id) continue;
       session.requests.set(request.id, request);
+      matched++;
     }
+    // Hermes waits only approvals.timeout (60s) for an approval, so a request that goes nowhere is
+    // otherwise invisible. Ids only: never the command text.
+    console.info(`[hermes-gateway] server request method=${request.method} id=${request.id} runtime=${String(request.params.session_id)} sessions=${matched} replayed=${Boolean(request.replayed)}`);
     this.requestHandlers.get(request.method)?.({ id: request.id, method: request.method, params: request.params, replayed: request.replayed });
     return true;
   }

@@ -36,7 +36,7 @@ export function ApprovalCard({ request, onApproval, active = true, canApprove = 
     <h3 className="text-[13px] font-semibold leading-5">Approval required</h3>
     <span aria-hidden="true" className="block h-[2px] w-5 rounded-full bg-[var(--color-text)]" />
     {p.tool_name || p.name ? <p className="text-[12px] text-[var(--color-text-muted)]">Tool: {p.tool_name || p.name}</p> : null}
-    {p.description && <p>{p.description}</p>}{p.command && <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono text-[11px]">{p.command}</pre>}
+    {p.description && <p>{p.description}</p>}{typeof p.timeout_s === "number" && p.timeout_s > 0 && <p className="text-[12px] text-[var(--color-text-muted)]">Blocks the action if nobody answers within {p.timeout_s}s.</p>}{p.command && <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-2 font-mono text-[11px]">{p.command}</pre>}
     {!active ? <p role="status">Resolved or withdrawn</p> : !canApprove ? <p role="status">Waiting for an approver</p> : submitted ? <p role="status">Response submitted</p> : <div className="flex flex-wrap gap-2">
       {once && <button type="button" className={dockButton} onClick={() => void choose("once")}>Run once</button>}
       {p.allow_session && (!offered?.length || offered.includes("session")) && <button type="button" className={dockButton} onClick={() => void choose("session")}>Allow for session</button>}

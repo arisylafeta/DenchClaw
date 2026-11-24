@@ -123,10 +123,13 @@ export class HermesChatService {
   private readonly requestListeners = new Map<string, Set<(request: PendingServerRequest) => void>>();
   constructor(readonly manager: HermesGatewayManager = getHermesGatewayManager()) {
     for (const method of ["approval", "clarify"] as const) {manager.onServerRequest(method, request => {
+      let delivered = 0;
       for (const [key, listeners] of this.requestListeners) {
         if (manager.session(key)?.runtimeId !== request.params.session_id) {continue;}
-        for (const listener of listeners) {listener(request);}
+        for (const listener of listeners) {listener(request); delivered++;}
       }
+      // No open browser stream for this chat: the card can only arrive later, from a snapshot.
+      if (!delivered) {console.warn(`[hermes-chat] server request method=${method} id=${request.id} runtime=${String(request.params.session_id)} has no subscribed viewer`);}
     });}
   }
   subscribeRequests(key: string, listener: (request: PendingServerRequest) => void, actor?: ConversationActor): () => void {

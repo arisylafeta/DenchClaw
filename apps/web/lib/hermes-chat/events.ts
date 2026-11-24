@@ -94,6 +94,7 @@ export interface EventPayload {
   choices?: string[]
   allow_permanent?: boolean | null
   allow_session?: boolean | null
+  timeout_s?: number | null
   answers?: Record<string, string | null> | null
   todos?: unknown
   revision?: number | null
