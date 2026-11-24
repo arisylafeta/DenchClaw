@@ -88,15 +88,11 @@ def batches(items: list, size: int) -> list[list]:
 
 
 def links_for(groups: list[dict], issued: dict[int, dict], origin: str) -> list[dict]:
-    """The links in the reply, in the groups' order. The first group's invitation is issued last, so its link is the
-    account-setup one; every other group is reached at its invitation path once the seller has set a password (a
-    later issue revokes an earlier setup link, never the invitation itself)."""
-    out = []
-    for i, g in enumerate(groups):
-        inv = issued[i]
-        url = inv["url"] if i == 0 else f"{origin}/supplier/listings/new?invitation={inv['invitationId']}"
-        out.append({"label": g["group"]["label"], "url": url})
-    return out
+    """The one link in the reply. The first group's invitation is issued last, so its link sets up the account; opening
+    it claims every other open invitation for the same email from ReBattery Sales too (claim_listing_invitation,
+    platform migration 20261124140000), so all the drafts land in the seller's account together."""
+    labels = [g["group"]["label"] for g in groups]
+    return [{"label": " and ".join(labels) if len(labels) <= 2 else f"{len(labels)} listings", "url": issued[0]["url"]}]
 
 
 # ---------- the outside world ----------

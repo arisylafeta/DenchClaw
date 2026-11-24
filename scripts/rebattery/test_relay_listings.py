@@ -39,10 +39,7 @@ def test_batches():
     assert rl.batches([], 3) == []
 
 
-def test_the_first_group_gets_the_setup_link_and_the_others_their_invitation_path():
+def test_one_link_sets_up_the_account_and_brings_every_draft():
     groups = [{"group": {"label": "35E packs"}}, {"group": {"label": "50E packs"}}]
     issued = {0: {"url": "https://www.rebattery.io/join/tok", "invitationId": "a"}, 1: {"url": "https://www.rebattery.io/join/old", "invitationId": "b"}}
-    assert rl.links_for(groups, issued, "https://www.rebattery.io") == [
-        {"label": "35E packs", "url": "https://www.rebattery.io/join/tok"},
-        {"label": "50E packs", "url": "https://www.rebattery.io/supplier/listings/new?invitation=b"},
-    ]
+    assert rl.links_for(groups, issued, "https://www.rebattery.io") == [{"label": "35E packs and 50E packs", "url": "https://www.rebattery.io/join/tok"}]
