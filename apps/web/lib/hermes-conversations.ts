@@ -95,7 +95,7 @@ export function sidebarConversation(row: HermesConversation): boolean {
   const key = sourceSection(row).key;
   return key === "chats" || key === "group";
 }
-/** Two sections, by visibility: My chats (private) and Shared (team), plus Pinned. */
+/** Sections: Pinned, My chats (private), Groups (group chats) and Shared (team). */
 export function applyChatView(rows: HermesConversation[], view: ChatView, query: string, _now = new Date(), userId?: string) {
   const needle = query.trim().toLowerCase();
   const unique = [...new Map(rows.filter((row) => canViewConversation(row, userId)).map((row) => [row.key, row])).values()];
@@ -106,6 +106,7 @@ export function applyChatView(rows: HermesConversation[], view: ChatView, query:
   const recentFirst = (a: HermesConversation, b: HermesConversation) => b.updatedAt - a.updatedAt || a.key.localeCompare(b.key);
   for (const row of [...shown].sort(recentFirst)) {
     const bucket = pins.has(row.key) ? { key: "pinned", label: "Pinned" }
+      : row.kind === "group" ? { key: "group", label: "Groups" }
       : row.access?.visibility === "team" ? { key: "shared", label: "Shared" } : { key: "mine", label: "My chats" };
     const section = sections.get(bucket.key) ?? { ...bucket, rows: [] };
     section.rows.push(row); sections.set(bucket.key, section);
@@ -114,6 +115,6 @@ export function applyChatView(rows: HermesConversation[], view: ChatView, query:
     section.rows.sort((a, b) => Number(!a.project) - Number(!b.project)
       || (a.project ?? "").localeCompare(b.project ?? "", undefined, { sensitivity: "base" }) || recentFirst(a, b));
   }
-  const order = ["pinned", "mine", "shared"];
+  const order = ["pinned", "mine", "group", "shared"];
   return { sections: [...sections.values()].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key)), shown: shown.length };
 }

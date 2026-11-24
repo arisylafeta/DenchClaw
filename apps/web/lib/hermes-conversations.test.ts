@@ -2,11 +2,11 @@ import { expect, it } from "vitest";
 import { applyChatView as applyView, conversationKey, DEFAULT_VIEW, filterConversations, parseChatView, type HermesConversation } from "./hermes-conversations";
 const applyChatView = (...args: Parameters<typeof applyView>) => applyView(args[0], args[1], args[2], args[3], "user-a");
 const row = (source: string, profile = "alpha"): HermesConversation => ({ access: { visibility: source === "web" ? "private" : "team", ownerId: source === "web" ? "user-a" : null, canShare: source === "web", canDelete: source === "web", canWrite: true, canApprove: true }, key: conversationKey("solo", source, profile), id: source, kind: "solo", profile, source, title: source, updatedAt: 100, participants: [{ profile, name: profile }], working: false });
-it("shows only Pinned, My chats and Shared, folds groups in by visibility and emits each key once", () => {
+it("shows only Pinned, My chats, Groups and Shared, keeps group chats in their own section and emits each key once", () => {
   const rows = [row("cron"), row("whatsapp"), row("discord"), row("web"), row("crm", "beta"), row("telegram"), row("gmail-triage"), { ...row("group"), kind: "group" as const }];
   const view = { ...DEFAULT_VIEW, pins: [rows[4].key] };
   const result = applyChatView([...rows, rows[3]], view, "");
-  expect(result.sections.map((s) => s.label)).toEqual(["Pinned", "My chats", "Shared"]);
+  expect(result.sections.map((s) => s.label)).toEqual(["Pinned", "My chats", "Groups"]);
   expect(result.sections.map((s) => s.rows.map((r) => r.source))).toEqual([["crm"], ["web"], ["group"]]);
   expect(applyChatView(filterConversations(rows, "beta"), { ...view, pins: [] }, "").sections.map((s) => s.label)).toEqual(["Shared"]);
 });
