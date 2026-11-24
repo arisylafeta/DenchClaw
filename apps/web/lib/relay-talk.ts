@@ -12,7 +12,9 @@ import type { PriceFill, StockFit } from "./relay-price-types";
 import { threadSides, type GuardDraft } from "./relay-leak";
 import { leaks, leakSentence, type Leak } from "./relay-leak-core";
 import { sendAtProblem } from "./relay-send-time";
-import { EARLIER_ROUND_SQL } from "./relay-round";
+import { inPlaySql, viewRoleSql } from "./relay-round";
+import { knownCosts, lastWritten, linkedThread } from "./relay-linked";
+import { costClashes } from "./relay-linked-core";
 import type { PackSource } from "./relay-context-core";
 import {
   hasPriceMarker, marks, parseTalk, pushHistory, readHistory, readSummary, SEND_MODES, stockBlock, TALK_ALL, talkPrompt, toKindOf,
@@ -64,26 +66,36 @@ export type TalkDraft = {
   /** A gap nothing fills yet: Send stays blocked. */
   gaps: boolean;
   price_markers: boolean;
+  /** Worth a look before it goes, never blocking: a price under the cost on record. */
+  warnings?: string[];
+  /** A reply on someone else's thread, shown here because it goes with this email: theirs is their newest email there. */
+  thread?: { itemId: string; name: string; subject: string; theirs: { at: string; text: string } | null } | null;
+  /** On the thread's own page: the other email this reply goes with. */
+  goesWith?: { itemId: string; name: string } | null;
 };
 export type TalkState = { turns: TalkTurn[]; drafts: TalkDraft[]; read: ReadSummary };
 
 export type TalkRow = {
-  id: string; item_id: string; role: "primary" | "follow"; position: number; title: string; why: string; state: string; to_kind: ToKind | null;
+  id: string; item_id: string; linked_item_id: string | null; role: "primary" | "follow"; position: number; title: string; why: string; state: string; to_kind: ToKind | null;
   send_mode: SendMode; send_at: string | null; included: boolean; history: unknown; redo: unknown; background: unknown; fills: unknown; mail_message_id: string | null;
   mail_state: string | null; identity_key: string | null; from_email: string | null; to_emails: string[]; cc_emails: string[]; bcc_emails: string[]; subject: string | null;
   body_text: string | null; updated_at: string | null; thread_id: string | null;
   scheduled: { at?: string; undo?: boolean; unless_reply?: unknown } | null; failure: { reason: string; detail?: unknown } | null;
 };
 
-/** The item's drafts that are still in play (not dropped, not sent in an earlier round), the reply first, with their mail. */
+/**
+ * The item's drafts that are still in play (not dropped, not sent in an earlier round), the reply first, with their mail.
+ * A reply on someone else's thread that goes with this email comes last, as a linked email.
+ */
 export async function draftRows(itemId: string): Promise<TalkRow[]> {
   return queryPg<TalkRow>(
-    `select d.id, d.item_id, d.role, d.position, d.title, d.why, d.state, d.to_kind, d.send_mode, d.send_at::text as send_at, d.included, d.history, d.redo,
+    `select d.id, d.item_id, d.linked_item_id, ${viewRoleSql("$1")} as role, d.position, case when d.item_id <> $1 and d.why <> '' then d.why else d.title end as title,
+       case when d.item_id <> $1 then '' else d.why end as why, d.state, d.to_kind, d.send_mode, d.send_at::text as send_at, d.included, d.history, d.redo,
        d.background, d.fills, d.mail_message_id, m.state as mail_state, m.identity_key, m.from_email, coalesce(m.to_emails, '{}') as to_emails,
        coalesce(m.cc_emails, '{}') as cc_emails, coalesce(m.bcc_emails, '{}') as bcc_emails, m.subject, m.body_text, m.updated_at, m.thread_id,
        m.personalization->'scheduled_send' as scheduled, m.personalization->'send_failure' as failure
      from relay_draft d left join mail_message m on m.id = d.mail_message_id
-     where d.item_id = $1 and d.state <> 'skipped' and not ${EARLIER_ROUND_SQL} order by d.role = 'primary' desc, d.position, d.created_at`, [itemId]);
+     where ${inPlaySql("$1")} order by d.item_id = $1 desc, d.role = 'primary' desc, d.position, d.created_at`, [itemId]);
 }
 
 export const isSent = (r: TalkRow) => r.state === "sent" || r.mail_state === "accepted" || (!!r.mail_state && r.mail_state !== "draft");
@@ -99,8 +111,16 @@ async function ownItem(itemId: string, ownerId: string): Promise<RelayItem> {
 async function draftViews(item: RelayItem, ownerId: string, rows: TalkRow[], stock: StockFit[]): Promise<TalkDraft[]> {
   const signatures = await identitySignatures();
   const withMail = rows.filter((r) => r.mail_message_id);
-  const sides = await threadSides(item.id, ownerId, withMail.map((r) => guardOf(r)), stock);
+  const [sides, costs, offered, threads, withItems] = await Promise.all([
+    threadSides(item.id, ownerId, withMail.map((r) => guardOf(r)), stock),
+    knownCosts(item),
+    lastWritten(item),
+    Promise.all(rows.filter((r) => r.item_id !== item.id).map(async (r) => [r.id, await linkedThread(ownerId, r.item_id)] as const)).then((x) => new Map(x)),
+    Promise.all(rows.filter((r) => r.item_id === item.id && r.linked_item_id).map(async (r) => [r.id, await readRelayItem(r.linked_item_id!, ownerId)] as const)).then((x) => new Map(x)),
+  ]);
   return rows.map((r) => {
+    const thread = threads.get(r.id);
+    const goesWith = withItems.get(r.id);
     const main = splitCopy(r.body_text, signatures.get(r.identity_key ?? "") ?? null).main;
     const history = readHistory(r.history);
     const redo = readHistory(r.redo);
@@ -124,6 +144,9 @@ async function draftViews(item: RelayItem, ownerId: string, rows: TalkRow[], sto
       // Only gaps nothing fills: a price marker Relay or Alex has priced goes in at Send.
       gaps: unfilledGaps(main, parseFills(r.fills)).length > 0,
       price_markers: hasPriceMarker(main),
+      warnings: toKind === "buyer" && !sent ? costClashes(r.role === "primary" ? `${main}\n${offered}` : main, costs) : [],
+      thread: thread ? { itemId: thread.item_id, name: thread.name ?? thread.email, subject: thread.subject, theirs: thread.theirs ? { at: thread.theirs.at, text: thread.theirs.text.slice(0, 1200) } : null } : null,
+      goesWith: goesWith && goesWith.status !== "done" ? { itemId: goesWith.id, name: goesWith.counterpart_name ?? goesWith.counterpart_email ?? "another email" } : null,
     };
   });
 }
@@ -308,8 +331,8 @@ async function answer(item: RelayItem, owner: { id: string; email: string }, row
 }
 
 /** Undo puts back the copy before the last change and keeps the undone one for Redo; Redo does the reverse. */
-export async function undoDraft(draftId: string, ownerId: string, redo = false): Promise<TalkDraft[]> {
-  const { item, row } = await ownDraft(draftId, ownerId);
+export async function undoDraft(draftId: string, ownerId: string, redo = false, viewItem?: string): Promise<TalkDraft[]> {
+  const { item, row } = await ownDraft(draftId, ownerId, viewItem);
   const mail = await readMailDraft(row.mail_message_id!, ownerId);
   if (!mail || mail.state !== "draft") throw new RelayError(409, "This email was already sent.");
   if (row.scheduled) throw new RelayError(409, "It's waiting to send. Cancel the send first.");
@@ -325,10 +348,11 @@ export async function undoDraft(draftId: string, ownerId: string, redo = false):
   return refreshed(item, ownerId);
 }
 
-async function ownDraft(draftId: string, ownerId: string): Promise<{ item: RelayItem; row: TalkRow; rows: TalkRow[] }> {
-  const [found] = await queryPg<{ item_id: string }>("select d.item_id from relay_draft d join relay_item i on i.id = d.item_id where d.id = $1 and i.owner_id = $2::uuid", [draftId, ownerId]);
+/** One of Alex's drafts, seen from the page he is on (viewItem): its own thread, or the email it goes with. */
+async function ownDraft(draftId: string, ownerId: string, viewItem?: string): Promise<{ item: RelayItem; row: TalkRow; rows: TalkRow[] }> {
+  const [found] = await queryPg<{ item_id: string; linked_item_id: string | null }>("select d.item_id, d.linked_item_id from relay_draft d join relay_item i on i.id = d.item_id where d.id = $1 and i.owner_id = $2::uuid", [draftId, ownerId]);
   if (!found) throw new RelayError(404, "Not found");
-  const item = await ownItem(found.item_id, ownerId);
+  const item = await ownItem(viewItem && viewItem === found.linked_item_id ? viewItem : found.item_id, ownerId);
   const rows = await draftRows(item.id);
   const row = rows.find((r) => r.id === draftId);
   if (!row?.mail_message_id) throw new RelayError(404, "Not found");
@@ -343,8 +367,8 @@ async function refreshed(item: RelayItem, ownerId: string): Promise<TalkDraft[]>
 export type LinkedPatch = { included?: boolean; sendMode?: SendMode; sendAt?: string | null };
 
 /** Ticks a linked email to go or not, and sets when it goes. The reply always goes; a waiting send has to be cancelled first. */
-export async function setLinked(draftId: string, ownerId: string, patch: LinkedPatch): Promise<TalkDraft[]> {
-  const { item, row } = await ownDraft(draftId, ownerId);
+export async function setLinked(draftId: string, ownerId: string, patch: LinkedPatch, viewItem?: string): Promise<TalkDraft[]> {
+  const { item, row } = await ownDraft(draftId, ownerId, viewItem);
   if (row.role === "primary") throw new RelayError(400, "The reply always goes. Change the linked emails instead.");
   if (isSent(row)) throw new RelayError(409, "This email was already sent.");
   if (row.scheduled) throw new RelayError(409, "It's waiting to send. Cancel the send first.");
@@ -439,7 +463,8 @@ export async function sendWithLinked(itemId: string, owner: { id: string; email:
  * started going is reported, not hidden. */
 export async function cancelAll(itemId: string, ownerId: string): Promise<{ results: SendOutcome[]; drafts: TalkDraft[] }> {
   const item = await ownItem(itemId, ownerId);
-  const waiting = (await draftRows(itemId)).filter((r) => r.scheduled && r.mail_state === "draft");
+  // A reply on someone else's thread that Alex set for later from its own page isn't this email's to stop.
+  const waiting = (await draftRows(itemId)).filter((r) => r.scheduled && r.mail_state === "draft" && (r.item_id === itemId || r.scheduled.undo));
   const results: SendOutcome[] = [];
   for (const r of waiting) {
     try {

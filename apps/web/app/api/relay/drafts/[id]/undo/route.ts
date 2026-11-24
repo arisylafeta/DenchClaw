@@ -12,7 +12,7 @@ export async function POST(req: Request, { params }: Context) {
   const { id } = await params;
   const body = await readBody(req);
   try {
-    return Response.json({ drafts: await undoDraft(id, guard.user.id, body?.redo === true) });
+    return Response.json({ drafts: await undoDraft(id, guard.user.id, body?.redo === true, typeof body?.item === "string" ? body.item : undefined) });
   } catch (error) {
     return relayError(error);
   }

@@ -5,7 +5,7 @@ import { accessSync, constants } from "node:fs";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { queryPg, withPgTransaction } from "./postgres";
 import { readMailDraft } from "./crm-postgres/mail";
-import { identitySignatures, splitCopy } from "./mail-draft-actions";
+import { identitySignatures, sameVersion, splitCopy } from "./mail-draft-actions";
 import { isTeamSender } from "./relay-senders";
 import { listingProposal, proposeListings, settleStaleListings } from "./relay-listings";
 import { mailboxScopeSql } from "./mail-scope";
@@ -19,8 +19,10 @@ import { activityText, stripQuoted } from "./relay-context-core";
 import { draftPriceGaps, marketplaceListings, pennyCards, priceDraft, priceStock, setFill, stockFits } from "./relay-price";
 import { parseFills } from "./relay-price-core";
 import type { StockFit } from "./relay-price-types";
-import { threadSides, type GuardDraft } from "./relay-leak";
+import { guardDrafts, threadSides, type GuardDraft } from "./relay-leak";
 import { leaks, leakSentence } from "./relay-leak-core";
+import { findThreads, knownCosts, lastWritten, linkedThread, relatedThreads } from "./relay-linked";
+import { costClashes, sameMailbox } from "./relay-linked-core";
 import { sendAtProblem } from "./relay-send-time";
 import { hasPriceMarker, type ToKind } from "./relay-talk-core";
 import { addTurn, draftRows, guardOf, isSent, type TalkRow } from "./relay-talk";
@@ -149,13 +151,17 @@ type Ctx = { item: RelayItem; ownerId: string; runId: string | null; dryRun: boo
 /** The email's facts, thread, drafts (with versions and prices), the stock that fits with Relay's prices, and the rules. */
 export async function deskState(item: RelayItem, ownerId: string): Promise<DeskState> {
   await settleStaleListings(item.id).catch(() => undefined);
-  const [ctx, rows, stock, signatures, listings] = await Promise.all([
+  const [ctx, rows, stock, signatures, listings, related, costs, offered] = await Promise.all([
     draftContext(item, ownerId, "(desk)", { background: false, offers: false }),
     draftRows(item.id),
     stockFits(item.id, ownerId).catch((error) => { console.error("relay desk stock", error); return [] as StockFit[]; }),
     identitySignatures(),
     listingProposal(item.id).catch(() => null),
+    relatedThreads(item, ownerId).catch((error) => { console.error("relay related threads", error); return []; }),
+    knownCosts(item),
+    lastWritten(item),
   ]);
+  const names = new Map(related.map((t) => [t.item_id, t.name ?? t.email]));
   const priced = await priceStock(stock, { askedDelivered: false }).catch(() => []);
   const sides = await threadSides(item.id, ownerId, rows.filter((r) => r.mail_message_id).map((r) => guardOf(r)), stock);
   const drafts: DeskDraft[] = rows.filter((r) => r.mail_message_id).map((r) => ({
@@ -165,6 +171,8 @@ export async function deskState(item: RelayItem, ownerId: string): Promise<DeskS
     send_mode: r.send_mode, send_at: r.send_at, included: r.role === "primary" || r.included,
     waiting_to_send: !!(r.mail_state === "draft" && r.scheduled?.at), sent: isSent(r),
     fills: parseFills(r.fills).map(({ key, label, value, by, basis, working, warnings }) => ({ key, label, value, by, basis, working, warnings })),
+    thread_of: r.item_id === item.id ? null : names.get(r.item_id) ?? r.to_emails[0] ?? "their",
+    warnings: (sides.kinds.get(r.id) ?? r.to_kind) === "buyer" && !isSent(r) ? costClashes(`${splitCopy(r.body_text, signatures.get(r.identity_key ?? "") ?? null).main}${r.role === "primary" ? `\n${offered}` : ""}`, costs) : [],
   }));
   const deal = item.deal ?? null;
   // Who the reply goes from: the draft's sender once there is one (Alex may have switched it), else Relay's pick.
@@ -184,6 +192,8 @@ export async function deskState(item: RelayItem, ownerId: string): Promise<DeskS
     })),
     others: await otherEmails(item, ownerId),
     drafts,
+    related,
+    costs,
     listings,
     stock: stock.map((s, i) => ({
       key: s.key, label: s.label, kind: s.kind, kwh: s.kwh, year: s.year, soh: s.soh, cost: s.cost, listed: s.listed,
@@ -239,6 +249,11 @@ export async function deskTool(input: { itemId: string; runId: string | null; dr
     case "relay_state": return JSON.stringify(await deskState(ctx.item, ownerId));
     case "relay_write_reply": return writeReply(ctx, args as DeskArgs["relay_write_reply"]);
     case "relay_update_draft": return updateDraft(ctx, args as DeskArgs["relay_update_draft"]);
+    case "relay_threads": {
+      const a = args as DeskArgs["relay_threads"];
+      const threads = await findThreads(ownerId, ctx.item.id, a.person, a.about);
+      return threads.length ? JSON.stringify(threads) : `Alex has no Relay thread with "${a.person}" besides this one.`;
+    }
     case "relay_add_email": return addEmail(ctx, args as DeskArgs["relay_add_email"]);
     case "relay_set_price": return setPrice(ctx, args as DeskArgs["relay_set_price"]);
     case "relay_reprice": return reprice(ctx, args as DeskArgs["relay_reprice"]);
@@ -288,8 +303,8 @@ async function guard(ctx: Ctx, rows: TalkRow[], target: GuardDraft): Promise<{ k
 }
 
 /** The draft as it is after a change, for the tool's answer: its id, version and Relay's prices. */
-async function after(draftId: string, note: string): Promise<string> {
-  const row = (await draftRows((await queryPg<{ item_id: string }>("select item_id from relay_draft where id = $1", [draftId]))[0]?.item_id ?? "")).find((r) => r.id === draftId);
+async function after(draftId: string, note: string, itemId?: string): Promise<string> {
+  const row = (await draftRows(itemId ?? (await queryPg<{ item_id: string }>("select item_id from relay_draft where id = $1", [draftId]))[0]?.item_id ?? "")).find((r) => r.id === draftId);
   if (!row) return note;
   const fills = parseFills(row.fills).map((f) => ({ key: f.key, label: f.label, value: f.value, by: f.by, working: f.working }));
   return JSON.stringify({ done: note, draft_id: row.id, version: row.updated_at ? new Date(row.updated_at).toISOString() : null, prices: fills });
@@ -382,6 +397,7 @@ async function knownAddresses(ctx: Ctx, addresses: string[]): Promise<void> {
 
 async function addEmail(ctx: Ctx, a: DeskArgs["relay_add_email"]): Promise<string> {
   if (claimsAttachment(a.body)) throw new RelayError(422, "Nothing can be attached from here. Don't say a file is attached.");
+  if (a.reply_on) return addOnThread(ctx, a, a.reply_on);
   await knownAddresses(ctx, [a.to]);
   if (a.send_at) {
     const problem = sendAtProblem(new Date(a.send_at));
@@ -408,6 +424,86 @@ async function addEmail(ctx: Ctx, a: DeskArgs["relay_add_email"]): Promise<strin
   return after(made.id, `Added "${title}" to ${a.to}.${await priceIfMarked(ctx, made.id, kind, a.body)}`);
 }
 
+/**
+ * relay_add_email with reply_on: the email goes on that person's own thread. It is the reply there (its own page shows it),
+ * and it also shows beside this one, ticked to go with it. A reply already waiting there is changed, never doubled, and one
+ * Alex wrote himself only when he asks for it in the chat. An answered thread gets it as a linked email of this one, on the
+ * thread, so it isn't opened again. Checked by the leak guard on both emails. Never sends.
+ */
+async function addOnThread(ctx: Ctx, a: DeskArgs["relay_add_email"], replyOn: string): Promise<string> {
+  if (replyOn === ctx.item.id) throw new RelayError(400, "That's this email's own thread: use relay_write_reply, or on_thread for a chase.");
+  const target = await readRelayItem(replyOn, ctx.ownerId);
+  const thread = await linkedThread(ctx.ownerId, replyOn);
+  if (!target?.mail_thread_id || !thread) throw new RelayError(404, "No thread with that id. Use a Thread id from relay_state or relay_threads.");
+  const there = await draftContext(target, ctx.ownerId, a.why || "(desk)", { background: false, offers: false });
+  if (!sameMailbox(there.to, a.to)) throw new RelayError(422, `A reply on that thread goes to ${there.to}, not ${a.to}. Pick the thread with the right person, or leave reply_on out for a new email.`);
+  if (a.send_at) {
+    const problem = sendAtProblem(new Date(a.send_at));
+    if (problem) throw new RelayError(400, problem);
+  }
+  const [busy] = await queryPg<{ id: string }>("select id from relay_desk_run where item_id = $1 and status = any($2)", [target.id, ACTIVE_STATUSES]);
+  if (busy) throw new RelayError(409, `Relay is working on ${thread.name ?? there.to}'s email right now. Tell Alex what to ask there instead.`);
+
+  const rows = await draftRows(ctx.item.id);
+  const waiting = thread.draft;
+  const draft: GuardDraft = { id: waiting?.draft_id ?? "new:email", role: "follow", to_kind: a.to_kind, to: [there.to], body: a.body };
+  const { refusal } = await guard(ctx, rows, draft);
+  if (refusal) throw new RelayError(422, refusal);
+  const onTheirs = [...(await guardDrafts(target.id)).filter((d) => d.id !== draft.id), { ...draft, role: "primary" as const }];
+  const theirSides = await threadSides(target.id, ctx.ownerId, onTheirs);
+  const problems = leaks({ toKind: theirSides.kinds.get(draft.id) ?? a.to_kind, body: a.body }, theirSides.facts);
+  if (problems.length) throw new RelayError(422, `${leakSentence(there.to, problems)} Rewrite it without that.`);
+
+  const title = (a.why || `Reply to ${thread.name ?? there.to}`).slice(0, 120);
+  const link = (id: string) => queryPg(
+    "update relay_draft set linked_item_id = $2, why = $3, to_kind = $4, send_mode = $5, send_at = $6, included = true, updated_at = now() where id = $1",
+    [id, ctx.item.id, title, a.to_kind, a.send_mode, a.send_at]);
+
+  if (waiting) {
+    if (waiting.waiting_to_send) throw new RelayError(409, "The reply there is waiting to send. Alex has to cancel it before it can change.");
+    if (waiting.linked_item_id && waiting.linked_item_id !== ctx.item.id) {
+      const other = await readRelayItem(waiting.linked_item_id, ctx.ownerId);
+      if (other && other.status !== "done") throw new RelayError(409, "The reply there already goes with another of Alex's emails. Tell Alex what to add to it.");
+    }
+    if (!a.draft_version) throw new RelayError(409, `A reply is already waiting there. Pass draft_version ${waiting.version} and the whole text: keep what it says and add yours.\n--- it says ---\n${waiting.body}`);
+    if (!sameVersion(waiting.version, a.draft_version)) throw new RelayError(409, `The reply there changed since you read it. It is now version ${waiting.version}:\n${waiting.body}`);
+    if (waiting.by_alex && await runMode(ctx) !== "chat") throw new RelayError(409, "Alex wrote the reply there himself, so it isn't changed without him asking. Say in your answer what to add to it.");
+    if (ctx.dryRun) return dry(`change the reply waiting on ${there.to}'s thread "${thread.subject}" and send it with this one (${a.send_mode}).\n--- new body ---\n${a.body}`);
+    const mail = await mailOf(waiting.draft_id, ctx.ownerId);
+    await saveDraftBody(waiting.draft_id, mail, { body: a.body }, { reason: title, by: "relay" });
+    await link(waiting.draft_id);
+    return after(waiting.draft_id, `Changed the reply waiting on ${there.to}'s thread; it goes with this one.`, ctx.item.id);
+  }
+  if (ctx.dryRun) return dry(`write the reply on ${there.to}'s thread "${thread.subject}" and send it with this one (${a.send_mode}).\n--- body ---\n${a.body}`);
+  if (target.status !== "done") {
+    await saveDraftOutputs(target, ctx.ownerId, title, there, { subject: "", body: a.body, log: ["Written by Relay's desk, to go with another email"] }, [], "desk", true, { keepTodos: true });
+    const [made] = await queryPg<{ id: string }>("select id from relay_draft where item_id = $1 and role = 'primary' and state = 'draft' order by created_at desc limit 1", [target.id]);
+    if (!made) throw new RelayError(502, "Couldn't save the reply on that thread. Try again.");
+    await link(made.id);
+    return after(made.id, `Wrote the reply on ${there.to}'s thread; it goes with this one.`, ctx.item.id);
+  }
+  const subject = thread.subject.trim();
+  const mailId = await createMailDraft({ identity: there.identity, to: [there.to], replyAll: true, thread: target.mail_thread_id, subject: /^re:/i.test(subject) ? subject : `Re: ${subject}`, body: a.body });
+  const [made] = await queryPg<{ id: string }>(
+    `insert into relay_draft (item_id, role, position, title, why, mail_message_id, source_note, original_body, origin, send_mode, send_at, included, to_kind)
+     values ($1, 'follow', (select coalesce(max(position), 0) + 1 from relay_draft where item_id = $1), $2, '', $3, $4, $5, 'desk', $6, $7, true, $8) returning id`,
+    [ctx.item.id, title, mailId, "Relay's desk", a.body, a.send_mode, a.send_at, a.to_kind]);
+  return after(made.id, `Added "${title}" on ${there.to}'s thread.`);
+}
+
+/** How the live run was started: Alex's chat message, or a first draft. */
+async function runMode(ctx: Ctx): Promise<DeskMode | null> {
+  const [run] = ctx.runId ? await queryPg<{ mode: DeskMode }>("select mode from relay_desk_run where id = $1", [ctx.runId]) : [];
+  return run?.mode ?? null;
+}
+
+async function mailOf(draftId: string, ownerId: string) {
+  const [row] = await queryPg<{ mail_message_id: string }>("select mail_message_id from relay_draft where id = $1", [draftId]);
+  const mail = row && await readMailDraft(row.mail_message_id, ownerId);
+  if (!mail || mail.state !== "draft") throw new RelayError(409, "That reply has already gone.");
+  return mail;
+}
+
 async function setPrice(ctx: Ctx, a: DeskArgs["relay_set_price"]): Promise<string> {
   await ownDraft(ctx, a.draft_id);
   if (ctx.dryRun) {
@@ -427,7 +523,7 @@ async function reprice(ctx: Ctx, a: DeskArgs["relay_reprice"]): Promise<string> 
 }
 
 async function ownDraft(ctx: Ctx, draftId: string): Promise<void> {
-  const [row] = await queryPg<{ id: string }>("select id from relay_draft where id = $1 and item_id = $2 and state <> 'skipped'", [draftId, ctx.item.id]);
+  const [row] = await queryPg<{ id: string }>("select id from relay_draft where id = $1 and (item_id = $2 or linked_item_id = $2) and state <> 'skipped'", [draftId, ctx.item.id]);
   if (!row) throw new RelayError(404, "That draft isn't on this email. Call relay_state for the ids.");
 }
 

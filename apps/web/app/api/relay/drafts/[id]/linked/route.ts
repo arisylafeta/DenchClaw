@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 type Context = { params: Promise<{ id: string }> };
 
-/** A linked email: `included` (ticked to go), `send_mode` and `send_at` (ISO, for "at" and "unless_reply"). Nothing is sent. */
+/** A linked email: `included` (ticked to go), `send_mode` and `send_at` (ISO, for "at" and "unless_reply"). `item`: the page it is seen from. Nothing is sent. */
 export async function PATCH(req: Request, { params }: Context) {
   const guard = await guardRelay();
   if ("response" in guard) return guard.response;
@@ -28,7 +28,7 @@ export async function PATCH(req: Request, { params }: Context) {
   }
   if (!Object.keys(patch).length) return Response.json({ error: "included, send_mode or send_at required" }, { status: 400 });
   try {
-    return Response.json({ drafts: await setLinked(id, guard.user.id, patch) });
+    return Response.json({ drafts: await setLinked(id, guard.user.id, patch, typeof body?.item === "string" ? body.item : undefined) });
   } catch (error) {
     return relayError(error);
   }

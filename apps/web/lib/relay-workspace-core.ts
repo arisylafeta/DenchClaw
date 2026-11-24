@@ -260,6 +260,7 @@ export function sendGate(drafts: readonly TalkDraft[], typed: Readonly<Record<st
 
   const relay = needs.reduce((k, x) => k + x.needs.relayPrices, 0);
   const undo = `${UNDO_SEND_SECONDS} seconds to undo.`;
+  if (going.some((d) => d.warnings?.length)) return { ready: true, label, line: `Check the price note on the reply first. ${undo}`, tone: "warn", going };
   if (relay) return { ready: true, label, line: `The yellow ${n(relay, "price is", "prices are")} Relay’s. Change any, or send. ${undo}`, tone: "warn", going };
   return { ready: true, label, line: `Ready. ${undo}`, tone: "ok", going };
 }

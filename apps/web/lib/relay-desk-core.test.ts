@@ -109,6 +109,26 @@ describe("the brief", () => {
     expect(withOthers).toContain("Muhammad Qasim");
     expect(stateText(STATE)).not.toContain("Their other emails");
   });
+  it("shows the threads a reply depends on, the reply waiting there, and the cost, as internal", () => {
+    const ricki = { item_id: "i9", status: "review" as const, name: "Ricki Mayhew", email: "ricki.mayhew@lkqsynetiq.co.uk", subject: "Re: VW ID.3 - tag 13319144", at: "2026-11-24T10:25:24.000Z",
+      theirs: { at: "2026-11-24T10:25:24.000Z", message_id: "m9", text: "We have the mileage as 14,782. What is your offer?", has_files: false },
+      draft: { draft_id: "d9", version: "2026-11-24T13:14:50.301Z", body: "Hi Rick, what would you let it go for?", by_alex: false, waiting_to_send: false, linked_item_id: null } };
+    const shown = stateText({ ...STATE, related: [ricki], costs: [{ label: "Volkswagen ID.3 2025", supplier: "LKQ Synetiq", amount: 1674, currency: "GBP", source: "price sheet 19 Oct", listed: 1880 }] });
+    expect(shown).toContain("--- Thread i9 with Ricki Mayhew <ricki.mayhew@lkqsynetiq.co.uk> (waiting on Alex)");
+    expect(shown).toContain("We have the mileage as 14,782");
+    expect(shown).toContain("(draft d9, version 2026-11-24T13:14:50.301Z):\nHi Rick");
+    expect(shown).toContain("never in an email to the buyer): Volkswagen ID.3 2025 from LKQ Synetiq: £1,674 (price sheet 19 Oct)");
+    expect(stateText({ ...STATE, related: [{ ...ricki, draft: null, theirs: null }] })).toContain("No reply waiting there.");
+    expect(stateText(STATE)).not.toContain("Cost on record");
+    expect(stateText({ ...STATE, drafts: [{ ...STATE.drafts[0], warnings: ["£1,570 is £104 under the cost."] }] })).toContain("For Alex, never in an email: £1,570");
+  });
+  it("tells every first draft to ask whoever has the answer", () => {
+    for (const mode of ["quick", "ahead", "chat"] as const) {
+      const b = buildBrief({ mode, state: STATE, rules: [], voice: null, now: new Date() });
+      expect(b).toContain("Ask whoever has the answer");
+      expect(b).toContain("reply_on");
+    }
+  });
 });
 
 describe("the turn's prompt and the modes", () => {
@@ -147,6 +167,12 @@ describe("the tools' arguments", () => {
     expect(readDeskArgs("relay_add_email", { ...base, send_mode: "at" })).toEqual({ ok: false, why: "send_mode at needs send_at as an ISO time." });
     expect(readDeskArgs("relay_add_email", { ...base, send_mode: "unless_reply", send_at: "2026-11-24T09:00:00Z" })).toMatchObject({ ok: true, args: { send_at: "2026-11-24T09:00:00.000Z" } });
     expect(readDeskArgs("relay_add_email", { ...base, to: "nobody" }).ok).toBe(false);
+    expect(readDeskArgs("relay_add_email", { ...base, subject: undefined }).ok).toBe(false);
+    expect(readDeskArgs("relay_add_email", { ...base, subject: undefined, reply_on: "i2", draft_version: "v1" })).toMatchObject({ ok: true, args: { reply_on: "i2", draft_version: "v1", subject: "" } });
+    expect(readDeskArgs("relay_add_email", { ...base, draft_version: "v1" }).ok).toBe(false);
+    expect(readDeskArgs("relay_add_email", { ...base, reply_on: "i2", on_thread: true }).ok).toBe(false);
+    expect(readDeskArgs("relay_threads", { person: "Ricki Mayhew" })).toEqual({ ok: true, args: { person: "Ricki Mayhew", about: "" } });
+    expect(readDeskArgs("relay_threads", {}).ok).toBe(false);
   });
   it("rounds prices to whole pounds and allows clearing one", () => {
     expect(readDeskArgs("relay_set_price", { draft_id: "d1", key: "stock:41", value: 5040.4 })).toMatchObject({ ok: true, args: { value: 5040 } });

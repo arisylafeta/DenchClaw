@@ -9,6 +9,7 @@ import { londonInputValue, londonWallToUtc, sendAtProblem, sendLabel, sendSlots,
 import {
   draftNeeds, fromEditable, isAddress, paragraphs, parsePrice, priceText, SEND_MODE_WORDS, sendGate, tabNote, toEditable, whenWords, type Piece,
 } from "@/lib/relay-workspace-core";
+import { cleanEmail } from "@/lib/relay-email-clean";
 import { ChevronDown, Pencil } from "lucide-react";
 import { ThinkingIndicator } from "@/app/components/chat-native/thinking";
 import { cx, failureText, firstOf } from "./relay-ui";
@@ -31,6 +32,8 @@ export type SheetActions = {
   typeGap: (draftId: string, index: number, value: string) => void;
   /** Who the email is from: alex, buy or supply. Re-signs it as that sender. */
   setSender: (d: TalkDraft, key: SenderKey) => Promise<void>;
+  /** Opens another email in Relay (the thread a linked reply is on, or the email it goes with). */
+  open: (itemId: string, name: string) => void;
   /** Alex's own edit of the text, subject or recipients; true when it saved. */
   edit: (d: TalkDraft, changes: { body?: string; subject?: string; to?: string[]; cc?: string[]; bcc?: string[] }) => Promise<boolean>;
 };
@@ -116,7 +119,7 @@ function Panel({ d, name, typed, stock, marksOn, onMarks, actions, busy, hold }:
 
   const to = mail.to_emails.join(", ") || "nobody yet";
   const cc = mail.cc_emails.length ? `, copying ${mail.cc_emails.join(", ")}` : "";
-  const head = d.role === "primary" ? `To ${to}${cc}.` : `To ${to}. ${whenWords(d)}.`;
+  const head = d.role === "primary" ? `To ${to}${cc}.` : `To ${to}${d.thread ? `${cc}, on their thread “${d.thread.subject}”` : ""}. ${whenWords(d)}.`;
   // Only a linked email to the other side of the deal needs the reminder: the reply goes to the person it's about.
   const guard = d.leaks.length || d.role !== "follow" ? null : d.to_kind === "supplier" ? `Never mentions ${firstOf(name)} or what we charge.` : d.to_kind === "buyer" ? "Never names the supplier or their cost." : null;
   const [editing, setEditing] = useState(false);
@@ -137,6 +140,8 @@ function Panel({ d, name, typed, stock, marksOn, onMarks, actions, busy, hold }:
         {!locked && <button type="button" className={w.editBtn} disabled={!!hold} title={hold ?? undefined} onClick={() => setEditing(true)}><Pencil size={12} aria-hidden />Edit</button>}
       </span>
       {d.state === "sent" && <p className={w.status}>Sent.</p>}
+      {d.goesWith && <p className={w.muted}>Goes with your reply to {d.goesWith.name}. <button type="button" className={w.linkbtn} onClick={() => actions.open(d.goesWith!.itemId, d.goesWith!.name)}>Open it</button></p>}
+      {d.thread && <Theirs thread={d.thread} onOpen={() => actions.open(d.thread!.itemId, d.thread!.name)} />}
       {scheduled && (
         <p className={w.status}>
           {scheduled.undo ? (left > 0 ? `Sending in ${left} s.` : "On its way.") : `Goes ${sendLabel(scheduled.at)}${scheduled.unless_reply ? ", unless they reply first" : ""}.`}
@@ -147,7 +152,24 @@ function Panel({ d, name, typed, stock, marksOn, onMarks, actions, busy, hold }:
       {mail.failure && mail.state === "draft" && <p className={w.error} role="alert">The last try didn't go: {failureText(mail.failure, mail.state)}</p>}
       <Body d={d} typed={typed} stock={stock} locked={locked} hold={hold} marksOn={marksOn} onMarks={onMarks} actions={actions} />
       {d.leaks.map((leak, k) => <p key={k} className={w.error} role="alert">Can't go like this: {leak.text.replace(/^./, (c) => c.toLowerCase())} Ask Relay to take it out.</p>)}
+      {!locked && d.warnings?.map((line) => <p key={line} className={w.costWarn} role="status">Check the price: {line} Only you see this.</p>)}
       {guard && <span className={w.guard}>{guard}</span>}
+    </div>
+  );
+}
+
+/** What the person a linked reply answers last wrote on their own thread, so it is read with theirs in view. */
+function Theirs({ thread, onOpen }: { thread: NonNullable<TalkDraft["thread"]>; onOpen: () => void }) {
+  const said = thread.theirs ? cleanEmail(thread.theirs.text) : "";
+  return (
+    <div className={w.theirs}>
+      {thread.theirs && said && (
+        <>
+          <span className={w.meta}>{firstOf(thread.name)}, {new Date(thread.theirs.at).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/London" })}</span>
+          <span className={w.theirsText}>{said}</span>
+        </>
+      )}
+      <span><button type="button" className={w.linkbtn} onClick={onOpen}>Open {firstOf(thread.name)}’s email</button></span>
     </div>
   );
 }

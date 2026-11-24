@@ -48,11 +48,15 @@ TOOLS: list[dict[str, Any]] = [
                             ["draft_id", "version"])},
     {"name": "relay_add_email", "description": "Add a linked email beside the reply: to a supplier, the buyer (a chase) or someone else (transport, an intro). "
      "send_mode: with_reply (goes when Alex sends the reply), at or unless_reply (at send_at; unless_reply only if they haven't written first), after_order. "
-     "on_thread: a chase to the person on this thread goes on the thread. Leak-guarded. Never sends.",
+     "on_thread: a chase to the person on this thread goes on the thread. reply_on: the Thread id (relay_state related, or relay_threads) of that person's own "
+     "thread, so it goes there instead of as a new email; when a reply is already waiting there, pass its version as draft_version and the whole text, "
+     "keeping what it says. Leak-guarded. Never sends.",
      "inputSchema": _schema({"to": _S, "to_kind": {"type": "string", "enum": ["buyer", "supplier", "other"]}, "subject": _S, "body": _S,
                              "send_mode": {"type": "string", "enum": ["with_reply", "at", "unless_reply", "after_order"]},
-                             "send_at": {**_S, "description": "ISO time, for at and unless_reply."}, "why": _S, "on_thread": {"type": "boolean"}},
-                            ["to", "to_kind", "subject", "body"])},
+                             "send_at": {**_S, "description": "ISO time, for at and unless_reply."}, "why": {**_S, "description": "What it asks for, in a few words (its title on the page)."}, "on_thread": {"type": "boolean"},
+                             "reply_on": {**_S, "description": "The Thread id to reply on; the subject is then the thread's."},
+                             "draft_version": {**_S, "description": "With reply_on: the version of the reply waiting there, to change it."}},
+                            ["to", "to_kind", "body"])},
     {"name": "relay_set_price", "description": "Set Relay's price (whole pounds) for one price gap in a draft, by its ref key; null clears it. Shown in yellow until Alex accepts it.",
      "inputSchema": _schema({"draft_id": _S, "key": _S, "value": {"type": ["number", "null"]}}, ["draft_id", "key", "value"])},
     {"name": "relay_reprice", "description": "Work Relay's prices out again for every price gap in a draft. Prices Alex set stay.",
@@ -78,6 +82,9 @@ TOOLS: list[dict[str, Any]] = [
          "buyItNowPrice": {"type": "number", "description": "Only a price the seller stated"}, "currency": {"type": "string", "enum": ["GBP", "EUR", "USD"]},
          "location": {"type": "object", "properties": {"country": _S, "countryCode": _S, "region": _S, "city": _S}, "required": ["country", "countryCode"]}},
          "required": ["label", "format", "description", "location"]}}, "why": _S}, ["groups"])},
+    {"name": "relay_threads", "description": "Alex's Relay threads with a person (email address, name or company), the one about the same thing first: their newest email "
+     "on each, and the reply waiting there with its version. Read only.",
+     "inputSchema": _schema({"person": _S, "about": {**_S, "description": "Words it is about: the pack, a stock tag."}}, ["person"]), "annotations": {"readOnlyHint": True}},
     {"name": "crm_query", "description": "Read the CRM database (Postgres): ONE statement starting with SELECT or WITH, read only, 10 second limit, at most 200 rows. "
      "Useful tables: crm_people, crm_companies, crm_bulk_listings (deals), crm_stock_opportunities (supplier stock), mail_message, whatsapp_message, crm_price_cards.",
      "inputSchema": _schema({"sql": _S}, ["sql"]), "annotations": {"readOnlyHint": True}},

@@ -202,6 +202,9 @@
 .laterChevron { margin-left: 4px; vertical-align: -2px; }
 .srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-weight: 600; }
+.costWarn { font-size: 13px; line-height: 1.5; padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, var(--color-warning, #b7791f) 12%, transparent); }
+.theirs { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding-left: 12px; border-left: 2px solid var(--color-border); }
+.theirsText { font-size: 13px; line-height: 1.5; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
 .guard { font-size: 12px; line-height: 1.5; font-weight: 600; color: var(--color-accent); }
 
 /* the body, with Alex's margin on the right */

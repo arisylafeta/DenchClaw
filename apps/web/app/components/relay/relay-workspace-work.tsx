@@ -47,7 +47,7 @@ export function Work({ itemId, name, waited, waitingSince, item, job, reviewIds,
   /** Opens the linked deal, or an email as it was sent, in a new CRM tab. */
   onOpenDeal?: (id: string, title?: string) => void; onOpenMail?: (id: string, title?: string) => void;
   say: Say; text: string; setText: (next: SetStateAction<string>) => void; composer: RefObject<HTMLTextAreaElement | null>;
-  onDone?: () => void; onSnooze?: (until: string) => void; onOpen: (itemId: string) => void; onBack: () => void; refreshLists: () => Promise<void>;
+  onDone?: () => void; onSnooze?: (until: string) => void; onOpen: (itemId: string, other?: string) => void; onBack: () => void; refreshLists: () => Promise<void>;
 }) {
   const [talk, setTalkState] = useState<DeskTalk | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -174,11 +174,11 @@ export function Work({ itemId, name, waited, waitingSince, item, job, reviewIds,
 
   // ---- undo, linked emails
   const undo = async (draftId: string, redo: boolean) => {
-    try { setDrafts((await api<{ drafts: TalkDraft[] }>(`/api/relay/drafts/${draftId}/undo`, { method: "POST", body: redo ? { redo: true } : {} })).drafts); }
+    try { setDrafts((await api<{ drafts: TalkDraft[] }>(`/api/relay/drafts/${draftId}/undo`, { method: "POST", body: { item: itemId, ...(redo ? { redo: true } : {}) } })).drafts); }
     catch (err) { say(message(err, redo ? "Couldn't redo." : "Couldn't undo.")); }
   };
   const setLinked = async (draftId: string, patch: { included?: boolean; send_mode?: SendMode; send_at?: string | null }) => {
-    try { setDrafts((await api<{ drafts: TalkDraft[] }>(`/api/relay/drafts/${draftId}/linked`, { method: "PATCH", body: patch })).drafts); return true; }
+    try { setDrafts((await api<{ drafts: TalkDraft[] }>(`/api/relay/drafts/${draftId}/linked`, { method: "PATCH", body: { ...patch, item: itemId } })).drafts); return true; }
     catch (err) { say(message(err, "Couldn't change that.")); return false; }
   };
 
@@ -440,7 +440,7 @@ export function Work({ itemId, name, waited, waitingSince, item, job, reviewIds,
       say(`Now from ${key}@rebattery.io, signed as that address.`);
     } catch (err) { say(message(err, "Couldn't change who it's from.")); }
   };
-  const actions: SheetActions = { setPrice, acceptPrice, undo, setLinked, sendAll, undoAll, toGmail, sendLater, cancelLater, saveGaps, edit, setSender,
+  const actions: SheetActions = { setPrice, acceptPrice, undo, setLinked, sendAll, undoAll, toGmail, sendLater, cancelLater, saveGaps, edit, setSender, open: onOpen,
     typeGap: (draftId, index, value) => setTyped((t) => ({ ...t, [draftId]: { ...t[draftId], [index]: value } })) };
 
   const msg = item?.last_message;

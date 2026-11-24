@@ -26,6 +26,22 @@ const draft = (over: Partial<TalkDraft> & { main?: string }): TalkDraft => {
   };
 };
 
+describe("a price under the cost on record", () => {
+  const line = "£1,570 is £104 under the cost on record for VW ID.3 2025: £1,674.";
+  it("is said on the Send line and never blocks", () => {
+    const gate = sendGate([draft({ warnings: [line] })]);
+    expect(gate).toMatchObject({ ready: true, tone: "warn" });
+    expect(gate.line).toContain("Check the price note");
+    expect(sendGate([draft({})]).line).not.toContain("Check the price");
+  });
+  it("counts a reply on someone else's thread as a linked email", () => {
+    const rick = draft({ id: "d9", role: "follow", title: "Ask Rick for a photo", to_kind: "supplier", thread: { itemId: "i9", name: "Ricki Mayhew", subject: "Re: VW ID.3", theirs: null } });
+    expect(sendGate([draft({}), rick]).label).toBe("Send the reply and 1 more");
+    expect(Object.keys(versionsOf(sendGate([draft({}), rick]).going))).toEqual(["d1", "d9"]);
+    expect(sendGate([draft({}), { ...rick, included: false }]).label).toBe("Send the reply");
+  });
+});
+
 describe("gaps in a body", () => {
   it("finds each gap where it sits, with its stock key when it is a price", () => {
     const spans = gapSpans(BODY);

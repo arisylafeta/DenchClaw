@@ -4,7 +4,9 @@ import { stockFits } from "./relay-price";
 import type { StockFit } from "./relay-price-types";
 import { replyIdentity } from "./relay-identity";
 import { draftSide, leakFacts, leaks, moneyMentions, type Leak, type LeakFacts, type Party, type Side } from "./relay-leak-core";
-import { EARLIER_ROUND_SQL } from "./relay-round";
+import { knownCosts } from "./relay-linked";
+import { secretCosts } from "./relay-linked-core";
+import { inPlaySql, viewRoleSql } from "./relay-round";
 
 /**
  * The leak guard, the I/O part: gathers who is on each side of an email's thread (the counterpart, the linked deal's
@@ -44,7 +46,7 @@ export async function threadSides(itemId: string, ownerId: string, drafts: Guard
   const [item] = await queryPg<ItemRow>(
     "select id, contact_type, counterpart_name, counterpart_email, company, bulk_listing_id, mail_thread_id from relay_item where id = $1 and owner_id = $2::uuid", [itemId, ownerId]);
   if (!item) throw new Error("Relay item not found for the leak check");
-  const fits = stock ?? await stockFits(itemId, ownerId);
+  const [fits, costs] = await Promise.all([stock ?? stockFits(itemId, ownerId), knownCosts(item)]);
   const side = await itemSide(item);
   const buyerParty = side === "buyer" ? null : await dealBuyer(item.bulk_listing_id);
   const counterpart = { name: item.counterpart_name, company: item.company, email: item.counterpart_email };
@@ -56,7 +58,8 @@ export async function threadSides(itemId: string, ownerId: string, drafts: Guard
   const kinds = new Map(drafts.map((d) => [d.id, draftSide({ toKind: d.to_kind, role: d.role, to: d.to }, side, { suppliers: supplierEmails, buyer: buyerEmail })]));
   const facts = leakFacts({
     side, counterpart, dealBuyer: buyerParty,
-    stock: fits.map((f) => ({ name: f.supplier.name, email: f.supplier.email, cost: f.cost?.amount ?? null })),
+    // The pack in play and what it cost us, as well as the stock that fits.
+    stock: [...fits.map((f) => ({ name: f.supplier.name, email: f.supplier.email, cost: f.cost?.amount ?? null })), ...secretCosts(costs).map((c) => ({ name: c.supplier, email: null, cost: c.amount }))],
     drafts: drafts.map((d) => ({ toKind: kinds.get(d.id) ?? "other", to: d.to, body: d.body })),
     theirAmounts: theirs.flatMap((m) => moneyMentions(m.body_text ?? "").map((x) => x.value)),
   });
@@ -66,19 +69,24 @@ export async function threadSides(itemId: string, ownerId: string, drafts: Guard
 /** The Relay emails on an item, as they are now, for the guard. */
 export async function guardDrafts(itemId: string): Promise<GuardDraft[]> {
   return queryPg<GuardDraft>(
-    `select d.id, d.role, d.to_kind, coalesce(m.to_emails, '{}') as to, coalesce(m.body_text, '') as body
-       from relay_draft d join mail_message m on m.id = d.mail_message_id where d.item_id = $1 and d.state <> 'skipped' and not ${EARLIER_ROUND_SQL}`, [itemId]);
+    `select d.id, ${viewRoleSql("$1")} as role, d.to_kind, coalesce(m.to_emails, '{}') as to, coalesce(m.body_text, '') as body
+       from relay_draft d join mail_message m on m.id = d.mail_message_id where ${inPlaySql("$1")}`, [itemId]);
 }
 
-/** What one Relay email, as it is now, would leak: checked against everything on its thread. */
+/** What one Relay email, as it is now, would leak: checked against everything on its thread, and on the email it goes with. */
 export async function draftLeaks(draftId: string, ownerId: string): Promise<{ to: string; problems: Leak[] }> {
-  const [row] = await queryPg<{ item_id: string }>(
-    "select d.item_id from relay_draft d join relay_item i on i.id = d.item_id where d.id = $1 and i.owner_id = $2::uuid", [draftId, ownerId]);
+  const [row] = await queryPg<{ item_id: string; linked_item_id: string | null }>(
+    "select d.item_id, d.linked_item_id from relay_draft d join relay_item i on i.id = d.item_id where d.id = $1 and i.owner_id = $2::uuid", [draftId, ownerId]);
   if (!row) throw new Error("Relay draft not found for the leak check");
-  const drafts = await guardDrafts(row.item_id);
-  const draft = drafts.find((d) => d.id === draftId);
-  if (!draft) return { to: "", problems: [] };
-  const sides = await threadSides(row.item_id, ownerId, drafts);
-  const problems = leaks({ toKind: sides.kinds.get(draftId) ?? "other", body: draft.body }, sides.facts);
-  return { to: draft.to.join(", ") || "nobody yet", problems };
+  let to = "";
+  const problems: Leak[] = [];
+  for (const itemId of [row.item_id, row.linked_item_id].filter((id): id is string => !!id)) {
+    const drafts = await guardDrafts(itemId);
+    const draft = drafts.find((d) => d.id === draftId);
+    if (!draft) continue;
+    to ||= draft.to.join(", ") || "nobody yet";
+    const sides = await threadSides(itemId, ownerId, drafts);
+    for (const p of leaks({ toKind: sides.kinds.get(draftId) ?? "other", body: draft.body }, sides.facts)) if (!problems.some((q) => q.text === p.text)) problems.push(p);
+  }
+  return { to, problems };
 }

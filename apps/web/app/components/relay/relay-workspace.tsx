@@ -103,6 +103,12 @@ export function RelayWorkspace({ onBack, onOpenPage, onOpenListing, onOpenMailMe
     setPicked(rows[0]);
   }, [rows, picked]);
   const pick = useCallback((row: Row) => { setPicked(row); setPane("work"); }, []);
+  /** Opens another person's email (the thread a linked reply is on): as their own row when they're waiting, never under this name. */
+  const openOther = useCallback((itemId: string, name: string) => {
+    const row = waiting ? [...Object.values(waiting.bands).flat(), ...(waiting.scheduled ?? [])].find((r) => r.openId === itemId || r.itemIds?.includes(itemId)) : undefined;
+    pick(row ? { key: row.key, itemId, name: row.name, ask: row.ask, waited: row.scheduledAt ? sendLabel(row.scheduledAt) : row.waited, waitingSince: row.waitingSince, tag: row.scheduledAt ? "Scheduled" : row.tag, reviewIds: row.openId === itemId ? row.reviewIds : [], itemIds: row.itemIds, scheduledAt: row.scheduledAt }
+      : { key: itemId, itemId, name, ask: "", waited: "", tag: null, reviewIds: [] });
+  }, [waiting, pick]);
   // Below 1024 the email and the chat scroll as one pane: each person starts at the top.
   useEffect(() => { workPane.current?.scrollTo({ top: 0 }); }, [picked?.itemId]);
   const move = useCallback((step: number) => {
@@ -230,7 +236,7 @@ export function RelayWorkspace({ onBack, onOpenPage, onOpenListing, onOpenMailMe
             <Work key={picked.itemId} itemId={picked.itemId} name={picked.name} waited={view === "waiting" && !picked.scheduledAt ? picked.waited : null} waitingSince={view === "waiting" && !picked.scheduledAt ? picked.waitingSince ?? null : null} item={item} job={job}
               reviewIds={picked.reviewIds} autoDraft={view === "waiting"} onOpenDeal={onOpenListing} onOpenMail={onOpenMailMessage} say={say} text={textOf} setText={setText(picked.itemId)} composer={composer}
               onDone={view === "waiting" ? () => void markDone(picked) : undefined} onSnooze={view === "waiting" ? (until) => void snooze(picked, until) : undefined}
-              onOpen={(itemId) => setPicked({ ...picked, key: itemId, itemId, reviewIds: [] })} onBack={() => setPane("list")} refreshLists={reloadLists} />
+              onOpen={(itemId, other) => (other ? openOther(itemId, other) : setPicked({ ...picked, key: itemId, itemId, reviewIds: [] }))} onBack={() => setPane("list")} refreshLists={reloadLists} />
           ) : (
             <section className={w.empty}>
               <button type="button" className={w.back} onClick={() => setPane("list")}><ChevronLeft size={14} aria-hidden />Back to the list</button>
