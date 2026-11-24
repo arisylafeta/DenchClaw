@@ -711,6 +711,8 @@ async function mainCopies(mailIds: string[]): Promise<Map<string, string>> {
 
 /** Writes the drafts, attaches files and saves to-dos for one item, then puts it in Review. Shared by quick drafts, agent
  * jobs and the desk. keepTodos: the desk may have suggested a to-do earlier in the same turn, so Relay's suggestions stay. */
+const MARKED_DONE = "Alex marked this email as no reply needed, so the reply wasn't saved. Stop here.";
+
 export async function saveDraftOutputs(item: RelayItem, ownerId: string, note: string, ctx: Awaited<ReturnType<typeof draftContext>>, parsed: Record<string, unknown>, files: string[], origin: "note" | "job" | "desk" = "note", keepLinked = false, opts: { keepTodos?: boolean } = {}): Promise<void> {
   const itemId = item.id;
   const rawSubject = String(parsed.subject || ctx.messages[0]?.subject || item.headline || "").trim();
@@ -722,6 +724,9 @@ export async function saveDraftOutputs(item: RelayItem, ownerId: string, note: s
   const since = sinceFrom(ctx.pack.sources);
   if (since.length) log.push(`${SINCE_NOTE}${since.join("; ")}`);
   if (ctx.pack.read) log.push(ctx.pack.read);
+  // "No reply needed" while Relay was still writing: the late draft is dropped, and the email stays done.
+  const [now] = await queryPg<{ status: string }>("select status from relay_item where id = $1", [itemId]);
+  if (now?.status === "done") throw new RelayError(409, MARKED_DONE);
   const primaryId = await createMailDraft({ identity: ctx.identity, to: [ctx.to], replyAll: true, thread: item.mail_thread_id, subject, body });
   if (files.length) {
     try { await run(MAIL_CLI, ["attachment", "add", primaryId, ...files], { timeout: 60_000, maxBuffer: 4 << 20 }); }
@@ -741,6 +746,8 @@ export async function saveDraftOutputs(item: RelayItem, ownerId: string, note: s
   // What Relay wrote, split from the signature the same way as the sent copy, so learning compares like with like.
   const originals = await mainCopies([primaryId, ...followRows.map((f) => f.mailId).filter((id): id is string => !!id)]);
   await withPgTransaction(async (tx) => {
+    const { rows: [locked] } = await tx.query<{ status: string }>("select status from relay_item where id = $1 for update", [itemId]);
+    if (locked?.status === "done") throw new RelayError(409, MARKED_DONE);
     await tx.query(keepLinked ? SKIP_PRIMARY_SQL : SKIP_DRAFTS_SQL, [itemId]);
     await tx.query(`insert into relay_draft (item_id, role, position, title, why, mail_message_id, source_note, agent_log, original_body, origin, background) values ($1, 'primary', 0, $2, '', $3, $4, $5::jsonb, $6, $7, $8::jsonb)`,
       [itemId, `Reply to ${item.counterpart_name ?? ctx.to}`, primaryId, note, JSON.stringify([...log, ...sources]), originals.get(primaryId) ?? null, origin, JSON.stringify(ctx.pack.sources)]);
@@ -1423,6 +1430,9 @@ export async function markDone(itemId: string, ownerId: string, ownerEmail: stri
     throw new RelayError(502, "Gmail didn't accept the change. Try again.");
   }
   await queryPg(SKIP_DRAFTS_SQL, [itemId]);
+  // A reply Relay is still writing stops too (the runner ends within seconds); one that finishes anyway isn't saved.
+  await queryPg(`update relay_desk_run set status = case status when 'queued' then 'stopped' else 'stopping' end,
+      finished_at = case status when 'queued' then now() else finished_at end where item_id = $1 and status in ('queued', 'running')`, [itemId]);
   return updateRelayItem(itemId, ownerId, { status: "done", done_reason: reason });
 }
 
