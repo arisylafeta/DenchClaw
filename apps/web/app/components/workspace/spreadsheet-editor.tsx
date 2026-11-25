@@ -31,6 +31,7 @@ import {
   selectionStats,
 } from "./spreadsheet-utils";
 import { fileWriteUrl } from "@/lib/workspace-paths";
+import { FileShareButtons } from "./file-share-buttons";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -934,6 +935,8 @@ export function SpreadsheetEditor({
                 <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
               </svg>
             </ToolbarButton>
+            <ToolbarSep />
+            <FileShareButtons url={url} filePath={filePath} filename={filename} dirty={dirty} />
           </div>
         )}
 
