@@ -98,13 +98,14 @@ describe("Bulk Trades board", () => {
     expect(screen.getByRole("region", { name: "Offered" }).getAttribute("data-drop-target")).toBeNull();
     fireEvent.dragOver(abandonedColumn);
     fireEvent.drop(abandonedColumn);
-    const prompt = within(screen.getByRole("form", { name: "Abandon deal" }));
+    const prompt = within(screen.getByRole("dialog", { name: "Abandon deal" }));
+    expect(document.activeElement).toBe(prompt.getByRole("radio", { name: "Bought elsewhere" }));
     expect((prompt.getByRole("button", { name: "Abandon" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(prompt.getByRole("radio", { name: "Bought elsewhere" }));
     fireEvent.change(prompt.getByRole("textbox", { name: "Note" }), { target: { value: "Went with a cheaper broker" } });
     fireEvent.click(prompt.getByRole("button", { name: "Abandon" }));
     await waitFor(() => expect(onAbandon).toHaveBeenCalledWith(expect.objectContaining({ id: "d" }), "bought_elsewhere", "Went with a cheaper broker"));
-    await waitFor(() => expect(screen.queryByRole("form", { name: "Abandon deal" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Abandon deal" })).toBeNull());
   });
 
   it("keeps the prompt open with the error when the abandon fails, and Cancel leaves the card where it was", async () => {
@@ -113,13 +114,16 @@ describe("Bulk Trades board", () => {
     const abandonedColumn = screen.getByRole("region", { name: "Abandoned" });
     fireEvent.dragStart(document.querySelector("[data-card=a]") as HTMLElement);
     fireEvent.drop(abandonedColumn);
-    const prompt = within(screen.getByRole("form", { name: "Abandon deal" }));
+    const prompt = within(screen.getByRole("dialog", { name: "Abandon deal" }));
     expect(prompt.getByRole("radio", { name: "Stock gone" })).toBeTruthy();
+    // A second drop while the prompt is open is ignored.
+    fireEvent.dragStart(document.querySelector("[data-card=a]") as HTMLElement);
+    expect(abandonedColumn.getAttribute("data-drop-target")).toBeNull();
     fireEvent.click(prompt.getByRole("radio", { name: "Stock gone" }));
     fireEvent.click(prompt.getByRole("button", { name: "Abandon" }));
     expect(await prompt.findByRole("alert")).toHaveTextContent("already closed");
     fireEvent.click(prompt.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("form", { name: "Abandon deal" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Abandon deal" })).toBeNull();
     expect(within(screen.getByRole("region", { name: "Offered" })).getByText("40x Toyota Proace 50kWh Packs")).toBeTruthy();
   });
 

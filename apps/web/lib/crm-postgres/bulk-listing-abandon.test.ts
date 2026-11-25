@@ -23,12 +23,17 @@ describe.skipIf(!TEST_URL)("abandon and reopen from the Deals board", () => {
         ('btl_abn_supply', 'supply', 'Paired Seller', 'Leaf packs lot', 'open', null, '{}'),
         ('btl_abn_old', 'supply', 'Old Seller', 'Old lot', 'closed', 'gone', '{}'),
         ('btl_abn_dup', 'supply', 'Dup Seller', 'Dup lot', 'closed', 'duplicate', '{}'),
-        ('btl_abn_never', 'demand', 'Quiet Buyer', 'Never offered', 'closed', 'no_longer_needed', '{"intent": "request"}');
+        ('btl_abn_never', 'demand', 'Quiet Buyer', 'Never offered', 'closed', 'no_longer_needed', '{"intent": "request"}'),
+        ('btl_abn_pa', 'demand', 'Pair Buyer', 'Pair ask', 'open', null, '{"intent": "request"}'),
+        ('btl_abn_pb', 'supply', 'Pair Seller', 'Pair lot', 'open', null, '{}');
       insert into crm_bulk_offers (id, bulk_listing_id, counterpart_id, role, stage) values
         ('bof_abn_pair', 'btl_abn_supply', 'btl_abn_demand', 'counterparty', 'negotiating'),
         ('bof_abn_paid', 'btl_abn_demand', null, 'counterparty', 'paid'),
         ('bof_abn_old', 'btl_abn_old', null, 'counterparty', 'offered'),
-        ('bof_abn_dup', 'btl_abn_dup', null, 'counterparty', 'offered');
+        ('bof_abn_dup', 'btl_abn_dup', null, 'counterparty', 'offered'),
+        ('bof_abn_unstaged', 'btl_abn_demand', null, 'counterparty', null),
+        ('bof_abn_both', 'btl_abn_pb', 'btl_abn_pa', 'counterparty', 'offered');
+      insert into crm_bulk_offers (id, bulk_listing_id, role, stage) values ('bof_abn_contact', 'btl_abn_demand', 'contact', null);
     `);
   });
 
@@ -58,6 +63,8 @@ describe.skipIf(!TEST_URL)("abandon and reopen from the Deals board", () => {
     expect(closed.context.abandoned).toMatchObject({ by: "qa@rebattery.io", from_status: "qualifying" });
     expect(await offer("bof_abn_pair")).toMatchObject({ stage: "lost", data: { abandoned: { listing_id: "btl_abn_demand", stage: "negotiating" } } });
     expect((await offer("bof_abn_paid")).stage).toBe("paid");
+    expect(await offer("bof_abn_unstaged")).toMatchObject({ stage: "lost", data: { abandoned: { stage: null } } });
+    expect((await offer("bof_abn_contact")).stage).toBeNull();
     const story = await pg.queryPg<{ kind: string; title: string; body: string | null }>(
       "select kind, title, body from crm_bulk_listing_activity where bulk_listing_id = 'btl_abn_demand' order by id");
     expect(story.filter((row) => row.kind === "status" && row.title.startsWith("Closed"))).toHaveLength(0);
@@ -81,6 +88,7 @@ describe.skipIf(!TEST_URL)("abandon and reopen from the Deals board", () => {
     const restored = await offer("bof_abn_pair");
     expect(restored.stage).toBe("negotiating");
     expect(restored.data.abandoned).toBeUndefined();
+    expect((await offer("bof_abn_unstaged")).stage).toBeNull();
     expect(await abandon.reopenListing("btl_abn_demand", actor)).toBe("open");
     expect((await sheet.listAbandoned()).some((row) => row.id === "btl_abn_demand")).toBe(false);
   });
@@ -89,5 +97,28 @@ describe.skipIf(!TEST_URL)("abandon and reopen from the Deals board", () => {
     expect(await abandon.reopenListing("btl_abn_old", actor)).toBe("ok");
     expect(await listing("btl_abn_old")).toMatchObject({ status: "open", closed_reason: null });
     expect((await offer("bof_abn_old")).stage).toBe("offered");
+  });
+
+  it("never reopens a listing closed as sold, duplicate or moved", async () => {
+    expect(await abandon.reopenListing("btl_abn_dup", actor)).toBe("not_abandoned");
+    expect(await listing("btl_abn_dup")).toMatchObject({ status: "closed", closed_reason: "duplicate" });
+  });
+
+  it("revives a deal between two abandoned listings only once both are open again", async () => {
+    expect(await abandon.abandonListing("btl_abn_pa", "not_a_fit", null, actor)).toBe("ok");
+    expect(await abandon.abandonListing("btl_abn_pb", "gone", null, actor)).toBe("ok");
+    expect((await offer("bof_abn_both")).stage).toBe("lost");
+    expect(await abandon.reopenListing("btl_abn_pa", actor)).toBe("ok");
+    expect((await offer("bof_abn_both")).stage).toBe("lost");
+    expect(await abandon.reopenListing("btl_abn_pb", actor)).toBe("ok");
+    expect(await offer("bof_abn_both")).toMatchObject({ stage: "offered" });
+    expect((await offer("bof_abn_both")).data.abandoned).toBeUndefined();
+  });
+
+  it("orders a listing with an unreadable abandon time by its other dates instead of failing", async () => {
+    await pg.queryPg(`update crm_bulk_listings set context = context || '{"abandoned": {"at": "yesterday-ish"}}' where id = 'btl_abn_dup'`);
+    const listed = (await sheet.listAbandoned()).filter((row) => row.id === "btl_abn_dup");
+    expect(listed).toHaveLength(1);
+    expect(listed[0].abandoned?.at).toMatch(/^\d{4}-/);
   });
 });

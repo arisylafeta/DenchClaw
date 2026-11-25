@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FEE_RATE, formatEurCompact, type SheetRow, type SheetTone } from "@/lib/bulk-sheet";
 import { dealTotals, isBoardRequest } from "@/lib/bulk-desk";
 import type { ListingStage } from "@/lib/bulk-listing";
@@ -93,6 +93,9 @@ function AbandonPrompt({ row, onConfirm, onCancel }: { row: SheetRow; onConfirm:
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const first = useRef<HTMLButtonElement>(null);
+  // The dragged card left its column, so focus would fall to the page: put it on the first reason.
+  useEffect(() => { first.current?.focus(); }, []);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && !saving) onCancel(); };
     window.addEventListener("keydown", onKey);
@@ -111,16 +114,16 @@ function AbandonPrompt({ row, onConfirm, onCancel }: { row: SheetRow; onConfirm:
     }
   }
   return (
-    <form aria-label="Abandon deal" onSubmit={submit} className="flex flex-col gap-2 rounded-[10px] border p-3" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border-strong)" }}>
+    <form role="dialog" aria-label="Abandon deal" onSubmit={submit} className="flex flex-col gap-2 rounded-[10px] border p-3" style={{ background: "var(--bt-surface)", borderColor: "var(--bt-border-strong)" }}>
       <span className="flex flex-col gap-0.5">
         <span className="text-[13px] font-semibold">Why did it stop?</span>
         <span className="truncate text-[12px]" style={{ color: "var(--bt-muted)" }}>{row.company ?? row.title}</span>
       </span>
       <span role="radiogroup" aria-label="Reason" className="flex flex-wrap gap-1.5">
-        {ABANDON_REASONS[row.kind].map((item) => {
+        {ABANDON_REASONS[row.kind].map((item, index) => {
           const on = reason === item.value;
           return (
-            <button key={item.value} type="button" role="radio" aria-checked={on} onClick={() => setReason(item.value)}
+            <button key={item.value} ref={index === 0 ? first : undefined} type="button" role="radio" aria-checked={on} onClick={() => setReason(item.value)}
               className="rounded-full border px-2.5 py-1 text-[12px] font-medium"
               style={on ? { background: "var(--bt-text)", color: "var(--bt-surface)", borderColor: "var(--bt-text)" } : { borderColor: "var(--bt-border)", color: "var(--bt-text-2)" }}>
               {item.label}
@@ -164,7 +167,7 @@ export function BulkBoard({ shown, abandoned = [], loading, error, today, onOpen
     : name === "Abandoned" ? abandoned.filter((row) => row.key !== asking?.key)
     : shown.filter((row) => row.progress === name);
   /** Into Abandoned from any other column; out of Abandoned into any other column (the card lands where its stage says). */
-  const accepts = (name: ColumnName) => !!dragging && (dragging.from === "abandoned" ? name !== "Abandoned" : name === "Abandoned");
+  const accepts = (name: ColumnName) => !!dragging && !asking && (dragging.from === "abandoned" ? name !== "Abandoned" : name === "Abandoned");
   function drop(name: ColumnName) {
     const moved = dragging;
     setDragging(null);

@@ -28,5 +28,6 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const result = await reopenListing(id, { userId: guard.userId, email: guard.email });
   if (result === "missing") return notFound("Listing");
   if (result === "open") return Response.json({ ok: true, already: true });
+  if (result === "not_abandoned") return Response.json({ error: "Only abandoned deals can be reopened here." }, { status: 409 });
   return Response.json({ ok: true });
 }

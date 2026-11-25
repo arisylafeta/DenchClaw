@@ -172,10 +172,9 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
     void loadSheet();
   }
 
-  /** Dragged out of Abandoned: reopen it; the reload puts it in the column its stage says. */
+  /** Dragged out of Abandoned: reopen it; the reload puts it in the column its stage says (its offers may come back). */
   async function reopen(row: SheetRow) {
     setAbandoned((current) => current.filter((item) => item.key !== row.key));
-    setRows((current) => [...current.filter((item) => item.key !== row.key), { ...row, abandoned: null }]);
     try {
       await request(`/api/bulk-listings/${encodeURIComponent(row.id)}/abandon`, { method: "DELETE" });
       setActionError(null);

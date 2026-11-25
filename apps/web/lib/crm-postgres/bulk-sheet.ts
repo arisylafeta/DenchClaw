@@ -40,7 +40,8 @@ export const SHEET_QUERY = `${sheetSelect()}
   where listing.status in ('open', 'qualifying') and listing.kind in ('demand', 'supply')`;
 
 /** When a closed listing was closed: the board's abandon time, else its latest status change, else its last update. */
-const CLOSED_AT = `coalesce((listing.context->'abandoned'->>'at')::timestamptz,
+const CLOSED_AT = `coalesce(case when listing.context->'abandoned'->>'at' ~ '^\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}'
+    then (listing.context->'abandoned'->>'at')::timestamptz end,
   (select max(a.occurred_at) from crm_bulk_listing_activity a where a.bulk_listing_id = listing.id and a.kind = 'status'),
   listing.updated_at)`;
 
