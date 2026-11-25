@@ -8,7 +8,8 @@ import { nextCheckTime, ukTime, type CheckStatus, type Proposal } from "@/lib/bu
 import { todayInLondon, type TradeOwner } from "@/lib/bulk-trades";
 import { filterSheet, filtersFromRoute, NO_FILTERS, routeFromFilters, sortRows, type SheetFilters, type SheetRow, type SheetSort } from "@/lib/bulk-sheet";
 import { DEMAND_MAIN_STAGES, DEMAND_STAGES, SUPPLY_MAIN_STAGES, SUPPLY_STAGES, progressFor } from "@/lib/bulk-listing";
-import { boardRows, deskCounts } from "@/lib/bulk-desk";
+import { boardTabRows, deskCounts } from "@/lib/bulk-desk";
+import type { AbandonReason } from "@/lib/bulk-abandon";
 import { activeFilterCount } from "@/lib/bulk-overview";
 import { dealOwner, type DealOwner } from "@/lib/bulk-owner";
 import type { Demand } from "@/lib/bulk-demand";
@@ -51,6 +52,8 @@ type Props = {
 export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
   const { route, navigate } = useBulkTradesRoute(TRADES_PREVIEW_PATH);
   const [rows, setRows] = useState<SheetRow[]>([]);
+  /** The Deals board's Abandoned column. */
+  const [abandoned, setAbandoned] = useState<SheetRow[]>([]);
   const [sheetLoaded, setSheetLoaded] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
   const [inboxLoaded, setInboxLoaded] = useState(false);
@@ -68,8 +71,9 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
   // The sheet and the inbox load side by side: the rows never wait on the inbox, nor the inbox on the rows.
   const loadSheet = useCallback(async () => {
     try {
-      const data = await sharedGet<{ rows: SheetRow[] }>("/api/bulk-trades/sheet");
+      const data = await sharedGet<{ rows: SheetRow[]; abandoned?: SheetRow[] }>("/api/bulk-trades/sheet");
       setRows(data.rows);
+      setAbandoned(data.abandoned ?? []);
       setSheetError(null);
       setSheetLoaded(true);
     } catch (err) {
@@ -113,9 +117,10 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
     return { ...base, progress, side: tab === "demand" ? "buyer" : tab === "supply" ? "seller" : tab === "board" ? base.side : "all" };
   }, [route, tab]);
   const tabRows = useMemo(() => tab === "demand" ? rows.filter((row) => row.kind === "demand")
-    : tab === "supply" ? rows.filter((row) => row.kind === "supply") : tab === "board" ? boardRows(rows) : rows, [rows, tab]);
+    : tab === "supply" ? rows.filter((row) => row.kind === "supply") : tab === "board" ? boardTabRows(rows) : rows, [rows, tab]);
   // The list tabs group and order their own rows (OverviewList); the Board keeps the chosen order.
   const shown = useMemo(() => tab === "today" ? filterSheet(rows, { ...NO_FILTERS, owner: filters.owner }) : tab === "board" ? sortRows(filterSheet(tabRows, filters), sort) : filterSheet(tabRows, filters), [rows, tabRows, filters, sort, tab]);
+  const shownAbandoned = useMemo(() => tab === "board" ? filterSheet(abandoned, filters) : [], [abandoned, filters, tab]);
   /** What each tab holds for the chosen driver, shown beside its name. */
   const tabCounts = useMemo(() => {
     const counts = deskCounts(filterSheet(rows, { ...NO_FILTERS, owner: filters.owner }));
@@ -156,6 +161,29 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
   /** A list row saved a change (next action, date, driver or chance): update it in place. */
   function updateRow(row: SheetRow, patch: Partial<SheetRow>) {
     setRows((current) => current.map((item) => (item.key === row.key ? { ...item, ...patch } : item)));
+  }
+
+  /** Dropped on Abandoned: close it with the reason, move the card at once, then reload (its paired listing may leave the board too). */
+  async function abandon(row: SheetRow, reason: AbandonReason, note: string) {
+    await request(`/api/bulk-listings/${encodeURIComponent(row.id)}/abandon`, { method: "POST", body: JSON.stringify({ reason, note: note || null }) });
+    setRows((current) => current.filter((item) => item.key !== row.key));
+    setAbandoned((current) => [{ ...row, abandoned: { reason, at: new Date().toISOString() } }, ...current.filter((item) => item.key !== row.key)]);
+    setActionError(null);
+    void loadSheet();
+  }
+
+  /** Dragged out of Abandoned: reopen it; the reload puts it in the column its stage says. */
+  async function reopen(row: SheetRow) {
+    setAbandoned((current) => current.filter((item) => item.key !== row.key));
+    setRows((current) => [...current.filter((item) => item.key !== row.key), { ...row, abandoned: null }]);
+    try {
+      await request(`/api/bulk-listings/${encodeURIComponent(row.id)}/abandon`, { method: "DELETE" });
+      setActionError(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not reopen it.");
+    } finally {
+      void loadSheet();
+    }
   }
 
   /** A Today row changed its action, date or driver: update it in place. */
@@ -246,7 +274,8 @@ export function TradesPreviewView({ onOpenEntry, onOpenListing }: Props) {
             onOpen={open} onUpdate={updateNext} onOpenBoard={() => setTab("board")}
             onOpenCompany={onOpenEntry ? (id) => onOpenEntry("company", id) : undefined} />
         ) : tab === "board" ? (
-          <BulkBoard shown={shown} loading={!sheetLoaded && !sheetError} error={sheetError} today={today} onOpen={open} />
+          <BulkBoard shown={shown} abandoned={shownAbandoned} loading={!sheetLoaded && !sheetError} error={sheetError} today={today} onOpen={open}
+            onAbandon={abandon} onReopen={(row) => void reopen(row)} />
         ) : (
           <OverviewList key={tab} rows={shown} loading={!sheetLoaded && !sheetError} error={sheetError} today={today} owner={filters.owner} sort={sort}
             filtered={searching || filterCount > 0} onOpen={open} onUpdate={updateRow} />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardRows, countedDeals, dealTotals, deskCounts, EUR_PER_GBP, QUARTER_TARGET_GBP, quarterTarget, todayGroups, weightedFee } from "./bulk-desk";
+import { boardRows, boardTabRows, countedDeals, dealTotals, deskCounts, EUR_PER_GBP, QUARTER_TARGET_GBP, quarterTarget, todayGroups, weightedFee } from "./bulk-desk";
 import type { SheetRow } from "./bulk-sheet";
 
 const row = (id: string, over: Partial<SheetRow> = {}): SheetRow => ({
@@ -77,5 +77,14 @@ describe("todayGroups review", () => {
     expect(groups[0]).toMatchObject({ key: "review", label: "To review" });
     expect(groups[0].rows.map((r) => r.id)).toEqual(["imp"]);
     expect(groups.find((g) => g.key === "overdue")!.rows.map((r) => r.id)).toEqual(["late"]);
+  });
+});
+
+describe("Deals tab rows", () => {
+  it("are the open requests not yet offered plus every listing at a deal stage", () => {
+    const rows = [row("ask", { kind: "demand", progress: "Sourcing" }), row("cant", { kind: "demand", progress: "Can't source" }), row("lot", { progress: "Available" }),
+      row("deal", { kind: "demand", progress: "Offered" }), row("sold", { progress: "Delivered" })];
+    expect(boardTabRows(rows).map((r) => r.id)).toEqual(["ask", "cant", "deal", "sold"]);
+    expect(boardRows(rows).map((r) => r.id)).toEqual(["deal", "sold"]);
   });
 });

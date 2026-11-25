@@ -67,6 +67,8 @@ export type SheetRow = {
   contact?: string | null;
   /** Added by an import (a marketplace request) and not yet reviewed by a person. */
   review?: boolean;
+  /** Set on the Deals board's Abandoned cards: the listing's closed_reason and when it closed. */
+  abandoned?: { reason: string | null; at: string | null } | null;
   /** Date used to order the sheet, newest first. */
   touched: string | null;
 };

@@ -1,12 +1,13 @@
 import { guardBulkTrades } from "@/lib/bulk-trades-route";
-import { listSheet } from "@/lib/crm-postgres/bulk-sheet";
+import { listAbandoned, listSheet } from "@/lib/crm-postgres/bulk-sheet";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** The working sheet: open demand, open offers and live trades, one row each. */
+/** The working sheet: open demand, open offers and live trades, one row each; plus the Deals board's Abandoned cards. */
 export async function GET() {
   const guard = await guardBulkTrades();
   if ("response" in guard) return guard.response;
-  return Response.json({ rows: await listSheet() });
+  const [rows, abandoned] = await Promise.all([listSheet(), listAbandoned()]);
+  return Response.json({ rows, abandoned });
 }

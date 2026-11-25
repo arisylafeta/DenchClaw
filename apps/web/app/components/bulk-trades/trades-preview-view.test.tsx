@@ -62,10 +62,10 @@ const TRADE = {
   auction_status: null, auction_closes_at: null, hold_until: null, hold_reason: null, hold_from_stage: null, updated_at: "2026-09-28T09:00:00Z",
 };
 
-type Api = { inbox?: unknown; sheet?: SheetRow[]; hangInbox?: boolean };
-function mockApi({ inbox, sheet = ROWS, hangInbox }: Api = {}) {
+type Api = { inbox?: unknown; sheet?: SheetRow[]; abandoned?: SheetRow[]; hangInbox?: boolean };
+function mockApi({ inbox, sheet = ROWS, abandoned = [], hangInbox }: Api = {}) {
   return vi.fn(async (url: string, init?: RequestInit) => {
-    if (url === "/api/bulk-trades/sheet") return new Response(JSON.stringify({ rows: sheet }));
+    if (url === "/api/bulk-trades/sheet") return new Response(JSON.stringify({ rows: sheet, abandoned }));
     if ((url.startsWith("/api/bulk-trades?") || url === "/api/bulk-trades" || url === "/api/bulk-trades/demand") && hangInbox) return new Promise<Response>(() => {});
     if (url === "/api/bulk-trades/demand") return new Response(JSON.stringify({ demand: [], possible: [], accepted: [] }));
     if (url === "/api/bulk-trades?inbox=1") return new Response(JSON.stringify(inbox ?? { trades: [], owners: [] }));
@@ -337,7 +337,7 @@ describe("Trades Preview sheet", () => {
     expect(params().get("listing")).toBe("d1");
   });
 
-  it("puts only deals on the Board, and the Today nudge for unsized deals opens it", async () => {
+  it("puts open requests and deals on the Board, and the Today nudge for unsized deals opens it", async () => {
     vi.stubGlobal("fetch", mockApi());
     render(<TradesPreviewView />);
     await userEvent.click(await screen.findByRole("button", { name: "1 deal needs a fee or chance" }));
@@ -345,8 +345,29 @@ describe("Trades Preview sheet", () => {
     const offered = await screen.findByRole("region", { name: "Offered" });
     expect(within(offered).getByText("3 hybrid packs")).toBeInTheDocument();
     expect(within(offered).getByText("1 unsized")).toBeInTheDocument();
-    expect(screen.queryByText("12 Ioniq packs")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Requests" })).getByText(/12 Ioniq packs/)).toBeInTheDocument();
     expect(screen.queryByText("Synthetic eBS37")).not.toBeInTheDocument();
+  });
+
+  it("drags a deal to Abandoned with a reason, and back out to reopen it", async () => {
+    go("&tab=board");
+    const lost = { ...ROWS.find((row) => row.progress === "Offered")!, key: "gone1", id: "gone1", title: "Old lost lot", abandoned: { reason: "gone", at: "2026-11-01 09:00:00+00" } };
+    const fetch = mockApi({ abandoned: [lost] });
+    vi.stubGlobal("fetch", fetch);
+    render(<TradesPreviewView />);
+    const offered = await screen.findByRole("region", { name: "Offered" });
+    const abandonedColumn = screen.getByRole("region", { name: "Abandoned" });
+    expect(within(abandonedColumn).getByText("Old lost lot")).toBeInTheDocument();
+    const card = within(offered).getByText("3 hybrid packs").closest("li")!;
+    fireEvent.dragStart(card);
+    fireEvent.drop(abandonedColumn);
+    await userEvent.click(screen.getByRole("radio", { name: "Not a fit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Abandon" }));
+    const id = ROWS.find((row) => row.key === card.getAttribute("data-card"))!.id;
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/bulk-listings/${id}/abandon`, expect.objectContaining({ method: "POST", body: JSON.stringify({ reason: "not_a_fit", note: null }) })));
+    fireEvent.dragStart(within(abandonedColumn).getByText("Old lost lot").closest("li")!);
+    fireEvent.drop(screen.getByRole("region", { name: "Offered" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/bulk-listings/gone1/abandon", expect.objectContaining({ method: "DELETE" })));
   });
 
   it("hands a clicked row to the workspace as its own tab and leaves the sheet where it is", async () => {

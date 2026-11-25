@@ -76,6 +76,16 @@ export function boardRows(rows: SheetRow[]): SheetRow[] {
   return rows.filter((row) => isBoardStage(row.progress));
 }
 
+/** The Board's Requests column: bulk requests (demand) not yet offered to anyone. Once offered they move to the deal columns. */
+export function isBoardRequest(row: SheetRow): boolean {
+  return row.kind === "demand" && !isBoardStage(row.progress);
+}
+
+/** Everything the Deals tab shows apart from Abandoned: the open requests, then the deals. */
+export function boardTabRows(rows: SheetRow[]): SheetRow[] {
+  return rows.filter((row) => isBoardRequest(row) || isBoardStage(row.progress));
+}
+
 export type TodayGroupKey = "review" | "overdue" | "today" | "upcoming" | "undated" | "none";
 export type TodayGroup = { key: TodayGroupKey; label: string; rows: SheetRow[] };
 const GROUP_LABEL: Record<TodayGroupKey, string> = { review: "To review", overdue: "Overdue", today: "Today", upcoming: "Upcoming", undated: "No date", none: "Needs a next action" };
