@@ -66,12 +66,12 @@ const writtenTo = (emails: string[], domains: string[]) => queryPg<{ address: st
 
 /** The fields of a Relay email the ranking reads. */
 export type RankSource = Pick<RelayItem, "id" | "status" | "tab" | "priority" | "counterpart_name" | "counterpart_email" | "company" | "contact_type"
-  | "situation" | "headline" | "waiting_since" | "last_message"> & { scheduled_at?: string | null };
+  | "situation" | "headline" | "waiting_since" | "overdue_since" | "last_message"> & { scheduled_at?: string | null };
 
 /** The owner's emails in Review with a draft not yet sent: they join their person's row as "Draft ready". */
 export const reviewWithDrafts = (ownerId: string) => queryPg<RankSource>(
   `select i.id, i.status, i.tab, i.priority, i.counterpart_name, i.counterpart_email, i.company, i.contact_type, i.situation, i.headline,
-     i.waiting_since, i.last_message,
+     i.waiting_since, i.overdue_since, i.last_message,
      -- The reply Alex scheduled with Send later (not the 30-second hold of Send): the person moves to "Scheduled".
      (select m.personalization->'scheduled_send'->>'at' from relay_draft d join mail_message m on m.id = d.mail_message_id
        where d.item_id = i.id and d.role = 'primary' and d.state in ('draft','gmail') and m.state = 'draft' and m.personalization ? 'scheduled_send'
@@ -106,7 +106,7 @@ export async function rankInputs(ownerId: string, items: RankSource[]): Promise<
     const s = senderOf.get(email);
     return {
       id: i.id, status: i.status === "review" ? "review" : "open", email: email || null, name: i.counterpart_name, company: i.company, contactType: i.contact_type, situation: i.situation,
-      tab: i.tab, priority: i.priority, headline: i.headline, waitingSince: iso(i.waiting_since), lastAt: iso(i.last_message?.at) ?? iso(i.waiting_since),
+      tab: i.tab, priority: i.priority, headline: i.headline, waitingSince: iso(i.waiting_since), overdueSince: iso(i.overdue_since), lastAt: iso(i.last_message?.at) ?? iso(i.waiting_since),
       text: i.last_message?.direction === "inbound" ? i.last_message.text : "",
       personIds: [s?.person_id, ...(s?.merged_into ?? [])].filter((p): p is string => !!p),
       companyId: s?.company_id ?? null,

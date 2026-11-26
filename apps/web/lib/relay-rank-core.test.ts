@@ -213,3 +213,12 @@ describe("scheduled replies", () => {
   });
 });
 
+
+describe("nobody replied", () => {
+  it("puts an email nobody answered in time at the top, with its own cue, even when it was set aside", () => {
+    const s = score([item({ overdueSince: "2026-11-13T16:37:00Z", contactType: "supplier" })]);
+    expect(s.band).toBe("now");
+    expect(s.tag).toBe("Overdue: nobody replied");
+    expect(score([item({ tab: "other" })]).tag).toBeNull();
+  });
+});

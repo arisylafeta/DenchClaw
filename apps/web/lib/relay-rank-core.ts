@@ -25,6 +25,8 @@ export type RankItem = {
   priority: string;
   headline: string;
   waitingSince: string | null;
+  /** Set aside, and nobody replied in time: the scan brought it back (relay_scan.py overdue). */
+  overdueSince?: string | null;
   /** When the newest message on the thread was sent; the newest item is the one a row opens. */
   lastAt: string | null;
   /** Their latest text, read for a large lot. */
@@ -59,6 +61,8 @@ export type RankScore = { score: number; band: RankBand; tag: string | null; why
 export const WEIGHTS = {
   // Promises
   promiseOverdue: 45,
+  /** Nobody replied in time: always Now, whatever else the email is. */
+  nobodyReplied: 70,
   // Stake
   liveDeal: 18,
   /** Added to a live deal by its value in GBP, the largest step that fits. */
@@ -256,6 +260,7 @@ export function mergeByPerson(items: RankItem[]): RankItem[][] {
 /** What a row's score is made from, combined over the person's emails. */
 export type RankSignals = {
   promiseOverdue: boolean;
+  nobodyReplied: boolean;
   deal: { gbp: number | null; label: string | null } | null;
   lot: string | null;
   newLead: boolean;
@@ -301,6 +306,7 @@ export function signalsOf(group: RankItem[], now = new Date()): RankSignals {
   const automated = group.every((i) => isAutomated(i.email));
   return {
     promiseOverdue: group.some((i) => i.priority === "overdue"),
+    nobodyReplied: group.some((i) => !!i.overdueSince),
     deal: best ? { gbp: best.value?.gbp ?? null, label: best.value?.label ?? null } : null,
     lot: trading ? lot : null,
     newLead,
@@ -335,8 +341,9 @@ export function scoreSignals(s: RankSignals, now = new Date()): RankScore {
     why.push(`${reason} ${points > 0 ? "+" : ""}${points}`);
     if (tag) tags.push(tag);
   };
-  const noise = s.automated || s.admin || s.otherTab;
+  const noise = !s.nobodyReplied && (s.automated || s.admin || s.otherTab);
 
+  if (s.nobodyReplied) add(W.nobodyReplied, "nobody has replied to them", "Overdue: nobody replied");
   if (s.promiseOverdue) add(W.promiseOverdue, "your promise is overdue", "Promise overdue");
   if (s.hasDraft) add(W.draftReady, "draft ready", "Draft ready");
   if (s.deal) {
@@ -357,7 +364,7 @@ export function scoreSignals(s: RankSignals, now = new Date()): RankScore {
   const chases = Math.min(s.chases, W.maxChases);
   if (chases) add(chases * W.chase, chases === 1 ? "they chased" : `they chased ${chases} times`, "Chased");
 
-  const stake = !!(s.deal || s.lot || s.buyerAsk || s.sellerOffer || s.newLead || s.promiseOverdue || s.deadline);
+  const stake = !!(s.deal || s.lot || s.buyerAsk || s.sellerOffer || s.newLead || s.promiseOverdue || s.nobodyReplied || s.deadline);
   if (s.automated) add(W.automated, "automated mail");
   else if (s.admin) add(W.admin, "admin");
   if (s.otherTab) add(W.otherTab, "no reply needed");
@@ -366,7 +373,7 @@ export function scoreSignals(s: RankSignals, now = new Date()): RankScore {
 
   const band = BANDS.find(([, min]) => score >= min)?.[0] ?? "later";
   // Noise never shows a cue; a draft is the most useful one only once the money and the promise are shown.
-  const order = ["Promise overdue", "Draft ready", "Live deal", "Returning", "New ", "Chased", "Lot ", "Seller offer", "Price ask", "Deadline"];
+  const order = ["Overdue: nobody replied", "Promise overdue", "Draft ready", "Live deal", "Returning", "New ", "Chased", "Lot ", "Seller offer", "Price ask", "Deadline"];
   const tag = noise ? null : order.map((p) => tags.find((t) => t.startsWith(p))).find(Boolean) ?? null;
   return { score, band, tag, why };
 }

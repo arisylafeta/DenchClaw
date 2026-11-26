@@ -426,7 +426,7 @@ def test_plan_clears_user_tab_on_new_message():
 
 TEST_DB = os.environ.get("RELAY_TEST_DB", "stock_test_9e426f3f65c340ea8fbd892fd0fabf84")
 SCHEMA = "relay_scan_t"
-MIGRATIONS = [Path(__file__).resolve().parents[2] / f"apps/web/lib/crm-postgres/migrations/{name}" for name in ("089_relay.sql", "098_relay_sticky_fresh.sql", "099_relay_voice.sql", "100_relay_learning.sql")]
+MIGRATIONS = [Path(__file__).resolve().parents[2] / f"apps/web/lib/crm-postgres/migrations/{name}" for name in ("089_relay.sql", "098_relay_sticky_fresh.sql", "099_relay_voice.sql", "100_relay_learning.sql", "135_relay_item_overdue.sql")]
 TABLES = ["crm_users", "mail_thread", "mail_message", "work_tasks", "crm_bulk_listings", "crm_bulk_thread_links", "crm_people", "crm_companies"]
 
 
@@ -771,3 +771,45 @@ def test_check_unsure_keeps_the_keyword_tab_when_the_model_fails(tmp_path):
 def test_parse_reply_checks_ignores_a_note_after_the_array():
     text = '[{"key": "a", "reply": true, "why": "asks a price"}]\nNote: [b] was unclear.'
     assert rs.parse_reply_checks(text, {"a"}) == {"a": {"reply": True, "why": "asks a price"}}
+
+
+# ---------- nobody may sit on a person's email ----------
+
+def _we_wrote(days_ago=5):
+    return msg("outbound", days_ago, "Thanks, where are the packs?", frm="supply@rebattery.io", to=["lee@gmail.example"],
+               subject="Re: Your Nissan Leaf 24kWh packs")
+
+
+def test_an_answer_left_to_jules_comes_back_after_a_day_with_nobody_replying():
+    late = msg("inbound", NOW - dt.timedelta(hours=25), "Connecticut and Minnesota.", frm="lee@gmail.example",
+               to=["supply@rebattery.io"], subject="Re: Your Nissan Leaf 24kWh packs", mid="g40", in_reply_to="<0a1b2c@mtasv.net>")
+    r = rs.classify_thread([_we_wrote(), late], ctx(known=False), NOW)
+    assert r["tab"] == "action" and r["reason"].startswith("overdue: answer to Jules")
+    assert r["overdue_since"] == late["at"] + dt.timedelta(hours=24)
+    fresh = {**late, "at": NOW - dt.timedelta(hours=23)}
+    r = rs.classify_thread([_we_wrote(), fresh], ctx(known=False), NOW)
+    assert r["tab"] == "other" and r["reason"] == "answer to Jules" and "overdue_since" not in r
+
+
+def test_anything_else_set_aside_comes_back_after_two_days_but_never_without_a_conversation():
+    asked = msg("inbound", NOW - dt.timedelta(hours=49), "Could you share the attendee list? Please reply.", mid="g31")
+    archived = {"automated_state": "1 Action", "proposed_state": None, "last_classified_message_id": "g31"}
+    r = rs.classify_thread([_we_wrote(), asked], ctx(triage=archived), NOW)
+    assert r["tab"] == "action" and r["reason"].startswith("overdue: triage: archived") and r["overdue_since"]
+    # 47 hours: still set aside.
+    assert rs.classify_thread([_we_wrote(), {**asked, "at": NOW - dt.timedelta(hours=47)}], ctx(triage=archived), NOW)["tab"] == "other"
+    # We never wrote to them: a cold email stays where triage put it.
+    assert rs.classify_thread([asked], ctx(triage=archived), NOW)["tab"] == "other"
+
+
+def test_plain_no_reply_needed_text_never_comes_back():
+    thanks = msg("inbound", 4, "Thanks, all received.", mid="g32")
+    r = rs.classify_thread([_we_wrote(6), thanks], ctx(), NOW)
+    assert r["tab"] in ("other", None) and "overdue_since" not in r
+
+
+def test_an_overdue_email_two_weeks_old_is_not_expired_by_the_window():
+    old = msg("inbound", 14.5, "They are located in Connecticut and Minnesota.", frm="lee@gmail.example", to=["supply@rebattery.io"],
+              subject="Re: Your Nissan Leaf 24kWh packs", mid="g41", in_reply_to="<0a1b2c@mtasv.net>")
+    r = rs.classify_thread([_we_wrote(16), old], ctx(known=False), NOW)
+    assert r["tab"] == "action" and r["reason"].startswith("overdue:")

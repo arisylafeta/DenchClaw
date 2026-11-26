@@ -403,6 +403,23 @@ def counterpart_of(m: dict) -> str:
     return ""
 
 
+# Nobody may sit on a person's email: hours a person in an ongoing conversation can wait with no reply from anyone before
+# an email set aside (left to Jules, archived by triage, taken as FYI) comes back to Alex. Plain "no reply needed" text never does.
+OVERDUE_HOURS = {"answer to Jules": 24}
+OVERDUE_DEFAULT_HOURS = 48
+
+
+def overdue(tab: str, reason: str, msgs: list[dict], waiting_since: dt.datetime, now: dt.datetime) -> dt.datetime | None:
+    """When an email set aside ran out of time, or None. Only for a conversation we are already in (we wrote before), and,
+    unless Jules was meant to take it, only when their newest email asks something (a "thanks" never comes back)."""
+    if tab != "other" or reason == "needs no reply" or not any(m["direction"] == "outbound" for m in msgs):
+        return None
+    if reason != "answer to Jules" and not asks_something(msgs[-1].get("text")):
+        return None
+    due = waiting_since + dt.timedelta(hours=OVERDUE_HOURS.get(reason, OVERDUE_DEFAULT_HOURS))
+    return due if now >= due else None
+
+
 def classify_thread(msgs: list[dict], ctx: dict, now: dt.datetime, days: int = 14, follow_days: int = 30) -> dict:
     """Decide tab (or None: nothing to show), reason, waiting_since and counterpart for one thread.
 
@@ -449,7 +466,12 @@ def classify_thread(msgs: list[dict], ctx: dict, now: dt.datetime, days: int = 1
             tab, reason = "action", "reply to our email"
         else:
             tab, reason = "other", "unsolicited or FYI"
-        limit = follow_days if tab == "action" and triage_action and not triage_archived else days
+        late = overdue(tab, reason, msgs, waiting_since, now)
+        if late:
+            hours = int((now - waiting_since).total_seconds() // 3600)
+            tab, reason = "action", f"overdue: {reason}, nobody replied for {hours} h"
+            out["overdue_since"] = late
+        limit = follow_days if tab == "action" and ((triage_action and not triage_archived) or late) else days
         if age_days > limit and not ctx.get("existing_open"):
             return {**out, "tab": None, "reason": "older than window", "done_reason": "expired"}
         if tab == "other" and age_days > days:
@@ -966,7 +988,7 @@ def summarise(batches: list[list[dict]], model=run_hermes) -> tuple[dict[str, di
 
 CONTENT_FIELDS = ("headline", "context", "earlier", "contact_type", "situation", "last_message", "last_seen_message_id", "summary_message_id")
 STATE_FIELDS = ("tab", "priority", "counterpart_name", "counterpart_email", "company", "mail_thread_id",
-                "bulk_listing_id", "deal_label", "waiting_since")
+                "bulk_listing_id", "deal_label", "waiting_since", "overdue_since")
 CLEAR_USER_TAB = {"user_tab": None, "user_tab_seen_id": None}
 
 
@@ -1062,6 +1084,10 @@ SKIP_DRAFTS_SQL = """with s as (update relay_draft set state = 'skipped', update
 
 def apply_ops(conn, owner_id: str, ops: list[dict]) -> None:
     with conn.cursor() as cur:
+        # overdue_since arrives with migration 135: a scan that runs first leaves it out instead of failing.
+        cur.execute("select 1 from information_schema.columns where table_name = 'relay_item' and column_name = 'overdue_since' and table_schema = any(current_schemas(false))")
+        if not cur.fetchone():
+            ops = [{**op, "values": {k: v for k, v in op["values"].items() if k != "overdue_since"}} for op in ops]
         for op in ops:
             values = {k: v for k, v in op["values"].items() if k != "note"}
             if op["op"] == "insert":
@@ -1143,6 +1169,9 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
         newer, seen_known = newer_than(th["messages"], last, (item or {}).get("last_seen_message_id"))
         new_message = newer and last["direction"] == "inbound"  # Alex's own sends never reopen anything by themselves
         result, clear_user_tab = apply_user_choices(result, last, item, th["messages"], ctx_global.get("sender_rules", {}))
+        # Alex's own choice (a tab he moved it to, a sender rule) wins over the overdue rule.
+        if result.get("tab") != "action" or not str(result.get("reason") or "").startswith("overdue:"):
+            result = {**result, "overdue_since": None}
         priority, why = compute_priority(result, msgs, ctx, now)
         sender_name = None
         if counterpart:
@@ -1159,7 +1188,7 @@ def build_rows(threads: dict[str, dict], existing: dict[str, dict], ctx_global: 
             "contact_type": contact_type,
             "bulk_listing_id": deal["bulk_listing_id"] if deal else None,
             "deal_label": deal_label(deal["summary"], deal["quantity"]) if deal else None,
-            "waiting_since": result.get("waiting_since"),
+            "waiting_since": result.get("waiting_since"), "overdue_since": result.get("overdue_since"),
             "last_message": {"from_name": "Alex" if last["direction"] == "outbound" else name,
                              "from_email": email_of(last.get("from_email")), "at": last["at"].isoformat(),
                              "direction": last["direction"], "text": last.get("text") or ""},

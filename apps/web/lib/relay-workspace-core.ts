@@ -70,7 +70,7 @@ export const visibleRows = (entries: ListEntry[]) => entries.flatMap((e) => (e.k
 export const waitedDays = (label: string) => (/^\d+/.test(label) ? parseInt(label, 10) : 0);
 
 /** The tone of a row's cue: a late promise in red, a ready draft in the accent, the rest in ink. */
-export const tagTone = (tag: string | null): "err" | "acc" | "ink" => (tag === "Promise overdue" ? "err" : tag === "Draft ready" ? "acc" : "ink");
+export const tagTone = (tag: string | null): "err" | "acc" | "ink" => (tag === "Promise overdue" || tag === "Overdue: nobody replied" ? "err" : tag === "Draft ready" ? "acc" : "ink");
 
 // ---------- the body ----------
 

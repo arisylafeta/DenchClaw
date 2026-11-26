@@ -60,6 +60,8 @@ export type RelayItem = {
   /** The linked deal as it is now (deal_label is a short copy taken when it was linked). */
   deal?: RelayDeal | null;
   waiting_since: string | null;
+  /** The scan brought it back: a person in an ongoing conversation had no reply from anyone in time (relay_scan.py overdue). */
+  overdue_since?: string | null;
   note: string;
   mail_thread_id: string | null;
   gmail_thread_id: string;
@@ -127,7 +129,7 @@ export type RelayReviewItem = RelayItem & { drafts: RelayDraftView[]; todos: Rel
 
 
 const ITEM_COLUMNS = `i.id,i.tab,i.status,i.priority,i.counterpart_name,i.counterpart_email,i.company,i.contact_type,i.headline,i.context,i.last_message,
-  i.earlier,i.bulk_listing_id,i.deal_label,i.waiting_since,i.note,i.mail_thread_id,i.gmail_thread_id,i.updated_at,i.situation,
+  i.earlier,i.bulk_listing_id,i.deal_label,i.waiting_since,i.overdue_since,i.note,i.mail_thread_id,i.gmail_thread_id,i.updated_at,i.situation,
   (select jsonb_build_object('kind', b.kind, 'summary', b.summary, 'quantity', b.quantity, 'status', b.status, 'title', b.context->>'listing_title',
      'location', b.location, 'price', b.spec->>'value_basis', 'stage', b.spec->>'trade_stage',
      'auction_slug', nullif(b.auction_slug, ''), 'auction_status', b.auction_status, 'listing_id', nullif(b.marketplace_listing_id, '')) from crm_bulk_listings b where b.id = i.bulk_listing_id) as deal,
