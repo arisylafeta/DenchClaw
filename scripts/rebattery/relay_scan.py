@@ -1025,7 +1025,10 @@ def plan_writes(rows: list[dict], existing: dict[str, dict], now: dt.datetime, s
             reopen_follow = item["status"] == "done" and item.get("done_reason") in ("replied", "sent") and row.get("tab") == "follow"
             # Closed as answered, but the thread still waits on Alex (an answer that turned out not to count): back to Action.
             reopen_unanswered = item["status"] == "done" and item.get("done_reason") == "replied" and row.get("tab") == "action"
-            if (new_message and row.get("tab")) or reopen_follow or reopen_unanswered:
+            # Closed by the scan itself for age while nobody had answered them: overdue, so back to Action. Never one Alex
+            # closed himself (No reply needed is done_reason user_done).
+            reopen_overdue = item["status"] == "done" and item.get("done_reason") == "expired" and bool(row.get("overdue_since"))
+            if (new_message and row.get("tab")) or reopen_follow or reopen_unanswered or reopen_overdue:
                 ops.append({"op": "update", "gmail_thread_id": gid, "id": item["id"], "kind": "reopen",
                             "values": {**fields, **content, **CLEAR_USER_TAB, "status": "open", "done_reason": None}})
             elif item["status"] == "review" and not row.get("tab") and row.get("done_reason") == "replied" \

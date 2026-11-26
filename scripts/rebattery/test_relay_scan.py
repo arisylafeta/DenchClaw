@@ -813,3 +813,11 @@ def test_an_overdue_email_two_weeks_old_is_not_expired_by_the_window():
               subject="Re: Your Nissan Leaf 24kWh packs", mid="g41", in_reply_to="<0a1b2c@mtasv.net>")
     r = rs.classify_thread([_we_wrote(16), old], ctx(known=False), NOW)
     assert r["tab"] == "action" and r["reason"].startswith("overdue:")
+
+
+def test_an_email_the_scan_closed_for_age_reopens_when_overdue_but_never_one_alex_closed():
+    late = row(new_message=False, overdue_since=NOW - dt.timedelta(days=3))
+    ops = rs.plan_writes([late], {"t1": item(status="done", done_reason="expired")}, NOW, {"t1"})
+    assert ops and ops[0]["kind"] == "reopen" and ops[0]["values"]["status"] == "open"
+    assert not rs.plan_writes([late], {"t1": item(status="done", done_reason="user_done")}, NOW, {"t1"})
+    assert not rs.plan_writes([row(new_message=False)], {"t1": item(status="done", done_reason="expired")}, NOW, {"t1"})
