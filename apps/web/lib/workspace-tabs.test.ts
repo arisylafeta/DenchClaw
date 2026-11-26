@@ -57,6 +57,7 @@ describe("platform operations tabs", () => {
     expect(inferContentTabKindFromPath("~mail/draft/abc123")).toBe("mail-draft");
     expect(inferContentTabKindFromPath("~mail/message/abc123")).toBe("mail-message");
     expect(inferContentTabTitle("~platform-admin/proposals")).toBe("Recycler selection");
+    expect(inferContentTabTitle("~platform-admin/jules-stats")).toBe("Jules");
     expect(inferContentTabTitle("~platform-admin/listings")).toBe("Listings");
     expect(inferContentTabTitle("~platform-admin/accounts")).toBe("Accounts");
     expect(inferContentTabTitle("~platform-admin/battery-review")).toBe("Battery review");

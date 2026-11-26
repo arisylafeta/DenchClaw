@@ -400,6 +400,7 @@ function resolveDerivedContent(
     case "platform-admin": {
       const section = tab.path.replace(/^~platform-admin\//, "");
       if (
+        section === "jules-stats" ||
         section === "proposals" ||
         section === "listings" ||
         section === "accounts" ||

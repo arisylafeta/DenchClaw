@@ -130,6 +130,7 @@ type WorkspaceSidebarProps = {
       | "crm-inbox"
       | "crm-calendar"
       | "trades-preview"
+      | "platform-jules-stats"
       | "platform-proposals"
       | "platform-listings"
       | "platform-accounts"
@@ -143,7 +144,7 @@ type WorkspaceSidebarProps = {
   /** Currently-active CRM nav item, used to highlight the row. */
   activeCrmTarget?: "home" | "people" | "companies" | "campaigns" | "leaderboard" | "relay" | "inbox" | "calendar" | "trades-preview" | null;
   /** Currently-active marketplace operations page. */
-  activePlatformTarget?: "proposals" | "listings" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews" | "label-review" | "transactions" | null;
+  activePlatformTarget?: "jules-stats" | "proposals" | "listings" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews" | "label-review" | "transactions" | null;
   /** Custom CRM tables (workspace.duckdb objects) to list under the default CRM nav. */
   customCrmObjects?: CustomCrmObject[];
   /** Currently-active custom CRM object name, used to highlight the row. */
@@ -450,6 +451,12 @@ export function WorkspaceSidebar({
 	].filter((item) => item.id !== "crm-relay" || authUser?.email?.toLowerCase() === "alex@rebattery.io");
 
 	const platformNavItems = [
+		{
+			id: "platform-jules-stats" as const,
+			label: "Jules",
+			target: "jules-stats" as const,
+			icon: <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>,
+		},
 		{
 			id: "platform-proposals" as const,
 			label: "Recycler selection",

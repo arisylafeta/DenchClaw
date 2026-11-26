@@ -12,6 +12,7 @@ describe("contentUsesFullView", () => {
   it("gives message monitoring the full workspace canvas", () => {
     expect(contentUsesFullView("~platform-admin/battery-requests")).toBe(true);
     expect(contentUsesFullView("~platform-admin/messages")).toBe(true);
+    expect(contentUsesFullView("~platform-admin/jules-stats")).toBe(true);
   });
 
   it("keeps the split view for the other admin pages", () => {

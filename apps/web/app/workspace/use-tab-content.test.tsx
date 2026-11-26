@@ -62,7 +62,7 @@ function makeObjectTab(name: string): ContentTab {
 }
 
 describe("platform operations content", () => {
-  it.each(["proposals", "battery-requests"])("resolves the %s platform tab without fetching", (section) => {
+  it.each(["proposals", "battery-requests", "jules-stats"])("resolves the %s platform tab without fetching", (section) => {
     const tab: ContentTab = {
       id: `~platform-admin/${section}`,
       kind: "platform-admin",

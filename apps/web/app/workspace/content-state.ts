@@ -84,6 +84,7 @@ export type DenchAppManifest = {
 };
 
 export type PlatformAdminSection =
+  | "jules-stats"
   | "proposals"
   | "listings"
   | "accounts"

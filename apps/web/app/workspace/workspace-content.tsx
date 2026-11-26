@@ -1514,6 +1514,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
         | "crm-inbox"
         | "crm-calendar"
         | "trades-preview"
+        | "platform-jules-stats"
         | "platform-proposals"
         | "platform-listings"
         | "platform-accounts"
@@ -1554,6 +1555,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
         "crm-relay": { path: "~crm/relay", name: "Relay" },
         "crm-calendar": { path: "~crm/calendar", name: "Calendar" },
         "trades-preview": { path: TRADES_PREVIEW_PATH, name: "Bulk Trades" },
+        "platform-jules-stats": { path: "~platform-admin/jules-stats", name: "Jules" },
         "platform-proposals": { path: "~platform-admin/proposals", name: "Recycler selection" },
         "platform-listings": { path: "~platform-admin/listings", name: "Listings" },
         "platform-accounts": { path: "~platform-admin/accounts", name: "Accounts" },
@@ -2593,7 +2595,7 @@ function WorkspacePageInner({ hermesChats }: { hermesChats: HermesChatsControlle
                 : null
     ),
     activePlatformTarget: activeContentTab?.kind === "platform-admin"
-      ? activeContentTab.path.replace(/^~platform-admin\//, "") as "proposals" | "listings" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews" | "label-review" | "transactions"
+      ? activeContentTab.path.replace(/^~platform-admin\//, "") as "jules-stats" | "proposals" | "listings" | "accounts" | "battery-review" | "battery-requests" | "messages" | "payout-reviews" | "label-review" | "transactions"
       : null,
     customCrmObjects,
     activeCrmObjectName: activeContentTab?.kind === "object" ? activeContentTab.path : null,
