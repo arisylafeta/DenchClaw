@@ -185,8 +185,12 @@ def answered_by_hand(cur, thread_id):
         return False
     cur.execute("select to_regclass('public.relay_draft') is not null as relay")
     relay = cur.fetchone()['relay']
+    # A Gmail row that is only the mailbox copy of a Postmark send (the sender's own address is BCC'd so replies thread)
+    # shares that send's RFC Message-ID; it is an agent's email, not Alex writing by hand.
     cur.execute(f"""select 1 from mail_message m where m.thread_id = %s and m.direction = 'outbound' and m.campaign_id is null
-                      and (m.id like 'gmail_msg_%%'{" or (m.state = 'accepted' and exists (select 1 from relay_draft d where d.mail_message_id = m.id))" if relay else ""})
+                      and ((m.id like 'gmail_msg_%%' and not exists (select 1 from mail_message p where p.id <> m.id
+                             and p.rfc_message_id = m.rfc_message_id and p.transport like 'postmark%%'))
+                           {" or (m.state = 'accepted' and exists (select 1 from relay_draft d where d.mail_message_id = m.id))" if relay else ""})
                     limit 1""", (thread_id,))
     return cur.fetchone() is not None
 
