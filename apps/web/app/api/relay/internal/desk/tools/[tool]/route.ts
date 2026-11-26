@@ -23,7 +23,8 @@ export async function POST(req: Request, { params }: Context) {
   const run = typeof body?.run === "string" && body.run ? body.run : null;
   if (!item || item.length > 100 || (run && run.length > 100)) return Response.json({ error: "item required" }, { status: 400 });
   try {
-    return Response.json({ text: await deskTool({ itemId: item, runId: run, dryRun: body?.dry_run === true }, tool, body?.args ?? {}) });
+    const asOf = typeof body?.as_of === "string" && !Number.isNaN(Date.parse(body.as_of)) ? new Date(body.as_of).toISOString() : undefined;
+    return Response.json({ text: await deskTool({ itemId: item, runId: run, dryRun: body?.dry_run === true, asOf }, tool, body?.args ?? {}) });
   } catch (error) {
     if (error instanceof RelayError || error instanceof DraftActionError) return Response.json({ error: error.message }, { status: error.status });
     console.error("relay desk tool", tool, error);

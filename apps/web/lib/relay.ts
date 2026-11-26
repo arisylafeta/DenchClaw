@@ -280,13 +280,15 @@ export async function deleteSenderRule(ownerId: string, id: string): Promise<voi
 
 type ThreadMessage = { id: string; direction: string; from_email: string | null; to_emails: string[]; cc_emails: string[]; subject: string | null; body_text: string | null; at: string; identity_key: string | null; state: string; rfc_message_id: string | null; has_files: boolean };
 
-async function threadMessages(mailThreadId: string | null): Promise<ThreadMessage[]> {
+/** asOf: only what had arrived by then (the technical test set replays an email as it stood that day). */
+async function threadMessages(mailThreadId: string | null, asOf?: string): Promise<ThreadMessage[]> {
   if (!mailThreadId) return [];
   return queryPg<ThreadMessage>(
     `select id, direction, from_email, coalesce(to_emails,'{}') as to_emails, coalesce(cc_emails,'{}') as cc_emails, subject, body_text,
        coalesce(sent_at, accepted_at, created_at)::text as at, identity_key, state, rfc_message_id, ${HAS_FILES_SQL} as has_files
      from mail_message where thread_id = $1 and state in ('received','accepted','sent','delivered','opened','clicked','replied')
-     order by coalesce(sent_at, accepted_at, created_at) desc limit 8`, [mailThreadId]);
+       and ($2::timestamptz is null or coalesce(sent_at, accepted_at, created_at) <= $2::timestamptz)
+     order by coalesce(sent_at, accepted_at, created_at) desc limit 8`, [mailThreadId, asOf ?? null]);
 }
 
 async function dealSummary(listingId: string | null, counterpartEmail: string | null): Promise<string> {
@@ -382,8 +384,8 @@ async function offerBlock(item: RelayItem, ownerId: string): Promise<string> {
 /** Everything a draft is written from: the thread, the deal, the background on the person (relay-context.ts), the writing
  * rules, the owner's voice and who the reply goes to. background: false skips the look-up when only the addressing is needed;
  * offers: false leaves out the stock that fits (the chat adds its own). */
-export async function draftContext(item: RelayItem, ownerId: string, note: string, opts: { background?: boolean; offers?: boolean } = {}) {
-  const messages = await threadMessages(item.mail_thread_id);
+export async function draftContext(item: RelayItem, ownerId: string, note: string, opts: { background?: boolean; offers?: boolean; asOf?: string } = {}) {
+  const messages = await threadMessages(item.mail_thread_id, opts.asOf);
   const rules = await activeRules(ownerId);
   const lastInbound = messages.find((m) => m.direction === "inbound");
   const deal = await dealSummary(item.bulk_listing_id, lastInbound?.from_email ?? item.counterpart_email);

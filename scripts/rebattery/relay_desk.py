@@ -12,7 +12,8 @@ This runner writes only relay_desk_run, relay_talk and relay_item.desk_session_i
 tools, which go through the CRM's guarded code. Nothing here sends or creates a Gmail draft.
 
 Dry run (no database writes, a throwaway session, the write tools say what they would do):
-  relay_desk.py --dry-run --item <relay item id> --mode quick [--text "..."]
+  relay_desk.py --dry-run --item <relay item id> --mode quick [--text "..."] [--as-of ISO]
+  --as-of replays the email as it stood then (the technical test set): the brief and every tool see only what had arrived.
 """
 from __future__ import annotations
 
@@ -319,10 +320,10 @@ def kill_group(proc: subprocess.Popen) -> None:
             continue
 
 
-def fetch_brief(item: str, mode: str, text: str, run: str | None = None) -> dict:
+def fetch_brief(item: str, mode: str, text: str, run: str | None = None, as_of: str | None = None) -> dict:
     with open(SECRET_FILE, encoding="utf-8") as handle:
         secret = handle.read().strip()
-    request = urllib.request.Request(f"{CRM_URL}/api/relay/internal/desk/brief", data=json.dumps({"item": item, "mode": mode, "text": text, "run": run}).encode(),
+    request = urllib.request.Request(f"{CRM_URL}/api/relay/internal/desk/brief", data=json.dumps({"item": item, "mode": mode, "text": text, "run": run, **({"as_of": as_of, "dry_run": True} if as_of else {})}).encode(),
                                      method="POST", headers={"content-type": "application/json", "authorization": f"Bearer {secret}"})
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
@@ -365,14 +366,17 @@ class Turn:
 
 # ---------- the run ----------
 
-def dry_run(item: str, mode: str, text: str) -> int:
+def dry_run(item: str, mode: str, text: str, as_of: str | None = None) -> int:
     """A turn with no database writes and a throwaway session: prints what the desk did and would do."""
-    brief = fetch_brief(item, mode, text)
+    brief = fetch_brief(item, mode, text, as_of=as_of)
     folder = tempfile.mkdtemp(prefix="relay-desk-dry-")
     try:
         brief_file, mcp_file = os.path.join(folder, "brief.md"), os.path.join(folder, "mcp.json")
         Path(brief_file).write_text(brief["brief"])
-        Path(mcp_file).write_text(json.dumps(mcp_config(item, "", True)))
+        config = mcp_config(item, "", True)
+        if as_of:
+            config["mcpServers"]["relay"]["env"]["RELAY_DESK_AS_OF"] = as_of
+        Path(mcp_file).write_text(json.dumps(config))
         command = build_command(mode, ["--session-id", str(uuid.uuid4())], brief_file, mcp_file, read_denies(), dry_run=True)
         started = time.monotonic()
         turn = Turn(lambda said, name: print(f"[trace] {said}    ({name})", flush=True))
@@ -480,8 +484,9 @@ def main(argv: list[str]) -> int:
         parser.add_argument("--item", required=True)
         parser.add_argument("--mode", choices=sorted(MODE_EFFORT), default="quick")
         parser.add_argument("--text", default="")
+        parser.add_argument("--as-of", default=None)
         args = parser.parse_args(argv[1:])
-        return dry_run(args.item, args.mode, args.text)
+        return dry_run(args.item, args.mode, args.text, args.as_of)
     run_id = argv[0] if argv else ""
     if not re.fullmatch(r"[0-9a-f-]{36}", run_id):
         return 2

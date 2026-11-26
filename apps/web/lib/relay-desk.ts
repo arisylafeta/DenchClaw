@@ -146,18 +146,19 @@ export async function deskOwner(): Promise<string> {
   return owner.id;
 }
 
-type Ctx = { item: RelayItem; ownerId: string; runId: string | null; dryRun: boolean };
+type Ctx = { item: RelayItem; ownerId: string; runId: string | null; dryRun: boolean; asOf?: string };
 
 /** The email's facts, thread, drafts (with versions and prices), the stock that fits with Relay's prices, and the rules. */
-export async function deskState(item: RelayItem, ownerId: string): Promise<DeskState> {
-  await settleStaleListings(item.id).catch(() => undefined);
+/** asOf (dry runs only, for the technical test set): the email as it stood then, with no drafts yet. */
+export async function deskState(item: RelayItem, ownerId: string, asOf?: string): Promise<DeskState> {
+  if (!asOf) await settleStaleListings(item.id).catch(() => undefined);
   const [ctx, rows, stock, signatures, listings, related, costs, offered] = await Promise.all([
-    draftContext(item, ownerId, "(desk)", { background: false, offers: false }),
-    draftRows(item.id),
+    draftContext(item, ownerId, "(desk)", { background: false, offers: false, asOf }),
+    asOf ? Promise.resolve([] as TalkRow[]) : draftRows(item.id),
     stockFits(item.id, ownerId).catch((error) => { console.error("relay desk stock", error); return [] as StockFit[]; }),
     identitySignatures(),
-    listingProposal(item.id).catch(() => null),
-    relatedThreads(item, ownerId).catch((error) => { console.error("relay related threads", error); return []; }),
+    asOf ? Promise.resolve(null) : listingProposal(item.id).catch(() => null),
+    relatedThreads(item, ownerId, 4, asOf).catch((error) => { console.error("relay related threads", error); return []; }),
     knownCosts(item),
     lastWritten(item),
   ]);
@@ -190,7 +191,7 @@ export async function deskState(item: RelayItem, ownerId: string): Promise<DeskS
       message_id: m.id, direction: m.direction ?? "", from: m.from_email, to: m.to_emails, cc: m.cc_emails, at: m.at, subject: m.subject,
       text: stripQuoted(m.body_text ?? "").slice(0, 4000), has_files: !!m.has_files,
     })),
-    others: await otherEmails(item, ownerId),
+    others: await otherEmails(item, ownerId, asOf),
     drafts,
     related,
     costs,
@@ -205,25 +206,31 @@ export async function deskState(item: RelayItem, ownerId: string): Promise<DeskS
 }
 
 /** The same person's other emails still waiting on Alex (open, or drafted and unsent), on other threads, newest first. */
-async function otherEmails(item: RelayItem, ownerId: string): Promise<NonNullable<DeskState["others"]>> {
+async function otherEmails(item: RelayItem, ownerId: string, asOf?: string): Promise<NonNullable<DeskState["others"]>> {
   if (!item.counterpart_email) return [];
   const rows = await queryPg<{ id: string; last_message: RelayItem["last_message"]; headline: string }>(
     `select id, last_message, headline from relay_item where owner_id = $1::uuid and id <> $2 and status in ('open', 'review')
        and lower(counterpart_email) = lower($3) order by updated_at desc limit 5`, [ownerId, item.id, item.counterpart_email]);
-  return rows.filter((r) => r.last_message?.direction === "inbound").map((r) => ({
+  // In a replay only emails that had arrived by then count (an item's newest email may be later; then it is left out).
+  return rows.filter((r) => r.last_message?.direction === "inbound" && (!asOf || (r.last_message?.at ?? "") <= asOf)).map((r) => ({
     item_id: r.id, subject: r.headline, at: r.last_message?.at ?? null, text: stripQuoted(r.last_message?.text ?? "").slice(0, 3000),
   }));
 }
 
 /** The brief (appended to the session's system prompt) and the prompt for one turn, both built fresh from the email now. */
-export async function deskBrief(itemId: string, mode: DeskMode, text: string): Promise<{ brief: string; prompt: string; timeoutSeconds: number }> {
+export async function deskBrief(itemId: string, mode: DeskMode, text: string, asOf?: string): Promise<{ brief: string; prompt: string; timeoutSeconds: number }> {
   const ownerId = await deskOwner();
-  const item = await ownItem(itemId, ownerId);
-  const state = await deskState(item, ownerId);
+  const live = await ownItem(itemId, ownerId);
+  const item = asOf ? asOfItem(live) : live;
+  const state = await deskState(item, ownerId, asOf);
+  if (asOf) state.item.headline = state.thread.find((m) => m.direction === "inbound")?.subject ?? state.item.headline;
   const theirs = state.thread.find((m) => m.direction === "inbound")?.text ?? item.last_message?.text ?? "";
   const voice = await voiceFor(ownerId, item, theirs);
-  return { brief: buildBrief({ mode, state, rules: state.rules, voice, lessons: await readLessons(), now: new Date() }), prompt: deskPrompt(mode, text), timeoutSeconds: MODE_TIMEOUT[mode] };
+  return { brief: buildBrief({ mode, state, rules: state.rules, voice, lessons: await readLessons(), now: asOf ? new Date(asOf) : new Date(), asOf }), prompt: deskPrompt(mode, text), timeoutSeconds: MODE_TIMEOUT[mode] };
 }
+
+/** The item for a replay: waiting on Alex, with none of today's summary (which can describe later emails). */
+const asOfItem = (item: RelayItem): RelayItem => ({ ...item, tab: "action", status: "open", note: "", headline: "", context: "", earlier: [] });
 
 /** A write is only taken from the run that is working on this email right now, so a stray or stopped process can't change anything. */
 async function liveRun(ctx: Ctx): Promise<void> {
@@ -238,20 +245,23 @@ async function liveRun(ctx: Ctx): Promise<void> {
  * One MCP tool call from the desk. Arguments are read strictly; writes need the live run. In a dry run every write tool
  * runs its checks (ownership, version, the leak guard, send times) and says what it would do, without writing.
  */
-export async function deskTool(input: { itemId: string; runId: string | null; dryRun: boolean }, tool: DeskTool, raw: unknown): Promise<string> {
+export async function deskTool(input: { itemId: string; runId: string | null; dryRun: boolean; asOf?: string }, tool: DeskTool, raw: unknown): Promise<string> {
+  // A replay is a dry run by definition: asOf never reaches a run that can write.
+  const asOf = input.dryRun ? input.asOf : undefined;
   const checked = readDeskArgs(tool, raw);
   if (!checked.ok) throw new RelayError(400, checked.why);
   const ownerId = await deskOwner();
-  const ctx: Ctx = { item: await ownItem(input.itemId, ownerId), ownerId, runId: input.runId, dryRun: input.dryRun };
+  const owned = await ownItem(input.itemId, ownerId);
+  const ctx: Ctx = { item: asOf ? asOfItem(owned) : owned, ownerId, runId: input.runId, dryRun: input.dryRun, asOf };
   if (WRITE_TOOLS.includes(tool)) await liveRun(ctx);
   const args = checked.args as DeskArgs[DeskTool];
   switch (tool) {
-    case "relay_state": return JSON.stringify(await deskState(ctx.item, ownerId));
+    case "relay_state": return JSON.stringify(await deskState(ctx.item, ownerId, asOf));
     case "relay_write_reply": return writeReply(ctx, args as DeskArgs["relay_write_reply"]);
     case "relay_update_draft": return updateDraft(ctx, args as DeskArgs["relay_update_draft"]);
     case "relay_threads": {
       const a = args as DeskArgs["relay_threads"];
-      const threads = await findThreads(ownerId, ctx.item.id, a.person, a.about);
+      const threads = await findThreads(ownerId, ctx.item.id, a.person, a.about, 6, asOf);
       return threads.length ? JSON.stringify(threads) : `Alex has no Relay thread with "${a.person}" besides this one.`;
     }
     case "relay_add_email": return addEmail(ctx, args as DeskArgs["relay_add_email"]);
@@ -433,7 +443,7 @@ async function addEmail(ctx: Ctx, a: DeskArgs["relay_add_email"]): Promise<strin
 async function addOnThread(ctx: Ctx, a: DeskArgs["relay_add_email"], replyOn: string): Promise<string> {
   if (replyOn === ctx.item.id) throw new RelayError(400, "That's this email's own thread: use relay_write_reply, or on_thread for a chase.");
   const target = await readRelayItem(replyOn, ctx.ownerId);
-  const thread = await linkedThread(ctx.ownerId, replyOn);
+  const thread = await linkedThread(ctx.ownerId, replyOn, ctx.asOf);
   if (!target?.mail_thread_id || !thread) throw new RelayError(404, "No thread with that id. Use a Thread id from relay_state or relay_threads.");
   const there = await draftContext(target, ctx.ownerId, a.why || "(desk)", { background: false, offers: false });
   if (!sameMailbox(there.to, a.to)) throw new RelayError(422, `A reply on that thread goes to ${there.to}, not ${a.to}. Pick the thread with the right person, or leave reply_on out for a new email.`);

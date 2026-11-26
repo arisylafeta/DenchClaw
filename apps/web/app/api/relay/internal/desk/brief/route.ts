@@ -16,7 +16,9 @@ export async function POST(req: Request) {
   const text = typeof body?.text === "string" ? body.text : "";
   if (!item || item.length > 100 || !isDeskMode(body?.mode)) return Response.json({ error: "item and mode required" }, { status: 400 });
   try {
-    return Response.json(await deskBrief(item, body.mode, text));
+    // as_of (an ISO time) replays the email as it stood then; only for dry runs, which never write.
+    const asOf = body?.dry_run === true && typeof body?.as_of === "string" && !Number.isNaN(Date.parse(body.as_of)) ? new Date(body.as_of).toISOString() : undefined;
+    return Response.json(await deskBrief(item, body.mode, text, asOf));
   } catch (error) {
     if (error instanceof RelayError) return Response.json({ error: error.message }, { status: error.status });
     console.error("relay desk brief", error);

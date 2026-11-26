@@ -27,7 +27,10 @@ type ThreadRow = { item_id: string; status: LinkedThread["status"]; name: string
   in_id: string | null; in_at: string | null; in_text: string | null; in_files: boolean | null;
   draft_id: string | null; draft_at: string | null; draft_body: string | null; draft_identity: string | null; last_by: string | null; scheduled: boolean | null; linked_item_id: string | null };
 
-async function readThreads(where: string, values: unknown[], limit: number): Promise<LinkedThread[]> {
+/** asOf: the threads as they stood then (a replay in the technical test set): no later emails, and no reply waiting. */
+async function readThreads(where: string, values: unknown[], limit: number, asOf?: string): Promise<LinkedThread[]> {
+  const by = `$${values.length + 1}::timestamptz`;
+  const before = (col: string) => `and (${by} is null or ${col} <= ${by})`;
   const rows = await queryPg<ThreadRow>(
     `select i.id as item_id, i.status, i.counterpart_name as name, i.counterpart_email as email, i.headline,
             n.subject, coalesce(n.at, i.waiting_since::text, i.updated_at::text) as at,
@@ -35,15 +38,15 @@ async function readThreads(where: string, values: unknown[], limit: number): Pro
             d.id as draft_id, d.mail_at as draft_at, d.body_text as draft_body, d.identity_key as draft_identity, d.last_by, d.scheduled, d.linked_item_id
        from relay_item i
        left join lateral (select m.subject, coalesce(m.sent_at, m.accepted_at, m.created_at)::text as at from mail_message m
-         where m.thread_id = i.mail_thread_id and m.state in ${LIVE} order by coalesce(m.sent_at, m.accepted_at, m.created_at) desc limit 1) n on true
+         where m.thread_id = i.mail_thread_id and m.state in ${LIVE} ${before("coalesce(m.sent_at, m.accepted_at, m.created_at)")} order by coalesce(m.sent_at, m.accepted_at, m.created_at) desc limit 1) n on true
        left join lateral (select m.id, coalesce(m.sent_at, m.created_at)::text as at, left(m.body_text, 8000) as text, m.has_attachments as has_files from mail_message m
-         where m.thread_id = i.mail_thread_id and m.direction = 'inbound' and m.state in ${LIVE} order by coalesce(m.sent_at, m.created_at) desc limit 1) t on true
+         where m.thread_id = i.mail_thread_id and m.direction = 'inbound' and m.state in ${LIVE} ${before("coalesce(m.sent_at, m.created_at)")} order by coalesce(m.sent_at, m.created_at) desc limit 1) t on true
        left join lateral (select r.id, m.updated_at::text as mail_at, m.body_text, m.identity_key, r.history->-1->>'by' as last_by,
            (m.personalization ? 'scheduled_send') as scheduled, r.linked_item_id
          from relay_draft r join mail_message m on m.id = r.mail_message_id
-         where r.item_id = i.id and r.role = 'primary' and r.state in ('draft', 'gmail') and m.state = 'draft' order by r.created_at desc limit 1) d on true
-      where i.mail_thread_id is not null and coalesce(i.counterpart_email, '') <> '' and (${where})
-      order by coalesce(n.at::timestamptz, i.updated_at) desc limit ${limit}`, values);
+         where r.item_id = i.id and r.role = 'primary' and r.state in ('draft', 'gmail') and m.state = 'draft' and ${by} is null order by r.created_at desc limit 1) d on true
+      where i.mail_thread_id is not null and coalesce(i.counterpart_email, '') <> '' and (${where}) and (${by} is null or n.at is not null)
+      order by coalesce(n.at::timestamptz, i.updated_at) desc limit ${limit}`, [...values, asOf ?? null]);
   const signatures = rows.some((r) => r.draft_id) ? await identitySignatures() : new Map<string, never>();
   return rows.map((r) => ({
     item_id: r.item_id, status: r.status, name: r.name, email: r.email, subject: r.subject ?? r.headline, at: iso(r.at),
@@ -111,7 +114,7 @@ export async function lastWritten(item: Pick<Item, "mail_thread_id">): Promise<s
  * Alex's threads with the people this email depends on: those already written to from here, and the supplier of the pack
  * in play. The thread about the same thing first. Empty when nobody is known.
  */
-export async function relatedThreads(item: Item, ownerId: string, limit = 4): Promise<LinkedThread[]> {
+export async function relatedThreads(item: Item, ownerId: string, limit = 4, asOf?: string): Promise<LinkedThread[]> {
   const [{ rows, asked }, sent] = await Promise.all([
     stockInPlay(item),
     queryPg<{ a: string }>(
@@ -121,22 +124,22 @@ export async function relatedThreads(item: Item, ownerId: string, limit = 4): Pr
   const own = item.counterpart_email ? mailbox(item.counterpart_email) : "";
   const people = [...new Set([...sent.map((s) => s.a), ...rows.map((r) => r.person_email ?? "")].filter((a) => a.includes("@") && !a.endsWith("@rebattery.io")).map(mailbox))].filter((m) => m !== own);
   if (!people.length) return [];
-  const threads = await readThreads(`i.owner_id = $1::uuid and i.id <> $2 and ${mailboxSql("i.counterpart_email")} = any($3) and (i.status <> 'done' or i.updated_at > now() - interval '45 days')`, [ownerId, item.id, people], 20);
+  const threads = await readThreads(`i.owner_id = $1::uuid and i.id <> $2 and ${mailboxSql("i.counterpart_email")} = any($3) and (i.status <> 'done' or i.updated_at > now() - interval '45 days')`, [ownerId, item.id, people], 20, asOf);
   const about = [...asked, ...rows.map((r) => `${r.title} ${r.make ?? ""} ${r.model ?? ""} ${r.supplier_ref?.split(":")[1] ?? ""}`)].join("\n");
   const ranked = threads.map((t) => ({ t, score: threadScore(about, `${t.subject}\n${t.theirs?.text ?? ""}`) }));
   return ranked.sort((a, b) => b.score - a.score || (b.t.at ?? "").localeCompare(a.t.at ?? "")).slice(0, limit).map((x) => x.t);
 }
 
 /** Alex's threads with a person (an address, name or company), about some words if given: the desk's look-up. */
-export async function findThreads(ownerId: string, itemId: string, person: string, words: string, limit = 6): Promise<LinkedThread[]> {
+export async function findThreads(ownerId: string, itemId: string, person: string, words: string, limit = 6, asOf?: string): Promise<LinkedThread[]> {
   const who = person.trim().toLowerCase();
   const match = who.includes("@") ? `${mailboxSql("i.counterpart_email")} = $3` : `(lower(coalesce(i.counterpart_name, '') || ' ' || coalesce(i.company, '') || ' ' || i.counterpart_email) like $3)`;
-  const threads = await readThreads(`i.owner_id = $1::uuid and i.id <> $2 and ${match}`, [ownerId, itemId, who.includes("@") ? mailbox(who) : `%${who.replace(/[%_\\]/g, "\\$&")}%`], 30);
+  const threads = await readThreads(`i.owner_id = $1::uuid and i.id <> $2 and ${match}`, [ownerId, itemId, who.includes("@") ? mailbox(who) : `%${who.replace(/[%_\\]/g, "\\$&")}%`], 30, asOf);
   if (!words.trim()) return threads.slice(0, limit);
   return threads.map((t) => ({ t, score: threadScore(words, `${t.subject}\n${t.theirs?.text ?? ""}`) })).sort((a, b) => b.score - a.score).slice(0, limit).map((x) => x.t);
 }
 
 /** One thread by its Relay item, when it is Alex's. */
-export async function linkedThread(ownerId: string, itemId: string): Promise<LinkedThread | null> {
-  return (await readThreads("i.owner_id = $1::uuid and i.id = $2", [ownerId, itemId], 1))[0] ?? null;
+export async function linkedThread(ownerId: string, itemId: string, asOf?: string): Promise<LinkedThread | null> {
+  return (await readThreads("i.owner_id = $1::uuid and i.id = $2", [ownerId, itemId], 1, asOf))[0] ?? null;
 }

@@ -124,13 +124,16 @@ def http_post(url: str, body: dict, secret: str, timeout: int = TOOL_TIMEOUT) ->
 class Server:
     """The JSON-RPC handling, apart from stdio so it can be tested. post: (url, body) -> (status, json)."""
 
-    def __init__(self, item: str, run: str, dry_run: bool, post: Callable[[str, dict], tuple[int, dict]], crm_url: str = CRM_URL):
+    def __init__(self, item: str, run: str, dry_run: bool, post: Callable[[str, dict], tuple[int, dict]], crm_url: str = CRM_URL, as_of: str | None = None):
         self.item, self.run, self.dry_run, self.post, self.crm_url = item, run, dry_run, post, crm_url
+        self.as_of = as_of if dry_run else None  # a replay (technical test set) is always a dry run
 
     def call_tool(self, name: str, args: Any) -> dict:
         if name not in TOOL_NAMES:
             return {"content": [{"type": "text", "text": f"Unknown tool {name}."}], "isError": True}
         body = {"item": self.item, "run": self.run, "args": args if isinstance(args, dict) else {}, "dry_run": self.dry_run}
+        if self.as_of:
+            body["as_of"] = self.as_of
         try:
             status, answer = self.post(f"{self.crm_url}/api/relay/internal/desk/tools/{name}", body)
         except (OSError, ValueError) as error:  # the CRM down or a broken answer: the desk is told, and carries on
@@ -183,7 +186,7 @@ def main() -> int:
         sys.stderr.write("relay_desk_mcp: RELAY_DESK_ITEM is not set\n")
         return 2
     secret = read_secret()
-    Server(item, run, os.environ.get("RELAY_DESK_DRY_RUN") == "1", lambda url, body: http_post(url, body, secret)).serve()
+    Server(item, run, os.environ.get("RELAY_DESK_DRY_RUN") == "1", lambda url, body: http_post(url, body, secret), as_of=os.environ.get("RELAY_DESK_AS_OF") or None).serve()
     return 0
 
 
