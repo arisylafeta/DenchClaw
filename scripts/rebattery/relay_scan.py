@@ -1084,7 +1084,7 @@ SKIP_DRAFTS_SQL = """with s as (update relay_draft set state = 'skipped', update
 
 def apply_ops(conn, owner_id: str, ops: list[dict]) -> None:
     with conn.cursor() as cur:
-        # overdue_since arrives with migration 135: a scan that runs first leaves it out instead of failing.
+        # overdue_since arrives with migration 136: a scan that runs first leaves it out instead of failing.
         cur.execute("select 1 from information_schema.columns where table_name = 'relay_item' and column_name = 'overdue_since' and table_schema = any(current_schemas(false))")
         if not cur.fetchone():
             ops = [{**op, "values": {k: v for k, v in op["values"].items() if k != "overdue_since"}} for op in ops]
