@@ -90,6 +90,12 @@ describe("mergeByPerson", () => {
     const d = item({ id: "d", email: "new@acme.com", personIds: ["p1"] });
     expect(ids(mergeByPerson([a, b, c, d]))).toEqual([["a", "b"], ["c", "d"]]);
   });
+  it("joins addresses Relay knows are one person, whatever their names", () => {
+    const eco = item({ id: "e", email: "eco.mobility.dev.1@gmail.com", name: "Eco Mobility", personal: true, personKey: "k1" });
+    const chris = item({ id: "c", email: "threadofariadne.dev1@gmail.com", name: "Chris Smerling", personal: true, personKey: "k1" });
+    const other = item({ id: "o", email: "someone@else.com", name: "Some One", personKey: "k2" });
+    expect(ids(mergeByPerson([eco, chris, other]))).toEqual([["c", "e"], ["o"]]);
+  });
   it("joins a personal address to a work address with the same full name", () => {
     const gmail = item({ id: "g", email: "bbament@gmail.com", name: "Ben Bament", personal: true, personIds: ["p1"] });
     const work = item({ id: "w", email: "ben@silentclassics.co.uk", name: "Ben Bament", companyId: "sc", personIds: ["p2"] });

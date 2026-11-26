@@ -7,6 +7,7 @@ import { draftSide, leakFacts, leaks, moneyMentions, type Leak, type LeakFacts, 
 import { knownCosts } from "./relay-linked";
 import { secretCosts } from "./relay-linked-core";
 import { inPlaySql, viewRoleSql } from "./relay-round";
+import { otherAddresses } from "./relay-people";
 
 /**
  * The leak guard, the I/O part: gathers who is on each side of an email's thread (the counterpart, the linked deal's
@@ -53,9 +54,12 @@ export async function threadSides(itemId: string, ownerId: string, drafts: Guard
   // A supplier's own emails on the thread hold what they want for the stock: those figures are costs.
   const theirs = side === "supplier" && item.mail_thread_id ? await queryPg<{ body_text: string | null }>(
     "select body_text from mail_message where thread_id = $1 and direction = 'inbound' order by coalesce(sent_at, created_at) desc limit 8", [item.mail_thread_id]) : [];
-  const supplierEmails = [...fits.map((f) => f.supplier.email), side === "supplier" ? item.counterpart_email : null].filter((e): e is string => !!e).map((e) => e.toLowerCase());
+  // The counterpart's other addresses are the same party: an email to one of them sits on the same side.
+  const theirOthers = (await otherAddresses(ownerId, item.counterpart_email)).map((o) => o.address);
+  const supplierEmails = [...fits.map((f) => f.supplier.email), ...(side === "supplier" ? [item.counterpart_email, ...theirOthers] : [])].filter((e): e is string => !!e).map((e) => e.toLowerCase());
   const buyerEmail = (side === "buyer" ? item.counterpart_email : buyerParty?.email)?.toLowerCase() ?? null;
-  const kinds = new Map(drafts.map((d) => [d.id, draftSide({ toKind: d.to_kind, role: d.role, to: d.to }, side, { suppliers: supplierEmails, buyer: buyerEmail })]));
+  const known = { suppliers: supplierEmails, buyer: buyerEmail, buyerAlso: side === "buyer" ? theirOthers : [] };
+  const kinds = new Map(drafts.map((d) => [d.id, draftSide({ toKind: d.to_kind, role: d.role, to: d.to }, side, known)]));
   const facts = leakFacts({
     side, counterpart, dealBuyer: buyerParty,
     // The pack in play and what it cost us, as well as the stock that fits.

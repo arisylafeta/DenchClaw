@@ -49,6 +49,9 @@ from typing import Any
 import psycopg2
 import psycopg2.extras
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import relay_people  # noqa: E402  (one person behind several addresses)
+
 DEFAULT_DSN = "host=/var/run/postgresql dbname=denchclaw"
 TRIAGE_DIR = Path("/root/.hermes/workspace/gmail-unified-triage")
 TRIAGE_APP_SRC = Path("/root/.hermes/apps/gmail-email-management/src")
@@ -1351,6 +1354,12 @@ def main(argv: list[str] | None = None) -> int:
         since = now - dt.timedelta(days=max(args.days, args.follow_days))
         threads = load_threads(cur, owner_id, since, open_thread_ids)
         last_to, last_from, last_new_to = load_contact_maps(cur, owner_id, now - dt.timedelta(days=max(args.days, args.follow_days) + 30))
+        # One person behind several addresses (relay_people.py): link them on evidence, then read "Alex wrote to them" and
+        # "they wrote in" per person, so answering one address settles their other threads.
+        inbound = [{"id": m["id"], "from_email": m.get("from_email"), "text": m.get("text") or clean_text(m.get("body_html"), m.get("body_text") or m.get("body_preview"))}
+                   for th in threads.values() for m in real_messages(th["messages"]) if m["direction"] == "inbound"]
+        linked = relay_people.link_people(cur, owner_id, inbound, apply=args.apply)
+        last_to, last_from, last_new_to = (relay_people.fold(x, linked["people"]) for x in (last_to, last_from, last_new_to))
         counterparts = set()
         for th in threads.values():
             for m in th["messages"]:
@@ -1418,6 +1427,7 @@ def main(argv: list[str] | None = None) -> int:
             "new": sum(1 for o in ops if o["op"] == "insert"),
             "updated": sum(1 for o in ops if o["op"] == "update" and o["kind"] in ("update", "content", "reopen")),
             "reopened": sum(1 for o in ops if o.get("kind") == "reopen"),
+            "people_linked": linked["links"], "people_suggested": linked["suggestions"],
             "done": sum(1 for o in ops if o.get("kind") == "done"),
             "adopted": sum(1 for o in ops if o.get("kind") == "adopt"),
             "llm_calls": llm_calls, "reply_checks": reply_checks, "summaries_pending": sum(1 for j in jobs if not j["row"]["summarised"]),

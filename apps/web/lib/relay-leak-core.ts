@@ -220,12 +220,12 @@ export type FactsInput = {
 const lower = (email: string | null | undefined) => (email ?? "").trim().toLowerCase() || null;
 
 /** Who an email goes to: what it was saved as, else the reply follows the thread's side, else its address decides. */
-export function draftSide(d: { toKind: Side | null; role: "primary" | "follow"; to: string[] }, side: Side, known: { suppliers: string[]; buyer: string | null }): Side {
+export function draftSide(d: { toKind: Side | null; role: "primary" | "follow"; to: string[] }, side: Side, known: { suppliers: string[]; buyer: string | null; buyerAlso?: string[] }): Side {
   if (d.toKind) return d.toKind;
   if (d.role === "primary") return side;
   const to = d.to.map((a) => a.trim().toLowerCase());
   if (to.some((a) => known.suppliers.includes(a))) return "supplier";
-  if (known.buyer && to.includes(known.buyer)) return "buyer";
+  if ([known.buyer, ...(known.buyerAlso ?? [])].some((b) => !!b && to.includes(b))) return "buyer";
   return "other";
 }
 

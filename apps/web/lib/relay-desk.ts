@@ -23,6 +23,7 @@ import { guardDrafts, threadSides, type GuardDraft } from "./relay-leak";
 import { leaks, leakSentence } from "./relay-leak-core";
 import { findThreads, knownCosts, lastWritten, linkedThread, relatedThreads } from "./relay-linked";
 import { costClashes, sameMailbox } from "./relay-linked-core";
+import { addressesOf } from "./relay-people";
 import { sendAtProblem } from "./relay-send-time";
 import { hasPriceMarker, type ToKind } from "./relay-talk-core";
 import { addTurn, draftRows, guardOf, isSent, type TalkRow } from "./relay-talk";
@@ -205,12 +206,14 @@ export async function deskState(item: RelayItem, ownerId: string, asOf?: string)
   };
 }
 
-/** The same person's other emails still waiting on Alex (open, or drafted and unsent), on other threads, newest first. */
+/** The same person's other emails still waiting on Alex (open, or drafted and unsent), on other threads and from any of
+ * their addresses, newest first. */
 async function otherEmails(item: RelayItem, ownerId: string, asOf?: string): Promise<NonNullable<DeskState["others"]>> {
-  if (!item.counterpart_email) return [];
+  const addresses = await addressesOf(ownerId, item.counterpart_email);
+  if (!addresses.length) return [];
   const rows = await queryPg<{ id: string; last_message: RelayItem["last_message"]; headline: string }>(
     `select id, last_message, headline from relay_item where owner_id = $1::uuid and id <> $2 and status in ('open', 'review')
-       and lower(counterpart_email) = lower($3) order by updated_at desc limit 5`, [ownerId, item.id, item.counterpart_email]);
+       and lower(counterpart_email) = any($3) order by updated_at desc limit 5`, [ownerId, item.id, addresses]);
   // In a replay only emails that had arrived by then count (an item's newest email may be later; then it is left out).
   return rows.filter((r) => r.last_message?.direction === "inbound" && (!asOf || (r.last_message?.at ?? "") <= asOf)).map((r) => ({
     item_id: r.id, subject: r.headline, at: r.last_message?.at ?? null, text: stripQuoted(r.last_message?.text ?? "").slice(0, 3000),

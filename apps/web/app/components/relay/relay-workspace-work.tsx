@@ -17,6 +17,7 @@ import { AttachmentStrip } from "@/app/components/crm/inbox/attachment-strip";
 import { api, cx, failureText, firstName, firstOf, statusOf } from "./relay-ui";
 import { DraftSheet, type SheetActions } from "./relay-workspace-draft";
 import { ListingsCard } from "./relay-listings-card";
+import { PeopleLine } from "./relay-people";
 import { RelayChat } from "./relay-workspace-chat";
 import { SnoozeMenu } from "./relay-snooze";
 import w from "./relay-workspace.module.css";
@@ -477,6 +478,7 @@ export function Work({ itemId, name, waited, waitingSince, item, job, reviewIds,
               </button>
             )}
           </div>
+          <PeopleLine itemId={itemId} onError={say} />
         </section>
 
         {msg && (

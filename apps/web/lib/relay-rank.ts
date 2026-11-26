@@ -3,6 +3,7 @@ import { queryPg } from "./postgres";
 import { mailboxScopeSql } from "./mail-scope";
 import { listRelayItems, relayCounts, type RelayCounts, type RelayItem } from "./relay";
 import { isPersonalDomain } from "./relay-identity";
+import { personKeys } from "./relay-people";
 import { rankItems, type RankBand, type RankItem, type WaitingRow } from "./relay-rank-core";
 
 export type { RankBand, WaitingRow } from "./relay-rank-core";
@@ -92,8 +93,8 @@ export async function rankInputs(ownerId: string, items: RankSource[]): Promise<
   if (!items.length) return [];
   const emails = [...new Set(items.map(emailOf).filter(Boolean))];
   const domains = [...new Set(emails.map((e) => e.split("@")[1] ?? "").filter((d) => d && !isPersonalDomain(d) && d !== "rebattery.io"))];
-  const [facts, senders, written] = await Promise.all([
-    itemFacts(ownerId, items.map((i) => i.id)), senderFacts(ownerId, emails, domains), writtenTo(emails, domains),
+  const [facts, senders, written, people] = await Promise.all([
+    itemFacts(ownerId, items.map((i) => i.id)), senderFacts(ownerId, emails, domains), writtenTo(emails, domains), personKeys(ownerId, emails),
   ]);
   const factOf = new Map(facts.map((f) => [f.id, f]));
   const senderOf = new Map(senders.map((s) => [s.email, s]));
@@ -109,6 +110,7 @@ export async function rankInputs(ownerId: string, items: RankSource[]): Promise<
       tab: i.tab, priority: i.priority, headline: i.headline, waitingSince: iso(i.waiting_since), overdueSince: iso(i.overdue_since), lastAt: iso(i.last_message?.at) ?? iso(i.waiting_since),
       text: i.last_message?.direction === "inbound" ? i.last_message.text : "",
       personIds: [s?.person_id, ...(s?.merged_into ?? [])].filter((p): p is string => !!p),
+      personKey: people.get(email) ?? null,
       companyId: s?.company_id ?? null,
       personal: !domain || isPersonalDomain(domain),
       deal: f?.deal_status ? { live: LIVE.has(f.deal_status) && !f.deal_held, value: f.deal_value, quantity: f.deal_quantity } : null,

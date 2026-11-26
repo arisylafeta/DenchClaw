@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leaks, leakSentence, moneyMentions, readNumber, type LeakFacts } from "./relay-leak-core";
+import { draftSide, leaks, leakSentence, moneyMentions, readNumber, type LeakFacts } from "./relay-leak-core";
 
 const FACTS: LeakFacts = {
   suppliers: [
@@ -124,5 +124,14 @@ describe("lone words", () => {
   it("never takes an everyday word for a company (found in Relay's sent emails)", () => {
     expect(found("We supply surplus and second-life batteries globally, so it'd be great to know.")).toEqual([]);
     expect(found("We bought from Surplus Autos last year.")).toEqual(["Surplus Autos"]);
+  });
+});
+
+describe("draftSide", () => {
+  it("counts an email to the buyer's other address as to the buyer", () => {
+    const known = { suppliers: ["s@supplier.com"], buyer: "chris@a.com", buyerAlso: ["eco@b.com"] };
+    expect(draftSide({ toKind: null, role: "follow", to: ["ECO@b.com"] }, "buyer", known)).toBe("buyer");
+    expect(draftSide({ toKind: null, role: "follow", to: ["x@c.com"] }, "buyer", known)).toBe("other");
+    expect(draftSide({ toKind: null, role: "follow", to: ["s@supplier.com"] }, "buyer", known)).toBe("supplier");
   });
 });

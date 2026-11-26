@@ -4,6 +4,7 @@ import { identitySignatures, splitCopy } from "./mail-draft-actions";
 import { stripQuoted } from "./relay-context-core";
 import { mailbox, mailboxSql, newestSlugs, stockTags, threadScore, type KnownCost } from "./relay-linked-core";
 import { queryPg } from "./postgres";
+import { addressesOf } from "./relay-people";
 
 /**
  * Emails to the other side of a deal, the reading part: the threads Alex has with the people an email depends on (the
@@ -115,14 +116,16 @@ export async function lastWritten(item: Pick<Item, "mail_thread_id">): Promise<s
  * in play. The thread about the same thing first. Empty when nobody is known.
  */
 export async function relatedThreads(item: Item, ownerId: string, limit = 4, asOf?: string): Promise<LinkedThread[]> {
-  const [{ rows, asked }, sent] = await Promise.all([
+  const [{ rows, asked }, sent, self] = await Promise.all([
     stockInPlay(item),
     queryPg<{ a: string }>(
       `select distinct lower(a) as a from relay_draft d join mail_message m on m.id = d.mail_message_id, unnest(coalesce(m.to_emails, '{}')) a
         where (d.item_id = $1 and d.role = 'follow' or d.linked_item_id = $1) and d.state <> 'skipped' and coalesce(d.to_kind, 'supplier') <> 'buyer'`, [item.id]),
+    addressesOf(ownerId, item.counterpart_email),
   ]);
-  const own = item.counterpart_email ? mailbox(item.counterpart_email) : "";
-  const people = [...new Set([...sent.map((s) => s.a), ...rows.map((r) => r.person_email ?? "")].filter((a) => a.includes("@") && !a.endsWith("@rebattery.io")).map(mailbox))].filter((m) => m !== own);
+  // Their own other addresses are the same person, not someone the email depends on.
+  const own = new Set(self.map(mailbox));
+  const people = [...new Set([...sent.map((s) => s.a), ...rows.map((r) => r.person_email ?? "")].filter((a) => a.includes("@") && !a.endsWith("@rebattery.io")).map(mailbox))].filter((m) => !own.has(m));
   if (!people.length) return [];
   const threads = await readThreads(`i.owner_id = $1::uuid and i.id <> $2 and ${mailboxSql("i.counterpart_email")} = any($3) and (i.status <> 'done' or i.updated_at > now() - interval '45 days')`, [ownerId, item.id, people], 20, asOf);
   const about = [...asked, ...rows.map((r) => `${r.title} ${r.make ?? ""} ${r.model ?? ""} ${r.supplier_ref?.split(":")[1] ?? ""}`)].join("\n");

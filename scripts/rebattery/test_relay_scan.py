@@ -426,7 +426,7 @@ def test_plan_clears_user_tab_on_new_message():
 
 TEST_DB = os.environ.get("RELAY_TEST_DB", "stock_test_9e426f3f65c340ea8fbd892fd0fabf84")
 SCHEMA = "relay_scan_t"
-MIGRATIONS = [Path(__file__).resolve().parents[2] / f"apps/web/lib/crm-postgres/migrations/{name}" for name in ("089_relay.sql", "098_relay_sticky_fresh.sql", "099_relay_voice.sql", "100_relay_learning.sql", "136_relay_item_overdue.sql")]
+MIGRATIONS = [Path(__file__).resolve().parents[2] / f"apps/web/lib/crm-postgres/migrations/{name}" for name in ("089_relay.sql", "098_relay_sticky_fresh.sql", "099_relay_voice.sql", "100_relay_learning.sql", "136_relay_item_overdue.sql", "137_relay_people.sql")]
 TABLES = ["crm_users", "mail_thread", "mail_message", "work_tasks", "crm_bulk_listings", "crm_bulk_thread_links", "crm_people", "crm_companies"]
 
 
@@ -821,3 +821,34 @@ def test_an_email_the_scan_closed_for_age_reopens_when_overdue_but_never_one_ale
     assert ops and ops[0]["kind"] == "reopen" and ops[0]["values"]["status"] == "open"
     assert not rs.plan_writes([late], {"t1": item(status="done", done_reason="user_done")}, NOW, {"t1"})
     assert not rs.plan_writes([row(new_message=False)], {"t1": item(status="done", done_reason="expired")}, NOW, {"t1"})
+
+
+def test_people_links_saved_and_a_no_is_kept(scratch):
+    import psycopg2, psycopg2.extras
+    import relay_people as rp
+    owner = "7b98322f-e439-4000-97ce-cce1c36a0d2a"
+    conn = psycopg2.connect(f"host=/var/run/postgresql dbname={TEST_DB} options=-csearch_path={SCHEMA},public")
+    try:
+        _people_links(conn, owner, rp)
+    finally:
+        conn.rollback()
+        conn.close()
+
+
+def _people_links(conn, owner, rp):
+    import psycopg2.extras
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("insert into crm_users (id, email, password_hash) values (%s, 'alex@rebattery.io', 'x')", (owner,))
+    said = [{"id": "m1", "from_email": "eco@example.org", "text": "This is also me, my other email is chris@example.net.\n\nChris"}]
+    first = rp.link_people(cur, owner, said, apply=True)
+    assert first["links"] == 2  # addresses saved
+    cur.execute("select address, person_key, how from relay_person_address order by address")
+    rows = cur.fetchall()
+    assert [r["address"] for r in rows] == ["chris@example.net", "eco@example.org"] and rows[0]["person_key"] == rows[1]["person_key"]
+    assert first["people"]["eco@example.org"] == first["people"]["chris@example.net"]
+    # Alex unlinks (what the CRM's Unlink writes): the next scan finds the same words and leaves them apart.
+    cur.execute("delete from relay_person_address where address = 'chris@example.net'")
+    cur.execute("insert into relay_person_suggestion (owner_id, address, other_address, why, status) values (%s, 'chris@example.net', 'eco@example.org', 'unlinked', 'no')", (owner,))
+    again = rp.link_people(cur, owner, said, apply=True)
+    cur.execute("select address from relay_person_address")
+    assert again["links"] == 0 and [r["address"] for r in cur.fetchall()] == ["eco@example.org"]

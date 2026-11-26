@@ -33,6 +33,8 @@ export type RankItem = {
   text: string;
   /** The CRM people behind the address: its own record and any record it was merged into. */
   personIds: string[];
+  /** Relay's own person for the address (relay_person_address): their other addresses share it. */
+  personKey?: string | null;
   companyId: string | null;
   /** The address is on a personal or ISP domain, so it says nothing about a company. */
   personal: boolean;
@@ -212,8 +214,8 @@ export function matchName(name: string | null | undefined, email?: string | null
 }
 
 /**
- * Groups items that come from the same person. Sure links: the same address, or the same CRM person (including a record
- * merged into another). A weaker link, the same full name, joins two groups only when they hold at most one company
+ * Groups items that come from the same person. Sure links: the same address, the same CRM person (including a record
+ * merged into another), or the same Relay person (addresses they told us are theirs, or Alex linked). A weaker link, the same full name, joins two groups only when they hold at most one company
  * between them: so a gmail address and a work address with the same name join, while two people of the same name at
  * two companies stay apart. Different names never join on a shared company, so two colleagues stay two rows.
  * Groups keep the input order of their first item.
@@ -239,6 +241,7 @@ export function mergeByPerson(items: RankItem[]): RankItem[][] {
     const email = (it.email ?? "").toLowerCase().trim();
     if (email) link(`email:${email}`, i, true);
     for (const p of it.personIds) link(`person:${p}`, i, true);
+    if (it.personKey) link(`relay:${it.personKey}`, i, true);
   });
   // Name links run after the sure ones, so each group's companies are known before a name may join it.
   items.forEach((it, i) => {
