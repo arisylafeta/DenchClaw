@@ -287,10 +287,12 @@ export function buildWindow(
     );
     const row = rows.get(entry)!;
     row.chats += 1;
-    lanes[laneOf(session, leads.some((lead) => lead.channel_mode === "recycling"))] += 1;
+    const lane = laneOf(session, leads.some((lead) => lead.channel_mode === "recycling"));
+    lanes[lane] += 1;
 
     const messages = messagesBySession.get(session.id) ?? [];
-    if (messages.some((message) => message.role === "assistant" && showsPrice(message.body))) {
+    // Buyer chats quote marketplace prices; only a seller-lane valuation counts here.
+    if (lane !== "buyer" && messages.some((message) => message.role === "assistant" && showsPrice(message.body))) {
       row.priceShown += 1;
     }
     if (isReachable(session, leads)) {

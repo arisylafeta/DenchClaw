@@ -68,6 +68,20 @@ describe("lanes", () => {
     expect(laneOf(session({ id: "4", source_surface: "buy-batteries" }), false)).toBe("buyer");
     expect(laneOf(session({ id: "5" }), true)).toBe("recycling");
   });
+
+  it("does not count marketplace stock prices as a seller valuation", () => {
+    const stats = buildJulesStats({
+      now: NOW,
+      sessions: [session({ id: "b1", source_surface: "buy-batteries", account_id: "acct-1" })],
+      leads: [],
+      events: [],
+      messages: [{ session_id: "b1", role: "assistant", created_at: iso(0, -1), body: "US$350 buy-now, 1 available" }],
+      turnErrors: [],
+      mail: [],
+    });
+    expect(stats.current.totals.chats).toBe(1);
+    expect(stats.current.totals.priceShown).toBe(0);
+  });
 });
 
 describe("reply classification", () => {

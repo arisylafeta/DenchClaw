@@ -15,8 +15,13 @@ import {
   type RawTurnError,
 } from "./metrics";
 
-/** Two weeks of production activity, read once per page view. */
+/** Funnel, health and follow-up windows cover two weeks. */
 const WINDOW_DAYS = 14;
+/**
+ * Contacts are older than the funnel: "waiting on us" looks at every recent sales lead,
+ * the way scripts/jules_waiting_on_us.py does, not only last fortnight's chats.
+ */
+const CONTACT_DAYS = 120;
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 20;
 
@@ -110,17 +115,18 @@ export async function loadJulesStats(): Promise<JulesStats> {
 
   const now = new Date();
   const since = new Date(now.getTime() - WINDOW_DAYS * 24 * 3600 * 1000).toISOString();
+  const contactsSince = new Date(now.getTime() - CONTACT_DAYS * 24 * 3600 * 1000).toISOString();
 
   const [sessions, leads, events, messages, turnErrors] = await Promise.all([
     fetchAll<RawSession>(
       "jules_sessions",
       "id, source_surface, created_at, contact_email, account_id, created_by_user_id, owner_auth_user_id",
-      (builder) => builder.gte("created_at", since).order("created_at", { ascending: true }),
+      (builder) => builder.gte("created_at", contactsSince).order("created_at", { ascending: true }),
     ),
     fetchAll<RawLead>(
       "intake_leads",
       "conversation_id, channel_mode, stage, contact_email, ready_to_publish, listing_status, first_seen_at, discarded_at",
-      (builder) => builder.or(`first_seen_at.gte.${since},discarded_at.gte.${since}`),
+      (builder) => builder.or(`first_seen_at.gte.${contactsSince},discarded_at.gte.${contactsSince}`),
     ),
     fetchAll<RawEvent>(
       "intake_lead_events",
