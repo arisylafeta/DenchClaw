@@ -31,8 +31,8 @@ function session(over: Partial<RawSession> & { id: string }): RawSession {
   };
 }
 
-function message(sessionId: string, role: "user" | "assistant", body: string, minutesAgo = 0): RawMessage {
-  return { session_id: sessionId, role, created_at: iso(0, -minutesAgo), body };
+function message(sessionId: string, role: "user" | "assistant", body: string, createdAt = iso(0)): RawMessage {
+  return { session_id: sessionId, role, created_at: createdAt, body };
 }
 
 const events: RawEvent[] = [
@@ -41,6 +41,8 @@ const events: RawEvent[] = [
   { conversation_id: "c", kind: "follow_up_sent", at: iso(4) },
   { conversation_id: "d", kind: "seller_email_reply", at: iso(5) },
   { conversation_id: "e", kind: "team_email_sent", at: iso(9) },
+  // internal test address: never counted, like its chat
+  { conversation_id: "s3", kind: "team_email_sent", at: iso(2) },
 ];
 
 describe("entry attribution", () => {
@@ -163,17 +165,20 @@ describe("buildJulesStats", () => {
   ];
 
   const messages: RawMessage[] = [
-    message("s1", "user", "I'd like to sell 40 Leaf packs"),
-    { session_id: "s1", role: "assistant", created_at: iso(1, 1), body: "Those are worth about £4,000." },
-    message("s2", "user", "I have scrap to recycle"),
-    { session_id: "s5", role: "assistant", created_at: iso(4, 0.5), body: "I've started your draft listing." },
-    message("s5", "user", "here is the label", 0.25),
-    { session_id: "s6", role: "assistant", created_at: iso(9, 2), body: "Hello" },
+    message("s1", "user", "I'd like to sell 40 Leaf packs", iso(1)),
+    message("s1", "assistant", "Those are worth about £4,000.", iso(1, 1)),
+    message("s2", "user", "I have scrap to recycle", iso(2)),
+    message("s5", "user", "here is the label", iso(4)),
+    message("s5", "assistant", "I've started your draft listing.", iso(4, 0.5)),
+    message("s6", "user", "hello", iso(9)),
+    message("s6", "assistant", "Hello", iso(9, 2)),
   ];
 
   const turnErrors: RawTurnError[] = [
     { session_id: "s1", emitted_at: iso(1) },
     { session_id: "s1", emitted_at: iso(10) },
+    // smoke-test chat: never counted
+    { session_id: "s4", emitted_at: iso(3) },
   ];
 
   const mail = [
@@ -200,7 +205,7 @@ describe("buildJulesStats", () => {
     expect(stats.previous.funnel[0]).toMatchObject({ entry: "home", chats: 1, emailLeft: 0 });
   });
 
-  it("counts follow-up emails and replies in each window", () => {
+  it("counts follow-up emails and replies in each window, ignoring staff and smoke-test chats", () => {
     expect(stats.current.followUps).toEqual({ teamEmails: 2, autoFollowUps: 1, sellerReplies: 1 });
     expect(stats.previous.followUps).toEqual({ teamEmails: 1, autoFollowUps: 0, sellerReplies: 0 });
   });
@@ -209,7 +214,7 @@ describe("buildJulesStats", () => {
     expect(stats.current.lanes).toEqual({ sales: 2, recycling: 1, buyer: 0 });
   });
 
-  it("reports health: no reply, placeholder replies and failed turns", () => {
+  it("reports health: no reply, placeholder replies and failed turns, ignoring excluded chats", () => {
     expect(stats.current.health.noReply).toBe(1);
     expect(stats.current.health.placeholderReplies).toBe(1);
     expect(stats.current.health.failedTurns).toBe(1);
@@ -257,5 +262,47 @@ describe("waiting on us", () => {
       mail: [],
     });
     expect(emails).toEqual(["seller1@example.test"]);
+  });
+});
+
+describe("reply timing", () => {
+  it("measures from the seller's first message and ignores chats where nobody typed", () => {
+    const stats = buildJulesStats({
+      now: NOW,
+      sessions: [
+        session({ id: "greeted", created_at: iso(1) }),
+        session({ id: "silent", created_at: iso(1) }),
+      ],
+      leads: [],
+      events: [],
+      messages: [
+        // a greeting with no seller message is not a chat waiting on a reply
+        message("greeted", "assistant", "Hello, what are you selling?", iso(1)),
+        message("silent", "user", "twenty Leaf packs", iso(1)),
+      ],
+      turnErrors: [],
+      mail: [],
+    });
+    expect(stats.current.health.noReply).toBe(1);
+    expect(stats.current.health.firstReplySeconds.answered).toBe(0);
+  });
+
+  it("treats a placeholder with a curly apostrophe as the same reply", () => {
+    expect(isPlaceholderReply("I\u2019ve started your draft listing.")).toBe(true);
+  });
+
+  it("counts a chat that starts exactly at the window edge and not one at its end", () => {
+    const from = new Date(NOW.getTime() - 7 * 86_400_000);
+    const stats = buildJulesStats({
+      now: NOW,
+      sessions: [session({ id: "edge", created_at: from.toISOString() }), session({ id: "end", created_at: NOW.toISOString() })],
+      leads: [],
+      events: [],
+      messages: [message("edge", "user", "hi", from.toISOString())],
+      turnErrors: [],
+      mail: [],
+    });
+    expect(stats.current.totals.chats).toBe(1);
+    expect(stats.previous.totals.chats).toBe(0);
   });
 });

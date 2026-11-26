@@ -1,5 +1,3 @@
-"use client";
-
 import { CrmListShell } from "@/app/components/crm/crm-list-shell";
 import type { FunnelRow, HealthStats, JulesStats, WindowStats } from "./metrics";
 
@@ -156,7 +154,7 @@ function Health({ health, previous }: { health: HealthStats; previous: HealthSta
         label="Waiting on us"
         value={health.waitingOnUs}
         tone={health.waitingOnUs > 0 ? "warning" : "muted"}
-        note="Sales leads whose last email is from the seller"
+        note="Sales leads whose last email is the seller’s, with no reply from us after it"
       />
     </div>
   );
@@ -199,7 +197,7 @@ export function JulesStatsView({ stats }: { stats: JulesStats }) {
             label="Price shown"
             value={current.totals.priceShown}
             previous={previous.totals.priceShown}
-            note="Reply quoting an amount"
+            note="Text match for an amount in a seller chat"
           />
         </div>
 

@@ -153,7 +153,7 @@ export function showsPrice(body: string | null): boolean {
 }
 
 export function isPlaceholderReply(body: string | null): boolean {
-  const text = (body ?? "").trim().replace(/\s+/g, " ");
+  const text = (body ?? "").replace(/\u2019/g, "'").trim().replace(/\s+/g, " ");
   return text.length === 0 || text === STUB_REPLY;
 }
 
@@ -187,10 +187,7 @@ function isReachable(session: RawSession, leads: RawLead[]): boolean {
   if (emailOf(session, leads)) {
     return true;
   }
-  if (session.account_id || session.owner_auth_user_id) {
-    return true;
-  }
-  return !!(session.created_by_user_id && session.contact_email);
+  return Boolean(session.account_id || session.owner_auth_user_id);
 }
 
 function isReady(leads: RawLead[]): boolean {
@@ -273,7 +270,13 @@ export function buildWindow(
 
   const lanes = { sales: 0, recycling: 0, buyer: 0 };
   const sessionIds = new Set<string>();
-  const sessionLeadEmails: string[] = [];
+  // Staff, QA and smoke-test chats are dropped everywhere, including their events.
+  const excludedSessions = new Set<string>();
+  for (const session of input.sessions) {
+    if (!isIncluded(session, leadsByConversation.get(session.id) ?? [])) {
+      excludedSessions.add(session.id);
+    }
+  }
 
   for (const session of sessions) {
     const leads = leadsByConversation.get(session.id) ?? [];
@@ -305,10 +308,6 @@ export function buildWindow(
       row.published += 1;
     }
 
-    const email = emailOf(session, leads);
-    if (email) {
-      sessionLeadEmails.push(email);
-    }
   }
 
   const funnel = ENTRY_ORDER.map((key) => rows.get(key)!).filter((row) => row.chats > 0);
@@ -330,6 +329,9 @@ export function buildWindow(
     if (!inWindow(event.at)) {
       continue;
     }
+    if (event.conversation_id && excludedSessions.has(event.conversation_id)) {
+      continue;
+    }
     if (event.kind === "team_email_sent") {
       teamEmails += 1;
     } else if (event.kind === "follow_up_sent") {
@@ -349,15 +351,23 @@ export function buildWindow(
     const messages = (messagesBySession.get(session.id) ?? []).toSorted(
       (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
-    const firstAssistant = messages.find((message) => message.role === "assistant");
-    if (!firstAssistant) {
+    const firstUser = messages.find((message) => message.role === "user");
+    if (!firstUser) {
+      continue;
+    }
+    const firstReply = messages.find(
+      (message) =>
+        message.role === "assistant" &&
+        new Date(message.created_at).getTime() >= new Date(firstUser.created_at).getTime(),
+    );
+    if (!firstReply) {
       noReply += 1;
       continue;
     }
-    const started = new Date(session.created_at).getTime();
-    const replied = new Date(firstAssistant.created_at).getTime();
-    if (Number.isFinite(started) && Number.isFinite(replied) && replied >= started) {
-      firstReplySeconds.push((replied - started) / 1000);
+    const asked = new Date(firstUser.created_at).getTime();
+    const replied = new Date(firstReply.created_at).getTime();
+    if (Number.isFinite(asked) && Number.isFinite(replied) && replied >= asked) {
+      firstReplySeconds.push((replied - asked) / 1000);
     }
   }
   for (const message of input.messages) {
@@ -372,7 +382,9 @@ export function buildWindow(
     }
   }
 
-  const failedTurns = input.turnErrors.filter((error) => inWindow(error.emitted_at)).length;
+  const failedTurns = input.turnErrors.filter(
+    (error) => inWindow(error.emitted_at) && !(error.session_id && excludedSessions.has(error.session_id)),
+  ).length;
   const sorted = firstReplySeconds.toSorted((a, b) => a - b);
 
   return {

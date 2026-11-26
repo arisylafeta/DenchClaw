@@ -47,19 +47,32 @@ type UntypedClient = { from(table: string): { select(columns: string): SelectBui
 type MailRow = { email: string | null; last_inbound_at: string | null; last_outbound_at: string | null };
 
 /**
- * Last inbound and last outbound mail per address. Same rule as
- * scripts/jules_waiting_on_us.py, in one query for every lead address.
+ * Last inbound and last outbound mail per lead address, in one pass over the mail log.
+ * A lead is waiting when its newest inbound mail is later than the newest mail we sent it.
+ * This is the plain version of scripts/jules_waiting_on_us.py, which also drops notification
+ * subjects, other agents' threads and mail already answered by hand, so the page count can be
+ * higher than that script's queue.
  */
 export const WAITING_SQL = `
-with wanted as (select distinct lower(email) as email from unnest($1::text[]) as email)
-select w.email,
-  (select max(coalesce(m.sent_at, m.created_at)) from mail_message m
-    where m.direction = 'inbound' and lower(m.from_email) = w.email) as last_inbound_at,
-  (select max(coalesce(m.sent_at, m.created_at)) from mail_message m
-    where m.direction = 'outbound' and m.state in ('accepted', 'sending', 'approved')
-      and (lower(m.recipient_email) = w.email
-        or exists (select 1 from unnest(m.to_emails) as to_addr where lower(to_addr) = w.email))) as last_outbound_at
+with wanted as (select distinct lower(email) as email from unnest($1::text[]) as addresses(email)),
+received as (
+  select lower(m.from_email) as email, max(coalesce(m.sent_at, m.created_at)) as last_inbound_at
+  from mail_message m
+  where m.direction = 'inbound' and lower(m.from_email) = any($1::text[])
+  group by 1
+),
+sent as (
+  select lower(recipient.email) as email, max(coalesce(m.sent_at, m.created_at)) as last_outbound_at
+  from mail_message m
+  cross join lateral unnest(array[m.recipient_email] || m.to_emails) as recipient(email)
+  where m.direction = 'outbound' and m.state in ('accepted', 'sending', 'approved')
+    and lower(recipient.email) = any($1::text[])
+  group by 1
+)
+select w.email, r.last_inbound_at, s.last_outbound_at
 from wanted w
+left join received r on r.email = w.email
+left join sent s on s.email = w.email
 `;
 
 export type QueryRows = (sql: string, params: readonly unknown[]) => Promise<Record<string, unknown>[]>;
@@ -100,16 +113,16 @@ async function fetchAll<T>(
     const batch = (data ?? []) as T[];
     rows.push(...batch);
     if (batch.length < PAGE_SIZE) {
-      break;
+      return rows;
     }
   }
-  return rows;
+  throw new Error("Jules activity is larger than this page can read");
 }
 
 export async function loadJulesStats(): Promise<JulesStats> {
   noStore();
   const user = await currentUser();
-  if (!user || !ALLOWED_EMAILS.has(user.email)) {
+  if (!user || !ALLOWED_EMAILS.has(user.email.toLowerCase())) {
     throw new Error("Unauthorized");
   }
 
@@ -121,12 +134,19 @@ export async function loadJulesStats(): Promise<JulesStats> {
     fetchAll<RawSession>(
       "jules_sessions",
       "id, source_surface, created_at, contact_email, account_id, created_by_user_id, owner_auth_user_id",
-      (builder) => builder.gte("created_at", contactsSince).order("created_at", { ascending: true }),
+      (builder) =>
+        builder
+          .gte("created_at", contactsSince)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true }),
     ),
     fetchAll<RawLead>(
       "intake_leads",
       "conversation_id, channel_mode, stage, contact_email, ready_to_publish, listing_status, first_seen_at, discarded_at",
-      (builder) => builder.or(`first_seen_at.gte.${contactsSince},discarded_at.gte.${contactsSince}`),
+      (builder) =>
+        builder
+          .or(`first_seen_at.gte.${contactsSince},discarded_at.gte.${contactsSince}`)
+          .order("id", { ascending: true }),
     ),
     fetchAll<RawEvent>(
       "intake_lead_events",
@@ -135,17 +155,26 @@ export async function loadJulesStats(): Promise<JulesStats> {
         builder
           .in("kind", ["team_email_sent", "follow_up_sent", "seller_email_reply"])
           .gte("at", since)
-          .order("at", { ascending: true }),
+          .order("at", { ascending: true })
+          .order("id", { ascending: true }),
     ),
     fetchAll<RawMessage>(
       "jules_messages",
       "session_id, role, created_at, body",
-      (builder) => builder.gte("created_at", since).order("created_at", { ascending: true }),
+      (builder) =>
+        builder
+          .gte("created_at", since)
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true }),
     ),
     fetchAll<RawTurnError>(
       "jules_events",
       "session_id, emitted_at",
-      (builder) => builder.eq("event_type", "turn.failed").gte("emitted_at", since),
+      (builder) =>
+        builder
+          .eq("event_type", "turn.failed")
+          .gte("emitted_at", since)
+          .order("id", { ascending: true }),
     ),
   ]);
 
