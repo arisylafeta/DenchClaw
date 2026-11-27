@@ -8,6 +8,7 @@ import {
   buildJulesStats,
   leadEmails,
   type JulesStats,
+  type MailActivity,
   type RawEvent,
   type RawLead,
   type RawMessage,
@@ -44,35 +45,71 @@ interface SelectBuilder extends PromiseLike<QueryResult> {
 
 type UntypedClient = { from(table: string): { select(columns: string): SelectBuilder } };
 
-type MailRow = { email: string | null; last_inbound_at: string | null; last_outbound_at: string | null };
+type MailRow = {
+  email: string | null;
+  last_inbound_at: string | null;
+  last_subject: string | null;
+  last_thread: string | null;
+  last_outbound_at: string | null;
+  first_outbound_at: string | null;
+  hand_answered_at: string | null;
+  thread_owner: string | null;
+};
 
 /**
- * Last inbound and last outbound mail per lead address, in one pass over the mail log.
- * A lead is waiting when its newest inbound mail is later than the newest mail we sent it.
- * This is the plain version of scripts/jules_waiting_on_us.py, which also drops notification
- * subjects, other agents' threads and mail already answered by hand, so the page count can be
- * higher than that script's queue.
+ * Everything the "waiting on us" rule needs per lead address, in the same shape
+ * `scripts/jules_waiting_on_us.py` reads: the newest inbound mail with its subject and
+ * thread, our newest and first mail, any founder mailbox reply, and who owns the thread.
+ * The rules themselves live in `metrics.countWaitingOnUs`, so both sides of the count
+ * (whether a person is waiting, and why not) are testable.
  */
 export const WAITING_SQL = `
 with wanted as (select distinct lower(email) as email from unnest($1::text[]) as addresses(email)),
 received as (
-  select lower(m.from_email) as email, max(coalesce(m.sent_at, m.created_at)) as last_inbound_at
+  select lower(m.from_email) as email,
+    max(coalesce(m.sent_at, m.created_at)) as last_inbound_at,
+    (array_agg(coalesce(m.subject, '') order by coalesce(m.sent_at, m.created_at) desc))[1] as last_subject,
+    (array_agg(coalesce(m.thread_id, '') order by coalesce(m.sent_at, m.created_at) desc))[1] as last_thread
   from mail_message m
   where m.direction = 'inbound' and lower(m.from_email) = any($1::text[])
   group by 1
 ),
 sent as (
-  select lower(recipient.email) as email, max(coalesce(m.sent_at, m.created_at)) as last_outbound_at
+  select lower(recipient.email) as email,
+    max(coalesce(m.sent_at, m.created_at)) as last_outbound_at
   from mail_message m
   cross join lateral unnest(array[m.recipient_email] || m.to_emails) as recipient(email)
   where m.direction = 'outbound' and m.state in ('accepted', 'sending', 'approved')
     and lower(recipient.email) = any($1::text[])
   group by 1
+),
+first_out as (
+  -- First contact counts every outbound row, as scripts/jules_waiting_on_us.py does: a draft or
+  -- a failed send still means we had started with the person before their old mail arrived.
+  select lower(recipient.email) as email, min(coalesce(m.sent_at, m.created_at)) as first_outbound_at
+  from mail_message m
+  cross join lateral unnest(array[m.recipient_email] || m.to_emails) as recipient(email)
+  where m.direction = 'outbound' and lower(recipient.email) = any($1::text[])
+  group by 1
+),
+hand as (
+  select lower(recipient.email) as email, max(coalesce(m.sent_at, m.created_at)) as hand_answered_at
+  from mail_message m
+  cross join lateral unnest(array[m.recipient_email] || m.to_emails) as recipient(email)
+  where m.direction = 'outbound' and m.state in ('accepted', 'sending', 'approved')
+    and lower(coalesce(m.from_email, '')) in ('alex@rebattery.io', 'ari@rebattery.io')
+    and lower(recipient.email) = any($1::text[])
+  group by 1
 )
-select w.email, r.last_inbound_at, s.last_outbound_at
+select w.email, r.last_inbound_at, r.last_subject, r.last_thread,
+  s.last_outbound_at, f.first_outbound_at, h.hand_answered_at,
+  nullif(o.profile, '') as thread_owner
 from wanted w
 left join received r on r.email = w.email
 left join sent s on s.email = w.email
+left join first_out f on f.email = w.email
+left join hand h on h.email = w.email
+left join mail_thread_owner o on o.thread_id = nullif(r.last_thread, '')
 `;
 
 export type QueryRows = (sql: string, params: readonly unknown[]) => Promise<Record<string, unknown>[]>;
@@ -80,7 +117,7 @@ export type QueryRows = (sql: string, params: readonly unknown[]) => Promise<Rec
 export async function readMailActivity(
   emails: string[],
   run: QueryRows = queryPg as QueryRows,
-): Promise<{ email: string; lastInboundAt: string | null; lastOutboundAt: string | null }[]> {
+): Promise<MailActivity[]> {
   if (emails.length === 0) {
     return [];
   }
@@ -90,7 +127,11 @@ export async function readMailActivity(
     .map((row) => ({
       email: row.email.toLowerCase(),
       lastInboundAt: row.last_inbound_at ? new Date(row.last_inbound_at).toISOString() : null,
+      lastSubject: row.last_subject ?? null,
       lastOutboundAt: row.last_outbound_at ? new Date(row.last_outbound_at).toISOString() : null,
+      firstOutboundAt: row.first_outbound_at ? new Date(row.first_outbound_at).toISOString() : null,
+      handAnsweredAt: row.hand_answered_at ? new Date(row.hand_answered_at).toISOString() : null,
+      threadOwner: row.thread_owner ?? null,
     }));
 }
 
@@ -135,8 +176,9 @@ export async function loadJulesStats(): Promise<JulesStats> {
       "jules_sessions",
       "id, source_surface, created_at, contact_email, account_id, created_by_user_id, owner_auth_user_id",
       (builder) =>
+        // Every chat, not just the window: first contact and the person's first chat must match
+        // scripts/jules_waiting_on_us.py, which reads all of them. buildWindow filters by date.
         builder
-          .gte("created_at", contactsSince)
           .order("created_at", { ascending: true })
           .order("id", { ascending: true }),
     ),
@@ -153,8 +195,11 @@ export async function loadJulesStats(): Promise<JulesStats> {
       "conversation_id, kind, at",
       (builder) =>
         builder
-          .in("kind", ["team_email_sent", "follow_up_sent", "seller_email_reply"])
-          .gte("at", since)
+          // Funnel emails and replies, the platform's own first-contact emails, and the
+          // app-written `price_shown` rows. One read covers the funnel and "waiting on us".
+          .in("kind", ["team_email_sent", "follow_up_sent", "seller_email_reply", "received_email_sent", "finish_email_sent", "price_shown"])
+          // No date bound: the first-contact kinds must come from the chat's whole history, as in
+          // scripts/jules_waiting_on_us.py. Funnel and price counts filter by window themselves.
           .order("at", { ascending: true })
           .order("id", { ascending: true }),
     ),

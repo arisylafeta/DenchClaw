@@ -108,8 +108,11 @@ describe("jules stats reads", () => {
       "jules_events",
     ]);
     const sessions = seen.find((entry) => entry.table === "jules_sessions")!;
-    expect(sessions.calls).toContainEqual(expect.stringMatching(/^gte created_at /));
+    // All chats, like scripts/jules_waiting_on_us.py: first contact and first chat need the history.
+    expect(sessions.calls).not.toContainEqual(expect.stringMatching(/^gte created_at /));
     expect(sessions.calls).toContainEqual(expect.stringMatching(/^range 0-999$/));
+    const events = seen.find((entry) => entry.table === "intake_lead_events")!;
+    expect(events.calls).not.toContainEqual(expect.stringMatching(/^gte at /));
     // Only read fields; never select * from the platform.
     expect(sessions.calls[0]).toBe(
       "select id, source_surface, created_at, contact_email, account_id, created_by_user_id, owner_auth_user_id",
@@ -142,11 +145,28 @@ describe("jules stats reads", () => {
 describe("mail activity", () => {
   it("maps one row per lead address", async () => {
     queryPg.mockResolvedValue([
-      { email: "A@X.test", last_inbound_at: "2026-11-26T10:00:00Z", last_outbound_at: null },
+      {
+        email: "A@X.test",
+        last_inbound_at: "2026-11-26T10:00:00Z",
+        last_subject: "Re: Nissan Leaf packs",
+        last_thread: "thread-1",
+        last_outbound_at: "2026-11-25T10:00:00Z",
+        first_outbound_at: "2026-11-01T10:00:00Z",
+        hand_answered_at: null,
+        thread_owner: "papajules",
+      },
       { email: null, last_inbound_at: null, last_outbound_at: null },
     ]);
     expect(await readMailActivity(["a@x.test"])).toEqual([
-      { email: "a@x.test", lastInboundAt: "2026-11-26T10:00:00.000Z", lastOutboundAt: null },
+      {
+        email: "a@x.test",
+        lastInboundAt: "2026-11-26T10:00:00.000Z",
+        lastSubject: "Re: Nissan Leaf packs",
+        lastOutboundAt: "2026-11-25T10:00:00.000Z",
+        firstOutboundAt: "2026-11-01T10:00:00.000Z",
+        handAnsweredAt: null,
+        threadOwner: "papajules",
+      },
     ]);
     expect(queryPg).toHaveBeenCalledWith(expect.stringContaining("from mail_message"), [["a@x.test"]]);
   });

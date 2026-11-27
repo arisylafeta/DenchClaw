@@ -227,6 +227,24 @@ describe("buildJulesStats", () => {
     expect(stats.current.health.firstReplySeconds.p90).toBe(57);
   });
 
+  it("counts a price from the recorded event, and from the reply text for older chats", () => {
+    const value = (id: string, extra: { events?: RawEvent[]; messages?: RawMessage[] }) =>
+      buildJulesStats({
+        now: NOW,
+        sessions: [session({ id, contact_email: `${id}@example.test` })],
+        leads: [],
+        events: extra.events ?? [],
+        messages: extra.messages ?? [],
+        turnErrors: [],
+        mail: [],
+      }).current.totals.priceShown;
+    // The app writes this row when the valuation tool returns a range.
+    expect(value("p1", { events: [{ conversation_id: "p1", kind: "price_shown", at: iso(0, -5) }] })).toBe(1);
+    // No event: the currency pattern still keeps pre-event chats in the count.
+    expect(value("p2", { messages: [message("p2", "assistant", "Around £1,200 for the lot.")] })).toBe(1);
+    expect(value("p3", { messages: [message("p3", "assistant", "What condition are they in?")] })).toBe(0);
+  });
+
   it("counts leads whose last email is from the seller", () => {
     expect(stats.current.health.waitingOnUs).toBe(1);
   });
@@ -241,6 +259,45 @@ describe("waiting on us", () => {
       { email: "d@x.test", lastInboundAt: "2026-11-24T10:00:00.000Z", lastOutboundAt: null },
     ];
     expect(countWaitingOnUs(mail, ["a@x.test", "b@x.test", "c@x.test", "d@x.test"])).toBe(2);
+  });
+
+  it("applies the same skips as scripts/jules_waiting_on_us.py", () => {
+    const at = (iso: string) => iso;
+    const mail = [
+      { email: "person@x.test", lastInboundAt: at("2026-11-26T10:00:00.000Z"), lastOutboundAt: at("2026-11-25T10:00:00.000Z") },
+      // Marketplace and site notifications are not a person waiting.
+      { email: "note@x.test", lastInboundAt: at("2026-11-26T10:00:00.000Z"), lastOutboundAt: null, lastSubject: "Re: New message about your listing" },
+      // A thread another agent owns is theirs to answer.
+      { email: "other@x.test", lastInboundAt: at("2026-11-26T10:00:00.000Z"), lastOutboundAt: null, threadOwner: "sorcerer" },
+      // Alex or Ari already answered them by hand at or after their mail.
+      { email: "handled@x.test", lastInboundAt: at("2026-11-26T10:00:00.000Z"), lastOutboundAt: null, handAnsweredAt: at("2026-11-26T12:00:00.000Z") },
+      // Mail older than our first contact with the person is not this lead.
+      { email: "old@x.test", lastInboundAt: at("2026-11-01T10:00:00.000Z"), lastOutboundAt: null },
+      // Mail that predates the person's first chat, with no mail from us at all.
+      { email: "junk@x.test", lastInboundAt: at("2026-08-01T10:00:00.000Z"), lastOutboundAt: null },
+    ];
+    const contact = {
+      platformEmail: new Map([["old@x.test", "2026-11-10T10:00:00.000Z"]]),
+      firstChat: new Map([["junk@x.test", "2026-11-10T10:00:00.000Z"]]),
+    };
+    expect(countWaitingOnUs(mail, [...mail.map((row) => row.email), "junk@x.test"], contact)).toBe(1);
+    // A thread Jules owns and a hand reply older than their mail still count.
+    expect(countWaitingOnUs(
+      [{ email: "ours@x.test", lastInboundAt: at("2026-11-26T10:00:00.000Z"), lastOutboundAt: null, threadOwner: "papajules", handAnsweredAt: at("2026-11-20T10:00:00.000Z") }],
+      ["ours@x.test"],
+    )).toBe(1);
+  });
+
+  it("compares first contact by time, not by the text of the timestamp", () => {
+    // String order would pick the fixed-offset value and place first contact after the mail.
+    const mail = [{
+      email: "offset@x.test",
+      lastInboundAt: "2026-11-09T19:45:00.000Z",
+      lastOutboundAt: null,
+      firstOutboundAt: "2026-11-09T20:00:00.000Z",
+    }];
+    const contact = { platformEmail: new Map([["offset@x.test", "2026-11-10T00:30:00.000+05:00"]]), firstChat: new Map() };
+    expect(countWaitingOnUs(mail, ["offset@x.test"], contact)).toBe(1);
   });
 
   it("ignores addresses that are not sales leads", () => {

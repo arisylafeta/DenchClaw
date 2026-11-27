@@ -48,6 +48,20 @@ export type RawTurnError = {
   emitted_at: string;
 };
 
+export type MailActivity = {
+  email: string;
+  lastInboundAt: string | null;
+  /** Subject of the newest inbound mail: notification subjects are not a person waiting. */
+  lastSubject?: string | null;
+  lastOutboundAt: string | null;
+  /** Our first mail to the address: anything inbound older than this predates the lead. */
+  firstOutboundAt?: string | null;
+  /** Newest reply from a founder mailbox (Alex or Ari answered this person by hand). */
+  handAnsweredAt?: string | null;
+  /** Agent profile that owns the newest inbound thread, when one does. */
+  threadOwner?: string | null;
+};
+
 export type WindowInput = {
   now: Date;
   sessions: RawSession[];
@@ -56,7 +70,7 @@ export type WindowInput = {
   messages: RawMessage[];
   turnErrors: RawTurnError[];
   /** Emails with activity in our mail log: last inbound and last outbound we sent. */
-  mail: { email: string; lastInboundAt: string | null; lastOutboundAt: string | null }[];
+  mail: MailActivity[];
 };
 
 export type FunnelRow = {
@@ -110,6 +124,21 @@ const STUB_REPLY = "I've started your draft listing.";
 const INTERNAL_EMAIL = /(@rebattery\.io|@qa\.rebattery\.io)$|^qa[+-]/i;
 /** Account used by staff for manual testing; never a seller lead. */
 const STAFF_ACCOUNT = "c45a4168-88ab-43e4-9d22-6ae46298cef8";
+/** The profile that owns Jules's own mail threads; any other owner answers the person. */
+const JULES_THREAD_OWNER = "papajules";
+/** Marketplace and site notifications: a machine wrote them, not a person waiting for us. */
+const NOTIFICATION_SUBJECTS = [
+  "new message about",
+  "counter offer received",
+  "new buy now transaction",
+  "your shop quality report",
+  "new offer received",
+  "your listing",
+];
+/** The platform's own first-contact emails: they start our side of the conversation. */
+const CONTACT_EVENT_KINDS = new Set(["received_email_sent", "finish_email_sent", "follow_up_sent", "team_email_sent"]);
+/** The app-written timeline row from estimate_battery_value (lib/db/jules/price-shown.ts). */
+const PRICE_EVENT_KIND = "price_shown";
 
 export function entryKey(sourceSurface: string | null, signedIn: boolean): EntryKey {
   const surface = (sourceSurface ?? "").toLowerCase();
@@ -294,8 +323,10 @@ export function buildWindow(
     lanes[lane] += 1;
 
     const messages = messagesBySession.get(session.id) ?? [];
-    // Buyer chats quote marketplace prices; only a seller-lane valuation counts here.
-    if (lane !== "buyer" && messages.some((message) => message.role === "assistant" && showsPrice(message.body))) {
+    // Buyer chats quote marketplace prices; only a seller-lane valuation counts here. The
+    // recorded `price_shown` event is the fact; the reply text only covers chats that ran
+    // before the event existed.
+    if (lane !== "buyer" && priceWasShown(session.id, messages, input.events, inWindow)) {
       row.priceShown += 1;
     }
     if (isReachable(session, leads)) {
@@ -408,10 +439,25 @@ export function buildWindow(
   };
 }
 
-/** Emails whose newest inbound mail is later than the newest mail we sent them. */
+/** Notification subjects arrive with re:/fw: prefixes; compare the subject itself. */
+export function isNotificationSubject(subject: string | null | undefined): boolean {
+  let text = (subject ?? "").trim().toLowerCase();
+  while (text.startsWith("re:") || text.startsWith("fw:") || text.startsWith("fwd:")) {
+    text = text.split(":").slice(1).join(":").trim();
+  }
+  return NOTIFICATION_SUBJECTS.some((prefix) => text.startsWith(prefix));
+}
+
+/**
+ * People waiting on us, using the same rules as `scripts/jules_waiting_on_us.py`: the
+ * newest inbound mail is later than our newest mail to them, and it is not a marketplace
+ * or site notification, not a thread another agent owns, not already answered by hand
+ * from Alex's or Ari's mailbox, and not mail that predates our first contact.
+ */
 export function countWaitingOnUs(
-  mail: { email: string; lastInboundAt: string | null; lastOutboundAt: string | null }[],
+  mail: MailActivity[],
   emails: string[],
+  contact: ContactTimes = { platformEmail: new Map(), firstChat: new Map() },
 ): number {
   const wanted = new Set(emails.filter(Boolean));
   const seen = new Set<string>();
@@ -425,11 +471,93 @@ export function countWaitingOnUs(
     if (!row.lastInboundAt) {
       continue;
     }
-    if (!row.lastOutboundAt || new Date(row.lastInboundAt) > new Date(row.lastOutboundAt)) {
-      waiting += 1;
+    if (row.lastOutboundAt && new Date(row.lastInboundAt) <= new Date(row.lastOutboundAt)) {
+      continue;
     }
+    if (isNotificationSubject(row.lastSubject)) {
+      continue;
+    }
+    if (row.threadOwner && row.threadOwner !== JULES_THREAD_OWNER) {
+      continue;
+    }
+    if (row.handAnsweredAt && new Date(row.handAnsweredAt) >= new Date(row.lastInboundAt)) {
+      continue;
+    }
+    // First contact is the earliest of our first mail and the platform's first automatic
+    // email. With neither, before their first chat is still not this lead waiting.
+    const firstContact = [row.firstOutboundAt, contact.platformEmail.get(email)]
+      .filter((value): value is string => Boolean(value))
+      .reduce<string | null>((earliest, value) => (!earliest || new Date(value) < new Date(earliest) ? value : earliest), null);
+    if (firstContact && new Date(row.lastInboundAt) < new Date(firstContact)) {
+      continue;
+    }
+    const started = contact.firstChat.get(email);
+    if (!row.firstOutboundAt && started && new Date(row.lastInboundAt) < new Date(started)) {
+      continue;
+    }
+    waiting += 1;
   }
   return waiting;
+}
+
+/** A chat showed a price: the recorded event, or the reply text for chats older than it. */
+function priceWasShown(
+  sessionId: string,
+  messages: RawMessage[],
+  events: RawEvent[],
+  inWindow: (value: string | null | undefined) => boolean,
+): boolean {
+  if (events.some((event) => event.conversation_id === sessionId && event.kind === PRICE_EVENT_KIND && inWindow(event.at))) {
+    return true;
+  }
+  return messages.some((message) => message.role === "assistant" && showsPrice(message.body));
+}
+
+export type ContactTimes = {
+  /** The platform's first automatic email (received, finish link, follow-up, team email) per address. */
+  platformEmail: Map<string, string>;
+  /** The person's first Jules chat per address. */
+  firstChat: Map<string, string>;
+};
+
+/** When our side of the conversation started, per lead email, as the script computes it. */
+export function contactTimes(input: Omit<WindowInput, "now">): ContactTimes {
+  const leadsByConversation = new Map<string, RawLead[]>();
+  for (const lead of input.leads) {
+    if (!lead.conversation_id) {
+      continue;
+    }
+    const list = leadsByConversation.get(lead.conversation_id) ?? [];
+    list.push(lead);
+    leadsByConversation.set(lead.conversation_id, list);
+  }
+  const platformEmail = new Map<string, string>();
+  const firstChat = new Map<string, string>();
+  const remember = (into: Map<string, string>, email: string | null, at: string | null | undefined) => {
+    const key = (email ?? "").trim().toLowerCase();
+    if (!key || !at) {
+      return;
+    }
+    const current = into.get(key);
+    if (!current || new Date(at) < new Date(current)) {
+      into.set(key, at);
+    }
+  };
+  const emailByConversation = new Map<string, string>();
+  for (const session of input.sessions) {
+    const email = emailOf(session, leadsByConversation.get(session.id) ?? []);
+    remember(firstChat, email, session.created_at);
+    if (email) {
+      emailByConversation.set(session.id, email);
+    }
+  }
+  for (const event of input.events) {
+    if (!CONTACT_EVENT_KINDS.has(event.kind) || !event.conversation_id) {
+      continue;
+    }
+    remember(platformEmail, emailByConversation.get(event.conversation_id) ?? null, event.at);
+  }
+  return { platformEmail, firstChat };
 }
 
 /** Lead emails the page needs for the waiting-on-us join, newest first, de-duplicated. */
@@ -464,7 +592,7 @@ export function buildJulesStats(input: WindowInput): JulesStats {
   const now = input.now;
   const currentFrom = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
   const previousFrom = new Date(now.getTime() - 14 * 24 * 3600 * 1000);
-  const waitingOnUs = countWaitingOnUs(input.mail, leadEmails(input));
+  const waitingOnUs = countWaitingOnUs(input.mail, leadEmails(input), contactTimes(input));
   return {
     generatedAt: now.toISOString(),
     current: buildWindow(input, currentFrom, now, waitingOnUs),
