@@ -65,6 +65,29 @@ def content(message):
             raise Refused('marketing_requires_unsubscribe')
 
 
+SIGNED_IDENTITIES = ('supply', 'buy')
+
+
+def _squeeze(markup):
+    """Signature HTML with whitespace removed, so a template that reflows it still matches."""
+    return re.sub(r'\s+', '', markup or '')
+
+
+def signature(author, message):
+    """Every supply@ and buy@ send carries that identity's signature (Ari, 25 Nov 2026).
+
+    The CRM signature is part of the draft body, so a draft created without it cannot
+    be repaired at send time: the sender re-creates the draft instead of shipping
+    an unsigned one.
+    """
+    if author.get('key') not in SIGNED_IDENTITIES:
+        return
+    wanted = _squeeze(author.get('signature_html'))
+    if not wanted or wanted not in _squeeze(message.get('body_html')):
+        raise Refused('signature_missing', identity=author.get('key'), address=author.get('address'),
+                      hint='Re-create the draft so the %s identity signature is in the body' % author.get('key'))
+
+
 def catch_all(evidence):
     status = str(evidence.get('status') or '').lower().replace('-', '_')
     sub = str(evidence.get('sub_status') or '').lower().replace('-', '_')

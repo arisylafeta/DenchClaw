@@ -166,6 +166,8 @@ def preflight(message, driver):
     refresh_replies(message,author,driver)
     with connection(read_only=True) as db:
         policy.content(message)
+        # supply@ and buy@ never go out without the identity signature (REB-744).
+        policy.signature(author, message)
         if message.get('person_id'):
             with db.cursor() as cur:
                 cur.execute('select lower(trim(email)) from crm_people where id=%s',(message['person_id'],))
