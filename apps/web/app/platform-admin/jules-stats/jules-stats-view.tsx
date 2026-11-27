@@ -107,8 +107,8 @@ function FunnelCard({ funnel }: { funnel: CohortFunnel }) {
               <div className="grid grid-cols-[6.75rem_minmax(0,1fr)_4.5rem] items-center gap-x-3">
                 <span className="text-[12px] leading-snug" style={{ color: "var(--color-text)" }}>
                   {step.label}
-                  {step.key === "priced" && priceFromText && (
-                    <span className={`ml-1 whitespace-nowrap text-[10px] ${MUTED}`}>events since 27 Nov</span>
+                  {step.key === "priced" && (
+                    <span className={`ml-1 whitespace-nowrap text-[10px] ${MUTED}`}>tracked since 27 Nov, not required for later steps</span>
                   )}
                 </span>
                 <div

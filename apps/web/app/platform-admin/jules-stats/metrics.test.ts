@@ -356,13 +356,16 @@ describe("cohort funnel", () => {
     expect(cohort.steps[1].share).toBe(0.5);
   });
 
-  it("does not count an email that arrived before any price", () => {
+  it("counts an email left before any price: the price step does not gate later steps", () => {
     const cohort = cohortOf(
       [session({ id: "email-first", contact_email: "seller@example.test" })],
       [lead({ conversation_id: "email-first", title: "Growatt 6.5kWh", draft: { manufacturer: "Growatt" } })],
       [message("email-first", "user", "hello", iso(1))],
     );
-    expect(cohort.steps.map((step) => step.count)).toEqual([1, 1, 0, 0, 0, 0]);
+    expect(cohort.steps.map((step) => step.count)).toEqual([1, 1, 0, 1, 0, 0]);
+    // Email is measured from "said what the battery is", not from the price step.
+    expect(cohort.steps[3].lost).toBe(0);
+    expect(cohort.biggestDrop?.to).toBe("ready");
     expect(cohort.emailBeforePrice).toBe(1);
   });
 

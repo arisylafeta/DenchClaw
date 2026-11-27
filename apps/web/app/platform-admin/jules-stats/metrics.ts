@@ -197,6 +197,8 @@ const CAPACITY_ONLY_TITLE = /^[\d.,]+\s?kwh$/i;
 const NAME_KEYS = ["manufacturer", "model"] as const;
 
 export const COHORT_STEP_KEYS: CohortStepKey[] = ["started", "named", "priced", "email", "ready", "published"];
+/** Shown with its own drop from the step before, but later steps do not require it. */
+export const NON_GATING_STEPS: ReadonlySet<CohortStepKey> = new Set<CohortStepKey>(["priced"]);
 
 const COHORT_STEP_LABELS: Record<CohortStepKey, string> = {
   started: "Chat started",
@@ -642,20 +644,29 @@ function buildCohort(
   for (const chat of chats) {
     const row = byEntry.get(chat.entry) ?? COHORT_STEP_KEYS.map(() => 0);
     byEntry.set(chat.entry, row);
-    // Steps are cumulative: a chat only counts at a step when it passed every earlier one.
+    // Steps are cumulative: a chat only counts at a step when it passed every earlier gating step.
+    // "Got a price" is shown but does not gate: prices were only recorded from 27 Nov, and most chats
+    // leave an email before any price, so gating on it would empty every later step.
     let reached = true;
     for (let index = 0; index < COHORT_STEP_KEYS.length; index += 1) {
-      reached = reached && chat.passed[index] === true;
-      if (reached) {
+      const here: boolean = reached && chat.passed[index] === true;
+      if (here) {
         counts[index] += 1;
         row[index] += 1;
       }
+      if (!NON_GATING_STEPS.has(COHORT_STEP_KEYS[index])) reached = here;
     }
   }
 
   const share = (value: number) => (started ? value / started : 0);
+  // The step a chat had to pass to get here: the nearest earlier gating step.
+  const gateBefore = (index: number) => {
+    for (let at = index - 1; at >= 0; at -= 1) if (!NON_GATING_STEPS.has(COHORT_STEP_KEYS[at])) return at;
+    return -1;
+  };
   const steps = COHORT_STEP_KEYS.map((key, index): CohortStep => {
-    const previous = index === 0 ? null : counts[index - 1];
+    const gate = gateBefore(index);
+    const previous = gate < 0 ? null : counts[gate];
     const lost = previous === null ? 0 : previous - counts[index];
     return {
       key,
@@ -670,13 +681,13 @@ function buildCohort(
   let biggestDrop: CohortDrop | null = null;
   for (let index = 1; index < steps.length; index += 1) {
     const step = steps[index];
-    if (step.lost <= 0) {
+    if (step.lost <= 0 || NON_GATING_STEPS.has(step.key)) {
       continue;
     }
     // Most people lost wins; a tie keeps the earlier step.
     if (!biggestDrop || step.lost > biggestDrop.lost) {
       biggestDrop = {
-        from: steps[index - 1].key,
+        from: steps[gateBefore(index)].key,
         to: step.key,
         lost: step.lost,
         lostShare: step.lostShare,
