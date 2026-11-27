@@ -184,7 +184,7 @@ export async function loadJulesStats(): Promise<JulesStats> {
     ),
     fetchAll<RawLead>(
       "intake_leads",
-      "conversation_id, channel_mode, stage, contact_email, ready_to_publish, listing_status, first_seen_at, discarded_at",
+      "conversation_id, channel_mode, stage, contact_email, ready_to_publish, listing_status, first_seen_at, discarded_at, title, draft",
       (builder) =>
         builder
           .or(`first_seen_at.gte.${contactsSince},discarded_at.gte.${contactsSince}`)

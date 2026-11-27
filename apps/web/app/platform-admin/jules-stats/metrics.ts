@@ -28,6 +28,10 @@ export type RawLead = {
   listing_status: string | null;
   first_seen_at: string | null;
   discarded_at: string | null;
+  /** Lead title: the generic ones say nothing about the battery. */
+  title?: string | null;
+  /** Draft fields; `manufacturer` and `model` are what name the battery. */
+  draft?: unknown;
 };
 
 export type RawEvent = {
@@ -83,11 +87,57 @@ export type FunnelRow = {
   published: number;
 };
 
+export type CohortStepKey = "started" | "named" | "priced" | "email" | "ready" | "published";
+
+export type CohortStep = {
+  key: CohortStepKey;
+  label: string;
+  /** Chats that reached this step and every step before it. */
+  count: number;
+  /** Share of the started cohort that reached this step, 0..1. */
+  share: number;
+  /** Chats lost between the previous step and this one. */
+  lost: number;
+  /** Share of the previous step's chats that this step lost, 0..1. */
+  lostShare: number;
+};
+
+export type CohortDrop = {
+  from: CohortStepKey;
+  to: CohortStepKey;
+  lost: number;
+  lostShare: number;
+  /** One line naming the step people stop at, e.g. "leave before saying what the battery is". */
+  label: string;
+};
+
+export type EntryCohort = {
+  entry: EntryKey;
+  label: string;
+  started: number;
+  /** Reached each step in `COHORT_STEP_KEYS` order; always non-increasing. */
+  counts: number[];
+};
+
+export type CohortFunnel = {
+  started: number;
+  steps: CohortStep[];
+  /** The transition that loses the most chats; ties go to the earlier step. */
+  biggestDrop: CohortDrop | null;
+  /** Priced chats with no recorded price event: a reply quoting an amount is the only evidence. */
+  pricedFromText: number;
+  /** Chats that reached contact details while no price was counted for them. */
+  emailBeforePrice: number;
+  byEntry: EntryCohort[];
+};
+
 export type WindowStats = {
   from: string;
   to: string;
   funnel: FunnelRow[];
   totals: Omit<FunnelRow, "entry" | "label">;
+  /** Sales-lane chats started in this window, followed through every step in order. */
+  cohort: CohortFunnel;
   followUps: { teamEmails: number; autoFollowUps: number; sellerReplies: number };
   lanes: { sales: number; recycling: number; buyer: number };
   health: HealthStats;
@@ -139,6 +189,33 @@ const NOTIFICATION_SUBJECTS = [
 const CONTACT_EVENT_KINDS = new Set(["received_email_sent", "finish_email_sent", "follow_up_sent", "team_email_sent"]);
 /** The app-written timeline row from estimate_battery_value (lib/db/jules/price-shown.ts). */
 const PRICE_EVENT_KIND = "price_shown";
+/** Lead titles the platform writes before a seller has said anything about the battery. */
+const GENERIC_LEAD_TITLES = new Set(["battery listing", "whole chat sent to rebattery"]);
+/** A title that is only a capacity ("0.9kWh") is not a named battery. */
+const CAPACITY_ONLY_TITLE = /^[\d.,]+\s?kwh$/i;
+/** Draft keys that name the battery. */
+const NAME_KEYS = ["manufacturer", "model"] as const;
+
+export const COHORT_STEP_KEYS: CohortStepKey[] = ["started", "named", "priced", "email", "ready", "published"];
+
+const COHORT_STEP_LABELS: Record<CohortStepKey, string> = {
+  started: "Chat started",
+  named: "Said what the battery is",
+  priced: "Got a price",
+  email: "Left an email",
+  ready: "Ready to publish",
+  published: "Published",
+};
+
+/** What people are doing when they stop, for the highlighted biggest drop. */
+const COHORT_DROP_LABELS: Record<CohortStepKey, string> = {
+  started: "start a chat",
+  named: "leave before saying what the battery is",
+  priced: "leave before getting a price",
+  email: "leave before leaving an email",
+  ready: "leave before being ready to publish",
+  published: "leave before publishing",
+};
 
 export function entryKey(sourceSurface: string | null, signedIn: boolean): EntryKey {
   const surface = (sourceSurface ?? "").toLowerCase();
@@ -217,6 +294,26 @@ function isReachable(session: RawSession, leads: RawLead[]): boolean {
     return true;
   }
   return Boolean(session.account_id || session.owner_auth_user_id);
+}
+
+/** A lead names the battery: a real title, or a manufacturer/model in the draft. */
+export function namesBattery(leads: RawLead[]): boolean {
+  for (const lead of leads) {
+    const title = (lead.title ?? "").trim();
+    if (title && !GENERIC_LEAD_TITLES.has(title.toLowerCase()) && !CAPACITY_ONLY_TITLE.test(title) && /[a-z]/i.test(title)) {
+      return true;
+    }
+    const draft = lead.draft;
+    if (draft && typeof draft === "object") {
+      for (const key of NAME_KEYS) {
+        const value = (draft as Record<string, unknown>)[key];
+        if (typeof value === "string" && value.trim().length > 0) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 function isReady(leads: RawLead[]): boolean {
@@ -299,6 +396,10 @@ export function buildWindow(
 
   const lanes = { sales: 0, recycling: 0, buyer: 0 };
   const sessionIds = new Set<string>();
+  // Sales-lane chats of this window, with the steps each one actually passed.
+  const cohortChats: { entry: EntryKey; passed: boolean[] }[] = [];
+  let pricedFromText = 0;
+  let emailBeforePrice = 0;
   // Staff, QA and smoke-test chats are dropped everywhere, including their events.
   const excludedSessions = new Set<string>();
   for (const session of input.sessions) {
@@ -326,10 +427,12 @@ export function buildWindow(
     // Buyer chats quote marketplace prices; only a seller-lane valuation counts here. The
     // recorded `price_shown` event is the fact; the reply text only covers chats that ran
     // before the event existed.
-    if (lane !== "buyer" && priceWasShown(session.id, messages, input.events, inWindow)) {
+    const price = lane !== "buyer" ? priceSource(session.id, messages, input.events, inWindow) : null;
+    if (price) {
       row.priceShown += 1;
     }
-    if (isReachable(session, leads)) {
+    const leftEmail = isReachable(session, leads);
+    if (leftEmail) {
       row.emailLeft += 1;
     }
     if (isReady(leads)) {
@@ -338,7 +441,18 @@ export function buildWindow(
     if (isPublished(leads)) {
       row.published += 1;
     }
-
+    if (lane === "sales") {
+      if (price === "text") {
+        pricedFromText += 1;
+      }
+      if (leftEmail && !price) {
+        emailBeforePrice += 1;
+      }
+      cohortChats.push({
+        entry,
+        passed: [true, namesBattery(leads), Boolean(price), leftEmail, isReady(leads), isPublished(leads)],
+      });
+    }
   }
 
   const funnel = ENTRY_ORDER.map((key) => rows.get(key)!).filter((row) => row.chats > 0);
@@ -423,6 +537,7 @@ export function buildWindow(
     to: to.toISOString(),
     funnel,
     totals,
+    cohort: buildCohort(cohortChats, pricedFromText, emailBeforePrice),
     followUps: { teamEmails, autoFollowUps, sellerReplies },
     lanes,
     health: {
@@ -500,17 +615,89 @@ export function countWaitingOnUs(
   return waiting;
 }
 
+/** How a priced chat was counted: the recorded event, or the reply text for older chats. */
+type PriceSource = "event" | "text" | null;
+
 /** A chat showed a price: the recorded event, or the reply text for chats older than it. */
-function priceWasShown(
+function priceSource(
   sessionId: string,
   messages: RawMessage[],
   events: RawEvent[],
   inWindow: (value: string | null | undefined) => boolean,
-): boolean {
+): PriceSource {
   if (events.some((event) => event.conversation_id === sessionId && event.kind === PRICE_EVENT_KIND && inWindow(event.at))) {
-    return true;
+    return "event";
   }
-  return messages.some((message) => message.role === "assistant" && showsPrice(message.body));
+  return messages.some((message) => message.role === "assistant" && showsPrice(message.body)) ? "text" : null;
+}
+
+function buildCohort(
+  chats: { entry: EntryKey; passed: boolean[] }[],
+  pricedFromText: number,
+  emailBeforePrice: number,
+): CohortFunnel {
+  const started = chats.length;
+  const counts = COHORT_STEP_KEYS.map(() => 0);
+  const byEntry = new Map<EntryKey, number[]>();
+  for (const chat of chats) {
+    const row = byEntry.get(chat.entry) ?? COHORT_STEP_KEYS.map(() => 0);
+    byEntry.set(chat.entry, row);
+    // Steps are cumulative: a chat only counts at a step when it passed every earlier one.
+    let reached = true;
+    for (let index = 0; index < COHORT_STEP_KEYS.length; index += 1) {
+      reached = reached && chat.passed[index] === true;
+      if (reached) {
+        counts[index] += 1;
+        row[index] += 1;
+      }
+    }
+  }
+
+  const share = (value: number) => (started ? value / started : 0);
+  const steps = COHORT_STEP_KEYS.map((key, index): CohortStep => {
+    const previous = index === 0 ? null : counts[index - 1];
+    const lost = previous === null ? 0 : previous - counts[index];
+    return {
+      key,
+      label: COHORT_STEP_LABELS[key],
+      count: counts[index],
+      share: share(counts[index]),
+      lost,
+      lostShare: previous ? lost / previous : 0,
+    };
+  });
+
+  let biggestDrop: CohortDrop | null = null;
+  for (let index = 1; index < steps.length; index += 1) {
+    const step = steps[index];
+    if (step.lost <= 0) {
+      continue;
+    }
+    // Most people lost wins; a tie keeps the earlier step.
+    if (!biggestDrop || step.lost > biggestDrop.lost) {
+      biggestDrop = {
+        from: steps[index - 1].key,
+        to: step.key,
+        lost: step.lost,
+        lostShare: step.lostShare,
+        label: COHORT_DROP_LABELS[step.key],
+      };
+    }
+  }
+
+  return {
+    started,
+    steps,
+    biggestDrop,
+    pricedFromText,
+    emailBeforePrice,
+    byEntry: ENTRY_ORDER.filter((entry) => (byEntry.get(entry)?.[0] ?? 0) > 0).map((entry) => ({
+      entry,
+      label: ENTRY_LABELS[entry],
+      started: byEntry.get(entry)![0],
+      counts: byEntry.get(entry)!,
+    })),
+  };
 }
 
 export type ContactTimes = {

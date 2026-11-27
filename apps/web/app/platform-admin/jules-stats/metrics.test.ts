@@ -6,6 +6,7 @@ import {
   isPlaceholderReply,
   laneOf,
   leadEmails,
+  namesBattery,
   percentile,
   showsPrice,
   type RawEvent,
@@ -319,6 +320,156 @@ describe("waiting on us", () => {
       mail: [],
     });
     expect(emails).toEqual(["seller1@example.test"]);
+  });
+});
+
+describe("cohort funnel", () => {
+  const lead = (over: Partial<RawLead> & { conversation_id: string }): RawLead => ({
+    channel_mode: "sale",
+    stage: "drafted",
+    contact_email: null,
+    ready_to_publish: false,
+    listing_status: null,
+    first_seen_at: iso(1),
+    discarded_at: null,
+    title: "Battery listing",
+    draft: {},
+    ...over,
+  });
+
+  const cohortOf = (sessions: RawSession[], leads: RawLead[] = [], messages: RawMessage[] = [], events: RawEvent[] = []) =>
+    buildJulesStats({ now: NOW, sessions, leads, events, messages, turnErrors: [], mail: [] }).current.cohort;
+
+  it("only counts a chat at a step when it passed every step before it", () => {
+    const cohort = cohortOf(
+      [session({ id: "full", contact_email: "full@example.test" }), session({ id: "quiet" })],
+      [
+        lead({ conversation_id: "full", title: "Samsung INR-18650VTC6", ready_to_publish: true, stage: "live", listing_status: "published" }),
+      ],
+      [message("full", "assistant", "That lot is worth about £2,400.")],
+    );
+    expect(cohort.started).toBe(2);
+    expect(cohort.steps.map((step) => step.count)).toEqual([2, 1, 1, 1, 1, 1]);
+    // Share is always of the started cohort, so the bars only ever get shorter.
+    const counts = cohort.steps.map((step) => step.count);
+    expect(counts).toEqual(counts.toSorted((a, b) => b - a));
+    expect(cohort.steps[1].share).toBe(0.5);
+  });
+
+  it("does not count an email that arrived before any price", () => {
+    const cohort = cohortOf(
+      [session({ id: "email-first", contact_email: "seller@example.test" })],
+      [lead({ conversation_id: "email-first", title: "Growatt 6.5kWh", draft: { manufacturer: "Growatt" } })],
+      [message("email-first", "user", "hello", iso(1))],
+    );
+    expect(cohort.steps.map((step) => step.count)).toEqual([1, 1, 0, 0, 0, 0]);
+    expect(cohort.emailBeforePrice).toBe(1);
+  });
+
+  it("picks the transition that loses the most chats, and the earlier step on a tie", () => {
+    const cohort = cohortOf(
+      [
+        session({ id: "a" }),
+        session({ id: "b" }),
+        session({ id: "c", contact_email: "c@example.test" }),
+        session({ id: "d" }),
+      ],
+      [lead({ conversation_id: "a", title: "Samsung INR-18650VTC6" })],
+      [message("c", "assistant", "Around £900 for the lot.")],
+    );
+    // a named a battery but was never priced; c was priced but never named, so c drops at
+    // the named step: started 4, named 1, priced 0, and named loses 3.
+    expect(cohort.steps.map((step) => step.count)).toEqual([4, 1, 0, 0, 0, 0]);
+    expect(cohort.biggestDrop).toMatchObject({ to: "named", lost: 3 });
+    expect(cohort.biggestDrop?.to).not.toBe("started");
+
+    const tie = cohortOf([session({ id: "t1" }), session({ id: "t2" })], [lead({ conversation_id: "t1", title: "Tesla 5.2kWh" })], [
+      message("t1", "assistant", "About $1,100."),
+    ]);
+    // named loses 1, priced loses 1: the earlier step wins.
+    expect(tie.biggestDrop).toMatchObject({ to: "named", lost: 1 });
+  });
+
+  it("keeps buyer, recycling, staff and smoke-test chats out of the sales cohort", () => {
+    const priced = [message("b1", "assistant", "US$350 buy-now, 1 available.")];
+    const cohort = cohortOf(
+      [
+        session({ id: "b1", source_surface: "buy-batteries", account_id: "acct-1" }),
+        session({ id: "r1", source_surface: "recycle-batteries" }),
+        session({ id: "qa1", contact_email: "qa+smoke@rebattery.io" }),
+        session({ id: "smoke", source_surface: "reb308-production-smoke-test" }),
+        session({ id: "s1" }),
+      ],
+      [lead({ conversation_id: "b1", title: "Samsung INR-18650VTC6" })],
+      priced,
+    );
+    expect(cohort.started).toBe(1);
+    expect(cohort.byEntry.map((row) => row.entry)).toEqual(["sell"]);
+  });
+
+  it("counts a price from the reply text only when no event was recorded", () => {
+    const reply = [message("p1", "assistant", "Around £1,200 for the lot.")];
+    const textOnly = cohortOf([session({ id: "p1" })], [lead({ conversation_id: "p1", title: "Tesla 5.2kWh" })], reply);
+    expect(textOnly.pricedFromText).toBe(1);
+    expect(textOnly.steps[2].count).toBe(1);
+
+    const withEvent = cohortOf(
+      [session({ id: "p1" })],
+      [lead({ conversation_id: "p1", title: "Tesla 5.2kWh" })],
+      reply,
+      [{ conversation_id: "p1", kind: "price_shown", at: iso(1) }],
+    );
+    expect(withEvent.pricedFromText).toBe(0);
+    expect(withEvent.steps[2].count).toBe(1);
+  });
+
+  it("does not treat a discarded lead as ready or published", () => {
+    const cohort = cohortOf(
+      [session({ id: "gone", contact_email: "gone@example.test" })],
+      [
+        lead({
+          conversation_id: "gone",
+          title: "Tesla 5.2kWh",
+          ready_to_publish: true,
+          stage: "live",
+          listing_status: "published",
+          discarded_at: iso(0, -30),
+        }),
+      ],
+      [message("gone", "assistant", "About £1,100.")],
+    );
+    expect(cohort.steps.map((step) => step.count)).toEqual([1, 1, 1, 1, 0, 0]);
+  });
+
+  it("handles a window with no sales chats", () => {
+    const cohort = cohortOf([session({ id: "rec", source_surface: "recycle-batteries" })]);
+    expect(cohort.started).toBe(0);
+    expect(cohort.biggestDrop).toBeNull();
+    expect(cohort.steps.every((step) => step.count === 0 && step.share === 0)).toBe(true);
+    expect(cohort.byEntry).toEqual([]);
+  });
+
+  it("splits the same funnel by entry page", () => {
+    const cohort = cohortOf(
+      [
+        session({ id: "s1", source_surface: "sell-batteries" }),
+        session({ id: "s2", source_surface: "sell-batteries" }),
+        session({ id: "h1", source_surface: "home" }),
+      ],
+      [lead({ conversation_id: "s1", title: "Samsung INR-18650VTC6" })],
+    );
+    expect(cohort.byEntry.map((row) => [row.entry, row.started, row.counts[1]])).toEqual([
+      ["sell", 2, 1],
+      ["home", 1, 0],
+    ]);
+  });
+
+  it("names the battery from a real title or a draft manufacturer, not a generic title or a capacity", () => {
+    expect(namesBattery([lead({ conversation_id: "x", title: "Battery listing" })])).toBe(false);
+    expect(namesBattery([lead({ conversation_id: "x", title: "Whole chat sent to ReBattery" })])).toBe(false);
+    expect(namesBattery([lead({ conversation_id: "x", title: "0.9kWh" })])).toBe(false);
+    expect(namesBattery([lead({ conversation_id: "x", title: "Battery listing", draft: { model: "VTC6" } })])).toBe(true);
+    expect(namesBattery([lead({ conversation_id: "x", title: "Growatt 6.5kWh" })])).toBe(true);
   });
 });
 

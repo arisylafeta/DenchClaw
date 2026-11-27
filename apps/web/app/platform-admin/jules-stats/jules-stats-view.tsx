@@ -1,8 +1,19 @@
 import { CrmListShell } from "@/app/components/crm/crm-list-shell";
-import type { FunnelRow, HealthStats, JulesStats, WindowStats } from "./metrics";
+import { COHORT_STEP_KEYS } from "./metrics";
+import type { CohortFunnel, CohortStepKey, EntryCohort, HealthStats, JulesStats } from "./metrics";
 
 const CARD = "rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]";
 const MUTED = "text-[var(--color-text-muted)]";
+
+/** Short column names for the per-entry table. */
+const STEP_SHORT: Record<CohortStepKey, string> = {
+  started: "Started",
+  named: "Named lot",
+  priced: "Price",
+  email: "Email",
+  ready: "Ready",
+  published: "Published",
+};
 
 function pct(count: number, total: number): string {
   if (!total) {
@@ -55,68 +66,187 @@ function Metric({
   );
 }
 
-function FunnelTable({ rows, totals }: { rows: FunnelRow[]; totals: WindowStats["totals"] }) {
-  const columns: { key: keyof Omit<FunnelRow, "entry" | "label">; label: string }[] = [
-    { key: "chats", label: "Chats" },
-    { key: "priceShown", label: "Price shown" },
-    { key: "emailLeft", label: "Email left" },
-    { key: "readyToPublish", label: "Ready to publish" },
-    { key: "published", label: "Published" },
-  ];
-  const cell = (row: FunnelRow, key: (typeof columns)[number]["key"]) => {
-    const value = row[key];
-    if (key === "chats") {
-      return <span className="tabular-nums">{value}</span>;
-    }
+/**
+ * The cohort funnel: every sales chat started in the window, followed in order. Bars are
+ * share of started chats, so they only ever get shorter, and the drop between steps is
+ * written between them. The biggest single drop carries the accent.
+ */
+function FunnelCard({ funnel }: { funnel: CohortFunnel }) {
+  if (funnel.started === 0) {
     return (
-      <span className="tabular-nums">
-        {value} <span className={`text-[12px] ${MUTED}`}>{pct(value, row.chats)}</span>
-      </span>
+      <div className={`${CARD} px-4 py-6 text-[13px] ${MUTED}`}>No sales chats started in the last 7 days.</div>
     );
-  };
+  }
+  const biggest = funnel.biggestDrop;
+  // Some prices come from the reply text because no price event was recorded for them.
+  // Recorded events only start on 27 Nov, so say so rather than imply full coverage.
+  const priceFromText = funnel.pricedFromText > 0;
+
+  return (
+    <div className={`${CARD} px-4 py-4`}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p className="text-[13px]" style={{ color: "var(--color-text)" }}>
+          {biggest ? (
+            <>
+              <span className="font-medium">Biggest loss:</span> {Math.round(biggest.lostShare * 100)}% {biggest.label}{" "}
+              <span className={MUTED}>({biggest.lost} chats)</span>
+            </>
+          ) : (
+            "Every chat reached the last step."
+          )}
+        </p>
+        <span className={`text-[12px] ${MUTED}`}>{funnel.started} sales chats started</span>
+      </div>
+
+      <ol className="mt-4 space-y-0">
+        {funnel.steps.map((step, index) => {
+          const next = funnel.steps[index + 1];
+          const isBiggestTarget = biggest?.to === step.key;
+          return (
+            <li key={step.key}>
+              <div className="grid grid-cols-[6.75rem_minmax(0,1fr)_4.5rem] items-center gap-x-3">
+                <span className="text-[12px] leading-snug" style={{ color: "var(--color-text)" }}>
+                  {step.label}
+                  {step.key === "priced" && priceFromText && (
+                    <span className={`ml-1 whitespace-nowrap text-[10px] ${MUTED}`}>events since 27 Nov</span>
+                  )}
+                </span>
+                <div
+                  className="h-2 overflow-hidden rounded-full"
+                  style={{ background: "var(--color-border-strong)" }}
+                  aria-hidden
+                >
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${step.count ? Math.max(step.share * 100, 1.5) : 0}%`,
+                      background: isBiggestTarget ? "var(--color-accent-fill)" : "var(--color-text)",
+                      opacity: isBiggestTarget ? 1 : 0.78,
+                    }}
+                  />
+                </div>
+                <span className="text-right text-[12px] tabular-nums" style={{ color: "var(--color-text)" }}>
+                  {step.count}
+                  <span className={`ml-1 ${MUTED}`}>{Math.round(step.share * 100)}%</span>
+                </span>
+              </div>
+              {next && next.lost > 0 && (
+                <div className="grid grid-cols-[6.75rem_minmax(0,1fr)_4.5rem] items-center gap-x-3">
+                  <span aria-hidden />
+                  <span
+                    className="flex items-center gap-1.5 py-1 text-[11px] leading-none"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    <span aria-hidden className="h-2.5 w-px" style={{ background: "var(--color-border-strong)" }} />
+                    <span className="tabular-nums">
+                      −{next.lost} · {Math.round(next.lostShare * 100)}% lost
+                    </span>
+                    {biggest?.to === next.key && (
+                      <span
+                        className="rounded px-1.5 py-0.5 text-[10px] font-medium"
+                        style={{ background: "var(--color-accent-fill)", color: "var(--color-accent-foreground)" }}
+                      >
+                        Biggest loss
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
+              {next && next.lost === 0 && <div className="grid h-2 grid-cols-[6.75rem_minmax(0,1fr)_4.5rem] gap-x-3" aria-hidden>
+                <span />
+              </div>}
+            </li>
+          );
+        })}
+      </ol>
+
+      {(priceFromText || funnel.emailBeforePrice > 0) && (
+        <div
+          className={`mt-3 space-y-1 border-t pt-2 text-[11px] leading-relaxed ${MUTED}`}
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          {priceFromText && (
+            <p>
+              A price counts from a recorded price event, or from a reply quoting an amount when no event exists.
+              Price events only exist from 27 Nov, so some chats have no event to count.
+            </p>
+          )}
+          {funnel.emailBeforePrice > 0 && (
+            <p>
+              {funnel.emailBeforePrice} chats reached contact details before any price was counted, so the real
+              order is looser than these bars.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The step that loses the most chats for one entry, and what share of the step before it that is. */
+function worstStep(row: EntryCohort): { key: CohortStepKey; share: number } | null {
+  let worst: { key: CohortStepKey; share: number; lost: number } | null = null;
+  for (let index = 1; index < row.counts.length; index += 1) {
+    const previous = row.counts[index - 1];
+    const lost = previous - row.counts[index];
+    if (lost > 0 && (!worst || lost > worst.lost)) {
+      worst = { key: COHORT_STEP_KEYS[index], share: previous ? lost / previous : 0, lost };
+    }
+  }
+  return worst ? { key: worst.key, share: worst.share } : null;
+}
+
+function EntryCohortTable({ rows }: { rows: EntryCohort[] }) {
   return (
     <div className={`${CARD} overflow-x-auto`}>
-      <table className="w-full min-w-[640px] border-collapse text-[13px]">
+      <table className="w-full min-w-[680px] border-collapse text-[13px]">
         <thead>
           <tr className={`text-left text-[11px] uppercase tracking-wide ${MUTED}`}>
             <th className="px-4 py-2 font-normal">Entry</th>
-            {columns.map((column) => (
-              <th key={column.key} className="px-4 py-2 text-right font-normal">
-                {column.label}
+            {COHORT_STEP_KEYS.map((key) => (
+              <th key={key} className="px-4 py-2 text-right font-normal">
+                {STEP_SHORT[key]}
               </th>
             ))}
+            <th className="px-4 py-2 text-right font-normal">Most lost at</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={columns.length + 1} className={`px-4 py-6 text-[13px] ${MUTED}`}>
-                No Jules chats in the last 7 days.
+              <td colSpan={COHORT_STEP_KEYS.length + 2} className={`px-4 py-6 text-[13px] ${MUTED}`}>
+                No sales chats in the last 7 days.
               </td>
             </tr>
           )}
-          {rows.map((row) => (
-            <tr key={row.entry} className="border-t border-[var(--color-border)]">
-              <td className="px-4 py-2" style={{ color: "var(--color-text)" }}>
-                {row.label}
-              </td>
-              {columns.map((column) => (
-                <td key={column.key} className="px-4 py-2 text-right" style={{ color: "var(--color-text)" }}>
-                  {cell(row, column.key)}
+          {rows.map((row) => {
+            const worst = worstStep(row);
+            return (
+              <tr key={row.entry} className="border-t border-[var(--color-border)]">
+                <td className="px-4 py-2" style={{ color: "var(--color-text)" }}>
+                  {row.label}
                 </td>
-              ))}
-            </tr>
-          ))}
-          {rows.length > 0 && (
-            <tr className="border-t border-[var(--color-border)] font-medium">
-              <td className="px-4 py-2">All entries</td>
-              {columns.map((column) => (
-                <td key={column.key} className="px-4 py-2 text-right">
-                  {cell({ entry: "other", label: "All", ...totals }, column.key)}
+                {row.counts.map((count, index) => (
+                  <td
+                    key={COHORT_STEP_KEYS[index]}
+                    className="px-4 py-2 text-right tabular-nums"
+                    style={{ color: "var(--color-text)" }}
+                  >
+                    {count} <span className={`text-[12px] ${MUTED}`}>{pct(count, row.started)}</span>
+                  </td>
+                ))}
+                <td className="px-4 py-2 text-right text-[12px]" style={{ color: "var(--color-text)" }}>
+                  {worst ? (
+                    <>
+                      {STEP_SHORT[worst.key]} <span className={MUTED}>{Math.round(worst.share * 100)}%</span>
+                    </>
+                  ) : (
+                    <span className={MUTED}>none</span>
+                  )}
                 </td>
-              ))}
-            </tr>
-          )}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -179,6 +309,13 @@ export function JulesStatsView({ stats }: { stats: JulesStats }) {
   return (
     <CrmListShell title="Jules" count={current.totals.chats}>
       <div className="space-y-6 px-6 py-5">
+        <Section title="Funnel" caption="Sales chats started in the last 7 days, in order">
+          <div className="space-y-3">
+            <FunnelCard funnel={current.cohort} />
+            <EntryCohortTable rows={current.cohort.byEntry} />
+          </div>
+        </Section>
+
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <Metric label="Chats" value={current.totals.chats} previous={previous.totals.chats} />
           <Metric
@@ -200,10 +337,6 @@ export function JulesStatsView({ stats }: { stats: JulesStats }) {
             note="Text match for an amount in a seller chat"
           />
         </div>
-
-        <Section title="Funnel" caption="Last 7 days, share of that entry's chats">
-          <FunnelTable rows={current.funnel} totals={current.totals} />
-        </Section>
 
         <Section title="Follow-up">
           <div className="grid gap-3 sm:grid-cols-3">
